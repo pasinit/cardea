@@ -1,0 +1,28 @@
+{
+  "recorded_at": "2026-09-24T11:50:52.876345+00:00",
+  "cloud_image_url": "https://cloud.debian.org/images/cloud/trixie/20260914-2601/debian-13-genericcloud-amd64-20260914-2601.qcow2",
+  "cloud_image_sha512": "95e110dfcdbd0ed8a82a75ed9579802f9950cabf51a810dcc6388e81bc778188713878b9f28d583a0ea602fbf48b35996ae9ad37f584166d8fbd6489df248f53",
+  "cloud_build": "20260914-2601",
+  "qemu_container_image_id": "sha256:1b40de38cc022e26dfd09cc54a178a3ca7b43b9a8889086afe1985e81893056f",
+  "emulator": "QEMU 10.0.13, TCG, amd64 guest on arm64 host",
+  "guest_limits": {
+    "vcpus": 2,
+    "memory_mib": 1536
+  },
+  "provisioning": "Fresh VM from pinned image using vm.py start; bubblewrap and dedicated account installed by runner; no manual guest changes",
+  "fit_result": "debian-host-fit.json",
+  "transient_units_remaining": 0,
+  "source_sha256": {
+    "experiments/m2/vm.py": "337cbe0d197835331f91e99739abfad03395dc2f3c74eccc16f38fa75e69e948",
+    "experiments/m2/host_fit.py": "2ca20953377ab1aa25df065c5a008a0285bc8a8a6e48fff48ee3baf14fad52ca",
+    "experiments/m2/systemd_profile.py": "fec5ebad5ec0915c6477a83a726423c7c5e8b24eaf0b2f260b92be6ee7c3e7e0",
+    "experiments/m2/Dockerfile.vm": "58719c68d8b8df43b80389acbba910bf8d0cceff8a2f0fc845d85c24937145f8"
+  },
+  "regression": {
+    "make_test": "144 backend, 4 frontend passed",
+    "make_lint": "passed",
+    "make_typecheck": "passed",
+    "make_m2_host_check": "passed",
+    "m1_source_hashes_unchanged": 40
+  }
+}

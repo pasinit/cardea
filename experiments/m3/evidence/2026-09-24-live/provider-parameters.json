@@ -1,0 +1,147 @@
+{
+  "source": "https://openrouter.ai/api/v1/models/z-ai/glm-4.7/endpoints",
+  "model": "z-ai/glm-4.7",
+  "endpoints": [
+    {
+      "provider_name": "DeepInfra",
+      "name": "DeepInfra | z-ai/glm-4.7-20251222",
+      "supported_parameters": [
+        "reasoning",
+        "include_reasoning",
+        "max_tokens",
+        "temperature",
+        "top_p",
+        "stop",
+        "frequency_penalty",
+        "presence_penalty",
+        "repetition_penalty",
+        "top_k",
+        "seed",
+        "min_p",
+        "tools",
+        "tool_choice",
+        "structured_outputs",
+        "response_format",
+        "logit_bias"
+      ]
+    },
+    {
+      "provider_name": "Venice",
+      "name": "Venice | z-ai/glm-4.7-20251222",
+      "supported_parameters": [
+        "reasoning",
+        "include_reasoning",
+        "max_tokens",
+        "temperature",
+        "top_p",
+        "stop",
+        "frequency_penalty",
+        "presence_penalty",
+        "top_k",
+        "tools",
+        "tool_choice",
+        "structured_outputs",
+        "response_format"
+      ]
+    },
+    {
+      "provider_name": "AtlasCloud",
+      "name": "AtlasCloud | z-ai/glm-4.7-20251222",
+      "supported_parameters": [
+        "reasoning",
+        "include_reasoning",
+        "max_tokens",
+        "temperature",
+        "top_p",
+        "top_k",
+        "min_p",
+        "frequency_penalty",
+        "presence_penalty",
+        "repetition_penalty",
+        "stop",
+        "seed",
+        "logit_bias",
+        "response_format",
+        "structured_outputs",
+        "tools",
+        "tool_choice"
+      ]
+    },
+    {
+      "provider_name": "Novita",
+      "name": "Novita | z-ai/glm-4.7-20251222",
+      "supported_parameters": [
+        "reasoning",
+        "include_reasoning",
+        "max_tokens",
+        "temperature",
+        "top_p",
+        "stop",
+        "frequency_penalty",
+        "presence_penalty",
+        "seed",
+        "top_k",
+        "repetition_penalty",
+        "tools",
+        "tool_choice",
+        "response_format"
+      ]
+    },
+    {
+      "provider_name": "Google",
+      "name": "Google | z-ai/glm-4.7-20251222",
+      "supported_parameters": [
+        "reasoning",
+        "include_reasoning",
+        "max_tokens",
+        "temperature",
+        "top_p",
+        "seed",
+        "response_format",
+        "top_k",
+        "repetition_penalty",
+        "frequency_penalty",
+        "presence_penalty",
+        "stop",
+        "structured_outputs",
+        "tools",
+        "tool_choice"
+      ]
+    },
+    {
+      "provider_name": "Z.AI",
+      "name": "Z.AI | z-ai/glm-4.7-20251222",
+      "supported_parameters": [
+        "reasoning",
+        "include_reasoning",
+        "max_tokens",
+        "temperature",
+        "top_p",
+        "tools",
+        "tool_choice",
+        "top_k",
+        "response_format"
+      ]
+    },
+    {
+      "provider_name": "Mancer 2",
+      "name": "Mancer 2 | z-ai/glm-4.7-20251222",
+      "supported_parameters": [
+        "reasoning",
+        "include_reasoning",
+        "max_tokens",
+        "temperature",
+        "top_p",
+        "stop",
+        "frequency_penalty",
+        "presence_penalty",
+        "repetition_penalty",
+        "logit_bias",
+        "top_k",
+        "min_p",
+        "seed",
+        "top_a"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "owned_vm_container": "e7446d8b30545e0afb4a56f5193b555a0a1a0ef59f735773c3ef4ffe8934b9e6",
+  "running_worker_units_before_stop": "",
+  "vm_stopped": true,
+  "container_removed": true,
+  "guest_disk_preserved": true,
+  "provider_model_credentials_used": false
+}

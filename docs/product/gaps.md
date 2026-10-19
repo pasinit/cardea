@@ -1,0 +1,36 @@
+# Product Gap Assessment
+
+Reviewed 2026-09-25 against the current workspace and M0–M5 reports. Priority is delivery order, not a claim that later requirements can be ignored when an earlier workload needs them. All new behavior below is planned.
+
+| Gap | Current evidence and practical limit | Minimum product acceptance | Sequence |
+|---|---|---|---|
+| G1. Useful job and buyer | [Infrastructure MVP](../../mvp.md) and synthetic acceptance scenarios; [older enterprise research](../../problem-validation.md) predates the rescope | Named business owner, observed cases, baseline, outcome rubric, repeat-use commitment and purchasing hypothesis | M6 |
+| G2. Company identity and ownership | [Principal/provisioning models](../../apps/api/src/cardea/service/models.py) have human/agent/service identities and explicit permissions; no company/team membership lifecycle. [Task access](../../apps/api/src/cardea/service/policy.py) is tied to bound supervisor/agent/runtime | Company IdP onboarding; separate operator and supervisor; tested disablement and stale-membership behavior; explicit team visibility and handoff semantics preserving provenance and live ceilings | Cross-team minimum in M7; expand M9 |
+| G3. Reusable applications | `AgentTaskRequest` is incident-specific; host operations are fixed; [M4](../../experiments/m4/M4-REPORT.md) is a deterministic coordinator with at most four inline hash/copy children | Install/version/disable a workload outside kernel business logic; declared inputs, operations, outputs and verifier; no arbitrary application code in the privileged broker | One in M7; independent second in M9 |
+| G4. Business-system access | [M3](../../experiments/m3/README.md) uses the installed local incident MCP tool and selected model broker, not company SaaS connectors | Multiple operational systems with related records, preserved source ACLs, protected credentials, explicit disclosure rights and revocation; if writes are needed, idempotency/reconciliation and destination-state verification | M7 |
+| G5. Recurring and long-lived work | Input-directory updates require explicit rescan. Public task timeout is capped at one hour; M3 allows two model/tool rounds | Workload-appropriate triggers and lifetime; duplicate/missed-input policy; restart catch-up and cancellation; no second competing scheduler | M8, pulled into M7 if essential |
+| G6. Daily supervision | Local task APIs, receipts and diagnostics exist; the React escalation UI uses legacy simulated state | Find owned work and exceptions; understand why blocked, what action is permitted, last progress, cost and evidence; act without editing private provisioning JSON | Minimal in M7; complete workflow in M8 |
+| G7. Business quality and evidence | Independent checks cover bounded JSON, incident and hash/copy outputs | Job-specific rubric against source/destination evidence; incorrect, incomplete and uncertain results remain visible; operational completion is distinct from accepted business outcome | M6 rubric, M7 results |
+| G8. Shared context | Versioned objects and scoped input reads exist; no general company search, synchronization or knowledge lifecycle | Required sources remain discoverable, fresh and traceable under current access; deletion/disclosure rules are settled before real sensitive data enters | Shared cross-team context in M7; cross-process reuse M9 |
+| G9. Company resources and controls | [Budget models](../../apps/api/src/cardea/service/models.py) account by principal/namespace, with bounded child allocations; no department cost model or general handoff | Attributable outcomes/usage, independent team limits and safe offboarding; estimates distinguished from provider invoices; no reset or privilege bypass through reassignment | M7 cross-team controls; M9 wider coverage |
+| G10. Operable release | [M5](../../experiments/m5/M5-REPORT.md) proves one Debian profile; requires administrator setup. History is retained for life; selective deletion absent. Licensed Apache-2.0 since 2026-10-10 | Unassisted documented onboarding, chosen retention/export policy, tested updates/recovery for actual workload, support owner and declared release terms | M7 pilot prerequisites; M10 release |
+| G11. Capacity and availability | [M4 load report](../../packages/cardea-load/reports/2026-09-24-m4/REPORT.md) retains an admission-p95 warning; tiny bounded workload is not company capacity evidence. Single host, no HA | Workload-specific concurrency, latency, recovery and data-loss targets tested against a matched baseline; capacity headroom and recovery runbook | Define M6; verify M8/M10 |
+
+## Decisions before extending components
+
+Two additional first-scope gaps are explicit after the cross-team scope revision:
+
+| Gap | Current limit | Acceptance | Sequence |
+|---|---|---|---|
+| G12. Company process integration | No installed contract for importing/reference-binding process definitions, tracking external instances or coordinating departmental handoffs | Register a versioned process or external instance, correlate tasks and human/external work, expose progress and outcome evidence, and demonstrate one execution owner per transition | M6 fit/design; M7 first process; M9 reuse |
+| G13. Related company data | Bounded object inputs are not a company resource catalog or synchronized source model | Scoped record discovery and explicit relationships across systems, native IDs/version provenance, freshness, catch-up/deletion, and current source permissions on reads and derived artifacts | M6 fit/design; M7 connected sources; M9 reuse |
+
+See the [integration design](../components/company-integration.md) and [ADR-021](../decisions/021-company-process-data-integration.md). A source adapter alone does not close process integration or cross-system data semantics.
+
+Application packaging, external credential delegation, group synchronization, task handoff, longer lifetimes and selective history deletion each require a standards-first decision and relevant failure tests. They are not implied by existing fields or by installing a library. [ADR-020](../decisions/020-company-product-direction.md) provides the initial shortlist and fit questions.
+
+The first slice must exercise a complete process across departments and systems. Shared data, scoped visibility and handoff authority are M7 requirements, not optional later expansion. Pull forward retention, availability or cross-team access if that job requires them; do not call an unsuitable pilot successful by deferring a required control.
+
+## Product claims we can make now
+
+Cardea has an installed, tested agent-execution foundation for documented bounded workloads on one Debian host. It does not yet have a verified company operating experience, general application installation, arbitrary business connectors, proven ROI or a generally distributable supported release. This review inspects existing evidence; it does not constitute a new deployment or load run.

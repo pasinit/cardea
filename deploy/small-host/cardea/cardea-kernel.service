@@ -1,0 +1,25 @@
+[Unit]
+Description=Cardea kernel
+After=network-online.target spire-agent.service
+Wants=network-online.target
+Requires=spire-agent.service
+
+[Service]
+User=cardea-kernel
+Group=cardea-kernel
+# The working directory is on sys.path for -m: keep it a root-owned, empty location.
+WorkingDirectory=/
+Environment=PYTHONPATH=/opt/cardea/apps/api/src
+ExecStart=/opt/cardea/apps/api/.venv/bin/python -m cardea.service serve --config /etc/cardea/config.json
+Restart=on-failure
+RestartSec=5
+# Memory ceiling for the whole service cgroup, sessions included (2 GB host).
+MemoryMax=1400M
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/cardea
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

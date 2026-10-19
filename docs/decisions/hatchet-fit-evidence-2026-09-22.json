@@ -1,0 +1,1107 @@
+{
+  "schema_version": 1,
+  "recorded_date": "2026-09-22",
+  "decision": "ADR-006: Hatchet remains viable; ADR-007 selects DBOS for next integration experiment only",
+  "interpretation": "Passing observation cases include unsafe native behavior; not 18 passed Cardea acceptance requirements.",
+  "environment": {
+    "os": "Darwin",
+    "os_version": "25.6.0",
+    "machine": "arm64",
+    "python": "3.12.0",
+    "fictional_provider_sqlite": "3.42.0",
+    "postgresql": "postgres (PostgreSQL) 14.18 (Homebrew)",
+    "postgresql_transport": "disposable private Unix socket, timezone=UTC",
+    "engine": "hatchet-embedded v0.107.0, underlying Hatchet engine v0.107.0",
+    "sdk": "hatchet-sdk 1.41.0",
+    "messaging": "embedded PostgreSQL message queue; no RabbitMQ",
+    "listeners_observed": {
+      "grpc": "127.0.0.1, temporary port",
+      "rest": "wildcard TCP listener, temporary port"
+    },
+    "worker": {
+      "slots": 4,
+      "durable_slots": 4,
+      "parent_retries": 1,
+      "effect_child_retries": 1,
+      "idempotency_ttl_minutes": 10,
+      "event_lookback_minutes": 5,
+      "sync_force_kill": "SDK default false",
+      "startup": "lifespan marker after registration"
+    },
+    "profile": "native macOS arm64 sidecar plus external disposable PostgreSQL 14; not Debian"
+  },
+  "source": {
+    "engine_repository": "https://github.com/hatchet-dev/hatchet",
+    "repository_archived_at_screening": false,
+    "repository_pushed_at_screening": "2026-09-22T19:46:39Z",
+    "main_engine_screened": "v0.107.2; not the tested embedded engine",
+    "embedded_release": "https://github.com/hatchet-dev/hatchet-embedded/releases/tag/v0.107.0",
+    "embedded_published_at": "2026-09-15T12:53:18Z",
+    "embedded_go_mod": "https://github.com/hatchet-dev/hatchet-embedded/blob/v0.107.0/go.mod",
+    "sdk_source": "https://github.com/hatchet-dev/hatchet/tree/py/1.41.0/sdks/python",
+    "sdk_published_at": "2026-09-22T16:27:53.058137Z",
+    "license": "MIT engine core, sidecar source and Python SDK; no transitive audit",
+    "binary_url": "https://github.com/hatchet-dev/hatchet-embedded/releases/download/v0.107.0/hatchet-embedded-sidecar_darwin_arm64",
+    "binary_sha256": "3903d6c7057ee2d1bc4d3809981287191e3106a1f3be812ae78f7d77855b98ff",
+    "checksums_url": "https://github.com/hatchet-dev/hatchet-embedded/releases/download/v0.107.0/checksums.txt"
+  },
+  "dependencies": {
+    "Pygments": "2.21.0",
+    "aiohappyeyeballs": "2.7.1",
+    "aiohttp": "3.14.3",
+    "aiosignal": "1.4.0",
+    "annotated-types": "0.8.0",
+    "attrs": "26.1.0",
+    "frozenlist": "1.8.0",
+    "googleapis-common-protos": "1.75.3",
+    "grpcio": "1.84.0",
+    "grpcio-status": "1.84.0",
+    "grpcio-tools": "1.81.1",
+    "hatchet-sdk": "1.41.0",
+    "idna": "3.20",
+    "iniconfig": "2.3.0",
+    "multidict": "6.9.1",
+    "packaging": "26.3",
+    "pluggy": "1.6.0",
+    "prometheus_client": "0.26.0",
+    "propcache": "0.5.4",
+    "protobuf": "6.33.6",
+    "psycopg": "3.3.6",
+    "psycopg-binary": "3.3.6",
+    "pydantic": "2.13.5",
+    "pydantic-settings": "2.15.0",
+    "pydantic_core": "2.46.5",
+    "pytest": "9.0.3",
+    "pytest-asyncio": "1.3.0",
+    "python-dateutil": "2.9.0.post0",
+    "python-dotenv": "1.2.3",
+    "setuptools": "84.0.0",
+    "six": "1.17.0",
+    "tenacity": "9.1.4",
+    "typing-inspection": "0.4.4",
+    "typing_extensions": "4.16.0",
+    "urllib3": "2.8.0",
+    "yarl": "1.25.1"
+  },
+  "command": "HATCHET_FIT_SIDECAR=/tmp/cardea-hatchet-embedded-0.107.0/sidecar uv run --project experiments/hatchet --locked pytest -q experiments/hatchet/tests --junitxml=/tmp/cardea-hatchet-fit.xml -x",
+  "reproduction_command": "HATCHET_FIT_SIDECAR=<verified v0.107.0 arm64 binary> make hatchet-fit",
+  "summary": {
+    "tests": 18,
+    "errors": 0,
+    "failures": 0,
+    "skipped": 0,
+    "duration_seconds": 269.565
+  },
+  "source_sha256": {
+    "experiments/hatchet/runtime.py": "eda76cb0bcad04a29232be1fdf25d828cc9c5d0d504ff6785cef619289393fbb",
+    "experiments/hatchet/worker.py": "37f497f6656ac5ec63cda043391241857de7b0812ba749d12571fadb5bfe8013",
+    "experiments/hatchet/tests/conftest.py": "f5948de30574f65d570fcbc78f6bcb922b987ce38cdd4a4e505d520503f545a6",
+    "experiments/hatchet/tests/test_fit.py": "d0d8815b3047dc454e6355b3d16139872af1801a9149ed88fc12301269915856",
+    "experiments/hatchet/pyproject.toml": "38f903db4839024509a8f6fd9c0960048deb86c18fa207e2c72cdd48dea9fd54",
+    "experiments/hatchet/uv.lock": "d0bfaf39e7f1ff7c553ba89824d9a58c03ed9b5fd881ebd7465610181ded6dcb",
+    "experiments/hatchet/.python-version": "7b55f8e67b5623c4bef3fa691288da9437d79d3aba156de48d481db32ac7d16d"
+  },
+  "junit_sha256": "a3b9b4d50ee6e01694f588d0aeb7834994267ce17791a54f78b4e39086d85a89",
+  "regression_checks": {
+    "make test": {
+      "backend_passed": 138,
+      "frontend_passed": 4
+    },
+    "make lint": "passed",
+    "make typecheck": "passed",
+    "isolated_ruff": "passed",
+    "isolated_strict_mypy": "passed: 4 source files"
+  },
+  "setup_findings": [
+    "UTC check rejected inherited Europe/London timezone; configured UTC without bypassing check",
+    "Submission before registration raced; lifespan synchronization fixed harness",
+    "Same literal idempotency key collided across namespaced workflows within one tenant during initial setup",
+    "Structured JSON task results satisfy pinned SDK return typing",
+    "Sidecar REST listener is wildcard, not loopback-only"
+  ],
+  "limitations": [
+    "No paused-live-worker overlap/fencing test; dead-worker recovery is narrower",
+    "No engine/database restart, upgrades or backup/restore",
+    "No duplicate-push ordering/dedup, simultaneous registration race, retention or global cursor mapping",
+    "No child failure or full cancellation propagation mapping, host descendants or queued deadlines",
+    "Fictional authority and intent controls only; no authentication, supervisor/ancestor enforcement or reconciliation",
+    "No Cardea two-store integration or completion verifier",
+    "No Debian deployment, cost or security audit",
+    "Engine 0.107.2 untested; observed suite duration is not a benchmark"
+  ],
+  "cases": [
+    {
+      "name": "test_child_result",
+      "duration_seconds": 3.45,
+      "outcome": "passed",
+      "observations": {
+        "status": "COMPLETED",
+        "result": {
+          "value": 1
+        },
+        "result_wait_seconds": 0.86,
+        "durable_entries": [
+          [
+            "RUN",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "CHILD_WORKFLOW",
+                  "workflowName": "fitd7559c37ce1e4c11be62dda5e2f4f315_output"
+                }
+              ]
+            }
+          ]
+        ],
+        "output_effects": 1,
+        "external_effects": 0,
+        "worker_processes": 1
+      }
+    },
+    {
+      "name": "test_completed_child_survives_worker_death",
+      "duration_seconds": 32.179,
+      "outcome": "passed",
+      "observations": {
+        "registered_wait_kind": "USER_EVENT",
+        "status": "COMPLETED",
+        "result": {
+          "value": 1
+        },
+        "result_wait_seconds": 29.041,
+        "durable_entries": [
+          [
+            "RUN",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "CHILD_WORKFLOW",
+                  "workflowName": "fit47c02536512e4b7e8a5183b9c1cd6182_output"
+                }
+              ]
+            }
+          ],
+          [
+            "MEMO",
+            true,
+            null
+          ],
+          [
+            "WAIT_FOR",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "USER_EVENT",
+                  "eventKey": "fit47c02536512e4b7e8a5183b9c1cd6182_continue"
+                }
+              ]
+            }
+          ]
+        ],
+        "output_effects": 1,
+        "external_effects": 0,
+        "worker_processes": 2
+      }
+    },
+    {
+      "name": "test_events_with_scoped_lookback[before]",
+      "duration_seconds": 3.043,
+      "outcome": "passed",
+      "observations": {
+        "status": "COMPLETED",
+        "result": {
+          "events": [
+            {
+              "value": "first"
+            },
+            {
+              "value": "second"
+            }
+          ]
+        },
+        "result_wait_seconds": 0.225,
+        "durable_entries": [
+          [
+            "RUN",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "CHILD_WORKFLOW",
+                  "workflowName": "fit23da8a59fbe247dc8d3ed25e3519633a_output"
+                }
+              ]
+            }
+          ],
+          [
+            "MEMO",
+            true,
+            null
+          ],
+          [
+            "WAIT_FOR",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "USER_EVENT",
+                  "eventKey": "fit23da8a59fbe247dc8d3ed25e3519633a_continue"
+                }
+              ]
+            }
+          ],
+          [
+            "MEMO",
+            true,
+            null
+          ],
+          [
+            "WAIT_FOR",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "USER_EVENT",
+                  "eventKey": "fit23da8a59fbe247dc8d3ed25e3519633a_second"
+                }
+              ]
+            }
+          ]
+        ],
+        "output_effects": 1,
+        "external_effects": 0,
+        "worker_processes": 1
+      }
+    },
+    {
+      "name": "test_events_with_scoped_lookback[during]",
+      "duration_seconds": 2.236,
+      "outcome": "passed",
+      "observations": {
+        "registered_wait_kind": "USER_EVENT",
+        "status": "COMPLETED",
+        "result": {
+          "events": [
+            {
+              "value": "first"
+            },
+            {
+              "value": "second"
+            }
+          ]
+        },
+        "result_wait_seconds": 0.44,
+        "durable_entries": [
+          [
+            "RUN",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "CHILD_WORKFLOW",
+                  "workflowName": "fitb949cd7fc3f34b9ca66264ccff6fcbb6_output"
+                }
+              ]
+            }
+          ],
+          [
+            "MEMO",
+            true,
+            null
+          ],
+          [
+            "WAIT_FOR",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "USER_EVENT",
+                  "eventKey": "fitb949cd7fc3f34b9ca66264ccff6fcbb6_continue"
+                }
+              ]
+            }
+          ],
+          [
+            "MEMO",
+            true,
+            null
+          ],
+          [
+            "WAIT_FOR",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "USER_EVENT",
+                  "eventKey": "fitb949cd7fc3f34b9ca66264ccff6fcbb6_second"
+                }
+              ]
+            }
+          ]
+        ],
+        "output_effects": 1,
+        "external_effects": 0,
+        "worker_processes": 1
+      }
+    },
+    {
+      "name": "test_events_with_scoped_lookback[offline]",
+      "duration_seconds": 31.999,
+      "outcome": "passed",
+      "observations": {
+        "registered_wait_kind": "USER_EVENT",
+        "status": "COMPLETED",
+        "result": {
+          "events": [
+            {
+              "value": "first"
+            },
+            {
+              "value": "second"
+            }
+          ]
+        },
+        "result_wait_seconds": 29.347,
+        "durable_entries": [
+          [
+            "RUN",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "CHILD_WORKFLOW",
+                  "workflowName": "fitf4f8600f219c43c0834479d652c905b7_output"
+                }
+              ]
+            }
+          ],
+          [
+            "MEMO",
+            true,
+            null
+          ],
+          [
+            "WAIT_FOR",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "USER_EVENT",
+                  "eventKey": "fitf4f8600f219c43c0834479d652c905b7_continue"
+                }
+              ]
+            }
+          ],
+          [
+            "MEMO",
+            true,
+            null
+          ],
+          [
+            "WAIT_FOR",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "USER_EVENT",
+                  "eventKey": "fitf4f8600f219c43c0834479d652c905b7_second"
+                }
+              ]
+            }
+          ]
+        ],
+        "output_effects": 1,
+        "external_effects": 0,
+        "worker_processes": 2
+      }
+    },
+    {
+      "name": "test_timer_survives_worker_death",
+      "duration_seconds": 31.867,
+      "outcome": "passed",
+      "observations": {
+        "registered_wait_kind": "SLEEP",
+        "status": "COMPLETED",
+        "result": {
+          "status": "awake"
+        },
+        "result_wait_seconds": 29.347,
+        "durable_entries": [
+          [
+            "RUN",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "CHILD_WORKFLOW",
+                  "workflowName": "fite45b4ca7df2c4d59ae27a6af79074078_output"
+                }
+              ]
+            }
+          ],
+          [
+            "WAIT_FOR",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "SLEEP",
+                  "sleepDurationMs": 4000
+                }
+              ]
+            }
+          ]
+        ],
+        "output_effects": 1,
+        "external_effects": 0,
+        "worker_processes": 2
+      }
+    },
+    {
+      "name": "test_live_revocation[False-False]",
+      "duration_seconds": 5.152,
+      "outcome": "passed",
+      "observations": {
+        "registered_wait_kind": "USER_EVENT",
+        "status": "COMPLETED",
+        "result": {
+          "status": "effect_recorded"
+        },
+        "result_wait_seconds": 2.168,
+        "durable_entries": [
+          [
+            "RUN",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "CHILD_WORKFLOW",
+                  "workflowName": "fit4553e5ac414445559908ec0d49863bdd_output"
+                }
+              ]
+            }
+          ],
+          [
+            "RUN",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "CHILD_WORKFLOW",
+                  "workflowName": "fit4553e5ac414445559908ec0d49863bdd_permission"
+                }
+              ]
+            }
+          ],
+          [
+            "MEMO",
+            true,
+            null
+          ],
+          [
+            "WAIT_FOR",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "USER_EVENT",
+                  "eventKey": "fit4553e5ac414445559908ec0d49863bdd_continue"
+                }
+              ]
+            }
+          ],
+          [
+            "RUN",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "CHILD_WORKFLOW",
+                  "workflowName": "fit4553e5ac414445559908ec0d49863bdd_effect"
+                }
+              ]
+            }
+          ]
+        ],
+        "output_effects": 1,
+        "external_effects": 1,
+        "worker_processes": 1
+      }
+    },
+    {
+      "name": "test_live_revocation[False-True]",
+      "duration_seconds": 4.844,
+      "outcome": "passed",
+      "observations": {
+        "registered_wait_kind": "USER_EVENT",
+        "status": "COMPLETED",
+        "result": {
+          "status": "denied"
+        },
+        "result_wait_seconds": 1.078,
+        "durable_entries": [
+          [
+            "RUN",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "CHILD_WORKFLOW",
+                  "workflowName": "fit5d0947f290b44c1286cfc2616860fc52_output"
+                }
+              ]
+            }
+          ],
+          [
+            "RUN",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "CHILD_WORKFLOW",
+                  "workflowName": "fit5d0947f290b44c1286cfc2616860fc52_permission"
+                }
+              ]
+            }
+          ],
+          [
+            "MEMO",
+            true,
+            null
+          ],
+          [
+            "WAIT_FOR",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "USER_EVENT",
+                  "eventKey": "fit5d0947f290b44c1286cfc2616860fc52_continue"
+                }
+              ]
+            }
+          ],
+          [
+            "RUN",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "CHILD_WORKFLOW",
+                  "workflowName": "fit5d0947f290b44c1286cfc2616860fc52_effect"
+                }
+              ]
+            }
+          ]
+        ],
+        "output_effects": 1,
+        "external_effects": 0,
+        "worker_processes": 1
+      }
+    },
+    {
+      "name": "test_live_revocation[True-False]",
+      "duration_seconds": 33.14,
+      "outcome": "passed",
+      "observations": {
+        "registered_wait_kind": "USER_EVENT",
+        "status": "COMPLETED",
+        "result": {
+          "status": "effect_recorded"
+        },
+        "result_wait_seconds": 28.664,
+        "durable_entries": [
+          [
+            "RUN",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "CHILD_WORKFLOW",
+                  "workflowName": "fitaa2a8a89b0bf40d29f216775561d7766_output"
+                }
+              ]
+            }
+          ],
+          [
+            "RUN",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "CHILD_WORKFLOW",
+                  "workflowName": "fitaa2a8a89b0bf40d29f216775561d7766_permission"
+                }
+              ]
+            }
+          ],
+          [
+            "MEMO",
+            true,
+            null
+          ],
+          [
+            "WAIT_FOR",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "USER_EVENT",
+                  "eventKey": "fitaa2a8a89b0bf40d29f216775561d7766_continue"
+                }
+              ]
+            }
+          ],
+          [
+            "RUN",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "CHILD_WORKFLOW",
+                  "workflowName": "fitaa2a8a89b0bf40d29f216775561d7766_effect"
+                }
+              ]
+            }
+          ]
+        ],
+        "output_effects": 1,
+        "external_effects": 1,
+        "worker_processes": 2
+      }
+    },
+    {
+      "name": "test_live_revocation[True-True]",
+      "duration_seconds": 33.886,
+      "outcome": "passed",
+      "observations": {
+        "registered_wait_kind": "USER_EVENT",
+        "status": "COMPLETED",
+        "result": {
+          "status": "denied"
+        },
+        "result_wait_seconds": 29.182,
+        "durable_entries": [
+          [
+            "RUN",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "CHILD_WORKFLOW",
+                  "workflowName": "fite82fcf970c314deabc3a3750e0ad43a3_output"
+                }
+              ]
+            }
+          ],
+          [
+            "RUN",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "CHILD_WORKFLOW",
+                  "workflowName": "fite82fcf970c314deabc3a3750e0ad43a3_permission"
+                }
+              ]
+            }
+          ],
+          [
+            "MEMO",
+            true,
+            null
+          ],
+          [
+            "WAIT_FOR",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "USER_EVENT",
+                  "eventKey": "fite82fcf970c314deabc3a3750e0ad43a3_continue"
+                }
+              ]
+            }
+          ],
+          [
+            "RUN",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "CHILD_WORKFLOW",
+                  "workflowName": "fite82fcf970c314deabc3a3750e0ad43a3_effect"
+                }
+              ]
+            }
+          ]
+        ],
+        "output_effects": 1,
+        "external_effects": 0,
+        "worker_processes": 2
+      }
+    },
+    {
+      "name": "test_retry_rechecks_authority",
+      "duration_seconds": 4.019,
+      "outcome": "passed",
+      "observations": {
+        "status": "COMPLETED",
+        "result": {
+          "status": "denied"
+        },
+        "result_wait_seconds": 1.062,
+        "durable_entries": [
+          [
+            "RUN",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "CHILD_WORKFLOW",
+                  "workflowName": "fit967fae634c4d4eddb3360d426d41a098_output"
+                }
+              ]
+            }
+          ],
+          [
+            "RUN",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "CHILD_WORKFLOW",
+                  "workflowName": "fit967fae634c4d4eddb3360d426d41a098_effect"
+                }
+              ]
+            }
+          ]
+        ],
+        "output_effects": 1,
+        "external_effects": 0,
+        "worker_processes": 1
+      }
+    },
+    {
+      "name": "test_lost_effect_result_on_retry[False-False]",
+      "duration_seconds": 3.027,
+      "outcome": "passed",
+      "observations": {
+        "status": "COMPLETED",
+        "result": {
+          "status": "effect_recorded"
+        },
+        "result_wait_seconds": 1.077,
+        "durable_entries": [
+          [
+            "RUN",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "CHILD_WORKFLOW",
+                  "workflowName": "fit9cb2ad3c406044d895f345f010a870d4_output"
+                }
+              ]
+            }
+          ],
+          [
+            "RUN",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "CHILD_WORKFLOW",
+                  "workflowName": "fit9cb2ad3c406044d895f345f010a870d4_effect"
+                }
+              ]
+            }
+          ]
+        ],
+        "output_effects": 1,
+        "external_effects": 2,
+        "worker_processes": 1
+      }
+    },
+    {
+      "name": "test_lost_effect_result_on_retry[False-True]",
+      "duration_seconds": 3.146,
+      "outcome": "passed",
+      "observations": {
+        "status": "COMPLETED",
+        "result": {
+          "status": "outcome_unknown"
+        },
+        "result_wait_seconds": 0.218,
+        "durable_entries": [
+          [
+            "RUN",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "CHILD_WORKFLOW",
+                  "workflowName": "fitd5a3a74703444a71952ddfd5f10e0ccb_output"
+                }
+              ]
+            }
+          ],
+          [
+            "RUN",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "CHILD_WORKFLOW",
+                  "workflowName": "fitd5a3a74703444a71952ddfd5f10e0ccb_effect"
+                }
+              ]
+            }
+          ]
+        ],
+        "output_effects": 1,
+        "external_effects": 1,
+        "worker_processes": 1
+      }
+    },
+    {
+      "name": "test_lost_effect_result_on_retry[True-False]",
+      "duration_seconds": 32.743,
+      "outcome": "passed",
+      "observations": {
+        "status": "COMPLETED",
+        "result": {
+          "status": "effect_recorded"
+        },
+        "result_wait_seconds": 29.179,
+        "durable_entries": [
+          [
+            "RUN",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "CHILD_WORKFLOW",
+                  "workflowName": "fitf1975d18a006483ca49aed40351ea012_output"
+                }
+              ]
+            }
+          ],
+          [
+            "RUN",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "CHILD_WORKFLOW",
+                  "workflowName": "fitf1975d18a006483ca49aed40351ea012_effect"
+                }
+              ]
+            }
+          ]
+        ],
+        "output_effects": 1,
+        "external_effects": 2,
+        "worker_processes": 2
+      }
+    },
+    {
+      "name": "test_lost_effect_result_on_retry[True-True]",
+      "duration_seconds": 32.132,
+      "outcome": "passed",
+      "observations": {
+        "status": "COMPLETED",
+        "result": {
+          "status": "outcome_unknown"
+        },
+        "result_wait_seconds": 29.256,
+        "durable_entries": [
+          [
+            "RUN",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "CHILD_WORKFLOW",
+                  "workflowName": "fit9fd516684b644f3cb33f04c3b019a9f6_output"
+                }
+              ]
+            }
+          ],
+          [
+            "RUN",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "CHILD_WORKFLOW",
+                  "workflowName": "fit9fd516684b644f3cb33f04c3b019a9f6_effect"
+                }
+              ]
+            }
+          ]
+        ],
+        "output_effects": 1,
+        "external_effects": 1,
+        "worker_processes": 2
+      }
+    },
+    {
+      "name": "test_idempotency_collision_does_not_compare_arguments",
+      "duration_seconds": 2.153,
+      "outcome": "passed",
+      "observations": {
+        "status": "COMPLETED",
+        "result": {
+          "value": 1
+        },
+        "result_wait_seconds": 0.219,
+        "collision": "same and changed input both rejected, original ID returned",
+        "durable_entries": [
+          [
+            "RUN",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "CHILD_WORKFLOW",
+                  "workflowName": "fit89ec8368061e49e3ab63ae57cd023d15_output"
+                }
+              ]
+            }
+          ],
+          [
+            "MEMO",
+            true,
+            null
+          ],
+          [
+            "WAIT_FOR",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "USER_EVENT",
+                  "eventKey": "fit89ec8368061e49e3ab63ae57cd023d15_continue"
+                }
+              ]
+            }
+          ]
+        ],
+        "output_effects": 1,
+        "external_effects": 0,
+        "worker_processes": 1
+      }
+    },
+    {
+      "name": "test_repeated_scoped_lookback_can_read_same_event",
+      "duration_seconds": 2.91,
+      "outcome": "passed",
+      "observations": {
+        "status": "COMPLETED",
+        "result": {
+          "events": [
+            {
+              "value": "first"
+            },
+            {
+              "value": "first"
+            }
+          ]
+        },
+        "result_wait_seconds": 2.018,
+        "durable_entries": [
+          [
+            "RUN",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "CHILD_WORKFLOW",
+                  "workflowName": "fit0409fb7e15104ce58311f7850c267ba6_output"
+                }
+              ]
+            }
+          ],
+          [
+            "MEMO",
+            true,
+            null
+          ],
+          [
+            "WAIT_FOR",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "USER_EVENT",
+                  "eventKey": "fit0409fb7e15104ce58311f7850c267ba6_continue"
+                }
+              ]
+            }
+          ],
+          [
+            "MEMO",
+            true,
+            null
+          ],
+          [
+            "WAIT_FOR",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "USER_EVENT",
+                  "eventKey": "fit0409fb7e15104ce58311f7850c267ba6_continue"
+                }
+              ]
+            }
+          ]
+        ],
+        "output_effects": 1,
+        "external_effects": 0,
+        "worker_processes": 1
+      }
+    },
+    {
+      "name": "test_cancelled_parent_does_not_stop_inflight_sync_child",
+      "duration_seconds": 7.602,
+      "outcome": "passed",
+      "observations": {
+        "status": "CANCELLED",
+        "durable_entries": [
+          [
+            "RUN",
+            true,
+            {
+              "conditions": [
+                {
+                  "kind": "CHILD_WORKFLOW",
+                  "workflowName": "fit1ab59d69f4c547b4900bb27ea4ca450d_output"
+                }
+              ]
+            }
+          ],
+          [
+            "RUN",
+            false,
+            {
+              "conditions": [
+                {
+                  "kind": "CHILD_WORKFLOW",
+                  "workflowName": "fit1ab59d69f4c547b4900bb27ea4ca450d_effect"
+                }
+              ]
+            }
+          ]
+        ],
+        "output_effects": 1,
+        "external_effects": 1,
+        "worker_processes": 1
+      }
+    }
+  ]
+}

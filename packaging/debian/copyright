@@ -1,0 +1,16 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: Cardea
+Source: https://github.com/pasinit/cardea
+
+Files: src/* debian/*
+Copyright: 2026 The Cardea Authors
+License: Apache-2.0
+ On Debian systems, the full text of the Apache License 2.0 is in
+ /usr/share/common-licenses/Apache-2.0.
+
+Files: opt/venvs/*
+Copyright: Respective dependency authors
+License: dependency-specific
+ Dependency metadata and included license files are retained in the private
+ environment. See dependency-inventory.json and each distribution's dist-info.
+ This inventory is not a legal or vulnerability audit.

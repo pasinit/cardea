@@ -1,0 +1,285 @@
+{
+  "principals": [
+    {
+      "principal_id": "runtime",
+      "kind": "service",
+      "auth_kind": "spiffe",
+      "issuer": "cardea.internal",
+      "subject": "spiffe://cardea.internal/runtime/kernel"
+    },
+    {
+      "principal_id": "telos",
+      "kind": "service",
+      "auth_kind": "spiffe",
+      "issuer": "cardea.internal",
+      "subject": "spiffe://cardea.internal/service/telos"
+    },
+    {
+      "principal_id": "telos-research",
+      "kind": "agent",
+      "runtime_id": "runtime"
+    },
+    {
+      "principal_id": "telos-assistant",
+      "kind": "agent",
+      "runtime_id": "runtime"
+    }
+  ],
+  "permissions": [
+    {
+      "principal_id": "telos",
+      "namespace": "telos-user",
+      "operation": "objects.read",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "telos",
+      "namespace": "telos-user",
+      "operation": "objects.write",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "telos",
+      "namespace": "telos-user",
+      "operation": "tasks.inspect",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "telos",
+      "namespace": "telos-user",
+      "operation": "tasks.cancel",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "telos",
+      "namespace": "telos-user",
+      "operation": "tasks.resume",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "telos",
+      "namespace": "telos-user",
+      "operation": "events.read",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "telos",
+      "namespace": "telos-user",
+      "operation": "tasks.submit",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "telos",
+      "namespace": "telos-user",
+      "operation": "models.invoke",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "telos",
+      "namespace": "telos-user",
+      "operation": "tasks.schedule",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "telos",
+      "namespace": "telos-user",
+      "operation": "mail.send",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "telos",
+      "namespace": "telos-user",
+      "operation": "mail.preview",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "telos",
+      "namespace": "telos-user",
+      "operation": "listings.rightmove_search",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "telos",
+      "namespace": "telos-user",
+      "operation": "listings.zoopla_search",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "telos",
+      "namespace": "telos-user",
+      "operation": "listings.agency_search",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "telos",
+      "namespace": "telos-user",
+      "operation": "web.search",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "telos",
+      "namespace": "telos-user",
+      "operation": "browser.open",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "telos",
+      "namespace": "telos-user",
+      "operation": "browser.click",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "telos",
+      "namespace": "telos-user",
+      "operation": "memory.recall",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    }
+  ],
+  "platform": [
+    {
+      "principal_id": "platform",
+      "namespace": "telos-user",
+      "operation": "objects.read",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "platform",
+      "namespace": "telos-user",
+      "operation": "objects.write",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "platform",
+      "namespace": "telos-user",
+      "operation": "tasks.inspect",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "platform",
+      "namespace": "telos-user",
+      "operation": "tasks.cancel",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "platform",
+      "namespace": "telos-user",
+      "operation": "tasks.resume",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "platform",
+      "namespace": "telos-user",
+      "operation": "events.read",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "platform",
+      "namespace": "telos-user",
+      "operation": "tasks.submit",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "platform",
+      "namespace": "telos-user",
+      "operation": "models.invoke",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "platform",
+      "namespace": "telos-user",
+      "operation": "tasks.schedule",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "platform",
+      "namespace": "telos-user",
+      "operation": "mail.send",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "platform",
+      "namespace": "telos-user",
+      "operation": "mail.preview",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "platform",
+      "namespace": "telos-user",
+      "operation": "listings.rightmove_search",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "platform",
+      "namespace": "telos-user",
+      "operation": "listings.zoopla_search",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "platform",
+      "namespace": "telos-user",
+      "operation": "listings.agency_search",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "platform",
+      "namespace": "telos-user",
+      "operation": "web.search",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "platform",
+      "namespace": "telos-user",
+      "operation": "browser.open",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "platform",
+      "namespace": "telos-user",
+      "operation": "browser.click",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    },
+    {
+      "principal_id": "platform",
+      "namespace": "telos-user",
+      "operation": "memory.recall",
+      "delegate": true,
+      "expires_at": "2027-04-15T00:00:00Z"
+    }
+  ],
+  "triggers": []
+}

@@ -1,0 +1,32 @@
+{
+  "accepted": 5,
+  "achieved_request_rps": 1.2498458387024096,
+  "capacity_rejected": 0,
+  "completion_rps": 0.9601153438645564,
+  "distinct_credentials_used": 1,
+  "drain_seconds": 0.12596570899768267,
+  "expected_denial": 0,
+  "failures": {},
+  "fault_unavailable": 0,
+  "feeder_errors": [],
+  "http_seconds": 5.081741918998887,
+  "http_success_rps": 1.2450481961817186,
+  "intervention": {},
+  "malformed_successes": 0,
+  "name": "r1-1rps",
+  "p95_ms": 67.145417,
+  "p99_ms": 67.145417,
+  "passed": true,
+  "peak_fds": 46,
+  "peak_rss_bytes": 183697408,
+  "peak_wal_bytes": 2735712,
+  "rate": 1,
+  "requests": 5,
+  "seconds": 5,
+  "states": {
+    "succeeded": 5
+  },
+  "total_seconds": 5.2077076279965695,
+  "unexpected_error": 0,
+  "violations": []
+}

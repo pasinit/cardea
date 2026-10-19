@@ -1,0 +1,24 @@
+# Compose overlay for the Telos host: a spiffe-helper sidecar writes Telos's JWT-SVID
+# for Cardea into a shared volume. Use with: docker compose -f docker-compose.yml -f this.
+services:
+  cardea-identity:
+    image: ghcr.io/spiffe/spiffe-helper:0.12.1
+    command: ["-config", "/etc/spiffe-helper.conf"]
+    restart: unless-stopped
+    volumes:
+      - /run/spire/agent.sock:/run/spire/agent.sock:ro
+      - ./spiffe-helper.conf:/etc/spiffe-helper.conf:ro
+      - cardea-svid:/svid
+  telos:
+    environment:
+      TELOS_CARDEA_MODE: shadow
+      TELOS_CARDEA_URL: https://CARDEA_PRIVATE_IP:8443
+      TELOS_CARDEA_CA: /cardea/ca.crt
+      TELOS_CARDEA_TOKEN_FILE: /svid/telos.jwt
+      TELOS_CARDEA_SUPERVISOR: telos
+    volumes:
+      - cardea-svid:/svid:ro
+      - ./cardea-ca.crt:/cardea/ca.crt:ro
+
+volumes:
+  cardea-svid:

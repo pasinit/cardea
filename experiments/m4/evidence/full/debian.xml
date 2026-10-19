@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="2" time="110.871" timestamp="2026-09-24T20:51:29.216280+00:00" hostname="cardea-m2-fit"><testcase classname="test_integration" name="test_native_success" time="50.654" /><testcase classname="test_integration" name="test_restart_reconciles_same_children[delegation.child_admitted]" time="45.646"><failure message="KeyError: 'task_id'">service = &lt;harness.ServiceLab object at 0x7f443bf99810&gt;
+stage = 'delegation.child_admitted'
+
+    @pytest.mark.parametrize(
+        "stage", ["delegation.child_admitted", "delegation.before_verify"]
+    )
+    def test_restart_reconciles_same_children(service, stage):
+        process = service.start(stage)
+        parent = submit(service)
+        entered(service, process, stage)
+        service.stop(process)
+        service.start()
+        service.wait_state(parent, "succeeded", timeout=150)
+        data = evidence(service, parent, stage)
+        assert len(data["children"]) == 2
+        assert len(data["receipts"]) == 2
+&gt;       assert len({r["task_id"] for r in data["receipts"]}) == 2
+                    ^^^^^^^^^^^^
+E       KeyError: 'task_id'
+
+/opt/cardea-src/experiments/m4/test_integration.py:175: KeyError</failure></testcase></testsuite></testsuites>

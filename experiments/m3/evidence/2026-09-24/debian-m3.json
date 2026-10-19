@@ -1,0 +1,341 @@
+{
+  "provider": "fixture",
+  "first": {
+    "schema_version": "0.2",
+    "artifact": {
+      "schema_version": "0.1",
+      "namespace": "test",
+      "resource_id": "task-37becd1dd5d644acaf8c66717ebb4161.output",
+      "version": 1,
+      "content_digest": "74ede1415fa1f0969b8e7140e0eecdac2a8f971a5bc85c894de5bcbcac9fc370"
+    },
+    "content": {
+      "index": [
+        {
+          "id": "INC-1",
+          "severity": "low",
+          "title": "Fictional incident INC-1"
+        }
+      ],
+      "summary": "# Incident summary\n\n- [INC-1] \"Fictional incident INC-1\" (low)\n"
+    }
+  },
+  "final": {
+    "schema_version": "0.2",
+    "artifact": {
+      "schema_version": "0.1",
+      "namespace": "test",
+      "resource_id": "task-37becd1dd5d644acaf8c66717ebb4161.output",
+      "version": 2,
+      "content_digest": "6fa7c3b65b5a5bf4d53c98ff43be18f152f21eae2d090ac5548c1862d0efc7a3"
+    },
+    "content": {
+      "index": [
+        {
+          "id": "INC-1",
+          "severity": "low",
+          "title": "Fictional incident INC-1"
+        },
+        {
+          "id": "INC-2",
+          "severity": "low",
+          "title": "Fictional incident INC-2"
+        }
+      ],
+      "summary": "# Incident summary\n\n- [INC-1] \"Fictional incident INC-1\" (low)\n- [INC-2] \"Fictional incident INC-2\" (low)\n"
+    }
+  },
+  "receipts": [
+    {
+      "schema_version": "0.1",
+      "receipt_id": "receipt-38e62e78496c45498b8f31048d3a7674",
+      "request": {
+        "schema_version": "0.1",
+        "operation_id": "0.model",
+        "task_id": "task-37becd1dd5d644acaf8c66717ebb4161",
+        "subject_id": "agent-a",
+        "name": "models.invoke",
+        "resource": {
+          "schema_version": "0.1",
+          "namespace": "test",
+          "resource_id": "task-37becd1dd5d644acaf8c66717ebb4161"
+        },
+        "arguments": {
+          "model": "fixture/model",
+          "input": {
+            "records": [
+              {
+                "id": "INC-1",
+                "title": "Fictional incident INC-1",
+                "severity": "low"
+              }
+            ]
+          },
+          "tool": "compile_incidents"
+        },
+        "deadline": "2026-09-24T18:22:36.343757Z"
+      },
+      "request_digest": "f284565962857a172ac7bddfbda1589da94bc8f3b98a63d3003e9c447bb7926b",
+      "grant_ids": [
+        "grant-task-37becd1dd5d644acaf8c66717ebb4161"
+      ],
+      "retry_class": "reconciliation_required",
+      "state": "succeeded",
+      "revision": 2,
+      "created_at": "2026-09-24T18:12:37.283562Z",
+      "updated_at": "2026-09-24T18:12:41.617632Z",
+      "usage": {
+        "schema_version": "0.1",
+        "steps": 1,
+        "model_calls": 1,
+        "model_tokens": 50,
+        "tool_milliseconds": 0,
+        "output_bytes": 0
+      },
+      "result": {
+        "response_id": "fixture-response",
+        "model": "fixture/model",
+        "call_id": "fixture-call",
+        "tool": "compile_incidents",
+        "arguments": {
+          "batch": {
+            "records": [
+              {
+                "id": "INC-1",
+                "severity": "low",
+                "title": "Fictional incident INC-1"
+              }
+            ]
+          }
+        },
+        "usage": {
+          "input_tokens": 20,
+          "output_tokens": 30,
+          "total_tokens": 50,
+          "cost": null
+        }
+      },
+      "failure": null,
+      "reconciliation_evidence": []
+    },
+    {
+      "schema_version": "0.1",
+      "receipt_id": "receipt-31b6d4dd0bf44656984860858c6a3964",
+      "request": {
+        "schema_version": "0.1",
+        "operation_id": "0.tool",
+        "task_id": "task-37becd1dd5d644acaf8c66717ebb4161",
+        "subject_id": "agent-a",
+        "name": "tools.incidents",
+        "resource": {
+          "schema_version": "0.1",
+          "namespace": "test",
+          "resource_id": "task-37becd1dd5d644acaf8c66717ebb4161"
+        },
+        "arguments": {
+          "call_id": "fixture-call",
+          "arguments": {
+            "batch": {
+              "records": [
+                {
+                  "id": "INC-1",
+                  "severity": "low",
+                  "title": "Fictional incident INC-1"
+                }
+              ]
+            }
+          }
+        },
+        "deadline": "2026-09-24T18:22:36.343757Z"
+      },
+      "request_digest": "508544f33d4be1cdc2728acf0f8110b43ab85b89eddf9b2447c3ee86279765e7",
+      "grant_ids": [
+        "grant-task-37becd1dd5d644acaf8c66717ebb4161"
+      ],
+      "retry_class": "reconciliation_required",
+      "state": "succeeded",
+      "revision": 2,
+      "created_at": "2026-09-24T18:12:42.089071Z",
+      "updated_at": "2026-09-24T18:12:46.288741Z",
+      "usage": {
+        "schema_version": "0.1",
+        "steps": 1,
+        "model_calls": 0,
+        "model_tokens": 0,
+        "tool_milliseconds": 915,
+        "output_bytes": 168
+      },
+      "result": {
+        "tool": "compile_incidents",
+        "protocol": "2026-07-28"
+      },
+      "failure": null,
+      "reconciliation_evidence": []
+    },
+    {
+      "schema_version": "0.1",
+      "receipt_id": "receipt-2387584c8fa94fbfbae2c8b6d9ce195c",
+      "request": {
+        "schema_version": "0.1",
+        "operation_id": "1.model",
+        "task_id": "task-37becd1dd5d644acaf8c66717ebb4161",
+        "subject_id": "agent-a",
+        "name": "models.invoke",
+        "resource": {
+          "schema_version": "0.1",
+          "namespace": "test",
+          "resource_id": "task-37becd1dd5d644acaf8c66717ebb4161"
+        },
+        "arguments": {
+          "model": "fixture/model",
+          "input": {
+            "records": [
+              {
+                "id": "INC-1",
+                "title": "Fictional incident INC-1",
+                "severity": "low"
+              },
+              {
+                "id": "INC-2",
+                "title": "Fictional incident INC-2",
+                "severity": "low"
+              }
+            ]
+          },
+          "tool": "compile_incidents"
+        },
+        "deadline": "2026-09-24T18:22:36.343757Z"
+      },
+      "request_digest": "c3c0de9a9a5856966200af604fba196ef7f5f1e7256bb63d55f9cf771e18c22f",
+      "grant_ids": [
+        "grant-task-37becd1dd5d644acaf8c66717ebb4161"
+      ],
+      "retry_class": "reconciliation_required",
+      "state": "succeeded",
+      "revision": 2,
+      "created_at": "2026-09-24T18:13:08.658117Z",
+      "updated_at": "2026-09-24T18:13:11.990059Z",
+      "usage": {
+        "schema_version": "0.1",
+        "steps": 1,
+        "model_calls": 1,
+        "model_tokens": 50,
+        "tool_milliseconds": 0,
+        "output_bytes": 0
+      },
+      "result": {
+        "response_id": "fixture-response",
+        "model": "fixture/model",
+        "call_id": "fixture-call",
+        "tool": "compile_incidents",
+        "arguments": {
+          "batch": {
+            "records": [
+              {
+                "id": "INC-1",
+                "severity": "low",
+                "title": "Fictional incident INC-1"
+              },
+              {
+                "id": "INC-2",
+                "severity": "low",
+                "title": "Fictional incident INC-2"
+              }
+            ]
+          }
+        },
+        "usage": {
+          "input_tokens": 20,
+          "output_tokens": 30,
+          "total_tokens": 50,
+          "cost": null
+        }
+      },
+      "failure": null,
+      "reconciliation_evidence": []
+    },
+    {
+      "schema_version": "0.1",
+      "receipt_id": "receipt-ada743142c114b10afb7cacfbfd8b667",
+      "request": {
+        "schema_version": "0.1",
+        "operation_id": "1.tool",
+        "task_id": "task-37becd1dd5d644acaf8c66717ebb4161",
+        "subject_id": "agent-a",
+        "name": "tools.incidents",
+        "resource": {
+          "schema_version": "0.1",
+          "namespace": "test",
+          "resource_id": "task-37becd1dd5d644acaf8c66717ebb4161"
+        },
+        "arguments": {
+          "call_id": "fixture-call",
+          "arguments": {
+            "batch": {
+              "records": [
+                {
+                  "id": "INC-1",
+                  "severity": "low",
+                  "title": "Fictional incident INC-1"
+                },
+                {
+                  "id": "INC-2",
+                  "severity": "low",
+                  "title": "Fictional incident INC-2"
+                }
+              ]
+            }
+          }
+        },
+        "deadline": "2026-09-24T18:22:36.343757Z"
+      },
+      "request_digest": "13ab1afb95289a1847ba4a5118a01738eee57181449a0e436b6e7fc1214a075d",
+      "grant_ids": [
+        "grant-task-37becd1dd5d644acaf8c66717ebb4161"
+      ],
+      "retry_class": "reconciliation_required",
+      "state": "succeeded",
+      "revision": 2,
+      "created_at": "2026-09-24T18:13:12.453506Z",
+      "updated_at": "2026-09-24T18:13:15.962677Z",
+      "usage": {
+        "schema_version": "0.1",
+        "steps": 1,
+        "model_calls": 0,
+        "model_tokens": 0,
+        "tool_milliseconds": 725,
+        "output_bytes": 287
+      },
+      "result": {
+        "tool": "compile_incidents",
+        "protocol": "2026-07-28"
+      },
+      "failure": null,
+      "reconciliation_evidence": []
+    }
+  ],
+  "verified": {
+    "schema_version": "0.1",
+    "verification_id": "verification-task-37becd1dd5d644acaf8c66717ebb4161",
+    "task_id": "task-37becd1dd5d644acaf8c66717ebb4161",
+    "verifier_id": "incident-verifier-v1",
+    "checked_at": "2026-09-24T18:13:15.977684Z",
+    "passed": true,
+    "artifacts": [
+      {
+        "schema_version": "0.1",
+        "namespace": "test",
+        "resource_id": "task-37becd1dd5d644acaf8c66717ebb4161.output",
+        "version": 2,
+        "content_digest": "6fa7c3b65b5a5bf4d53c98ff43be18f152f21eae2d090ac5548c1862d0efc7a3"
+      }
+    ],
+    "evidence": [
+      {
+        "schema_version": "0.1",
+        "namespace": "test",
+        "resource_id": "task-37becd1dd5d644acaf8c66717ebb4161.verification"
+      }
+    ]
+  }
+}

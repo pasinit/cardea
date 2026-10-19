@@ -1,0 +1,49 @@
+{
+  "report": "packages/cardea-load/reports/2026-09-24-m3/REPORT.md",
+  "correctness_passed": true,
+  "tasks": 12,
+  "reference_repetitions": 2,
+  "comparison_repetitions": 1,
+  "comparison": {
+    "baseline_sha256": "54f66e7aeafb30645ead8832dad9911741076d428883234808732861ef2f9696",
+    "candidate_sha256": "db3633e2c0b8e9161fb9202087339d21fa48dfe0bca1f8a9e64a6c27273ab660",
+    "changes": {
+      "admission_p95_ms": {
+        "candidate": 434.2288324999345,
+        "ratio": 0.18422608232608764,
+        "reference": {
+          "max": 2631.1737833998795,
+          "median": 2357.043188549881,
+          "min": 2082.912593699882
+        }
+      },
+      "completion_p95_ms": {
+        "candidate": 25393.720360349926,
+        "ratio": 0.9604032509396705,
+        "reference": {
+          "max": 27683.162840149977,
+          "median": 26440.68555109991,
+          "min": 25198.208262049844
+        }
+      },
+      "completion_rps": {
+        "candidate": 0.08059554664256108,
+        "ratio": 1.0727463532632333,
+        "reference": {
+          "max": 0.07797229748250434,
+          "median": 0.07513010545073774,
+          "min": 0.07228791341897114
+        }
+      }
+    },
+    "correctness_passed": true,
+    "schema_version": "m3-load-1",
+    "warnings": []
+  },
+  "sha256": {
+    "reference/run.json": "4b270df89fa6337d1b4f032c9cb932ce54996d844ec42c214b697eb18e8cdc9c",
+    "comparison/run.json": "764617272a72629e9e1dd68ff0c49d2fd1e80732c6ab3688219df8294b49a46a",
+    "baseline.json": "d9d4bb7d9f44cb6b9e62b99b595a184ddbac7efc7caa5007091e38c9a2639b3c",
+    "comparison.json": "f593554b4d9c93033df4ca42d902e9f6e0e4e2f53f29e1cdcb23248cddde0211"
+  }
+}

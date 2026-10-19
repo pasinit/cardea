@@ -1,0 +1,647 @@
+{
+  "recorded_at": "2026-09-23T09:40:06.701104+00:00",
+  "decision": "ADR-010",
+  "scope": "M1 bounded authenticated headless kernel; no M2 confinement, model or arbitrary tool execution",
+  "runs": {
+    "macos": {
+      "tests": 46,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 216.416,
+      "junit_sha256": "b76b47c72992279aa69b5b000900c9eaa5036abfcd72a22179211b62816e4861",
+      "environment": {
+        "python": "3.12.0 (v3.12.0:0fb18b02c8, Oct  2 2023, 09:45:56) [Clang 13.0.0 (clang-1300.0.29.30)]",
+        "platform": "macOS-26.6.2-arm64-arm-64bit",
+        "machine": "arm64",
+        "sqlite": "3.42.0"
+      },
+      "cases": [
+        {
+          "name": "test_real_oidc_login_refresh_and_persisted_supervisor",
+          "class": "tests.test_oidc",
+          "seconds": 42.043
+        },
+        {
+          "name": "test_id_token_is_not_an_api_credential",
+          "class": "tests.test_oidc",
+          "seconds": 1.988
+        },
+        {
+          "name": "test_oidc_protocol_binding[state]",
+          "class": "tests.test_oidc",
+          "seconds": 0.1
+        },
+        {
+          "name": "test_oidc_protocol_binding[nonce]",
+          "class": "tests.test_oidc",
+          "seconds": 0.122
+        },
+        {
+          "name": "test_oidc_protocol_binding[pkce]",
+          "class": "tests.test_oidc",
+          "seconds": 0.103
+        },
+        {
+          "name": "test_oidc_protocol_binding[replay]",
+          "class": "tests.test_oidc",
+          "seconds": 0.133
+        },
+        {
+          "name": "test_human_disable_survives_restart",
+          "class": "tests.test_oidc",
+          "seconds": 3.812
+        },
+        {
+          "name": "test_wrong_oidc_audience_and_unavailable_provider",
+          "class": "tests.test_oidc",
+          "seconds": 0.215
+        },
+        {
+          "name": "test_authenticated_restart_and_verified_artifact",
+          "class": "tests.test_service",
+          "seconds": 8.493
+        },
+        {
+          "name": "test_cross_principal_and_retry_identity",
+          "class": "tests.test_service",
+          "seconds": 3.943
+        },
+        {
+          "name": "test_live_revocation_blocks_new_effects[permission]",
+          "class": "tests.test_service",
+          "seconds": 3.579
+        },
+        {
+          "name": "test_live_revocation_blocks_new_effects[delegation]",
+          "class": "tests.test_service",
+          "seconds": 3.549
+        },
+        {
+          "name": "test_live_revocation_blocks_new_effects[platform]",
+          "class": "tests.test_service",
+          "seconds": 3.379
+        },
+        {
+          "name": "test_live_revocation_blocks_new_effects[supervisor]",
+          "class": "tests.test_service",
+          "seconds": 3.442
+        },
+        {
+          "name": "test_live_revocation_blocks_new_effects[agent]",
+          "class": "tests.test_service",
+          "seconds": 3.472
+        },
+        {
+          "name": "test_live_revocation_blocks_new_effects[runtime]",
+          "class": "tests.test_service",
+          "seconds": 3.497
+        },
+        {
+          "name": "test_admission_ceiling[permission]",
+          "class": "tests.test_service",
+          "seconds": 2.023
+        },
+        {
+          "name": "test_admission_ceiling[delegate]",
+          "class": "tests.test_service",
+          "seconds": 2.044
+        },
+        {
+          "name": "test_admission_ceiling[platform]",
+          "class": "tests.test_service",
+          "seconds": 2.045
+        },
+        {
+          "name": "test_admission_ceiling[ancestor]",
+          "class": "tests.test_service",
+          "seconds": 2.837
+        },
+        {
+          "name": "test_cancel_terminal_and_resume_idempotency",
+          "class": "tests.test_service",
+          "seconds": 5.387
+        },
+        {
+          "name": "test_deadline_survives_restart",
+          "class": "tests.test_service",
+          "seconds": 10.584
+        },
+        {
+          "name": "test_backup_restore_shared_wait",
+          "class": "tests.test_service",
+          "seconds": 9.448
+        },
+        {
+          "name": "test_kill_at_shared_commit_boundary[admission.before_commit]",
+          "class": "tests.test_service",
+          "seconds": 5.172
+        },
+        {
+          "name": "test_kill_at_shared_commit_boundary[admission.after_commit]",
+          "class": "tests.test_service",
+          "seconds": 5.378
+        },
+        {
+          "name": "test_kill_at_shared_commit_boundary[publish.before_commit]",
+          "class": "tests.test_service",
+          "seconds": 6.131
+        },
+        {
+          "name": "test_kill_at_shared_commit_boundary[publish.after_commit]",
+          "class": "tests.test_service",
+          "seconds": 5.586
+        },
+        {
+          "name": "test_kill_at_shared_commit_boundary[finish.before_commit]",
+          "class": "tests.test_service",
+          "seconds": 6.115
+        },
+        {
+          "name": "test_kill_at_shared_commit_boundary[finish.after_commit]",
+          "class": "tests.test_service",
+          "seconds": 5.827
+        },
+        {
+          "name": "test_kill_at_shared_commit_boundary[control.before_commit]",
+          "class": "tests.test_service",
+          "seconds": 6.502
+        },
+        {
+          "name": "test_kill_at_shared_commit_boundary[control.after_commit]",
+          "class": "tests.test_service",
+          "seconds": 6.202
+        },
+        {
+          "name": "test_strict_wire[change0]",
+          "class": "tests.test_service",
+          "seconds": 2.003
+        },
+        {
+          "name": "test_strict_wire[change1]",
+          "class": "tests.test_service",
+          "seconds": 2.012
+        },
+        {
+          "name": "test_strict_wire[change2]",
+          "class": "tests.test_service",
+          "seconds": 2.003
+        },
+        {
+          "name": "test_strict_wire[change3]",
+          "class": "tests.test_service",
+          "seconds": 2.015
+        },
+        {
+          "name": "test_strict_wire[change4]",
+          "class": "tests.test_service",
+          "seconds": 2.005
+        },
+        {
+          "name": "test_strict_wire[change5]",
+          "class": "tests.test_service",
+          "seconds": 2.007
+        },
+        {
+          "name": "test_wrong_audience_and_missing_auth",
+          "class": "tests.test_service",
+          "seconds": 2.342
+        },
+        {
+          "name": "test_sigterm_preserves_wait_and_exclusive_owner",
+          "class": "tests.test_service",
+          "seconds": 6.124
+        },
+        {
+          "name": "test_ancestor_revocation_and_grants_never_expand",
+          "class": "tests.test_service",
+          "seconds": 5.105
+        },
+        {
+          "name": "test_early_event_and_event_pages",
+          "class": "tests.test_service",
+          "seconds": 9.104
+        },
+        {
+          "name": "test_verifier_rejects_corrupt_artifact",
+          "class": "tests.test_service",
+          "seconds": 5.038
+        },
+        {
+          "name": "test_dispatch_rechecks_before_any_publication[revoked]",
+          "class": "tests.test_service",
+          "seconds": 2.856
+        },
+        {
+          "name": "test_dispatch_rechecks_before_any_publication[expired]",
+          "class": "tests.test_service",
+          "seconds": 2.972
+        },
+        {
+          "name": "test_dispatch_rechecks_before_any_publication[cancelled]",
+          "class": "tests.test_service",
+          "seconds": 3.459
+        },
+        {
+          "name": "test_spire_agent_outage_fails_closed",
+          "class": "tests.test_service",
+          "seconds": 4.166
+        }
+      ]
+    },
+    "debian": {
+      "tests": 46,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 195.039,
+      "junit_sha256": "a96afa193193161c197c2324b55b19053400fb75b5af611a1af1e600dd976d77",
+      "environment": {
+        "python": "3.12.14 (main, Sep 19 2026, 01:04:57) [GCC 14.2.0]",
+        "platform": "Linux-6.12.76-linuxkit-x86_64-with-glibc2.41",
+        "machine": "x86_64",
+        "sqlite": "3.46.1",
+        "os_release": "PRETTY_NAME=\"Debian GNU/Linux 13 (trixie)\"\nNAME=\"Debian GNU/Linux\"\nVERSION_ID=\"13\"\nVERSION=\"13 (trixie)\"\nVERSION_CODENAME=trixie\nDEBIAN_VERSION_FULL=13.7\nID=debian\nHOME_URL=\"https://www.debian.org/\"\nSUPPORT_URL=\"https://www.debian.org/support\"\nBUG_REPORT_URL=\"https://bugs.debian.org/\"\n"
+      },
+      "cases": [
+        {
+          "name": "test_real_oidc_login_refresh_and_persisted_supervisor",
+          "class": "tests.test_oidc",
+          "seconds": 82.557
+        },
+        {
+          "name": "test_id_token_is_not_an_api_credential",
+          "class": "tests.test_oidc",
+          "seconds": 1.838
+        },
+        {
+          "name": "test_oidc_protocol_binding[state]",
+          "class": "tests.test_oidc",
+          "seconds": 0.192
+        },
+        {
+          "name": "test_oidc_protocol_binding[nonce]",
+          "class": "tests.test_oidc",
+          "seconds": 1.04
+        },
+        {
+          "name": "test_oidc_protocol_binding[pkce]",
+          "class": "tests.test_oidc",
+          "seconds": 0.295
+        },
+        {
+          "name": "test_oidc_protocol_binding[replay]",
+          "class": "tests.test_oidc",
+          "seconds": 0.357
+        },
+        {
+          "name": "test_human_disable_survives_restart",
+          "class": "tests.test_oidc",
+          "seconds": 3.21
+        },
+        {
+          "name": "test_wrong_oidc_audience_and_unavailable_provider",
+          "class": "tests.test_oidc",
+          "seconds": 0.264
+        },
+        {
+          "name": "test_authenticated_restart_and_verified_artifact",
+          "class": "tests.test_service",
+          "seconds": 3.941
+        },
+        {
+          "name": "test_cross_principal_and_retry_identity",
+          "class": "tests.test_service",
+          "seconds": 1.461
+        },
+        {
+          "name": "test_live_revocation_blocks_new_effects[permission]",
+          "class": "tests.test_service",
+          "seconds": 2.501
+        },
+        {
+          "name": "test_live_revocation_blocks_new_effects[delegation]",
+          "class": "tests.test_service",
+          "seconds": 2.486
+        },
+        {
+          "name": "test_live_revocation_blocks_new_effects[platform]",
+          "class": "tests.test_service",
+          "seconds": 2.525
+        },
+        {
+          "name": "test_live_revocation_blocks_new_effects[supervisor]",
+          "class": "tests.test_service",
+          "seconds": 2.563
+        },
+        {
+          "name": "test_live_revocation_blocks_new_effects[agent]",
+          "class": "tests.test_service",
+          "seconds": 2.511
+        },
+        {
+          "name": "test_live_revocation_blocks_new_effects[runtime]",
+          "class": "tests.test_service",
+          "seconds": 2.496
+        },
+        {
+          "name": "test_admission_ceiling[permission]",
+          "class": "tests.test_service",
+          "seconds": 1.423
+        },
+        {
+          "name": "test_admission_ceiling[delegate]",
+          "class": "tests.test_service",
+          "seconds": 1.447
+        },
+        {
+          "name": "test_admission_ceiling[platform]",
+          "class": "tests.test_service",
+          "seconds": 1.414
+        },
+        {
+          "name": "test_admission_ceiling[ancestor]",
+          "class": "tests.test_service",
+          "seconds": 1.48
+        },
+        {
+          "name": "test_cancel_terminal_and_resume_idempotency",
+          "class": "tests.test_service",
+          "seconds": 2.477
+        },
+        {
+          "name": "test_deadline_survives_restart",
+          "class": "tests.test_service",
+          "seconds": 8.878
+        },
+        {
+          "name": "test_backup_restore_shared_wait",
+          "class": "tests.test_service",
+          "seconds": 5.316
+        },
+        {
+          "name": "test_kill_at_shared_commit_boundary[admission.before_commit]",
+          "class": "tests.test_service",
+          "seconds": 2.89
+        },
+        {
+          "name": "test_kill_at_shared_commit_boundary[admission.after_commit]",
+          "class": "tests.test_service",
+          "seconds": 2.832
+        },
+        {
+          "name": "test_kill_at_shared_commit_boundary[publish.before_commit]",
+          "class": "tests.test_service",
+          "seconds": 3.93
+        },
+        {
+          "name": "test_kill_at_shared_commit_boundary[publish.after_commit]",
+          "class": "tests.test_service",
+          "seconds": 3.825
+        },
+        {
+          "name": "test_kill_at_shared_commit_boundary[finish.before_commit]",
+          "class": "tests.test_service",
+          "seconds": 3.824
+        },
+        {
+          "name": "test_kill_at_shared_commit_boundary[finish.after_commit]",
+          "class": "tests.test_service",
+          "seconds": 3.904
+        },
+        {
+          "name": "test_kill_at_shared_commit_boundary[control.before_commit]",
+          "class": "tests.test_service",
+          "seconds": 4.056
+        },
+        {
+          "name": "test_kill_at_shared_commit_boundary[control.after_commit]",
+          "class": "tests.test_service",
+          "seconds": 3.851
+        },
+        {
+          "name": "test_strict_wire[change0]",
+          "class": "tests.test_service",
+          "seconds": 1.418
+        },
+        {
+          "name": "test_strict_wire[change1]",
+          "class": "tests.test_service",
+          "seconds": 1.444
+        },
+        {
+          "name": "test_strict_wire[change2]",
+          "class": "tests.test_service",
+          "seconds": 1.424
+        },
+        {
+          "name": "test_strict_wire[change3]",
+          "class": "tests.test_service",
+          "seconds": 1.404
+        },
+        {
+          "name": "test_strict_wire[change4]",
+          "class": "tests.test_service",
+          "seconds": 1.436
+        },
+        {
+          "name": "test_strict_wire[change5]",
+          "class": "tests.test_service",
+          "seconds": 1.447
+        },
+        {
+          "name": "test_wrong_audience_and_missing_auth",
+          "class": "tests.test_service",
+          "seconds": 1.525
+        },
+        {
+          "name": "test_sigterm_preserves_wait_and_exclusive_owner",
+          "class": "tests.test_service",
+          "seconds": 4.231
+        },
+        {
+          "name": "test_ancestor_revocation_and_grants_never_expand",
+          "class": "tests.test_service",
+          "seconds": 2.597
+        },
+        {
+          "name": "test_early_event_and_event_pages",
+          "class": "tests.test_service",
+          "seconds": 2.608
+        },
+        {
+          "name": "test_verifier_rejects_corrupt_artifact",
+          "class": "tests.test_service",
+          "seconds": 2.646
+        },
+        {
+          "name": "test_dispatch_rechecks_before_any_publication[revoked]",
+          "class": "tests.test_service",
+          "seconds": 2.557
+        },
+        {
+          "name": "test_dispatch_rechecks_before_any_publication[expired]",
+          "class": "tests.test_service",
+          "seconds": 2.547
+        },
+        {
+          "name": "test_dispatch_rechecks_before_any_publication[cancelled]",
+          "class": "tests.test_service",
+          "seconds": 2.468
+        },
+        {
+          "name": "test_spire_agent_outage_fails_closed",
+          "class": "tests.test_service",
+          "seconds": 3.436
+        }
+      ]
+    }
+  },
+  "regressions": {
+    "backend": 144,
+    "frontend": 4,
+    "root_lint": "passed",
+    "root_types": "passed; 67 Python source files and TypeScript checks",
+    "authenticated_demo": "passed"
+  },
+  "source_sha256": {
+    "apps/api/pyproject.toml": "5936a430a54ae1b7f8090cfbee1c7a02757bfef5084a53cdec8913c6cd3800b7",
+    "apps/api/src/cardea/kernel/__init__.py": "8650a4493ed6ec15e25aabbd79ef88dc7ce04abffe4bb91441219eafc1249ee8",
+    "apps/api/src/cardea/kernel/cli.py": "29434e6a6927db393d9a91e1db31931badaf39eec37c2aca32aed18194928ae3",
+    "apps/api/src/cardea/kernel/demo.py": "9178cfb3b95afc953921a6cd38efa945058d8c1d4fcfd51276f48853ac3f3da2",
+    "apps/api/src/cardea/kernel/lifecycle.py": "04e9c0352d55ae883020480c8e0c24df06276752eb1e4431411203f1897a1e36",
+    "apps/api/src/cardea/kernel/models.py": "24b5def7e41f4a1ee0454168fef0bfdbdca7615e95833cc5a6f52665514919d0",
+    "apps/api/src/cardea/kernel/schema.py": "da600890e00367b0a9dd9c8eec2085108485d9f4891d373e347371d1b5aa3ac0",
+    "apps/api/src/cardea/kernel/smoke.py": "f33915db3fe13b309163f00b975ec7b42b294763e00cb71b511b82a23f3fa9f1",
+    "apps/api/src/cardea/kernel/store.py": "190eb4283f55d9923f4ce9239a2902d0f1676b16208eba9d813db5272737b559",
+    "apps/api/src/cardea/service/__init__.py": "e9396a51f1928658b7309dee03c657ad67685a54c5487cbe59eb25c97cdb639f",
+    "apps/api/src/cardea/service/__main__.py": "e2acc5ad68a491b230a5c2870b6074b639aab826a97ab01212f203a78d262d78",
+    "apps/api/src/cardea/service/admin.py": "936692007e4fb6c2a9a7c40dd909d2cc664ed1e8ebd9f68b90b3055ecae9406d",
+    "apps/api/src/cardea/service/app.py": "fdca900b3da18aca77302118d20f96ee99b621c26e60e7367a0c2d2586c784ae",
+    "apps/api/src/cardea/service/auth.py": "cec86b4ccfd0a692feb6ffa8c999c3f769aa81ce8a9021ead5a48bbd7602c637",
+    "apps/api/src/cardea/service/client.py": "3c13a5eb7053af936c3297f9194e4cb75da84430f4b97b6c8d64bff3183e2abc",
+    "apps/api/src/cardea/service/database.py": "a808d1b0a810b7ed792154f457ce9844ff98bc348551106715a6ec132c62bb49",
+    "apps/api/src/cardea/service/kernel.py": "0f2c61cf5046022c6dc768acabaa3380dc8992d3581a49b24f70bc5d6aa92fc6",
+    "apps/api/src/cardea/service/login.py": "40b73cd959a837c3b0456fff4c309725946123d74a259a1cb76d70c50377d4d2",
+    "apps/api/src/cardea/service/migrations/env.py": "25f8da3a4e72f3cdda622e4b42889c97cea1059f0d5ae6644f0972258d2b0032",
+    "apps/api/src/cardea/service/migrations/versions/m1_001.py": "87d42a1f9ca46cec4229a07db6878898dab25da0f4b1a44f7cb171c2789ad709",
+    "apps/api/src/cardea/service/models.py": "b7c63f6f0efab1eb607774a3b079238ade4df4cff67c8a3c1d587c02029f4e72",
+    "apps/api/src/cardea/service/policy.py": "8ff3d64e93e5b9208c7cf7efc925ac2a273e7047bd491fbcf0c0a3051d36eb73",
+    "apps/api/src/cardea/service/runtime.py": "1ade252af3df89950f33cf936d7b2c82f26671d4553794182f2a6c7b3e601db1",
+    "apps/api/src/cardea/service/schema.py": "bb9bfbd859e62c7d896b05196a36f8ac913990e9fd75f55d5a22b2a5f71cda37",
+    "apps/api/src/cardea/service/server.py": "1f49a008f688819c61c189577bdb1c0c5f531bc450aafdaeaaf80c60078799e4",
+    "apps/api/tests/service/test_storage.py": "14ffa44fd9d6f683c365d31c90b7600c19ed545d4beace825e990aae2974a5d7",
+    "apps/api/uv.lock": "8534bc90f41a10c36ab84518b34264b4f347629b94170f32fc12b208b7c0aadb",
+    "experiments/m1/Dockerfile": "bf7fac0f0b43e79bd67f660df8fd0fdf3e544cfa2f3a2bc08d6a878eb7967b3b",
+    "experiments/m1/daemon_probe.py": "73ea5ce7a30ee96a5d14cff7d2f5b2a3bc72f051a87bb10a9a74195e39da2938",
+    "experiments/m1/debian-build.sh": "6f0f065fa18e3083b1f093e53804d645e8c0f6660dd3b9ef8fc07ef3e7053edd",
+    "experiments/m1/demo.py": "0e573d0f9eb31d74a1e0659c5bb6eb44508b3cd1f813ee2730002c0616d87ec7",
+    "experiments/m1/harness.py": "739609076f624485d97193f0e2d7eca1f1714a23eab785fd0faea1e871fcaae0",
+    "experiments/m1/oidc_lab.py": "b0a90abb4e8c100b69a6f2154c0fceb45e76ab650592517c87fed5c39c247719",
+    "experiments/m1/provider_lab.py": "d0454572739a07f379f960c982c166b3dbb75f2679175f723617b42122a19354",
+    "experiments/m1/pytest.ini": "167fd1a0f1bfe8a7c5459c981626d174b3a3d34bef87bdabaa0b436e49da5150",
+    "experiments/m1/tests/conftest.py": "8258c8e91fd109b09b44e6473e23ae953e566d9cc5860c74de96443f27ae4fff",
+    "experiments/m1/tests/test_oidc.py": "c632bc9518d487a754f046f6c6c2acaaf4e41c6b61f710f914468dddb74d046b",
+    "experiments/m1/tests/test_service.py": "5e97155b4fd7714e4d4eb32c9384b0f9656a8cda9bc543652f186f597927bd0e",
+    "experiments/spire/binding.py": "1805e82d852b3f1ad5d625862cdde8b6757919fef393a3a7a0396d34eb7961e4",
+    "packages/kernel-openapi.json": "494a43051df8014b63351d16c6067979fccef5cee28228511e7799dd74b85d71"
+  },
+  "container_source_check": {
+    "checked": [
+      "apps/api/pyproject.toml",
+      "apps/api/src/cardea/kernel/__init__.py",
+      "apps/api/src/cardea/kernel/cli.py",
+      "apps/api/src/cardea/kernel/demo.py",
+      "apps/api/src/cardea/kernel/lifecycle.py",
+      "apps/api/src/cardea/kernel/models.py",
+      "apps/api/src/cardea/kernel/schema.py",
+      "apps/api/src/cardea/kernel/smoke.py",
+      "apps/api/src/cardea/kernel/store.py",
+      "apps/api/src/cardea/service/__init__.py",
+      "apps/api/src/cardea/service/__main__.py",
+      "apps/api/src/cardea/service/admin.py",
+      "apps/api/src/cardea/service/app.py",
+      "apps/api/src/cardea/service/auth.py",
+      "apps/api/src/cardea/service/client.py",
+      "apps/api/src/cardea/service/database.py",
+      "apps/api/src/cardea/service/kernel.py",
+      "apps/api/src/cardea/service/login.py",
+      "apps/api/src/cardea/service/migrations/env.py",
+      "apps/api/src/cardea/service/migrations/versions/m1_001.py",
+      "apps/api/src/cardea/service/models.py",
+      "apps/api/src/cardea/service/policy.py",
+      "apps/api/src/cardea/service/runtime.py",
+      "apps/api/src/cardea/service/schema.py",
+      "apps/api/src/cardea/service/server.py",
+      "apps/api/tests/service/test_storage.py",
+      "apps/api/uv.lock",
+      "experiments/m1/Dockerfile",
+      "experiments/m1/daemon_probe.py",
+      "experiments/m1/harness.py",
+      "experiments/m1/oidc_lab.py",
+      "experiments/m1/provider_lab.py",
+      "experiments/m1/pytest.ini",
+      "experiments/m1/tests/conftest.py",
+      "experiments/m1/tests/test_oidc.py",
+      "experiments/m1/tests/test_service.py",
+      "experiments/spire/binding.py"
+    ],
+    "not_in_acceptance_image": [
+      "experiments/m1/debian-build.sh",
+      "experiments/m1/demo.py",
+      "packages/kernel-openapi.json"
+    ],
+    "mismatched": []
+  },
+  "debian_image": {
+    "local_image": "sha256:6ddda4af264cd49ceab6c308254e8d4979e623d58d0a3d82db72f299d9001e88 amd64 linux",
+    "base": "python:3.12-slim-trixie@sha256:2f17fc044b579bab302c2e8054d3a686e2cb9a83de48e70534b94cd8ebbe06a9",
+    "execution": "linux/amd64 under Docker Desktop on macOS arm64; userspace conformance only",
+    "debian_packages": "ca-certificates\t20250419\nlibc6:amd64\t2.41-12+deb13u4\nopenjdk-21-jre-headless:amd64\t21.0.12.1+1-1~deb13u1\n"
+  },
+  "provider_builds": {
+    "spire": {
+      "version": "1.15.3",
+      "revision": "2f7861ae3923caf1f57eb087fc2928d58c0fb1d2",
+      "native": "clean source build with Go 1.26.6; reports 1.15.3-dev-unk",
+      "linux": "official amd64 musl release; matching revision, release metadata vcs.modified=true",
+      "archive_sha256": "ca1a4d1155317bdd2afc7f36663828a10410c7c840e54725b90b4064b0a301c7",
+      "linux_binaries": {
+        "spire-server": "2e8ac4f1d89b0be15b822b55c02bdcfe6ce83204a769b285ee86bfba532c5f0d",
+        "spire-agent": "3f2f2a7ed936ab13b763b05ce77286d2a30dd68fc57014f0f499c30607730ca6"
+      },
+      "native_binaries": {
+        "spire-server": "b48bb4a8963b91ff89f9fa6f1bcc25ed159992165d3581b5627f42b0d702ae31",
+        "spire-agent": "0fd6f980a0f15a59f2e44b21040af0d158777e0dee107e69149087fd5c2e8ed6"
+      }
+    },
+    "keycloak": {
+      "version": "26.7.4",
+      "archive_sha256": "04823c336b797a7e18889a44262a7a64e6bf624cbbcc518c85e2622176ff2eee",
+      "native_java": "openjdk version \"21.0.2\" 2024-01-16 LTS\nOpenJDK Runtime Environment Temurin-21.0.2+13 (build 21.0.2+13-LTS)\nOpenJDK 64-Bit Server VM Temurin-21.0.2+13 (build 21.0.2+13-LTS, mixed mode)\n",
+      "license": "Apache-2.0"
+    }
+  },
+  "historical_evidence_preserved": {
+    "docs/decisions/dbos-integration-evidence-2026-09-23.json": {
+      "matched_source_hashes": 16,
+      "evidence_sha256": "c1da13e27c19cc708a0ef336a68796ad8870bd6ff774bec7aeafbcc395bb73e6"
+    },
+    "docs/decisions/spire-fit-evidence-2026-09-23.json": {
+      "matched_source_hashes": 9,
+      "evidence_sha256": "439285c7a16821eaf2c201831ee95d66d36cd93305a5378ebeb8e874ed270bda"
+    }
+  },
+  "python_inventory": "python-inventory.json",
+  "upstream_maintenance": "upstream.json",
+  "known_limits": [
+    "Fixed trusted JSON runtime; no arbitrary execution or model dependency",
+    "Same-UID processes share the host identity/storage trust boundary",
+    "4 concurrent workflow slots; waits occupy slots; 100 active tasks",
+    "No automatic history retention; monitor disk use",
+    "Provider validity and local task authority are distinct; revoke local policy explicitly",
+    "No packaged provider installation, systemd/reboot acceptance or multi-host takeover",
+    "Authlib emits an upstream HTTPX deprecation warning under the tested dependency lock",
+    "Direct license/maintenance checks are not a full transitive security audit"
+  ]
+}

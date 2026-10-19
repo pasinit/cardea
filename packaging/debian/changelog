@@ -1,0 +1,12 @@
+cardea-kernel (0.1.0-2) unstable; urgency=medium
+
+  * Add fenced snapshot recovery, explicit schema upgrade and private diagnostics.
+  * Add artifact verification and explicit generated-backup retention.
+
+ -- Cardea maintainers <maintainers@cardea.invalid>  Fri, 25 Sep 2026 12:00:00 +0000
+
+cardea-kernel (0.1.0-1) unstable; urgency=medium
+
+  * Initial internal Debian package for the bounded M1-M4 runtime.
+
+ -- Cardea maintainers <maintainers@cardea.invalid>  Thu, 24 Sep 2026 12:00:00 +0000

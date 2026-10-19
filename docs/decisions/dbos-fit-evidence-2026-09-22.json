@@ -1,0 +1,632 @@
+{
+  "schema_version": 1,
+  "recorded_date": "2026-09-22",
+  "decision": "ADR-003; DBOS remains a candidate, not selected",
+  "interpretation": "Passing observation tests include unsafe raw behavior; these are not 38 passed Cardea acceptance requirements.",
+  "environment": {
+    "os": "Darwin",
+    "os_version": "26.6.2",
+    "machine": "arm64",
+    "python": "3.12.0",
+    "sqlite": "3.42.0",
+    "postgresql": "postgres (PostgreSQL) 14.18 (Homebrew)",
+    "postgresql_transport": "disposable cluster, private Unix socket only",
+    "dbos_notifications": "polling on both profiles; LISTEN/NOTIFY not exercised"
+  },
+  "dependencies": {
+    "PyYAML": "6.0.3",
+    "Pygments": "2.21.0",
+    "SQLAlchemy": "2.0.54",
+    "click": "8.5.0",
+    "dbos": "3.0.0",
+    "greenlet": "3.5.6",
+    "iniconfig": "2.3.0",
+    "packaging": "26.3",
+    "pluggy": "1.6.0",
+    "psycopg": "3.3.6",
+    "psycopg-binary": "3.3.6",
+    "pytest": "9.0.3",
+    "python-dateutil": "2.9.0.post0",
+    "six": "1.17.0",
+    "typing_extensions": "4.16.0",
+    "websockets": "17.1"
+  },
+  "command": "uv run --project experiments/dbos pytest -q experiments/dbos/tests --junitxml=/tmp/cardea-dbos-fit.xml",
+  "reproduction_command": "make dbos-fit",
+  "summary": {
+    "tests": 38,
+    "errors": 0,
+    "failures": 0,
+    "skipped": 0,
+    "duration_seconds": 80.888,
+    "profiles": {
+      "sqlite": 19,
+      "postgres": 19
+    }
+  },
+  "source_sha256": {
+    "experiments/dbos/worker.py": "330db40ccb07360e13b52a5ed06962f3af0eef5c3f26f84b9973ea9e8461e0c2",
+    "experiments/dbos/tests/conftest.py": "4096d4dffa29908d3af1f0f9c724f30b3d335ba800eac1df6bcc6dc376f40683",
+    "experiments/dbos/tests/test_fit.py": "d96c916cc678c31822167cecaa1abdb9e9e0705653a94e040407021a165abf94",
+    "experiments/dbos/pyproject.toml": "baa4ec6055db91c6165af0447dda3a1ad3e53a405fa9804526ef936ea29fc120",
+    "experiments/dbos/uv.lock": "4471f3bf6b2d558f360cdba217319757828211edbfab69509d2844a6e4b63534",
+    "experiments/dbos/.python-version": "7b55f8e67b5623c4bef3fa691288da9437d79d3aba156de48d481db32ac7d16d"
+  },
+  "junit_sha256": "9fcf3280120e6a2d2a331384e1604dae61e7994a7abaaabb73852e8f35bdb20d",
+  "regression_checks": {
+    "make test": {
+      "backend_passed": 138,
+      "frontend_passed": 4
+    },
+    "make lint": "passed",
+    "make typecheck": "passed",
+    "isolated_ruff": "passed",
+    "isolated_strict_mypy": "passed: 3 source files"
+  },
+  "acceptance_limits": {
+    "F01": "passed in bounded configuration",
+    "F02": "partial; simultaneous registration race and retention not run",
+    "F03": "partial; child failure and cancellation not run",
+    "F04": "partial; controlled replacement, not natural expiry or real provider fencing",
+    "F05": "raw behavior duplicates effect; intent fixture only, reconciliation not run",
+    "F06": "native ID reuse insufficient for changed-request conflict",
+    "F07": "fictional revocation fixture only, no authenticated supervisor or ancestor enforcement",
+    "F08": "partial; running synchronous effect continues, host descendants and absolute deadlines not run",
+    "F09": "not run: Cardea/engine commit integration",
+    "F10": "not run: upgrades and restore",
+    "F11": "not run: Cardea completion verification integration",
+    "F12": "not run: Debian operations and cost"
+  },
+  "cases": [
+    {
+      "name": "test_completed_step_survives_hard_restart[sqlite]",
+      "duration_seconds": 2.686,
+      "outcome": "passed",
+      "observations": {
+        "profile": "sqlite",
+        "worker_processes": 2,
+        "output_effects": 1,
+        "external_effects": 0,
+        "returned_results": [
+          1
+        ]
+      }
+    },
+    {
+      "name": "test_completed_step_survives_hard_restart[postgres]",
+      "duration_seconds": 3.479,
+      "outcome": "passed",
+      "observations": {
+        "profile": "postgres",
+        "worker_processes": 2,
+        "output_effects": 1,
+        "external_effects": 0,
+        "returned_results": [
+          1
+        ]
+      }
+    },
+    {
+      "name": "test_durable_messages_and_explicit_deduplication[sqlite-before]",
+      "duration_seconds": 0.411,
+      "outcome": "passed",
+      "observations": {
+        "profile": "sqlite",
+        "worker_processes": 1,
+        "output_effects": 1,
+        "external_effects": 0,
+        "returned_results": [
+          [
+            "first",
+            "second"
+          ]
+        ]
+      }
+    },
+    {
+      "name": "test_durable_messages_and_explicit_deduplication[sqlite-during]",
+      "duration_seconds": 1.455,
+      "outcome": "passed",
+      "observations": {
+        "profile": "sqlite",
+        "worker_processes": 1,
+        "output_effects": 1,
+        "external_effects": 0,
+        "returned_results": [
+          [
+            "first",
+            "second"
+          ]
+        ]
+      }
+    },
+    {
+      "name": "test_durable_messages_and_explicit_deduplication[sqlite-offline]",
+      "duration_seconds": 2.693,
+      "outcome": "passed",
+      "observations": {
+        "profile": "sqlite",
+        "worker_processes": 2,
+        "output_effects": 1,
+        "external_effects": 0,
+        "returned_results": [
+          [
+            "first",
+            "second"
+          ]
+        ]
+      }
+    },
+    {
+      "name": "test_durable_messages_and_explicit_deduplication[postgres-before]",
+      "duration_seconds": 0.511,
+      "outcome": "passed",
+      "observations": {
+        "profile": "postgres",
+        "worker_processes": 1,
+        "output_effects": 1,
+        "external_effects": 0,
+        "returned_results": [
+          [
+            "first",
+            "second"
+          ]
+        ]
+      }
+    },
+    {
+      "name": "test_durable_messages_and_explicit_deduplication[postgres-during]",
+      "duration_seconds": 1.534,
+      "outcome": "passed",
+      "observations": {
+        "profile": "postgres",
+        "worker_processes": 1,
+        "output_effects": 1,
+        "external_effects": 0,
+        "returned_results": [
+          [
+            "first",
+            "second"
+          ]
+        ]
+      }
+    },
+    {
+      "name": "test_durable_messages_and_explicit_deduplication[postgres-offline]",
+      "duration_seconds": 2.857,
+      "outcome": "passed",
+      "observations": {
+        "profile": "postgres",
+        "worker_processes": 2,
+        "output_effects": 1,
+        "external_effects": 0,
+        "returned_results": [
+          [
+            "first",
+            "second"
+          ]
+        ]
+      }
+    },
+    {
+      "name": "test_timer_survives_hard_restart[sqlite]",
+      "duration_seconds": 6.535,
+      "outcome": "passed",
+      "observations": {
+        "profile": "sqlite",
+        "worker_processes": 2,
+        "output_effects": 1,
+        "external_effects": 0,
+        "returned_results": [
+          "awake"
+        ]
+      }
+    },
+    {
+      "name": "test_timer_survives_hard_restart[postgres]",
+      "duration_seconds": 6.614,
+      "outcome": "passed",
+      "observations": {
+        "profile": "postgres",
+        "worker_processes": 2,
+        "output_effects": 1,
+        "external_effects": 0,
+        "returned_results": [
+          "awake"
+        ]
+      }
+    },
+    {
+      "name": "test_effect_commit_gap_requires_broker_intent[sqlite-False]",
+      "duration_seconds": 2.691,
+      "outcome": "passed",
+      "observations": {
+        "profile": "sqlite",
+        "worker_processes": 2,
+        "output_effects": 1,
+        "external_effects": 2,
+        "returned_results": [
+          "effect_recorded"
+        ]
+      }
+    },
+    {
+      "name": "test_effect_commit_gap_requires_broker_intent[sqlite-True]",
+      "duration_seconds": 1.695,
+      "outcome": "passed",
+      "observations": {
+        "profile": "sqlite",
+        "worker_processes": 2,
+        "output_effects": 1,
+        "external_effects": 1,
+        "returned_results": [
+          "outcome_unknown"
+        ]
+      }
+    },
+    {
+      "name": "test_effect_commit_gap_requires_broker_intent[postgres-False]",
+      "duration_seconds": 2.82,
+      "outcome": "passed",
+      "observations": {
+        "profile": "postgres",
+        "worker_processes": 2,
+        "output_effects": 1,
+        "external_effects": 2,
+        "returned_results": [
+          "effect_recorded"
+        ]
+      }
+    },
+    {
+      "name": "test_effect_commit_gap_requires_broker_intent[postgres-True]",
+      "duration_seconds": 2.861,
+      "outcome": "passed",
+      "observations": {
+        "profile": "postgres",
+        "worker_processes": 2,
+        "output_effects": 1,
+        "external_effects": 1,
+        "returned_results": [
+          "outcome_unknown"
+        ]
+      }
+    },
+    {
+      "name": "test_revocation_needs_fresh_check_at_effect[sqlite-False-False]",
+      "duration_seconds": 1.122,
+      "outcome": "passed",
+      "observations": {
+        "profile": "sqlite",
+        "worker_processes": 1,
+        "output_effects": 1,
+        "external_effects": 1,
+        "returned_results": [
+          "effect_recorded"
+        ]
+      }
+    },
+    {
+      "name": "test_revocation_needs_fresh_check_at_effect[sqlite-False-True]",
+      "duration_seconds": 1.13,
+      "outcome": "passed",
+      "observations": {
+        "profile": "sqlite",
+        "worker_processes": 1,
+        "output_effects": 1,
+        "external_effects": 0,
+        "returned_results": [
+          "denied"
+        ]
+      }
+    },
+    {
+      "name": "test_revocation_needs_fresh_check_at_effect[sqlite-True-False]",
+      "duration_seconds": 2.421,
+      "outcome": "passed",
+      "observations": {
+        "profile": "sqlite",
+        "worker_processes": 2,
+        "output_effects": 1,
+        "external_effects": 1,
+        "returned_results": [
+          "effect_recorded"
+        ]
+      }
+    },
+    {
+      "name": "test_revocation_needs_fresh_check_at_effect[sqlite-True-True]",
+      "duration_seconds": 2.377,
+      "outcome": "passed",
+      "observations": {
+        "profile": "sqlite",
+        "worker_processes": 2,
+        "output_effects": 1,
+        "external_effects": 0,
+        "returned_results": [
+          "denied"
+        ]
+      }
+    },
+    {
+      "name": "test_revocation_needs_fresh_check_at_effect[postgres-False-False]",
+      "duration_seconds": 1.182,
+      "outcome": "passed",
+      "observations": {
+        "profile": "postgres",
+        "worker_processes": 1,
+        "output_effects": 1,
+        "external_effects": 1,
+        "returned_results": [
+          "effect_recorded"
+        ]
+      }
+    },
+    {
+      "name": "test_revocation_needs_fresh_check_at_effect[postgres-False-True]",
+      "duration_seconds": 1.141,
+      "outcome": "passed",
+      "observations": {
+        "profile": "postgres",
+        "worker_processes": 1,
+        "output_effects": 1,
+        "external_effects": 0,
+        "returned_results": [
+          "denied"
+        ]
+      }
+    },
+    {
+      "name": "test_revocation_needs_fresh_check_at_effect[postgres-True-False]",
+      "duration_seconds": 3.491,
+      "outcome": "passed",
+      "observations": {
+        "profile": "postgres",
+        "worker_processes": 2,
+        "output_effects": 1,
+        "external_effects": 1,
+        "returned_results": [
+          "effect_recorded"
+        ]
+      }
+    },
+    {
+      "name": "test_revocation_needs_fresh_check_at_effect[postgres-True-True]",
+      "duration_seconds": 2.463,
+      "outcome": "passed",
+      "observations": {
+        "profile": "postgres",
+        "worker_processes": 2,
+        "output_effects": 1,
+        "external_effects": 0,
+        "returned_results": [
+          "denied"
+        ]
+      }
+    },
+    {
+      "name": "test_retry_rechecks_current_authority[sqlite]",
+      "duration_seconds": 0.629,
+      "outcome": "passed",
+      "observations": {
+        "profile": "sqlite",
+        "worker_processes": 1,
+        "output_effects": 1,
+        "external_effects": 0,
+        "returned_results": [
+          "denied"
+        ]
+      }
+    },
+    {
+      "name": "test_retry_rechecks_current_authority[postgres]",
+      "duration_seconds": 0.727,
+      "outcome": "passed",
+      "observations": {
+        "profile": "postgres",
+        "worker_processes": 1,
+        "output_effects": 1,
+        "external_effects": 0,
+        "returned_results": [
+          "denied"
+        ]
+      }
+    },
+    {
+      "name": "test_reused_workflow_id_does_not_validate_changed_arguments[sqlite]",
+      "duration_seconds": 0.709,
+      "outcome": "passed",
+      "observations": {
+        "profile": "sqlite",
+        "worker_processes": 2,
+        "output_effects": 1,
+        "external_effects": 0,
+        "returned_results": [
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "test_reused_workflow_id_does_not_validate_changed_arguments[postgres]",
+      "duration_seconds": 0.858,
+      "outcome": "passed",
+      "observations": {
+        "profile": "postgres",
+        "worker_processes": 2,
+        "output_effects": 1,
+        "external_effects": 0,
+        "returned_results": [
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "test_cancellation_does_not_preempt_a_running_sync_step[sqlite]",
+      "duration_seconds": 0.526,
+      "outcome": "passed",
+      "observations": {
+        "profile": "sqlite",
+        "worker_processes": 1,
+        "output_effects": 1,
+        "external_effects": 0,
+        "returned_results": []
+      }
+    },
+    {
+      "name": "test_cancellation_does_not_preempt_a_running_sync_step[postgres]",
+      "duration_seconds": 0.57,
+      "outcome": "passed",
+      "observations": {
+        "profile": "postgres",
+        "worker_processes": 1,
+        "output_effects": 1,
+        "external_effects": 0,
+        "returned_results": []
+      }
+    },
+    {
+      "name": "test_replacement_fences_step_boundary_but_not_inflight_external_code[sqlite-overlap]",
+      "duration_seconds": 1.672,
+      "outcome": "passed",
+      "observations": {
+        "profile": "sqlite",
+        "worker_processes": 2,
+        "output_effects": 1,
+        "external_effects": 1,
+        "returned_results": [
+          "effect_recorded",
+          "effect_recorded"
+        ]
+      }
+    },
+    {
+      "name": "test_replacement_fences_step_boundary_but_not_inflight_external_code[sqlite-overlap_inflight]",
+      "duration_seconds": 1.703,
+      "outcome": "passed",
+      "observations": {
+        "profile": "sqlite",
+        "worker_processes": 2,
+        "output_effects": 1,
+        "external_effects": 2,
+        "returned_results": [
+          "effect_recorded",
+          "effect_recorded"
+        ]
+      }
+    },
+    {
+      "name": "test_replacement_fences_step_boundary_but_not_inflight_external_code[sqlite-overlap_fenced]",
+      "duration_seconds": 1.7,
+      "outcome": "passed",
+      "observations": {
+        "profile": "sqlite",
+        "worker_processes": 2,
+        "output_effects": 1,
+        "external_effects": 1,
+        "returned_results": [
+          "effect_recorded",
+          "effect_recorded"
+        ]
+      }
+    },
+    {
+      "name": "test_replacement_fences_step_boundary_but_not_inflight_external_code[postgres-overlap]",
+      "duration_seconds": 2.849,
+      "outcome": "passed",
+      "observations": {
+        "profile": "postgres",
+        "worker_processes": 2,
+        "output_effects": 1,
+        "external_effects": 1,
+        "returned_results": [
+          "effect_recorded",
+          "effect_recorded"
+        ]
+      }
+    },
+    {
+      "name": "test_replacement_fences_step_boundary_but_not_inflight_external_code[postgres-overlap_inflight]",
+      "duration_seconds": 2.882,
+      "outcome": "passed",
+      "observations": {
+        "profile": "postgres",
+        "worker_processes": 2,
+        "output_effects": 1,
+        "external_effects": 2,
+        "returned_results": [
+          "effect_recorded",
+          "effect_recorded"
+        ]
+      }
+    },
+    {
+      "name": "test_replacement_fences_step_boundary_but_not_inflight_external_code[postgres-overlap_fenced]",
+      "duration_seconds": 2.844,
+      "outcome": "passed",
+      "observations": {
+        "profile": "postgres",
+        "worker_processes": 2,
+        "output_effects": 1,
+        "external_effects": 1,
+        "returned_results": [
+          "effect_recorded",
+          "effect_recorded"
+        ]
+      }
+    },
+    {
+      "name": "test_child_result_survives_restart[sqlite]",
+      "duration_seconds": 3.701,
+      "outcome": "passed",
+      "observations": {
+        "profile": "sqlite",
+        "worker_processes": 2,
+        "output_effects": 2,
+        "external_effects": 0,
+        "returned_results": [
+          2
+        ]
+      }
+    },
+    {
+      "name": "test_child_result_survives_restart[postgres]",
+      "duration_seconds": 3.862,
+      "outcome": "passed",
+      "observations": {
+        "profile": "postgres",
+        "worker_processes": 2,
+        "output_effects": 2,
+        "external_effects": 0,
+        "returned_results": [
+          2
+        ]
+      }
+    },
+    {
+      "name": "test_cancelled_status_does_not_stop_an_inflight_external_effect[sqlite]",
+      "duration_seconds": 0.412,
+      "outcome": "passed",
+      "observations": {
+        "profile": "sqlite",
+        "worker_processes": 1,
+        "output_effects": 1,
+        "external_effects": 1,
+        "returned_results": []
+      }
+    },
+    {
+      "name": "test_cancelled_status_does_not_stop_an_inflight_external_effect[postgres]",
+      "duration_seconds": 1.018,
+      "outcome": "passed",
+      "observations": {
+        "profile": "postgres",
+        "worker_processes": 1,
+        "output_effects": 1,
+        "external_effects": 1,
+        "returned_results": []
+      }
+    }
+  ]
+}

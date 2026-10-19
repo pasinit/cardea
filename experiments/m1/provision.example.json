@@ -1,0 +1,118 @@
+{
+  "principals": [
+    {
+      "principal_id": "runtime-a",
+      "kind": "service",
+      "auth_kind": "spiffe",
+      "issuer": "example.test",
+      "subject": "spiffe://example.test/runtime/kernel"
+    },
+    {
+      "principal_id": "supervisor",
+      "kind": "service",
+      "auth_kind": "spiffe",
+      "issuer": "example.test",
+      "subject": "spiffe://example.test/supervisor/alice"
+    },
+    {
+      "principal_id": "agent-a",
+      "kind": "agent",
+      "runtime_id": "runtime-a"
+    }
+  ],
+  "permissions": [
+    {
+      "principal_id": "supervisor",
+      "namespace": "workspace",
+      "operation": "objects.read",
+      "delegate": true,
+      "expires_at": "2026-12-31T00:00:00Z"
+    },
+    {
+      "principal_id": "supervisor",
+      "namespace": "workspace",
+      "operation": "objects.write",
+      "delegate": true,
+      "expires_at": "2026-12-31T00:00:00Z"
+    },
+    {
+      "principal_id": "supervisor",
+      "namespace": "workspace",
+      "operation": "tasks.inspect",
+      "delegate": true,
+      "expires_at": "2026-12-31T00:00:00Z"
+    },
+    {
+      "principal_id": "supervisor",
+      "namespace": "workspace",
+      "operation": "tasks.cancel",
+      "delegate": true,
+      "expires_at": "2026-12-31T00:00:00Z"
+    },
+    {
+      "principal_id": "supervisor",
+      "namespace": "workspace",
+      "operation": "tasks.resume",
+      "delegate": true,
+      "expires_at": "2026-12-31T00:00:00Z"
+    },
+    {
+      "principal_id": "supervisor",
+      "namespace": "workspace",
+      "operation": "events.read",
+      "delegate": true,
+      "expires_at": "2026-12-31T00:00:00Z"
+    },
+    {
+      "principal_id": "supervisor",
+      "namespace": "workspace",
+      "operation": "tasks.submit",
+      "delegate": true,
+      "expires_at": "2026-12-31T00:00:00Z"
+    }
+  ],
+  "platform": [
+    {
+      "principal_id": "platform",
+      "namespace": "workspace",
+      "operation": "objects.read",
+      "expires_at": "2026-12-31T00:00:00Z"
+    },
+    {
+      "principal_id": "platform",
+      "namespace": "workspace",
+      "operation": "objects.write",
+      "expires_at": "2026-12-31T00:00:00Z"
+    },
+    {
+      "principal_id": "platform",
+      "namespace": "workspace",
+      "operation": "tasks.inspect",
+      "expires_at": "2026-12-31T00:00:00Z"
+    },
+    {
+      "principal_id": "platform",
+      "namespace": "workspace",
+      "operation": "tasks.cancel",
+      "expires_at": "2026-12-31T00:00:00Z"
+    },
+    {
+      "principal_id": "platform",
+      "namespace": "workspace",
+      "operation": "tasks.resume",
+      "expires_at": "2026-12-31T00:00:00Z"
+    },
+    {
+      "principal_id": "platform",
+      "namespace": "workspace",
+      "operation": "events.read",
+      "expires_at": "2026-12-31T00:00:00Z"
+    },
+    {
+      "principal_id": "platform",
+      "namespace": "workspace",
+      "operation": "tasks.submit",
+      "expires_at": "2026-12-31T00:00:00Z"
+    }
+  ]
+}

@@ -1,0 +1,235 @@
+dpkg-buildpackage: info: source package cardea-kernel
+dpkg-buildpackage: info: source version 0.1.0-1
+dpkg-buildpackage: info: source distribution unstable
+dpkg-buildpackage: info: source changed by Cardea maintainers <maintainers@cardea.invalid>
+ dpkg-source --before-build .
+dpkg-buildpackage: info: host architecture amd64
+ debian/rules clean
+dh clean --with python-virtualenv
+   dh_clean
+ debian/rules binary
+dh binary --with python-virtualenv
+   dh_update_autotools_config
+   dh_autoreconf
+   create-stamp debian/debhelper-build-stamp
+   dh_prep
+   dh_install
+   debian/rules execute_after_dh_install
+make[1]: Entering directory '/opt/cardea-package'
+install -D -m 0755 src/cardea/hosts/launcher.py debian/cardea-kernel/usr/libexec/cardea-host
+make[1]: Leaving directory '/opt/cardea-package'
+   dh_installdocs
+   dh_installchangelogs
+   debian/rules override_dh_virtualenv
+make[1]: Entering directory '/opt/cardea-package'
+dh_virtualenv --builtin-venv --python /usr/bin/python3 --skip-install --extra-pip-arg=--no-deps --extra-pip-arg=--only-binary=:all: --extra-pip-arg=--no-compile
+Ignoring aiologic: markers 'python_full_version < "3.13"' don't match your environment
+Ignoring colorama: markers 'sys_platform == "win32"' don't match your environment
+Ignoring culsans: markers 'python_full_version < "3.13"' don't match your environment
+Ignoring httpx2-jsfetch: markers 'sys_platform == "emscripten"' don't match your environment
+Ignoring pywin32: markers 'sys_platform == "win32"' don't match your environment
+Ignoring sniffio: markers 'python_full_version < "3.13"' don't match your environment
+Ignoring tzdata: markers 'sys_platform == "win32"' don't match your environment
+Ignoring wrapt: markers 'python_full_version < "3.13"' don't match your environment
+Collecting a2a-sdk==1.1.5 (from -r ./requirements.txt (line 1))
+  Downloading a2a_sdk-1.1.5-py3-none-any.whl (255 kB)
+Collecting aiosqlite==0.22.1 (from -r ./requirements.txt (line 9))
+  Downloading aiosqlite-0.22.1-py3-none-any.whl (17 kB)
+Collecting alembic==1.20.0 (from -r ./requirements.txt (line 13))
+  Downloading alembic-1.20.0-py3-none-any.whl (268 kB)
+Collecting annotated-doc==0.0.4 (from -r ./requirements.txt (line 17))
+  Downloading annotated_doc-0.0.4-py3-none-any.whl (5.3 kB)
+Collecting annotated-types==0.7.0 (from -r ./requirements.txt (line 21))
+  Downloading annotated_types-0.7.0-py3-none-any.whl (13 kB)
+Collecting anyio==4.13.0 (from -r ./requirements.txt (line 25))
+  Downloading anyio-4.13.0-py3-none-any.whl (114 kB)
+Collecting attrs==26.1.0 (from -r ./requirements.txt (line 35))
+  Downloading attrs-26.1.0-py3-none-any.whl (67 kB)
+Collecting authlib==1.8.0 (from -r ./requirements.txt (line 41))
+  Downloading authlib-1.8.0-py2.py3-none-any.whl (260 kB)
+Collecting casbin==1.43.0 (from -r ./requirements.txt (line 45))
+  Downloading casbin-1.43.0-py3-none-any.whl (475 kB)
+Collecting certifi==2026.5.20 (from -r ./requirements.txt (line 49))
+  Downloading certifi-2026.5.20-py3-none-any.whl (134 kB)
+Collecting cffi==2.1.1 (from -r ./requirements.txt (line 56))
+  Downloading cffi-2.1.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (221 kB)
+Collecting charset-normalizer==3.5.1 (from -r ./requirements.txt (line 133))
+  Downloading charset_normalizer-3.5.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (250 kB)
+Collecting click==8.4.1 (from -r ./requirements.txt (line 259))
+  Downloading click-8.4.1-py3-none-any.whl (116 kB)
+Collecting cryptography==50.0.1 (from -r ./requirements.txt (line 271))
+  Downloading cryptography-50.0.1-cp311-abi3-manylinux_2_34_x86_64.whl (4.7 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.7/4.7 MB 4.2 MB/s eta 0:00:00
+Collecting dbos==3.0.0 (from -r ./requirements.txt (line 322))
+  Downloading dbos-3.0.0-py3-none-any.whl (266 kB)
+Collecting fastapi==0.136.3 (from -r ./requirements.txt (line 326))
+  Downloading fastapi-0.136.3-py3-none-any.whl (117 kB)
+Collecting google-api-core==2.38.0 (from -r ./requirements.txt (line 330))
+  Downloading google_api_core-2.38.0-py3-none-any.whl (187 kB)
+Collecting google-auth==2.58.0 (from -r ./requirements.txt (line 334))
+  Downloading google_auth-2.58.0-py3-none-any.whl (262 kB)
+Collecting googleapis-common-protos==1.75.3 (from -r ./requirements.txt (line 338))
+  Downloading googleapis_common_protos-1.75.3-py3-none-any.whl (306 kB)
+Collecting greenlet==3.5.6 (from -r ./requirements.txt (line 344))
+  Downloading greenlet-3.5.6-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (623 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 623.8/623.8 kB 3.6 MB/s eta 0:00:00
+Collecting grpcio==1.84.0 (from -r ./requirements.txt (line 406))
+  Downloading grpcio-1.84.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (7.2 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 7.2/7.2 MB 4.3 MB/s eta 0:00:00
+Collecting h11==0.16.0 (from -r ./requirements.txt (line 449))
+  Downloading h11-0.16.0-py3-none-any.whl (37 kB)
+Collecting httpcore==1.0.9 (from -r ./requirements.txt (line 456))
+  Downloading httpcore-1.0.9-py3-none-any.whl (78 kB)
+Collecting httpcore2==2.13.1 (from -r ./requirements.txt (line 462))
+  Downloading httpcore2-2.13.1-py3-none-any.whl (83 kB)
+Collecting httptools==0.8.0 (from -r ./requirements.txt (line 466))
+  Downloading httptools-0.8.0-cp313-cp313-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (486 kB)
+Collecting httpx==0.28.1 (from -r ./requirements.txt (line 497))
+  Downloading httpx-0.28.1-py3-none-any.whl (73 kB)
+Collecting httpx2==2.13.1 (from -r ./requirements.txt (line 504))
+  Downloading httpx2-2.13.1-py3-none-any.whl (95 kB)
+Collecting idna==3.18 (from -r ./requirements.txt (line 512))
+  Downloading idna-3.18-py3-none-any.whl (65 kB)
+Collecting joserfc==1.7.5 (from -r ./requirements.txt (line 520))
+  Downloading joserfc-1.7.5-py3-none-any.whl (71 kB)
+Collecting json-rpc==1.15.0 (from -r ./requirements.txt (line 524))
+  Downloading json_rpc-1.15.0-py2.py3-none-any.whl (39 kB)
+Collecting jsonpath-python==1.1.6 (from -r ./requirements.txt (line 528))
+  Downloading jsonpath_python-1.1.6-py3-none-any.whl (14 kB)
+Collecting jsonschema==4.26.0 (from -r ./requirements.txt (line 532))
+  Downloading jsonschema-4.26.0-py3-none-any.whl (90 kB)
+Collecting jsonschema-specifications==2025.9.1 (from -r ./requirements.txt (line 538))
+  Downloading jsonschema_specifications-2025.9.1-py3-none-any.whl (18 kB)
+Collecting mako==1.4.3 (from -r ./requirements.txt (line 542))
+  Downloading mako-1.4.3-py3-none-any.whl (80 kB)
+Collecting markupsafe==3.0.3 (from -r ./requirements.txt (line 546))
+  Downloading markupsafe-3.0.3-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (22 kB)
+Collecting mcp==2.2.0 (from -r ./requirements.txt (line 604))
+  Downloading mcp-2.2.0-py3-none-any.whl (365 kB)
+Collecting mcp-types==2.2.0 (from -r ./requirements.txt (line 608))
+  Downloading mcp_types-2.2.0-py3-none-any.whl (69 kB)
+Collecting openrouter==1.2.22 (from -r ./requirements.txt (line 612))
+  Downloading openrouter-1.2.22-py3-none-any.whl (1.1 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.1/1.1 MB 3.9 MB/s eta 0:00:00
+Collecting opentelemetry-api==1.44.0 (from -r ./requirements.txt (line 616))
+  Downloading opentelemetry_api-1.44.0-py3-none-any.whl (60 kB)
+Collecting packaging==26.2 (from -r ./requirements.txt (line 622))
+  Downloading packaging-26.2-py3-none-any.whl (100 kB)
+Collecting pem==23.1.0 (from -r ./requirements.txt (line 626))
+  Downloading pem-23.1.0-py3-none-any.whl (9.2 kB)
+Collecting proto-plus==1.28.4 (from -r ./requirements.txt (line 630))
+  Downloading proto_plus-1.28.4-py3-none-any.whl (50 kB)
+Collecting protobuf==7.36.2 (from -r ./requirements.txt (line 634))
+  Downloading protobuf-7.36.2-cp310-abi3-manylinux2014_x86_64.whl (343 kB)
+Collecting psycopg==3.3.6 (from -r ./requirements.txt (line 649))
+  Downloading psycopg-3.3.6-py3-none-any.whl (215 kB)
+Collecting psycopg-binary==3.3.6 (from -r ./requirements.txt (line 653))
+  Downloading psycopg_binary-3.3.6-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (5.2 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 5.2/5.2 MB 4.2 MB/s eta 0:00:00
+Collecting pyasn1==0.6.4 (from -r ./requirements.txt (line 699))
+  Downloading pyasn1-0.6.4-py3-none-any.whl (84 kB)
+Collecting pyasn1-modules==0.4.2 (from -r ./requirements.txt (line 705))
+  Downloading pyasn1_modules-0.4.2-py3-none-any.whl (181 kB)
+Collecting pycparser==3.0 (from -r ./requirements.txt (line 711))
+  Downloading pycparser-3.0-py3-none-any.whl (48 kB)
+Collecting pydantic==2.12.5 (from -r ./requirements.txt (line 715))
+  Downloading pydantic-2.12.5-py3-none-any.whl (463 kB)
+Collecting pydantic-core==2.41.5 (from -r ./requirements.txt (line 725))
+  Downloading pydantic_core-2.41.5-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.1 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.1/2.1 MB 4.2 MB/s eta 0:00:00
+Collecting pyjwt==2.13.0 (from -r ./requirements.txt (line 788))
+  Downloading pyjwt-2.13.0-py3-none-any.whl (31 kB)
+Collecting python-dateutil==2.9.0.post0 (from -r ./requirements.txt (line 794))
+  Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl (229 kB)
+Collecting python-dotenv==1.2.2 (from -r ./requirements.txt (line 798))
+  Downloading python_dotenv-1.2.2-py3-none-any.whl (22 kB)
+Collecting python-multipart==0.0.32 (from -r ./requirements.txt (line 802))
+  Downloading python_multipart-0.0.32-py3-none-any.whl (30 kB)
+Collecting pyyaml==6.0.3 (from -r ./requirements.txt (line 820))
+  Downloading pyyaml-6.0.3-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (801 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 801.6/801.6 kB 2.8 MB/s eta 0:00:00
+Collecting referencing==0.37.0 (from -r ./requirements.txt (line 863))
+  Downloading referencing-0.37.0-py3-none-any.whl (26 kB)
+Collecting requests==2.34.2 (from -r ./requirements.txt (line 869))
+  Downloading requests-2.34.2-py3-none-any.whl (73 kB)
+Collecting rfc8785==0.1.4 (from -r ./requirements.txt (line 873))
+  Downloading rfc8785-0.1.4-py3-none-any.whl (9.2 kB)
+Collecting rpds-py==2026.6.3 (from -r ./requirements.txt (line 877))
+  Downloading rpds_py-2026.6.3-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (365 kB)
+Collecting simpleeval==1.0.8 (from -r ./requirements.txt (line 970))
+  Downloading simpleeval-1.0.8-py3-none-any.whl (18 kB)
+Collecting six==1.17.0 (from -r ./requirements.txt (line 974))
+  Downloading six-1.17.0-py2.py3-none-any.whl (11 kB)
+Collecting spiffe==0.3.1 (from -r ./requirements.txt (line 982))
+  Downloading spiffe-0.3.1-py3-none-any.whl (59 kB)
+Collecting sqlalchemy==2.0.54 (from -r ./requirements.txt (line 986))
+  Downloading sqlalchemy-2.0.54-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (3.4 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.4/3.4 MB 3.7 MB/s eta 0:00:00
+Collecting sse-starlette==3.4.11 (from -r ./requirements.txt (line 1021))
+  Downloading sse_starlette-3.4.11-py3-none-any.whl (17 kB)
+Collecting starlette==1.2.1 (from -r ./requirements.txt (line 1027))
+  Downloading starlette-1.2.1-py3-none-any.whl (73 kB)
+Collecting truststore==0.10.4 (from -r ./requirements.txt (line 1035))
+  Downloading truststore-0.10.4-py3-none-any.whl (18 kB)
+Collecting typing-extensions==4.15.0 (from -r ./requirements.txt (line 1041))
+  Downloading typing_extensions-4.15.0-py3-none-any.whl (44 kB)
+Collecting typing-inspection==0.4.2 (from -r ./requirements.txt (line 1062))
+  Downloading typing_inspection-0.4.2-py3-none-any.whl (14 kB)
+Collecting urllib3==2.8.0 (from -r ./requirements.txt (line 1073))
+  Downloading urllib3-2.8.0-py3-none-any.whl (135 kB)
+Collecting uvicorn==0.49.0 (from -r ./requirements.txt (line 1077))
+  Downloading uvicorn-0.49.0-py3-none-any.whl (71 kB)
+Collecting uvloop==0.22.1 (from -r ./requirements.txt (line 1083))
+  Downloading uvloop-0.22.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (4.4 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.4/4.4 MB 4.2 MB/s eta 0:00:00
+Collecting watchfiles==1.2.0 (from -r ./requirements.txt (line 1110))
+  Downloading watchfiles-1.2.0-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (454 kB)
+Collecting websockets==16.0 (from -r ./requirements.txt (line 1188))
+  Downloading websockets-16.0-cp313-cp313-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (184 kB)
+Installing collected packages: json-rpc, websockets, watchfiles, uvloop, uvicorn, urllib3, typing-inspection, typing-extensions, truststore, starlette, sse-starlette, sqlalchemy, spiffe, six, simpleeval, rpds-py, rfc8785, requests, referencing, pyyaml, python-multipart, python-dotenv, python-dateutil, pyjwt, pydantic-core, pydantic, pycparser, pyasn1-modules, pyasn1, psycopg-binary, psycopg, protobuf, proto-plus, pem, packaging, opentelemetry-api, openrouter, mcp-types, mcp, markupsafe, mako, jsonschema-specifications, jsonschema, jsonpath-python, joserfc, idna, httpx2, httpx, httptools, httpcore2, httpcore, h11, grpcio, greenlet, googleapis-common-protos, google-auth, google-api-core, fastapi, dbos, cryptography, click, charset-normalizer, cffi, certifi, casbin, authlib, attrs, anyio, annotated-types, annotated-doc, alembic, aiosqlite, a2a-sdk
+
+Successfully installed a2a-sdk-1.1.5 aiosqlite-0.22.1 alembic-1.20.0 annotated-doc-0.0.4 annotated-types-0.7.0 anyio-4.13.0 attrs-26.1.0 authlib-1.8.0 casbin-1.43.0 certifi-2026.5.20 cffi-2.1.1 charset-normalizer-3.5.1 click-8.4.1 cryptography-50.0.1 dbos-3.0.0 fastapi-0.136.3 google-api-core-2.38.0 google-auth-2.58.0 googleapis-common-protos-1.75.3 greenlet-3.5.6 grpcio-1.84.0 h11-0.16.0 httpcore-1.0.9 httpcore2-2.13.1 httptools-0.8.0 httpx-0.28.1 httpx2-2.13.1 idna-3.18 joserfc-1.7.5 json-rpc-1.15.0 jsonpath-python-1.1.6 jsonschema-4.26.0 jsonschema-specifications-2025.9.1 mako-1.4.3 markupsafe-3.0.3 mcp-2.2.0 mcp-types-2.2.0 openrouter-1.2.22 opentelemetry-api-1.44.0 packaging-26.2 pem-23.1.0 proto-plus-1.28.4 protobuf-7.36.2 psycopg-3.3.6 psycopg-binary-3.3.6 pyasn1-0.6.4 pyasn1-modules-0.4.2 pycparser-3.0 pydantic-2.12.5 pydantic-core-2.41.5 pyjwt-2.13.0 python-dateutil-2.9.0.post0 python-dotenv-1.2.2 python-multipart-0.0.32 pyyaml-6.0.3 referencing-0.37.0 requests-2.34.2 rfc8785-0.1.4 rpds-py-2026.6.3 simpleeval-1.0.8 six-1.17.0 spiffe-0.3.1 sqlalchemy-2.0.54 sse-starlette-3.4.11 starlette-1.2.1 truststore-0.10.4 typing-extensions-4.15.0 typing-inspection-0.4.2 urllib3-2.8.0 uvicorn-0.49.0 uvloop-0.22.1 watchfiles-1.2.0 websockets-16.0
+make[1]: Leaving directory '/opt/cardea-package'
+   debian/rules execute_after_dh_virtualenv
+make[1]: Entering directory '/opt/cardea-package'
+debian/cardea-kernel/opt/venvs/cardea-kernel/bin/python debian/inventory.py > debian/cardea-kernel/usr/share/doc/cardea-kernel/dependency-inventory.json
+make[1]: Leaving directory '/opt/cardea-package'
+   dh_installinit
+   debian/rules override_dh_installsystemd
+make[1]: Entering directory '/opt/cardea-package'
+dh_installsystemd --no-start --no-enable
+make[1]: Leaving directory '/opt/cardea-package'
+   dh_perl
+   dh_link
+   dh_strip_nondeterminism
+   dh_compress
+   dh_fixperms
+   dh_missing
+   dh_dwz -a
+dwz: debian/cardea-kernel/opt/venvs/cardea-kernel/lib/python3.13/site-packages/_cffi_backend.cpython-313-x86_64-linux-gnu.so: .debug_info section not present
+dwz: debian/cardea-kernel/opt/venvs/cardea-kernel/lib/python3.13/site-packages/charset_normalizer/cd.cpython-313-x86_64-linux-gnu.so: .debug_info section not present
+dwz: debian/cardea-kernel/opt/venvs/cardea-kernel/lib/python3.13/site-packages/charset_normalizer/md.cpython-313-x86_64-linux-gnu.so: .debug_info section not present
+dwz: debian/cardea-kernel/opt/venvs/cardea-kernel/lib/python3.13/site-packages/cryptography/hazmat/bindings/_rust.abi3.so: .debug_info section not present
+dwz: debian/cardea-kernel/opt/venvs/cardea-kernel/lib/python3.13/site-packages/google/_upb/_message.abi3.so: .debug_info section not present
+dwz: debian/cardea-kernel/opt/venvs/cardea-kernel/lib/python3.13/site-packages/greenlet/tests/_test_extension.cpython-313-x86_64-linux-gnu.so: .debug_info section not present
+dwz: debian/cardea-kernel/opt/venvs/cardea-kernel/lib/python3.13/site-packages/grpc/_cython/cygrpc.cpython-313-x86_64-linux-gnu.so: .debug_info section not present
+dwz: debian/cardea-kernel/opt/venvs/cardea-kernel/lib/python3.13/site-packages/psycopg_binary.libs/libcom_err-2abe824b.so.2.1: .debug_info section not present
+dwz: debian/cardea-kernel/opt/venvs/cardea-kernel/lib/python3.13/site-packages/psycopg_binary.libs/libcrypt-bc2db45e.so.1: .debug_info section not present
+dwz: debian/cardea-kernel/opt/venvs/cardea-kernel/lib/python3.13/site-packages/psycopg_binary.libs/libcrypto-2d1629ee.so.3: .debug_info section not present
+dwz: debian/cardea-kernel/opt/venvs/cardea-kernel/lib/python3.13/site-packages/psycopg_binary.libs/libgssapi_krb5-497db0c6.so.2.2: .debug_info section not present
+dwz: debian/cardea-kernel/opt/venvs/cardea-kernel/lib/python3.13/site-packages/psycopg_binary.libs/libk5crypto-b1f99d5c.so.3.1: .debug_info section not present
+dwz: debian/cardea-kernel/opt/venvs/cardea-kernel/lib/python3.13/site-packages/psycopg_binary.libs/libkeyutils-dfe70bd6.so.1.5: .debug_info section not present
+dwz: debian/cardea-kernel/opt/venvs/cardea-kernel/lib/python3.13/site-packages/psycopg_binary.libs/libkrb5-fcafa220.so.3.3: .debug_info section not present
+dwz: debian/cardea-kernel/opt/venvs/cardea-kernel/lib/python3.13/site-packages/psycopg_binary.libs/libkrb5support-d0bcff84.so.0.1: .debug_info section not present
+dwz: debian/cardea-kernel/opt/venvs/cardea-kernel/lib/python3.13/site-packages/psycopg_binary.libs/liblber-a44a5afb.so.2.0.200: .debug_info section not present
+dwz: debian/cardea-kernel/opt/venvs/cardea-kernel/lib/python3.13/site-packages/psycopg_binary.libs/libldap-7c3a4b12.so.2.0.200: .debug_info section not present
+dwz: debian/cardea-kernel/opt/venvs/cardea-kernel/lib/python3.13/site-packages/psycopg_binary.libs/libpcre-9513aab5.so.1.2.0: .debug_info section not present
+dwz: debian/cardea-kernel/opt/venvs/cardea-kernel/lib/python3.13/site-packages/psycopg_binary.libs/libpq-e9b5c9ac.so.5.18: .debug_info section not present
+dwz: debian/cardea-kernel/opt/venvs/cardea-kernel/lib/python3.13/site-packages/psycopg_binary.libs/libsasl2-84219a89.so.3.0.0: .debug_info section not present
+dwz: debian/cardea-kernel/opt/venvs/cardea-kernel/lib/python3.13/site-packages/psycopg_binary.libs/libselinux-0922c95c.so.1: .debug_info section not present
+dwz: debian/cardea-kernel/opt/venvs/cardea-kernel/lib/python3.13/site-packages/psycopg_binary.libs/libssl-8bd944e8.so.3: .debug_info section not present
+dwz: debian/cardea-kernel/opt/venvs/cardea-kernel/lib/python3.13/site-packages/psycopg_binary/_psycopg.cpython-313-x86_64-linux-gnu.so: .debug_info section not present
+dwz: debian/cardea-kernel/opt/venvs/cardea-kernel/lib/python3.13/site-packages/psycopg_binary/pq.cpython-313-x86_64-linux-gnu.so: .debug_info section not present
+dwz: debian/cardea-kernel/opt/venvs/cardea-kernel/lib/python3.13/site-packages/pydantic_core/_pydantic_core.cpython-313-x86_64-linux-gnu.so: .debug_info section not present
+dwz: debian/cardea-kernel/opt/venvs/cardea-kernel/lib/python3.13/site-packages/rpds/rpds.cpython-313-x86_64-linux-gnu.so: .debug_info section not present
+dwz: debian/cardea-kernel/opt/venvs/cardea-kernel/lib/python3.13/site-packages/watchfiles/_rust_notify.cpython-313-x86_64-linux-gnu.so: .debug_info section not present

@@ -1,0 +1,15 @@
+{
+  "source": "administrative read of disposable task store before fixture cleanup",
+  "model": "z-ai/glm-4.7",
+  "model_effects": 1,
+  "tool_effects": 0,
+  "receipt_state": "outcome_unknown",
+  "failure_code": "model_outcome_unknown",
+  "usage_is_conservative_reservation": true,
+  "reserved_model_tokens": 34816,
+  "created_at": "2026-09-24T18:52:10.217389Z",
+  "updated_at": "2026-09-24T18:52:15.264809Z",
+  "automatic_retry": false,
+  "actual_provider_usage": "unknown",
+  "http_status": "not recorded by initial adapter"
+}

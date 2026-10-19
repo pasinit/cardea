@@ -1,0 +1,2631 @@
+{
+  "schema_version": 1,
+  "recorded_date": "2026-09-22",
+  "decision": "ADR-004; Temporal remains a candidate, not selected",
+  "interpretation": "Passing observation tests include unsafe raw behavior; not 26 passed Cardea acceptance requirements.",
+  "environment": {
+    "os": "Darwin",
+    "os_version": "26.6.2",
+    "machine": "arm64",
+    "python": "3.12.0",
+    "fictional_provider_sqlite": "3.42.0",
+    "server": "Temporal development server 1.32.0; embedded SQLite, not production",
+    "cli": "1.9.1",
+    "cli_embedded_ui": "2.54.1; disabled by --headless",
+    "transport": "ephemeral loopback gRPC listener; no existing service",
+    "server_persistence": "temporary file-backed SQLite with synchronous=FULL",
+    "worker_configuration": {
+      "distinct_worker_identities": true,
+      "activity_slots": 1,
+      "activity_pollers": 1,
+      "workflow_pollers": 2,
+      "workflow_task_timeout_seconds": 2,
+      "sticky_queue_timeout_seconds": 1,
+      "overlap_activity_start_to_close_seconds": 3,
+      "overlap_maximum_attempts": 2,
+      "heartbeat_throttle_seconds": 0.1
+    }
+  },
+  "sources": [
+    {
+      "repository": "https://github.com/temporalio/cli",
+      "tag": "v1.9.1",
+      "archived": false,
+      "default_branch": "main",
+      "pushed_at": "2026-09-21T05:11:14Z",
+      "license": "MIT",
+      "license_url": "https://raw.githubusercontent.com/temporalio/cli/v1.9.1/LICENSE",
+      "license_sha256": "692992f9a78f825b332d03f9b98aeb6cd5823ae884572af02e79f17327aa0612"
+    },
+    {
+      "repository": "https://github.com/temporalio/sdk-python",
+      "tag": "1.33.0",
+      "archived": false,
+      "default_branch": "main",
+      "pushed_at": "2026-09-22T15:05:16Z",
+      "license": "MIT",
+      "license_url": "https://raw.githubusercontent.com/temporalio/sdk-python/1.33.0/LICENSE",
+      "license_sha256": "d7706f28d144dabf07e4946553a4d117d1dab5cda6bf34a602959b4a2fa86b38"
+    },
+    {
+      "repository": "https://github.com/temporalio/temporal",
+      "tag": "v1.32.0",
+      "archived": false,
+      "default_branch": "main",
+      "pushed_at": "2026-09-22T12:05:04Z",
+      "license": "MIT",
+      "license_url": "https://raw.githubusercontent.com/temporalio/temporal/v1.32.0/LICENSE",
+      "license_sha256": "6aab9afd99ceb1dcaf6a0d91386b46baef9bce17ae4006044e0f231e31430b69"
+    }
+  ],
+  "cli_artifact": {
+    "release": "https://github.com/temporalio/cli/releases/tag/v1.9.1",
+    "published_at": "2026-09-14T21:33:35Z",
+    "archive": "temporal_cli_1.9.1_darwin_arm64.tar.gz",
+    "sha256": "41e0425378fcb4fb5766340b97435e20fe47bbff2d7bf644ec2d51f7662b7c56",
+    "checksum_verified_against": "https://github.com/temporalio/cli/releases/download/v1.9.1/checksums.txt",
+    "binary_sha256": "33c298d41f6eefebf01a28a3511f444480e939e21d3518cb0c12a4abad467c4b"
+  },
+  "dependencies": {
+    "Pygments": "2.21.0",
+    "iniconfig": "2.3.0",
+    "nexus-rpc": "1.4.0",
+    "packaging": "26.3",
+    "pluggy": "1.6.0",
+    "protobuf": "7.36.2",
+    "pytest": "9.0.3",
+    "pytest-asyncio": "1.3.0",
+    "temporalio": "1.33.0",
+    "types-protobuf": "7.35.1.20260906",
+    "typing_extensions": "4.16.0"
+  },
+  "command": "TEMPORAL_CLI=/tmp/cardea-temporal-cli-1.9.1/temporal uv run --project experiments/temporal --locked pytest -q experiments/temporal/tests --junitxml=/tmp/cardea-temporal-fit.xml",
+  "reproduction_command": "TEMPORAL_CLI=/path/to/verified/temporal make temporal-fit",
+  "summary": {
+    "tests": 26,
+    "errors": 0,
+    "failures": 0,
+    "skipped": 0,
+    "duration_seconds": 60.783,
+    "profiles": {
+      "temporal-dev-sqlite": 26
+    }
+  },
+  "source_sha256": {
+    "experiments/temporal/activities.py": "f38c3dcbc1a95ca16abc62dd8f109aec8aedcbc8996df6a659bb03eb7365c6b9",
+    "experiments/temporal/workflows.py": "e0b69273df17a8095cf95fe46acee4ac0f3e7b3a37ca2b06ce01e4ae630dccf0",
+    "experiments/temporal/worker.py": "597bd6958cbef8fa7226b525942233200a76e03761220d352f3827ce6c2208e5",
+    "experiments/temporal/tests/conftest.py": "2b5e3b6a5852ea384fefaf3ad5c6140aaa2ff7652f336ef00ed3ebfd2de22ba6",
+    "experiments/temporal/tests/test_fit.py": "820fdee4652eb3af70f7e94e6333469cef9b005e30742f264bf1097d4d5ef4e3",
+    "experiments/temporal/pyproject.toml": "56ea62cb2da76dde5d9919dd9995e9037d77881e0b541bc54b405dd3531ca3b1",
+    "experiments/temporal/uv.lock": "9970148e9fa8cb6617041ea5e557a39bf6a8149f74ffa6ed050a605a0db2b23d",
+    "experiments/temporal/.python-version": "7b55f8e67b5623c4bef3fa691288da9437d79d3aba156de48d481db32ac7d16d"
+  },
+  "junit_sha256": "db738b241d4c96615c540e477cef8f7b232b4f4db6e4eac05f19d74643c682d1",
+  "regression_checks": {
+    "make test": {
+      "backend_passed": 138,
+      "frontend_passed": 4
+    },
+    "make lint": "passed",
+    "make typecheck": "passed",
+    "isolated_ruff": "passed",
+    "isolated_strict_mypy": "passed: 5 source files"
+  },
+  "limitations": [
+    "Development server only; no production PostgreSQL or Debian run",
+    "No authenticated Cardea broker, supervisor/ancestor enforcement, or real host confinement",
+    "No simultaneous signal registration race or retention test",
+    "No child failure/cancellation mapping",
+    "No cross-store commit integration, schema upgrade/restore or verifier integration",
+    "No dependency vulnerability audit or operating-cost benchmark",
+    "Default thread cancellation tested at a waiting Python barrier; interruption-disabled mode uses an explicit SDK option"
+  ],
+  "cases": [
+    {
+      "name": "test_completed_activity_survives_restart[False]",
+      "duration_seconds": 1.574,
+      "outcome": "passed",
+      "observations": {
+        "result": 1,
+        "profile": "temporal-dev-sqlite",
+        "worker_processes": 2,
+        "server_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 0,
+        "history": [
+          {
+            "id": 1,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED"
+          },
+          {
+            "id": 2,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 3,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 4,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 5,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 6,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 7,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 8,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 9,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 10,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 11,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED"
+          },
+          {
+            "id": 12,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 13,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_TIMED_OUT"
+          },
+          {
+            "id": 14,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 15,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 16,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 17,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED"
+          }
+        ]
+      }
+    },
+    {
+      "name": "test_completed_activity_survives_restart[True]",
+      "duration_seconds": 0.715,
+      "outcome": "passed",
+      "observations": {
+        "result": 1,
+        "profile": "temporal-dev-sqlite",
+        "worker_processes": 2,
+        "server_restarts": 1,
+        "output_effects": 1,
+        "external_effects": 0,
+        "history": [
+          {
+            "id": 1,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED"
+          },
+          {
+            "id": 2,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 3,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 4,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 5,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 6,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 7,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 8,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 9,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 10,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 11,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED"
+          },
+          {
+            "id": 12,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 13,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 14,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 15,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED"
+          }
+        ]
+      }
+    },
+    {
+      "name": "test_signals_and_request_id_deduplication[before]",
+      "duration_seconds": 0.328,
+      "outcome": "passed",
+      "observations": {
+        "result": [
+          "first",
+          "second",
+          "end"
+        ],
+        "profile": "temporal-dev-sqlite",
+        "worker_processes": 1,
+        "server_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 0,
+        "history": [
+          {
+            "id": 1,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED"
+          },
+          {
+            "id": 2,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 3,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 4,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 5,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 6,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 7,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 8,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 9,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 10,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 11,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED"
+          },
+          {
+            "id": 12,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 13,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 14,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 15,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED"
+          },
+          {
+            "id": 16,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED"
+          },
+          {
+            "id": 17,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 18,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 19,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 20,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED"
+          },
+          {
+            "id": 21,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED"
+          },
+          {
+            "id": 22,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 23,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 24,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 25,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED"
+          }
+        ]
+      }
+    },
+    {
+      "name": "test_signals_and_request_id_deduplication[during]",
+      "duration_seconds": 0.361,
+      "outcome": "passed",
+      "observations": {
+        "result": [
+          "first",
+          "second",
+          "end"
+        ],
+        "profile": "temporal-dev-sqlite",
+        "worker_processes": 1,
+        "server_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 0,
+        "history": [
+          {
+            "id": 1,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED"
+          },
+          {
+            "id": 2,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 3,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 4,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 5,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 6,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 7,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 8,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 9,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 10,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 11,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED"
+          },
+          {
+            "id": 12,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 13,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 14,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 15,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED"
+          },
+          {
+            "id": 16,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 17,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 18,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 19,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED"
+          },
+          {
+            "id": 20,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED"
+          },
+          {
+            "id": 21,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 22,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 23,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 24,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED"
+          },
+          {
+            "id": 25,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED"
+          },
+          {
+            "id": 26,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 27,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 28,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 29,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED"
+          }
+        ]
+      }
+    },
+    {
+      "name": "test_signals_and_request_id_deduplication[offline]",
+      "duration_seconds": 1.361,
+      "outcome": "passed",
+      "observations": {
+        "result": [
+          "first",
+          "second",
+          "end"
+        ],
+        "profile": "temporal-dev-sqlite",
+        "worker_processes": 2,
+        "server_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 0,
+        "history": [
+          {
+            "id": 1,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED"
+          },
+          {
+            "id": 2,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 3,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 4,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 5,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 6,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 7,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 8,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 9,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 10,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 11,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED"
+          },
+          {
+            "id": 12,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 13,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED"
+          },
+          {
+            "id": 14,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED"
+          },
+          {
+            "id": 15,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED"
+          },
+          {
+            "id": 16,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED"
+          },
+          {
+            "id": 17,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_TIMED_OUT"
+          },
+          {
+            "id": 18,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 19,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 20,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 21,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED"
+          }
+        ]
+      }
+    },
+    {
+      "name": "test_high_level_signals_do_not_deduplicate_equal_payloads",
+      "duration_seconds": 0.358,
+      "outcome": "passed",
+      "observations": {
+        "result": [
+          "same",
+          "same",
+          "end"
+        ],
+        "profile": "temporal-dev-sqlite",
+        "worker_processes": 1,
+        "server_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 0,
+        "history": [
+          {
+            "id": 1,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED"
+          },
+          {
+            "id": 2,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 3,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 4,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 5,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 6,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 7,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 8,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 9,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 10,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 11,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED"
+          },
+          {
+            "id": 12,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 13,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 14,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 15,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED"
+          },
+          {
+            "id": 16,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED"
+          },
+          {
+            "id": 17,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 18,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 19,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 20,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED"
+          },
+          {
+            "id": 21,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 22,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 23,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 24,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED"
+          }
+        ]
+      }
+    },
+    {
+      "name": "test_timer_survives_worker_restart",
+      "duration_seconds": 4.3,
+      "outcome": "passed",
+      "observations": {
+        "result": "awake",
+        "profile": "temporal-dev-sqlite",
+        "worker_processes": 2,
+        "server_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 0,
+        "history": [
+          {
+            "id": 1,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED"
+          },
+          {
+            "id": 2,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 3,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 4,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 5,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 6,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 7,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 8,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 9,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 10,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 11,
+            "type": "EVENT_TYPE_TIMER_STARTED"
+          },
+          {
+            "id": 12,
+            "type": "EVENT_TYPE_TIMER_FIRED"
+          },
+          {
+            "id": 13,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 14,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_TIMED_OUT"
+          },
+          {
+            "id": 15,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 16,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 17,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 18,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED"
+          }
+        ]
+      }
+    },
+    {
+      "name": "test_child_result_survives_worker_restart",
+      "duration_seconds": 2.401,
+      "outcome": "passed",
+      "observations": {
+        "result": 2,
+        "profile": "temporal-dev-sqlite",
+        "worker_processes": 2,
+        "server_restarts": 0,
+        "output_effects": 2,
+        "external_effects": 0,
+        "history": [
+          {
+            "id": 1,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED"
+          },
+          {
+            "id": 2,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 3,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 4,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 5,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 6,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 7,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 8,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 9,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 10,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 11,
+            "type": "EVENT_TYPE_START_CHILD_WORKFLOW_EXECUTION_INITIATED"
+          },
+          {
+            "id": 12,
+            "type": "EVENT_TYPE_CHILD_WORKFLOW_EXECUTION_STARTED"
+          },
+          {
+            "id": 13,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 14,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 15,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 16,
+            "type": "EVENT_TYPE_CHILD_WORKFLOW_EXECUTION_COMPLETED"
+          },
+          {
+            "id": 17,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 18,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_TIMED_OUT"
+          },
+          {
+            "id": 19,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 20,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 21,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 22,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED"
+          }
+        ]
+      }
+    },
+    {
+      "name": "test_effect_commit_gap_requires_intent[False]",
+      "duration_seconds": 5.32,
+      "outcome": "passed",
+      "observations": {
+        "result": "effect_recorded",
+        "profile": "temporal-dev-sqlite",
+        "worker_processes": 2,
+        "server_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 2,
+        "history": [
+          {
+            "id": 1,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED"
+          },
+          {
+            "id": 2,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 3,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 4,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 5,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 6,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 7,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 8,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 9,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 10,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 11,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 12,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 13,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 14,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 15,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_TIMED_OUT"
+          },
+          {
+            "id": 16,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 17,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 18,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 19,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED"
+          }
+        ]
+      }
+    },
+    {
+      "name": "test_effect_commit_gap_requires_intent[True]",
+      "duration_seconds": 5.34,
+      "outcome": "passed",
+      "observations": {
+        "result": "outcome_unknown",
+        "profile": "temporal-dev-sqlite",
+        "worker_processes": 2,
+        "server_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 1,
+        "history": [
+          {
+            "id": 1,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED"
+          },
+          {
+            "id": 2,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 3,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 4,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 5,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 6,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 7,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 8,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 9,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 10,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 11,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 12,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 13,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 14,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 15,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_TIMED_OUT"
+          },
+          {
+            "id": 16,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 17,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 18,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 19,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED"
+          }
+        ]
+      }
+    },
+    {
+      "name": "test_disabling_retry_avoids_repeat_but_does_not_classify_uncertainty",
+      "duration_seconds": 4.338,
+      "outcome": "passed",
+      "observations": {
+        "failure": "Activity task timed out",
+        "profile": "temporal-dev-sqlite",
+        "worker_processes": 2,
+        "server_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 1,
+        "history": [
+          {
+            "id": 1,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED"
+          },
+          {
+            "id": 2,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 3,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 4,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 5,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 6,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 7,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 8,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 9,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 10,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 11,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 12,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 13,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_TIMED_OUT"
+          },
+          {
+            "id": 14,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 15,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_TIMED_OUT"
+          },
+          {
+            "id": 16,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 17,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 18,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 19,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_FAILED"
+          }
+        ]
+      }
+    },
+    {
+      "name": "test_revocation_needs_fresh_check[False-False]",
+      "duration_seconds": 0.36,
+      "outcome": "passed",
+      "observations": {
+        "result": "effect_recorded",
+        "profile": "temporal-dev-sqlite",
+        "worker_processes": 1,
+        "server_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 1,
+        "history": [
+          {
+            "id": 1,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED"
+          },
+          {
+            "id": 2,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 3,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 4,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 5,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 6,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 7,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 8,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 9,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 10,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 11,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 12,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 13,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 14,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 15,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 16,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 17,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED"
+          },
+          {
+            "id": 18,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 19,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 20,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 21,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 22,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 23,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 24,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 25,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 26,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 27,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED"
+          }
+        ]
+      }
+    },
+    {
+      "name": "test_revocation_needs_fresh_check[False-True]",
+      "duration_seconds": 0.325,
+      "outcome": "passed",
+      "observations": {
+        "result": "denied",
+        "profile": "temporal-dev-sqlite",
+        "worker_processes": 1,
+        "server_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 0,
+        "history": [
+          {
+            "id": 1,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED"
+          },
+          {
+            "id": 2,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 3,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 4,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 5,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 6,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 7,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 8,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 9,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 10,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 11,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 12,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 13,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 14,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 15,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 16,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 17,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED"
+          },
+          {
+            "id": 18,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 19,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 20,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 21,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 22,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 23,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 24,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 25,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 26,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 27,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED"
+          }
+        ]
+      }
+    },
+    {
+      "name": "test_revocation_needs_fresh_check[True-False]",
+      "duration_seconds": 1.37,
+      "outcome": "passed",
+      "observations": {
+        "result": "effect_recorded",
+        "profile": "temporal-dev-sqlite",
+        "worker_processes": 2,
+        "server_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 1,
+        "history": [
+          {
+            "id": 1,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED"
+          },
+          {
+            "id": 2,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 3,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 4,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 5,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 6,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 7,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 8,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 9,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 10,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 11,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 12,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 13,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 14,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 15,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 16,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 17,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED"
+          },
+          {
+            "id": 18,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 19,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_TIMED_OUT"
+          },
+          {
+            "id": 20,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 21,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 22,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 23,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 24,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 25,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 26,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 27,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 28,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 29,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED"
+          }
+        ]
+      }
+    },
+    {
+      "name": "test_revocation_needs_fresh_check[True-True]",
+      "duration_seconds": 1.356,
+      "outcome": "passed",
+      "observations": {
+        "result": "denied",
+        "profile": "temporal-dev-sqlite",
+        "worker_processes": 2,
+        "server_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 0,
+        "history": [
+          {
+            "id": 1,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED"
+          },
+          {
+            "id": 2,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 3,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 4,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 5,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 6,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 7,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 8,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 9,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 10,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 11,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 12,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 13,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 14,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 15,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 16,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 17,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED"
+          },
+          {
+            "id": 18,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 19,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_TIMED_OUT"
+          },
+          {
+            "id": 20,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 21,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 22,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 23,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 24,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 25,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 26,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 27,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 28,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 29,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED"
+          }
+        ]
+      }
+    },
+    {
+      "name": "test_retry_rechecks_authority",
+      "duration_seconds": 1.292,
+      "outcome": "passed",
+      "observations": {
+        "result": "denied",
+        "profile": "temporal-dev-sqlite",
+        "worker_processes": 1,
+        "server_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 0,
+        "history": [
+          {
+            "id": 1,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED"
+          },
+          {
+            "id": 2,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 3,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 4,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 5,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 6,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 7,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 8,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 9,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 10,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 11,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 12,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 13,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 14,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 15,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 16,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 17,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED"
+          }
+        ]
+      }
+    },
+    {
+      "name": "test_default_id_reuse_creates_new_run",
+      "duration_seconds": 0.297,
+      "outcome": "passed",
+      "observations": {
+        "result": 99,
+        "profile": "temporal-dev-sqlite",
+        "worker_processes": 1,
+        "server_restarts": 0,
+        "output_effects": 2,
+        "external_effects": 0,
+        "history": [
+          {
+            "id": 1,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED"
+          },
+          {
+            "id": 2,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 3,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 4,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 5,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 6,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED"
+          },
+          {
+            "id": 7,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 8,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 9,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 10,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 11,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 12,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 13,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 14,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 15,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED"
+          }
+        ]
+      }
+    },
+    {
+      "name": "test_reject_duplicate_rejects_both_same_and_changed_arguments",
+      "duration_seconds": 0.3,
+      "outcome": "passed",
+      "observations": {
+        "result": 1,
+        "profile": "temporal-dev-sqlite",
+        "worker_processes": 1,
+        "server_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 0,
+        "history": [
+          {
+            "id": 1,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED"
+          },
+          {
+            "id": 2,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 3,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 4,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 5,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 6,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED"
+          },
+          {
+            "id": 7,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 8,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 9,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 10,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 11,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 12,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 13,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 14,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 15,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED"
+          }
+        ]
+      }
+    },
+    {
+      "name": "test_use_existing_running_id_does_not_validate_arguments",
+      "duration_seconds": 0.322,
+      "outcome": "passed",
+      "observations": {
+        "result": 1,
+        "profile": "temporal-dev-sqlite",
+        "worker_processes": 1,
+        "server_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 0,
+        "history": [
+          {
+            "id": 1,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED"
+          },
+          {
+            "id": 2,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 3,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 4,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 5,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 6,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 7,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 8,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 9,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 10,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 11,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED"
+          },
+          {
+            "id": 12,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 13,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 14,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 15,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED"
+          }
+        ]
+      }
+    },
+    {
+      "name": "test_cancellation_boundaries[cancel]",
+      "duration_seconds": 0.348,
+      "outcome": "passed",
+      "observations": {
+        "profile": "temporal-dev-sqlite",
+        "worker_processes": 1,
+        "server_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 0,
+        "history": [
+          {
+            "id": 1,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED"
+          },
+          {
+            "id": 2,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 3,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 4,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 5,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 6,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 7,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 8,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 9,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 10,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 11,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 12,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_CANCEL_REQUESTED"
+          },
+          {
+            "id": 13,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 14,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 15,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 16,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_CANCEL_REQUESTED"
+          },
+          {
+            "id": 17,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_CANCELED"
+          }
+        ]
+      }
+    },
+    {
+      "name": "test_cancellation_boundaries[cancel_inflight]",
+      "duration_seconds": 0.348,
+      "outcome": "passed",
+      "observations": {
+        "profile": "temporal-dev-sqlite",
+        "worker_processes": 1,
+        "server_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 1,
+        "history": [
+          {
+            "id": 1,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED"
+          },
+          {
+            "id": 2,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 3,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 4,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 5,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 6,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 7,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 8,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 9,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 10,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 11,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 12,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_CANCEL_REQUESTED"
+          },
+          {
+            "id": 13,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 14,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 15,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 16,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_CANCEL_REQUESTED"
+          },
+          {
+            "id": 17,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_CANCELED"
+          }
+        ]
+      }
+    },
+    {
+      "name": "test_cancellation_boundaries[cancel_cooperative]",
+      "duration_seconds": 0.417,
+      "outcome": "passed",
+      "observations": {
+        "profile": "temporal-dev-sqlite",
+        "worker_processes": 1,
+        "server_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 0,
+        "history": [
+          {
+            "id": 1,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED"
+          },
+          {
+            "id": 2,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 3,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 4,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 5,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 6,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 7,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 8,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 9,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 10,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 11,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 12,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_CANCEL_REQUESTED"
+          },
+          {
+            "id": 13,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 14,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 15,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 16,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_CANCEL_REQUESTED"
+          },
+          {
+            "id": 17,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_CANCELED"
+          }
+        ]
+      }
+    },
+    {
+      "name": "test_activity_timeout_thread_interruption_and_effect_fencing[default]",
+      "duration_seconds": 8.447,
+      "outcome": "passed",
+      "observations": {
+        "result": "effect_recorded",
+        "thread_cancellation_mode": "default",
+        "profile": "temporal-dev-sqlite",
+        "worker_processes": 2,
+        "server_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 1,
+        "history": [
+          {
+            "id": 1,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED"
+          },
+          {
+            "id": 2,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 3,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 4,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 5,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 6,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 7,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 8,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 9,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 10,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 11,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 12,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 13,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 14,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 15,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 16,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_TIMED_OUT"
+          },
+          {
+            "id": 17,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 18,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 19,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_TIMED_OUT"
+          },
+          {
+            "id": 20,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 21,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 22,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 23,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED"
+          }
+        ]
+      }
+    },
+    {
+      "name": "test_activity_timeout_thread_interruption_and_effect_fencing[uninterruptible]",
+      "duration_seconds": 8.436,
+      "outcome": "passed",
+      "observations": {
+        "result": "effect_recorded",
+        "thread_cancellation_mode": "uninterruptible",
+        "profile": "temporal-dev-sqlite",
+        "worker_processes": 2,
+        "server_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 2,
+        "history": [
+          {
+            "id": 1,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED"
+          },
+          {
+            "id": 2,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 3,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 4,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 5,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 6,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 7,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 8,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 9,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 10,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 11,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 12,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 13,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 14,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 15,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 16,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_TIMED_OUT"
+          },
+          {
+            "id": 17,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 18,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 19,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_TIMED_OUT"
+          },
+          {
+            "id": 20,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 21,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 22,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 23,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED"
+          }
+        ]
+      }
+    },
+    {
+      "name": "test_activity_timeout_thread_interruption_and_effect_fencing[fenced]",
+      "duration_seconds": 8.436,
+      "outcome": "passed",
+      "observations": {
+        "result": "effect_recorded",
+        "thread_cancellation_mode": "fenced",
+        "profile": "temporal-dev-sqlite",
+        "worker_processes": 2,
+        "server_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 1,
+        "history": [
+          {
+            "id": 1,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED"
+          },
+          {
+            "id": 2,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 3,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 4,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 5,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 6,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 7,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 8,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 9,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 10,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 11,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED"
+          },
+          {
+            "id": 12,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_STARTED"
+          },
+          {
+            "id": 13,
+            "type": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED"
+          },
+          {
+            "id": 14,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 15,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 16,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_TIMED_OUT"
+          },
+          {
+            "id": 17,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 18,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 19,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_TIMED_OUT"
+          },
+          {
+            "id": 20,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 21,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_STARTED"
+          },
+          {
+            "id": 22,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED"
+          },
+          {
+            "id": 23,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED"
+          }
+        ]
+      }
+    },
+    {
+      "name": "test_execution_timeout_includes_queue_time",
+      "duration_seconds": 2.301,
+      "outcome": "passed",
+      "observations": {
+        "profile": "temporal-dev-sqlite",
+        "worker_processes": 1,
+        "server_restarts": 0,
+        "output_effects": 0,
+        "external_effects": 0,
+        "history": [
+          {
+            "id": 1,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED"
+          },
+          {
+            "id": 2,
+            "type": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED"
+          },
+          {
+            "id": 3,
+            "type": "EVENT_TYPE_WORKFLOW_EXECUTION_TIMED_OUT"
+          }
+        ]
+      }
+    }
+  ]
+}

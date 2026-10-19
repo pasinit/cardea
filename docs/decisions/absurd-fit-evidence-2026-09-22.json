@@ -1,0 +1,1453 @@
+{
+  "schema_version": 1,
+  "recorded_date": "2026-09-22",
+  "decision": "ADR-005; Absurd remains a candidate, not selected",
+  "interpretation": "Passing observation cases include unsafe raw behavior; this is not 26 passed Cardea acceptance requirements.",
+  "environment": {
+    "os": "Darwin",
+    "os_version": "26.6.2",
+    "machine": "arm64",
+    "python": "3.12.0",
+    "fictional_provider_sqlite": "3.42.0",
+    "postgresql": "postgres (PostgreSQL) 14.18 (Homebrew)",
+    "postgresql_transport": "private temporary Unix socket only; no existing service",
+    "absurd_sql": "0.5.0",
+    "sdk": "absurd-sdk 0.5.0 synchronous API",
+    "queues": "unpartitioned default and children",
+    "worker_configuration": {
+      "claim_timeout_seconds": 3,
+      "concurrency": 1,
+      "batch_size": 1,
+      "poll_interval_seconds": 0.05,
+      "retry_strategy": "fixed 0.1 seconds",
+      "default_max_attempts": 5,
+      "external_gap_and_overlap_max_attempts": 2,
+      "no_retry_max_attempts": 1
+    }
+  },
+  "source": {
+    "repository": "https://github.com/earendil-works/absurd",
+    "archived": false,
+    "pushed_at": "2026-08-10T17:23:16Z",
+    "release": "https://github.com/earendil-works/absurd/releases/tag/0.5.0",
+    "release_published_at": "2026-08-04T13:07:14Z",
+    "tag_commit": "550d3b9e6f9382d96178de6ab8c90c7f8edf2227",
+    "license": "Apache-2.0",
+    "license_url": "https://github.com/earendil-works/absurd/blob/0.5.0/LICENSE",
+    "release_sql_url": "https://github.com/earendil-works/absurd/releases/download/0.5.0/absurd.sql",
+    "tagged_sql_url": "https://raw.githubusercontent.com/earendil-works/absurd/0.5.0/sql/absurd.sql",
+    "release_matches_tagged_sql": true,
+    "installed_sdk_module_sha256": "5c9a1090fe630b9543b350ab1ecc34110fc14837650aa8980874cb4a2c118707"
+  },
+  "dependencies": {
+    "Pygments": "2.21.0",
+    "absurd-sdk": "0.5.0",
+    "iniconfig": "2.3.0",
+    "packaging": "26.3",
+    "pluggy": "1.6.0",
+    "psycopg": "3.3.6",
+    "psycopg-binary": "3.3.6",
+    "pytest": "9.0.3",
+    "typing_extensions": "4.16.0"
+  },
+  "command": "uv run --project experiments/absurd --locked pytest -q experiments/absurd/tests --junitxml=/tmp/cardea-absurd-fit.xml",
+  "reproduction_command": "make absurd-fit",
+  "summary": {
+    "tests": 26,
+    "errors": 0,
+    "failures": 0,
+    "skipped": 0,
+    "duration_seconds": 41.221,
+    "profiles": {
+      "postgres-sync-sdk": 26
+    }
+  },
+  "source_sha256": {
+    "experiments/absurd/worker.py": "de0c04ba2b8f857da4e40e19046007623accb53b9a4e33a30a2b9767df62ae61",
+    "experiments/absurd/tests/conftest.py": "ae247e110c1816c05d4bcc255d75281c349b7c303814db30f054240b47bdd74c",
+    "experiments/absurd/tests/test_fit.py": "47f4d803434a91c3e05a5511250272f7621167328cc8efc028cd3b09ae1d6c73",
+    "experiments/absurd/pyproject.toml": "0a698cd85f27fc4afc087879dc7c7d03490459008ce384f7618c6bdacf1dc803",
+    "experiments/absurd/uv.lock": "592ded9f3a90098b627a0e66b07a9a6180430f3028530e8355de1370a64e4ede",
+    "experiments/absurd/.python-version": "7b55f8e67b5623c4bef3fa691288da9437d79d3aba156de48d481db32ac7d16d",
+    "experiments/absurd/vendor/absurd-0.5.0.sql": "d34309370c539f3a51f2b36b69b1f77551f8e4a14480a1c8def8bb8f40fd9aab",
+    "experiments/absurd/vendor/LICENSE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+  },
+  "junit_sha256": "1c6e833655876ec71d0291920f02995dc3be688c5372af7705cd668bbb2772d0",
+  "redactions": "Workspace absolute path replaced by <workspace> in recorded tracebacks.",
+  "regression_checks": {
+    "make test": {
+      "backend_passed": 138,
+      "frontend_passed": 4
+    },
+    "make lint": "passed",
+    "make typecheck": "passed",
+    "isolated_ruff": "passed",
+    "isolated_strict_mypy": "passed: 3 source files"
+  },
+  "limitations": [
+    "Synchronous Python SDK and unpartitioned queues only; no async or partitioned profile",
+    "No exact concurrent wait-registration race, retention or clock-skew injection",
+    "Child success only; child failure and cancellation propagation unrun",
+    "Fake authority only; no authentication or supervisor/ancestor enforcement",
+    "Fake intent/generation only; no actual reconciliation or remote-service fencing",
+    "No Cardea/engine two-store integration or completion verifier",
+    "Same-version crash restart is not upgrade, backup or restore evidence",
+    "No Debian operations, security audit or cost benchmark"
+  ],
+  "cases": [
+    {
+      "name": "test_completed_step_survives_restart[False]",
+      "duration_seconds": 1.059,
+      "outcome": "passed",
+      "observations": {
+        "snapshot": {
+          "state": "completed",
+          "result": 1,
+          "failure": null
+        },
+        "profile": "postgres-sync-sdk",
+        "worker_processes": 2,
+        "database_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 0,
+        "runs": [
+          [
+            1,
+            "completed",
+            "fit-worker-29611",
+            1,
+            null
+          ]
+        ],
+        "checkpoints": [
+          [
+            "$awaitEvent:continue",
+            true,
+            "committed"
+          ],
+          [
+            "output",
+            1,
+            "committed"
+          ]
+        ],
+        "final_snapshot": {
+          "state": "completed",
+          "result": 1,
+          "failure": null
+        }
+      }
+    },
+    {
+      "name": "test_completed_step_survives_restart[True]",
+      "duration_seconds": 0.67,
+      "outcome": "passed",
+      "observations": {
+        "snapshot": {
+          "state": "completed",
+          "result": 1,
+          "failure": null
+        },
+        "profile": "postgres-sync-sdk",
+        "worker_processes": 2,
+        "database_restarts": 1,
+        "output_effects": 1,
+        "external_effects": 0,
+        "runs": [
+          [
+            1,
+            "completed",
+            "fit-worker-29635",
+            1,
+            null
+          ]
+        ],
+        "checkpoints": [
+          [
+            "$awaitEvent:continue",
+            true,
+            "committed"
+          ],
+          [
+            "output",
+            1,
+            "committed"
+          ]
+        ],
+        "final_snapshot": {
+          "state": "completed",
+          "result": 1,
+          "failure": null
+        }
+      }
+    },
+    {
+      "name": "test_named_events_around_wait_and_first_write_wins[before]",
+      "duration_seconds": 0.345,
+      "outcome": "passed",
+      "observations": {
+        "snapshot": {
+          "state": "completed",
+          "result": [
+            "first",
+            "second"
+          ],
+          "failure": null
+        },
+        "profile": "postgres-sync-sdk",
+        "worker_processes": 1,
+        "database_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 0,
+        "runs": [
+          [
+            1,
+            "completed",
+            "fit-worker-29642",
+            [
+              "first",
+              "second"
+            ],
+            null
+          ]
+        ],
+        "checkpoints": [
+          [
+            "$awaitEvent:gate",
+            true,
+            "committed"
+          ],
+          [
+            "$awaitEvent:input-one",
+            "first",
+            "committed"
+          ],
+          [
+            "$awaitEvent:input-two",
+            "second",
+            "committed"
+          ],
+          [
+            "output",
+            1,
+            "committed"
+          ]
+        ],
+        "final_snapshot": {
+          "state": "completed",
+          "result": [
+            "first",
+            "second"
+          ],
+          "failure": null
+        }
+      }
+    },
+    {
+      "name": "test_named_events_around_wait_and_first_write_wins[during]",
+      "duration_seconds": 0.433,
+      "outcome": "passed",
+      "observations": {
+        "snapshot": {
+          "state": "completed",
+          "result": [
+            "first",
+            "second"
+          ],
+          "failure": null
+        },
+        "profile": "postgres-sync-sdk",
+        "worker_processes": 1,
+        "database_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 0,
+        "runs": [
+          [
+            1,
+            "completed",
+            "fit-worker-29651",
+            [
+              "first",
+              "second"
+            ],
+            null
+          ]
+        ],
+        "checkpoints": [
+          [
+            "$awaitEvent:gate",
+            true,
+            "committed"
+          ],
+          [
+            "$awaitEvent:input-one",
+            "first",
+            "committed"
+          ],
+          [
+            "$awaitEvent:input-two",
+            "second",
+            "committed"
+          ],
+          [
+            "output",
+            1,
+            "committed"
+          ]
+        ],
+        "final_snapshot": {
+          "state": "completed",
+          "result": [
+            "first",
+            "second"
+          ],
+          "failure": null
+        }
+      }
+    },
+    {
+      "name": "test_named_events_around_wait_and_first_write_wins[offline]",
+      "duration_seconds": 0.469,
+      "outcome": "passed",
+      "observations": {
+        "snapshot": {
+          "state": "completed",
+          "result": [
+            "first",
+            "second"
+          ],
+          "failure": null
+        },
+        "profile": "postgres-sync-sdk",
+        "worker_processes": 2,
+        "database_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 0,
+        "runs": [
+          [
+            1,
+            "completed",
+            "fit-worker-29668",
+            [
+              "first",
+              "second"
+            ],
+            null
+          ]
+        ],
+        "checkpoints": [
+          [
+            "$awaitEvent:gate",
+            true,
+            "committed"
+          ],
+          [
+            "$awaitEvent:input-one",
+            "first",
+            "committed"
+          ],
+          [
+            "$awaitEvent:input-two",
+            "second",
+            "committed"
+          ],
+          [
+            "output",
+            1,
+            "committed"
+          ]
+        ],
+        "final_snapshot": {
+          "state": "completed",
+          "result": [
+            "first",
+            "second"
+          ],
+          "failure": null
+        }
+      }
+    },
+    {
+      "name": "test_repeated_wait_on_same_event_reads_same_cached_payload",
+      "duration_seconds": 0.381,
+      "outcome": "passed",
+      "observations": {
+        "snapshot": {
+          "state": "completed",
+          "result": [
+            "first",
+            "first"
+          ],
+          "failure": null
+        },
+        "profile": "postgres-sync-sdk",
+        "worker_processes": 1,
+        "database_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 0,
+        "runs": [
+          [
+            1,
+            "completed",
+            "fit-worker-29675",
+            [
+              "first",
+              "first"
+            ],
+            null
+          ]
+        ],
+        "checkpoints": [
+          [
+            "$awaitEvent:input",
+            "first",
+            "committed"
+          ],
+          [
+            "$awaitEvent:input#2",
+            "first",
+            "committed"
+          ],
+          [
+            "output",
+            1,
+            "committed"
+          ]
+        ],
+        "final_snapshot": {
+          "state": "completed",
+          "result": [
+            "first",
+            "first"
+          ],
+          "failure": null
+        }
+      }
+    },
+    {
+      "name": "test_event_name_is_shared_across_tasks_in_one_queue",
+      "duration_seconds": 0.367,
+      "outcome": "passed",
+      "observations": {
+        "snapshot": {
+          "state": "completed",
+          "result": [
+            "first-task-data",
+            "first-task-data"
+          ],
+          "failure": null
+        },
+        "profile": "postgres-sync-sdk",
+        "worker_processes": 1,
+        "database_restarts": 0,
+        "output_effects": 2,
+        "external_effects": 0,
+        "runs": [
+          [
+            1,
+            "completed",
+            "fit-worker-29682",
+            [
+              "first-task-data",
+              "first-task-data"
+            ],
+            null
+          ],
+          [
+            1,
+            "completed",
+            "fit-worker-29682",
+            [
+              "first-task-data",
+              "first-task-data"
+            ],
+            null
+          ]
+        ],
+        "checkpoints": [
+          [
+            "$awaitEvent:input",
+            "first-task-data",
+            "committed"
+          ],
+          [
+            "$awaitEvent:input",
+            "first-task-data",
+            "committed"
+          ],
+          [
+            "$awaitEvent:input#2",
+            "first-task-data",
+            "committed"
+          ],
+          [
+            "$awaitEvent:input#2",
+            "first-task-data",
+            "committed"
+          ],
+          [
+            "output",
+            1,
+            "committed"
+          ],
+          [
+            "output",
+            1,
+            "committed"
+          ]
+        ],
+        "final_snapshot": {
+          "state": "completed",
+          "result": [
+            "first-task-data",
+            "first-task-data"
+          ],
+          "failure": null
+        }
+      }
+    },
+    {
+      "name": "test_timer_survives_restart",
+      "duration_seconds": 3.562,
+      "outcome": "passed",
+      "observations": {
+        "snapshot": {
+          "state": "completed",
+          "result": "awake",
+          "failure": null
+        },
+        "profile": "postgres-sync-sdk",
+        "worker_processes": 2,
+        "database_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 0,
+        "runs": [
+          [
+            1,
+            "completed",
+            "fit-worker-29691",
+            "awake",
+            null
+          ]
+        ],
+        "checkpoints": [
+          [
+            "output",
+            1,
+            "committed"
+          ],
+          [
+            "timer",
+            "2026-09-22T21:57:22.822966+00:00",
+            "committed"
+          ]
+        ],
+        "final_snapshot": {
+          "state": "completed",
+          "result": "awake",
+          "failure": null
+        }
+      }
+    },
+    {
+      "name": "test_child_result_survives_restart_with_separate_queue",
+      "duration_seconds": 4.35,
+      "outcome": "passed",
+      "observations": {
+        "snapshot": {
+          "state": "completed",
+          "result": {
+            "result": 2,
+            "child_state": "completed"
+          },
+          "failure": null
+        },
+        "profile": "postgres-sync-sdk",
+        "worker_processes": 4,
+        "database_restarts": 0,
+        "output_effects": 2,
+        "external_effects": 0,
+        "runs": [
+          [
+            1,
+            "failed",
+            "fit-worker-29698",
+            null,
+            {
+              "name": "$ClaimTimeout",
+              "attempt": 1,
+              "message": "worker did not finish task within claim interval",
+              "workerId": "fit-worker-29698",
+              "claimExpiredAt": "2026-09-22T22:57:26.505589+01:00"
+            }
+          ],
+          [
+            2,
+            "completed",
+            "fit-worker-29704",
+            {
+              "result": 2,
+              "child_state": "completed"
+            },
+            null
+          ]
+        ],
+        "checkpoints": [
+          [
+            "$awaitTaskResult:01a0cb1f-a3b0-7115-9b8f-737004f22fc1",
+            {
+              "state": "completed",
+              "result": 2
+            },
+            "committed"
+          ],
+          [
+            "output",
+            1,
+            "committed"
+          ],
+          [
+            "spawn",
+            "01a0cb1f-a3b0-7115-9b8f-737004f22fc1",
+            "committed"
+          ]
+        ],
+        "final_snapshot": {
+          "state": "completed",
+          "result": {
+            "result": 2,
+            "child_state": "completed"
+          },
+          "failure": null
+        }
+      }
+    },
+    {
+      "name": "test_external_commit_gap_requires_broker_intent[False]",
+      "duration_seconds": 4.105,
+      "outcome": "passed",
+      "observations": {
+        "snapshot": {
+          "state": "completed",
+          "result": "effect_recorded",
+          "failure": null
+        },
+        "profile": "postgres-sync-sdk",
+        "worker_processes": 2,
+        "database_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 2,
+        "runs": [
+          [
+            1,
+            "failed",
+            "fit-worker-29714",
+            null,
+            {
+              "name": "$ClaimTimeout",
+              "attempt": 1,
+              "message": "worker did not finish task within claim interval",
+              "workerId": "fit-worker-29714",
+              "claimExpiredAt": "2026-09-22T22:57:30.772416+01:00"
+            }
+          ],
+          [
+            2,
+            "completed",
+            "fit-worker-29716",
+            "effect_recorded",
+            null
+          ]
+        ],
+        "checkpoints": [
+          [
+            "effect",
+            "effect_recorded",
+            "committed"
+          ],
+          [
+            "output",
+            1,
+            "committed"
+          ]
+        ],
+        "final_snapshot": {
+          "state": "completed",
+          "result": "effect_recorded",
+          "failure": null
+        }
+      }
+    },
+    {
+      "name": "test_external_commit_gap_requires_broker_intent[True]",
+      "duration_seconds": 4.073,
+      "outcome": "passed",
+      "observations": {
+        "snapshot": {
+          "state": "completed",
+          "result": "outcome_unknown",
+          "failure": null
+        },
+        "profile": "postgres-sync-sdk",
+        "worker_processes": 2,
+        "database_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 1,
+        "runs": [
+          [
+            1,
+            "failed",
+            "fit-worker-29724",
+            null,
+            {
+              "name": "$ClaimTimeout",
+              "attempt": 1,
+              "message": "worker did not finish task within claim interval",
+              "workerId": "fit-worker-29724",
+              "claimExpiredAt": "2026-09-22T22:57:34.842398+01:00"
+            }
+          ],
+          [
+            2,
+            "completed",
+            "fit-worker-29726",
+            "outcome_unknown",
+            null
+          ]
+        ],
+        "checkpoints": [
+          [
+            "effect",
+            "outcome_unknown",
+            "committed"
+          ],
+          [
+            "output",
+            1,
+            "committed"
+          ]
+        ],
+        "final_snapshot": {
+          "state": "completed",
+          "result": "outcome_unknown",
+          "failure": null
+        }
+      }
+    },
+    {
+      "name": "test_single_attempt_does_not_repeat_but_needs_uncertainty_mapping",
+      "duration_seconds": 3.365,
+      "outcome": "passed",
+      "observations": {
+        "profile": "postgres-sync-sdk",
+        "worker_processes": 2,
+        "database_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 1,
+        "runs": [
+          [
+            1,
+            "failed",
+            "fit-worker-29734",
+            null,
+            {
+              "name": "$ClaimTimeout",
+              "attempt": 1,
+              "message": "worker did not finish task within claim interval",
+              "workerId": "fit-worker-29734",
+              "claimExpiredAt": "2026-09-22T22:57:38.921762+01:00"
+            }
+          ]
+        ],
+        "checkpoints": [
+          [
+            "output",
+            1,
+            "committed"
+          ]
+        ],
+        "final_snapshot": {
+          "state": "failed",
+          "result": null,
+          "failure": {
+            "name": "$ClaimTimeout",
+            "attempt": 1,
+            "message": "worker did not finish task within claim interval",
+            "workerId": "fit-worker-29734",
+            "claimExpiredAt": "2026-09-22T22:57:38.921762+01:00"
+          }
+        }
+      }
+    },
+    {
+      "name": "test_revocation_needs_fresh_check[False-False]",
+      "duration_seconds": 0.36,
+      "outcome": "passed",
+      "observations": {
+        "snapshot": {
+          "state": "completed",
+          "result": "effect_recorded",
+          "failure": null
+        },
+        "profile": "postgres-sync-sdk",
+        "worker_processes": 1,
+        "database_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 1,
+        "runs": [
+          [
+            1,
+            "completed",
+            "fit-worker-29746",
+            "effect_recorded",
+            null
+          ]
+        ],
+        "checkpoints": [
+          [
+            "$awaitEvent:continue",
+            true,
+            "committed"
+          ],
+          [
+            "effect",
+            "effect_recorded",
+            "committed"
+          ],
+          [
+            "output",
+            1,
+            "committed"
+          ],
+          [
+            "permission",
+            true,
+            "committed"
+          ]
+        ],
+        "final_snapshot": {
+          "state": "completed",
+          "result": "effect_recorded",
+          "failure": null
+        }
+      }
+    },
+    {
+      "name": "test_revocation_needs_fresh_check[False-True]",
+      "duration_seconds": 0.362,
+      "outcome": "passed",
+      "observations": {
+        "snapshot": {
+          "state": "completed",
+          "result": "denied",
+          "failure": null
+        },
+        "profile": "postgres-sync-sdk",
+        "worker_processes": 1,
+        "database_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 0,
+        "runs": [
+          [
+            1,
+            "completed",
+            "fit-worker-29755",
+            "denied",
+            null
+          ]
+        ],
+        "checkpoints": [
+          [
+            "$awaitEvent:continue",
+            true,
+            "committed"
+          ],
+          [
+            "effect",
+            "denied",
+            "committed"
+          ],
+          [
+            "output",
+            1,
+            "committed"
+          ],
+          [
+            "permission",
+            true,
+            "committed"
+          ]
+        ],
+        "final_snapshot": {
+          "state": "completed",
+          "result": "denied",
+          "failure": null
+        }
+      }
+    },
+    {
+      "name": "test_revocation_needs_fresh_check[True-False]",
+      "duration_seconds": 0.426,
+      "outcome": "passed",
+      "observations": {
+        "snapshot": {
+          "state": "completed",
+          "result": "effect_recorded",
+          "failure": null
+        },
+        "profile": "postgres-sync-sdk",
+        "worker_processes": 2,
+        "database_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 1,
+        "runs": [
+          [
+            1,
+            "completed",
+            "fit-worker-29768",
+            "effect_recorded",
+            null
+          ]
+        ],
+        "checkpoints": [
+          [
+            "$awaitEvent:continue",
+            true,
+            "committed"
+          ],
+          [
+            "effect",
+            "effect_recorded",
+            "committed"
+          ],
+          [
+            "output",
+            1,
+            "committed"
+          ],
+          [
+            "permission",
+            true,
+            "committed"
+          ]
+        ],
+        "final_snapshot": {
+          "state": "completed",
+          "result": "effect_recorded",
+          "failure": null
+        }
+      }
+    },
+    {
+      "name": "test_revocation_needs_fresh_check[True-True]",
+      "duration_seconds": 0.445,
+      "outcome": "passed",
+      "observations": {
+        "snapshot": {
+          "state": "completed",
+          "result": "denied",
+          "failure": null
+        },
+        "profile": "postgres-sync-sdk",
+        "worker_processes": 2,
+        "database_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 0,
+        "runs": [
+          [
+            1,
+            "completed",
+            "fit-worker-29780",
+            "denied",
+            null
+          ]
+        ],
+        "checkpoints": [
+          [
+            "$awaitEvent:continue",
+            true,
+            "committed"
+          ],
+          [
+            "effect",
+            "denied",
+            "committed"
+          ],
+          [
+            "output",
+            1,
+            "committed"
+          ],
+          [
+            "permission",
+            true,
+            "committed"
+          ]
+        ],
+        "final_snapshot": {
+          "state": "completed",
+          "result": "denied",
+          "failure": null
+        }
+      }
+    },
+    {
+      "name": "test_retry_rechecks_current_authority",
+      "duration_seconds": 0.673,
+      "outcome": "passed",
+      "observations": {
+        "snapshot": {
+          "state": "completed",
+          "result": "denied",
+          "failure": null
+        },
+        "profile": "postgres-sync-sdk",
+        "worker_processes": 1,
+        "database_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 0,
+        "runs": [
+          [
+            1,
+            "failed",
+            "fit-worker-29787",
+            null,
+            {
+              "name": "RuntimeError",
+              "message": "fictional failure before effect",
+              "traceback": "Traceback (most recent call last):\n  File \"<workspace>/experiments/absurd/.venv/lib/python3.12/site-packages/absurd_sdk/__init__.py\", line 1793, in _execute_task\n    result = cast(JsonValue, registration[\"handler\"](task[\"params\"], ctx))\n                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<workspace>/experiments/absurd/worker.py\", line 140, in task\n    return ctx.step(\"effect\", lambda: retry_effect(root))\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<workspace>/experiments/absurd/.venv/lib/python3.12/site-packages/absurd_sdk/__init__.py\", line 699, in step\n    rv = fn()\n         ^^^^\n  File \"<workspace>/experiments/absurd/worker.py\", line 140, in <lambda>\n    return ctx.step(\"effect\", lambda: retry_effect(root))\n                                      ^^^^^^^^^^^^^^^^^^\n  File \"<workspace>/experiments/absurd/worker.py\", line 79, in retry_effect\n    raise RuntimeError(\"fictional failure before effect\")\nRuntimeError: fictional failure before effect\n"
+            }
+          ],
+          [
+            2,
+            "completed",
+            "fit-worker-29787",
+            "denied",
+            null
+          ]
+        ],
+        "checkpoints": [
+          [
+            "effect",
+            "denied",
+            "committed"
+          ],
+          [
+            "output",
+            1,
+            "committed"
+          ]
+        ],
+        "final_snapshot": {
+          "state": "completed",
+          "result": "denied",
+          "failure": null
+        }
+      }
+    },
+    {
+      "name": "test_idempotency_key_does_not_check_changed_arguments",
+      "duration_seconds": 0.37,
+      "outcome": "passed",
+      "observations": {
+        "spawn_id_runtime_type": "UUID",
+        "snapshot": {
+          "state": "completed",
+          "result": 1,
+          "failure": null
+        },
+        "profile": "postgres-sync-sdk",
+        "worker_processes": 1,
+        "database_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 0,
+        "runs": [
+          [
+            1,
+            "completed",
+            "fit-worker-29794",
+            1,
+            null
+          ]
+        ],
+        "checkpoints": [
+          [
+            "$awaitEvent:continue",
+            true,
+            "committed"
+          ],
+          [
+            "output",
+            1,
+            "committed"
+          ]
+        ],
+        "final_snapshot": {
+          "state": "completed",
+          "result": 1,
+          "failure": null
+        }
+      }
+    },
+    {
+      "name": "test_cancellation_boundaries[cancel]",
+      "duration_seconds": 0.373,
+      "outcome": "passed",
+      "observations": {
+        "profile": "postgres-sync-sdk",
+        "worker_processes": 1,
+        "database_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 0,
+        "runs": [
+          [
+            1,
+            "cancelled",
+            null,
+            null,
+            null
+          ]
+        ],
+        "checkpoints": [
+          [
+            "output",
+            1,
+            "committed"
+          ]
+        ],
+        "final_snapshot": {
+          "state": "cancelled",
+          "result": null,
+          "failure": null
+        }
+      }
+    },
+    {
+      "name": "test_cancellation_boundaries[cancel_cooperative]",
+      "duration_seconds": 0.295,
+      "outcome": "passed",
+      "observations": {
+        "profile": "postgres-sync-sdk",
+        "worker_processes": 1,
+        "database_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 0,
+        "runs": [
+          [
+            1,
+            "cancelled",
+            null,
+            null,
+            null
+          ]
+        ],
+        "checkpoints": [
+          [
+            "output",
+            1,
+            "committed"
+          ]
+        ],
+        "final_snapshot": {
+          "state": "cancelled",
+          "result": null,
+          "failure": null
+        }
+      }
+    },
+    {
+      "name": "test_cancellation_boundaries[cancel_inflight]",
+      "duration_seconds": 0.333,
+      "outcome": "passed",
+      "observations": {
+        "profile": "postgres-sync-sdk",
+        "worker_processes": 1,
+        "database_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 1,
+        "runs": [
+          [
+            1,
+            "cancelled",
+            null,
+            null,
+            null
+          ]
+        ],
+        "checkpoints": [
+          [
+            "output",
+            1,
+            "committed"
+          ]
+        ],
+        "final_snapshot": {
+          "state": "cancelled",
+          "result": null,
+          "failure": null
+        }
+      }
+    },
+    {
+      "name": "test_expired_claim_fences_checkpoints_but_not_inflight_effects[overlap_boundary]",
+      "duration_seconds": 3.625,
+      "outcome": "passed",
+      "observations": {
+        "snapshot": {
+          "state": "completed",
+          "result": "effect_recorded",
+          "failure": null
+        },
+        "profile": "postgres-sync-sdk",
+        "worker_processes": 2,
+        "database_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 1,
+        "runs": [
+          [
+            1,
+            "failed",
+            "fit-worker-29824",
+            null,
+            {
+              "name": "$ClaimTimeout",
+              "attempt": 1,
+              "message": "worker did not finish task within claim interval",
+              "workerId": "fit-worker-29824",
+              "claimExpiredAt": "2026-09-22T22:57:45.952143+01:00"
+            }
+          ],
+          [
+            2,
+            "completed",
+            "fit-worker-29826",
+            "effect_recorded",
+            null
+          ]
+        ],
+        "checkpoints": [
+          [
+            "effect",
+            "effect_recorded",
+            "committed"
+          ],
+          [
+            "output",
+            1,
+            "committed"
+          ],
+          [
+            "pause",
+            null,
+            "committed"
+          ]
+        ],
+        "final_snapshot": {
+          "state": "completed",
+          "result": "effect_recorded",
+          "failure": null
+        }
+      }
+    },
+    {
+      "name": "test_expired_claim_fences_checkpoints_but_not_inflight_effects[overlap_inflight]",
+      "duration_seconds": 3.63,
+      "outcome": "passed",
+      "observations": {
+        "snapshot": {
+          "state": "completed",
+          "result": "effect_recorded",
+          "failure": null
+        },
+        "profile": "postgres-sync-sdk",
+        "worker_processes": 2,
+        "database_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 2,
+        "runs": [
+          [
+            1,
+            "failed",
+            "fit-worker-29835",
+            null,
+            {
+              "name": "$ClaimTimeout",
+              "attempt": 1,
+              "message": "worker did not finish task within claim interval",
+              "workerId": "fit-worker-29835",
+              "claimExpiredAt": "2026-09-22T22:57:49.587147+01:00"
+            }
+          ],
+          [
+            2,
+            "completed",
+            "fit-worker-29837",
+            "effect_recorded",
+            null
+          ]
+        ],
+        "checkpoints": [
+          [
+            "effect",
+            "effect_recorded",
+            "committed"
+          ],
+          [
+            "output",
+            1,
+            "committed"
+          ]
+        ],
+        "final_snapshot": {
+          "state": "completed",
+          "result": "effect_recorded",
+          "failure": null
+        }
+      }
+    },
+    {
+      "name": "test_expired_claim_fences_checkpoints_but_not_inflight_effects[overlap_fenced]",
+      "duration_seconds": 3.588,
+      "outcome": "passed",
+      "observations": {
+        "snapshot": {
+          "state": "completed",
+          "result": "effect_recorded",
+          "failure": null
+        },
+        "profile": "postgres-sync-sdk",
+        "worker_processes": 2,
+        "database_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 1,
+        "runs": [
+          [
+            1,
+            "failed",
+            "fit-worker-29845",
+            null,
+            {
+              "name": "$ClaimTimeout",
+              "attempt": 1,
+              "message": "worker did not finish task within claim interval",
+              "workerId": "fit-worker-29845",
+              "claimExpiredAt": "2026-09-22T22:57:53.205124+01:00"
+            }
+          ],
+          [
+            2,
+            "completed",
+            "fit-worker-29847",
+            "effect_recorded",
+            null
+          ]
+        ],
+        "checkpoints": [
+          [
+            "effect",
+            "effect_recorded",
+            "committed"
+          ],
+          [
+            "output",
+            1,
+            "committed"
+          ]
+        ],
+        "final_snapshot": {
+          "state": "completed",
+          "result": "effect_recorded",
+          "failure": null
+        }
+      }
+    },
+    {
+      "name": "test_queued_delay_limit_is_enforced_when_worker_claims",
+      "duration_seconds": 2.477,
+      "outcome": "passed",
+      "observations": {
+        "state_before_worker": "pending",
+        "profile": "postgres-sync-sdk",
+        "worker_processes": 1,
+        "database_restarts": 0,
+        "output_effects": 0,
+        "external_effects": 0,
+        "runs": [
+          [
+            1,
+            "cancelled",
+            null,
+            null,
+            null
+          ]
+        ],
+        "checkpoints": [],
+        "final_snapshot": {
+          "state": "cancelled",
+          "result": null,
+          "failure": null
+        }
+      }
+    },
+    {
+      "name": "test_explicit_retry_can_reopen_a_failed_task_id",
+      "duration_seconds": 1.041,
+      "outcome": "passed",
+      "observations": {
+        "snapshot": {
+          "state": "completed",
+          "result": "effect_recorded",
+          "failure": null
+        },
+        "explicit_retry": {
+          "task_id": "01a0cb20-238a-7638-9148-8dadf7488856",
+          "run_id": "01a0cb20-2401-7a24-8fdb-271122c2a591",
+          "attempt": 2,
+          "created": false
+        },
+        "profile": "postgres-sync-sdk",
+        "worker_processes": 1,
+        "database_restarts": 0,
+        "output_effects": 1,
+        "external_effects": 1,
+        "runs": [
+          [
+            1,
+            "failed",
+            "fit-worker-29862",
+            null,
+            {
+              "name": "RuntimeError",
+              "message": "fictional failure before effect",
+              "traceback": "Traceback (most recent call last):\n  File \"<workspace>/experiments/absurd/.venv/lib/python3.12/site-packages/absurd_sdk/__init__.py\", line 1793, in _execute_task\n    result = cast(JsonValue, registration[\"handler\"](task[\"params\"], ctx))\n                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<workspace>/experiments/absurd/worker.py\", line 140, in task\n    return ctx.step(\"effect\", lambda: retry_effect(root))\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"<workspace>/experiments/absurd/.venv/lib/python3.12/site-packages/absurd_sdk/__init__.py\", line 699, in step\n    rv = fn()\n         ^^^^\n  File \"<workspace>/experiments/absurd/worker.py\", line 140, in <lambda>\n    return ctx.step(\"effect\", lambda: retry_effect(root))\n                                      ^^^^^^^^^^^^^^^^^^\n  File \"<workspace>/experiments/absurd/worker.py\", line 79, in retry_effect\n    raise RuntimeError(\"fictional failure before effect\")\nRuntimeError: fictional failure before effect\n"
+            }
+          ],
+          [
+            2,
+            "completed",
+            "fit-worker-29862",
+            "effect_recorded",
+            null
+          ]
+        ],
+        "checkpoints": [
+          [
+            "effect",
+            "effect_recorded",
+            "committed"
+          ],
+          [
+            "output",
+            1,
+            "committed"
+          ]
+        ],
+        "final_snapshot": {
+          "state": "completed",
+          "result": "effect_recorded",
+          "failure": null
+        }
+      }
+    }
+  ]
+}

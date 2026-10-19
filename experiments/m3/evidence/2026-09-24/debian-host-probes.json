@@ -1,0 +1,124 @@
+{
+  "profile": "debian-local-v1",
+  "checks": [
+    {
+      "name": "authorized_input_unprivileged",
+      "unit": "cardea-fit-766a9783d525420992ae8b2f58e26eaf.service",
+      "result": "success",
+      "exit_status": "0",
+      "output_excerpt": "{\"uid\": 65534}\nFIT_OK\n",
+      "output_bytes": 22,
+      "output_sha256": "991718036952fd035ac4ab139b2333834045047c0c88d1e791f5a670b42dbfd6",
+      "elapsed_seconds": 0.962,
+      "passed": true
+    },
+    {
+      "name": "filesystem_secrets_symlink_and_readonly_denial",
+      "unit": "cardea-fit-d2fb48ff57df45c4aecd095871fff765.service",
+      "result": "success",
+      "exit_status": "0",
+      "output_excerpt": "FIT_OK\n",
+      "output_bytes": 7,
+      "output_sha256": "7c28bc41fc500284ff8d65c03f6e9a05edba55b7a1cfb62692ad0aa83f6dbd9c",
+      "elapsed_seconds": 0.809,
+      "passed": true
+    },
+    {
+      "name": "network_and_unix_socket_denial",
+      "unit": "cardea-fit-23143d2c2298405d8364d1071c981be1.service",
+      "result": "success",
+      "exit_status": "0",
+      "output_excerpt": "FIT_OK\n",
+      "output_bytes": 7,
+      "output_sha256": "7c28bc41fc500284ff8d65c03f6e9a05edba55b7a1cfb62692ad0aa83f6dbd9c",
+      "elapsed_seconds": 0.962,
+      "passed": true
+    },
+    {
+      "name": "scratch_file_size_limit",
+      "unit": "cardea-fit-f9bec97de65641bcb6fb3c8eaabe11f0.service",
+      "result": "success",
+      "exit_status": "0",
+      "output_excerpt": "FIT_OK\n",
+      "output_bytes": 7,
+      "output_sha256": "7c28bc41fc500284ff8d65c03f6e9a05edba55b7a1cfb62692ad0aa83f6dbd9c",
+      "elapsed_seconds": 0.799,
+      "passed": true
+    },
+    {
+      "name": "scratch_is_private_and_capacity_bounded",
+      "unit": "cardea-fit-502b5c97c85347a98df2ee05978c5873.service",
+      "result": "success",
+      "exit_status": "0",
+      "output_excerpt": "FIT_OK\n",
+      "output_bytes": 7,
+      "output_sha256": "7c28bc41fc500284ff8d65c03f6e9a05edba55b7a1cfb62692ad0aa83f6dbd9c",
+      "elapsed_seconds": 0.871,
+      "passed": true
+    },
+    {
+      "name": "privilege_namespace_and_executable_memory_denial",
+      "unit": "cardea-fit-d450b14973fe4a809e5b87e29fdf75a8.service",
+      "result": "success",
+      "exit_status": "0",
+      "output_excerpt": "FIT_OK\n",
+      "output_bytes": 7,
+      "output_sha256": "7c28bc41fc500284ff8d65c03f6e9a05edba55b7a1cfb62692ad0aa83f6dbd9c",
+      "elapsed_seconds": 0.882,
+      "passed": true
+    },
+    {
+      "name": "process_count_limit",
+      "unit": "cardea-fit-f2035a3a86bb41be880fc66cb7558d0e.service",
+      "result": "success",
+      "exit_status": "0",
+      "output_excerpt": "FIT_OK\n",
+      "output_bytes": 7,
+      "output_sha256": "7c28bc41fc500284ff8d65c03f6e9a05edba55b7a1cfb62692ad0aa83f6dbd9c",
+      "elapsed_seconds": 2.898,
+      "passed": true
+    },
+    {
+      "name": "stdout_byte_limit",
+      "unit": "cardea-fit-fc601dd8c80947199365ed188869b98b.service",
+      "result": "exit-code",
+      "exit_status": "120",
+      "output_excerpt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "output_bytes": 65536,
+      "output_sha256": "1f8745f0d2d1387ec1af2211a3cf417b2e9e885e853472649c1d979d0e9370e3",
+      "elapsed_seconds": 0.924,
+      "passed": true
+    },
+    {
+      "name": "memory_limit",
+      "unit": "cardea-fit-789002002f8e4ee194cbda0c2a729363.service",
+      "result": "oom-kill",
+      "exit_status": "9",
+      "output_excerpt": "",
+      "output_bytes": 0,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "elapsed_seconds": 2.459,
+      "passed": true
+    },
+    {
+      "name": "wall_deadline",
+      "unit": "cardea-fit-4a91dca7a65641819a1eb7891599f7f2.service",
+      "result": "timeout",
+      "exit_status": "15",
+      "output_excerpt": "",
+      "output_bytes": 0,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "elapsed_seconds": 2.547,
+      "passed": true
+    },
+    {
+      "name": "cgroup_controls_and_detached_descendant_cancel",
+      "passed": true,
+      "cpu_max": "50000 100000",
+      "cpu_throttling_observed": true,
+      "pids_observed": 4
+    }
+  ],
+  "passed": true,
+  "instrumentation": "Hostile worker fixture; result retention disabled"
+}

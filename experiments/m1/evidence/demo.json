@@ -1,0 +1,19 @@
+{
+  "state": "succeeded",
+  "authenticated_supervisor": "supervisor",
+  "receipt_preserved_across_restart": true,
+  "output": {
+    "schema_version": "0.2",
+    "artifact": {
+      "schema_version": "0.1",
+      "namespace": "test",
+      "resource_id": "task-18e70e10b2c345f8bc29035ae514388f.output",
+      "version": 1,
+      "content_digest": "cda5364ca9a34e66afcdb260adc33a5698a98ccb1474917f7ec568d883d056cd"
+    },
+    "content": {
+      "message": "Hello from Cardea M1"
+    }
+  },
+  "model_calls": 0
+}

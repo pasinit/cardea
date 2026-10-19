@@ -1,0 +1,56 @@
+[project]
+name = "cardea-api"
+version = "0.1.0"
+description = "Python API for the Cardea prototype."
+requires-python = ">=3.12"
+dependencies = [
+    "a2a-sdk[http-server,sqlite]==1.1.5",
+    "alembic==1.20.0",
+    "authlib==1.8.0",
+    "casbin==1.43.0",
+    "croniter==6.2.4",
+    "dbos==3.0.0",
+    "fastapi>=0.115.0",
+    "httpx==0.28.1",
+    "claude-agent-sdk==0.2.163",
+    "jsonpointer==3.1.1",
+    "jsonschema==4.26.0",
+    "mcp==2.2.0",
+    "openrouter==1.2.22",
+    "pydantic>=2.7.0",
+    "rfc8785==0.1.4",
+    "spiffe==0.3.1",
+    "uvicorn[standard]>=0.30.0",
+]
+
+[dependency-groups]
+dev = [
+    "authlib==1.8.0",
+    "cryptography==50.0.1",
+    "httpx>=0.27.0",
+    "mypy>=1.10.0",
+    "pytest>=8.2.0",
+    "rfc8785==0.1.4",
+    "ruff>=0.6.0",
+    "spiffe==0.3.1",
+    "types-authlib==1.8.0.20260911",
+    "types-jsonschema>=4.26.0.20260518",
+    "types-protobuf>=7.35.1.20260906",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_configs = true
+files = ["src", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

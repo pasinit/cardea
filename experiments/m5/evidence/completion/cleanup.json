@@ -1,0 +1,10 @@
+{
+  "container": "5d9de55f43e1da33efe002829c9a68077bcc6f3148c0621f5949b09859fdf281",
+  "owned_mount_verified": true,
+  "disposable_sentinel_verified": true,
+  "services_stopped": true,
+  "no_running_job_units": true,
+  "guest_powered_off": true,
+  "outer_container_removed": true,
+  "disk_and_package_retained": true
+}

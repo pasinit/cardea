@@ -1,0 +1,38 @@
+{
+  "baseline_sha256": "2b94415dd2832c512ea14fefe4c7493450a35a4e0cb165ca4305dbaf02e7b2c6",
+  "candidate_sha256": "d2baf77c31531d2c50f93e18c50cfdd3493e8219958e1eb45209bfdd5ce8212e",
+  "changes": {
+    "admission_p95_ms": {
+      "candidate": 3105.0935799999484,
+      "ratio": 1.6393378887990033,
+      "reference": {
+        "max": 3051.183412849673,
+        "median": 1894.1144477998819,
+        "min": 737.0454827500907
+      }
+    },
+    "completion_p95_ms": {
+      "candidate": 27652.58683954992,
+      "ratio": 0.9596126669290912,
+      "reference": {
+        "max": 29557.892170350053,
+        "median": 28816.4045687751,
+        "min": 28074.916967200148
+      }
+    },
+    "completion_rps": {
+      "candidate": 0.06810167906162257,
+      "ratio": 0.9763942025339044,
+      "reference": {
+        "max": 0.06977486848976536,
+        "median": 0.06974813951669054,
+        "min": 0.0697214105436157
+      }
+    }
+  },
+  "correctness_passed": true,
+  "schema_version": "m4-load-1",
+  "warnings": [
+    "admission_p95_ms"
+  ]
+}

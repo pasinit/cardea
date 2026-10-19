@@ -1,0 +1,43 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.5, pytest-9.0.3, pluggy-1.6.0 -- /opt/cardea-venv/bin/python
+rootdir: /opt/cardea-src/experiments/m4
+plugins: anyio-4.13.0
+collecting ... collected 6 items / 5 deselected / 1 selected
+
+../../opt/cardea-src/experiments/m4/test_integration.py::test_native_success FAILED [100%]
+
+=================================== FAILURES ===================================
+_____________________________ test_native_success ______________________________
+
+service = <harness.ServiceLab object at 0x7fe09b734590>
+
+    def test_native_success(service):
+        service.start()
+>       parent = submit(service, minimum_success=2)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/opt/cardea-src/experiments/m4/test_integration.py:95: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+service = <harness.ServiceLab object at 0x7fe09b734590>
+request_id = 'delegation', changes = {'minimum_success': 2}
+request = DelegationTaskRequest(schema_version='0.2', request_id='delegation', agent_id='agent-a', namespace='test', objective='...st.copy', payload={'two': 2})), tool_milliseconds=20000, output_bytes=163840, concurrent_children=2, minimum_success=2)
+
+    def submit(service, request_id="delegation", **changes):
+        request = DelegationTaskRequest.model_validate({
+            "request_id": request_id, "agent_id": "agent-a", "namespace": "test",
+            "objective": "Verify the delegated input hash and copy",
+            "grants": [*RIGHTS, "tasks.delegate", "host.sha256", "host.copy"],
+            "children": [{"agent_id": "agent-b", "operation": "host.sha256", "payload": {"one": 1}},
+                         {"agent_id": "agent-b", "operation": "host.copy", "payload": {"two": 2}}],
+            **changes})
+>       return service.client.request("POST", "/delegation-tasks", request.model_dump(mode="json"))["task"]["task_id"]
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: KernelClient.request() takes 3 positional arguments but 4 were given
+
+/opt/cardea-src/experiments/m4/test_integration.py:58: TypeError
+---------------- generated xml file: /home/cardea-kernel/m4.xml ----------------
+=========================== short test summary info ============================
+FAILED ../../opt/cardea-src/experiments/m4/test_integration.py::test_native_success
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+======================= 1 failed, 5 deselected in 59.44s =======================

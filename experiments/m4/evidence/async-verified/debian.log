@@ -1,0 +1,47 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.5, pytest-9.0.3, pluggy-1.6.0 -- /opt/cardea-venv/bin/python
+rootdir: /opt/cardea-src/experiments/m4
+plugins: anyio-4.13.0
+collecting ... collected 7 items
+
+../../opt/cardea-src/experiments/m4/test_integration.py::test_native_success PASSED [ 14%]
+../../opt/cardea-src/experiments/m4/test_integration.py::test_restart_reconciles_same_children[delegation.child_admitted] PASSED [ 28%]
+../../opt/cardea-src/experiments/m4/test_integration.py::test_restart_reconciles_same_children[delegation.before_verify] PASSED [ 42%]
+../../opt/cardea-src/experiments/m4/test_integration.py::test_revocation_before_peer_admission PASSED [ 57%]
+../../opt/cardea-src/experiments/m4/test_integration.py::test_parent_cancel_stops_workers FAILED [ 71%]
+
+=================================== FAILURES ===================================
+_______________________ test_parent_cancel_stops_workers _______________________
+
+service = <harness.ServiceLab object at 0x7f2590a03e10>
+
+    def test_parent_cancel_stops_workers(service):
+        stage = "host.started"
+        process = service.start(stage)
+        parent = submit(service)
+        entered(service, process, stage)
+        service.client.control(parent, Signal(request_id="cancel-parent"), cancel=True)
+        release(service, process, stage)
+>       service.wait_state(parent, "cancelled", timeout=90)
+
+/opt/cardea-src/experiments/m4/test_integration.py:207: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/opt/cardea-src/experiments/m1/harness.py:102: in wait_state
+    wait_for(reached, timeout)
+/opt/cardea-src/experiments/m1/harness.py:30: in wait_for
+    return check()
+           ^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def reached() -> None:
+        state = self.client.inspect(task_id).task.state.value
+>       assert state == expected, (state, self.logs())
+               ^^^^^^^^^^^^^^^^^
+E       AssertionError: ('failed', '')
+
+/opt/cardea-src/experiments/m1/harness.py:101: AssertionError
+---------------- generated xml file: /home/cardea-kernel/m4.xml ----------------
+=========================== short test summary info ============================
+FAILED ../../opt/cardea-src/experiments/m4/test_integration.py::test_parent_cancel_stops_workers
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+=================== 1 failed, 4 passed in 292.31s (0:04:52) ====================

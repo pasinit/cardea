@@ -1,0 +1,40 @@
+{
+  "accepted": 49,
+  "accepted_p95_ms": 25.2634164,
+  "achieved_request_rps": 10.054193901815234,
+  "capacity_rejected": 0,
+  "completion_p50_ms": 54.344,
+  "completion_p95_ms": 81.03460000000001,
+  "completion_rps": 2.4205409613860223,
+  "distinct_credentials_used": 2,
+  "drain_seconds": 0.14046900000539608,
+  "expected_denial": 151,
+  "failures": {},
+  "fault_unavailable": 0,
+  "feeder_errors": [],
+  "http_seconds": 20.10293971799547,
+  "http_success_rps": 2.461471940062209,
+  "intervention": {
+    "at_ns": 1790208267015675175,
+    "committed": true,
+    "policy_cursor": 638
+  },
+  "malformed_successes": 0,
+  "name": "live-revocation",
+  "p95_ms": 19.567521,
+  "p99_ms": 39.235541,
+  "passed": true,
+  "peak_fds": 44,
+  "peak_rss_bytes": 178507776,
+  "peak_wal_bytes": 4206552,
+  "rate": 10,
+  "requests": 200,
+  "requests_per_configured_second": 10.0,
+  "seconds": 20,
+  "states": {
+    "succeeded": 49
+  },
+  "total_seconds": 20.243408718000865,
+  "unexpected_error": 0,
+  "violations": []
+}

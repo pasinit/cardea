@@ -1,0 +1,3 @@
+restored-work: passed
+maintenance: passed
+{"upgrade": true, "downgrade_refused": true, "reboot": true, "restore": true, "artifact": "/opt/cardea-kernel_0.1.0-2_amd64.deb"}

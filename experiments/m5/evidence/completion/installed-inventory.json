@@ -1,0 +1,17 @@
+{
+  "installed_source_files": 75,
+  "all_hashes_match": true,
+  "helper_sha256": "6556969d50c19830bbf484cb7472d263b5590defb4b32d1df03db45a395d699b",
+  "packages": [
+    "bubblewrap\t0.12.0-1~deb13u1",
+    "cardea-kernel\t0.1.0-2",
+    "debhelper\t13.24.2",
+    "dh-virtualenv\t1.2.2-1.7",
+    "dpkg\t1.22.22",
+    "libc6:amd64\t2.41-12+deb13u4",
+    "python3.13\t3.13.5-2+deb13u5",
+    "sudo\t1.9.16p2-3+deb13u2",
+    "systemd\t257.13-1~deb13u1"
+  ],
+  "kernel": "6.12.107+deb13-cloud-amd64"
+}

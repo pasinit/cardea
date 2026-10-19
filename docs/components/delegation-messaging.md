@@ -1,0 +1,13 @@
+# Delegation and Messaging
+
+**Purpose.** Let an agent delegate bounded work without expanding its supervisor's authority or its parent task's budget.
+
+**Reuse.** [ADR-017](../decisions/017-m4-native-a2a-delegation.md) selects A2A 1.0/Python SDK 1.1.5 for native peer discovery, messages, task/status/artifact retrieval and cancellation. Its SQL task store passes persistence/owner tests, but direct saves do not enforce terminal execution state or share the existing DBOS transaction. A small SDK request-handler adapter reads existing task state; no second task store, custom mailbox, scheduler or wire protocol is introduced.
+
+**Design.** The installed deterministic coordinator delegates one-level hash/copy tasks to a distinct installed worker agent over the private Unix socket. Immutable parent/slot/child/message associations commit atomically with admission and DBOS enqueue. Native peer task IDs equal local child IDs. Child grants are narrower, deadlines are capped by the parent, and fixed child allocations fit inside the parent ceiling and the existing cumulative supervisor pool. Read-only peer views check policy and data in one fresh WAL snapshot without claiming the SQLite writer. Native A2A handlers stay async; existing synchronous authentication/transaction calls run through Starlette’s awaited worker-pool boundary. Coordinator scheduling uses a separate DBOS queue so waiting parents cannot occupy all child worker slots.
+
+**Recovery and authority.** Reconcile lost replies from committed associations; reject changed content under the same identity. Recheck live supervisor, platform and ancestor ceilings, including delegation revocation, before dispatch and publication. Parent cancellation propagates to confined workers and waits for stop/reconciliation. Preserve uncertain host effects and full reservations without replay. Independently verify native peer artifacts; explicit minimum-success objectives may retain failed children in a partial-result report.
+
+**Acceptance.** Native client/server calls, SQL SDK fit, concurrent allocation denial, broader/forged messages, ancestor restrictions, cancellation, lost replies, interrupted publication and false peer artifacts. Real Debian and matched load results belong in the [M4 report](../../experiments/m4/M4-REPORT.md).
+
+**Status.** Complete for the bounded profile; portable, real Debian and matched load acceptance pass. Up to four one-level installed host children, zero model calls. Arbitrary remote peers, nested coordinator plans, streaming/push, arbitrary mailbox traffic and general multi-agent execution are outside this profile. See [usage](../../experiments/m4/README.md).

@@ -1,0 +1,1 @@
+{"eligible_for_fit": false, "errors": ["Debian 13 Linux required", "systemd as PID 1 required", "cgroup v2 CPU, memory and pids controllers required", "writable cgroup hierarchy required for the admin fit fixture", "systemd tools and bubblewrap required"], "enforcement_verified": false}

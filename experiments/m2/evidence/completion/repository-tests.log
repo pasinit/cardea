@@ -1,0 +1,50 @@
+cd apps/api && "/home/user/.local/bin/uv" run pytest
+============================= test session starts ==============================
+platform darwin -- Python 3.12.0, pytest-9.0.3, pluggy-1.6.0
+rootdir: /home/user/src/cardea/apps/api
+configfile: pyproject.toml
+testpaths: tests
+plugins: anyio-4.13.0
+collected 221 items
+
+tests/hosts/test_execution.py .......................                    [ 10%]
+tests/hosts/test_m2_completion.py ...................                    [ 19%]
+tests/hosts/test_object_inputs.py ...................................    [ 34%]
+tests/kernel/test_digest_compatibility.py .........                      [ 38%]
+tests/kernel/test_lifecycle.py ......................................... [ 57%]
+...                                                                      [ 58%]
+tests/kernel/test_models.py .........................                    [ 70%]
+tests/kernel/test_persistence_demo.py ....                               [ 71%]
+tests/kernel/test_store.py .........................                     [ 83%]
+tests/service/test_storage.py ......                                     [ 85%]
+tests/standards/test_identity_fit.py ..............                      [ 92%]
+tests/standards/test_transport_fit.py ....                               [ 94%]
+tests/test_actions_audit.py ....                                         [ 95%]
+tests/test_command_center_api.py ...                                     [ 97%]
+tests/test_evaluators.py .....                                           [ 99%]
+tests/test_health.py .                                                   [100%]
+
+=============================== warnings summary ===============================
+.venv/lib/python3.12/site-packages/fastapi/testclient.py:1
+  /home/user/src/cardea/apps/api/.venv/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+.venv/lib/python3.12/site-packages/authlib/integrations/httpx_client/assertion_client.py:5
+  /home/user/src/cardea/apps/api/.venv/lib/python3.12/site-packages/authlib/integrations/httpx_client/assertion_client.py:5: AuthlibDeprecationWarning: The httpx module is deprecated; please use httpx2 instead.
+    from ._compat import httpx2
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 221 passed, 2 warnings in 5.14s ========================
+
+> cardea-web@0.1.0 test
+> vitest run
+
+
+ RUN  v4.1.8 /home/user/src/cardea/apps/web
+
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  14:57:37
+   Duration  816ms (transform 71ms, setup 56ms, import 167ms, tests 170ms, environment 337ms)
+

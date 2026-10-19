@@ -1,0 +1,1 @@
+cardea-kernel ALL=(root) NOPASSWD: /usr/libexec/cardea-host ""

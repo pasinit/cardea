@@ -1,0 +1,30 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.5, pytest-9.0.3, pluggy-1.6.0 -- /opt/cardea-venv/bin/python
+rootdir: /opt/cardea-src/experiments/m2
+plugins: anyio-4.13.0
+collecting ... collected 15 items
+
+../../opt/cardea-src/experiments/m2/test_integration.py::test_authenticated_real_worker PASSED [  6%]
+../../opt/cardea-src/experiments/m2/test_integration.py::test_killed_daemon_preserves_unknown_without_relaunch[host.intent_committed] PASSED [ 13%]
+../../opt/cardea-src/experiments/m2/test_integration.py::test_killed_daemon_preserves_unknown_without_relaunch[host.started] PASSED [ 20%]
+../../opt/cardea-src/experiments/m2/test_integration.py::test_killed_daemon_preserves_unknown_without_relaunch[host.before_settle] PASSED [ 26%]
+../../opt/cardea-src/experiments/m2/test_integration.py::test_revoked_after_intent_never_starts PASSED [ 33%]
+../../opt/cardea-src/experiments/m2/test_integration.py::test_cancel_after_intent PASSED [ 40%]
+../../opt/cardea-src/experiments/m2/test_integration.py::test_fixed_sudo_command_scope PASSED [ 46%]
+../../opt/cardea-src/experiments/m2/test_integration.py::test_authenticated_stored_object_worker PASSED [ 53%]
+../../opt/cardea-src/experiments/m2/test_integration.py::test_live_object_ceiling_on_debian[allow-host.intent_committed] PASSED [ 60%]
+../../opt/cardea-src/experiments/m2/test_integration.py::test_live_object_ceiling_on_debian[allow-host.before_settle] PASSED [ 66%]
+../../opt/cardea-src/experiments/m2/test_integration.py::test_live_object_ceiling_on_debian[delegate-host.intent_committed] PASSED [ 73%]
+../../opt/cardea-src/experiments/m2/test_integration.py::test_live_object_ceiling_on_debian[delegate-host.before_settle] PASSED [ 80%]
+../../opt/cardea-src/experiments/m2/test_integration.py::test_live_object_ceiling_on_debian[platform-host.intent_committed] PASSED [ 86%]
+../../opt/cardea-src/experiments/m2/test_integration.py::test_live_object_ceiling_on_debian[platform-host.before_settle] PASSED [ 93%]
+../../opt/cardea-src/experiments/m2/test_integration.py::test_stored_object_daemon_crash_never_relaunches PASSED [100%]
+
+=============================== warnings summary ===============================
+../../opt/cardea-venv/lib/python3.13/site-packages/authlib/integrations/httpx_client/assertion_client.py:5
+  /opt/cardea-venv/lib/python3.13/site-packages/authlib/integrations/httpx_client/assertion_client.py:5: AuthlibDeprecationWarning: The httpx module is deprecated; please use httpx2 instead.
+    from ._compat import httpx2
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+---------- generated xml file: /home/cardea-kernel/m2-integration.xml ----------
+================== 15 passed, 1 warning in 429.34s (0:07:09) ===================

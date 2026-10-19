@@ -1,0 +1,16 @@
+[project]
+name = "cardea-dbos-integration-fit"
+version = "0.1.0"
+description = "Disposable Cardea and DBOS transaction integration experiment"
+requires-python = ">=3.12"
+dependencies = ["dbos==3.0.0", "pydantic==2.13.5", "pytest==9.0.3"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "../../apps/api/src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

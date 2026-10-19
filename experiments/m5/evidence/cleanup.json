@@ -1,0 +1,9 @@
+{
+  "owned_vm_mount_verified": true,
+  "post_reboot_boot_id": "75b442df-355a-4ae6-9aec-ea7f0d9ff22b",
+  "active_worker_units_before_stop": [],
+  "service_and_fixture_stopped": true,
+  "guest_powered_off": true,
+  "container_removed": true,
+  "disk_and_package_retained": true
+}

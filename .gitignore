@@ -1,0 +1,22 @@
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+
+# Node / frontend
+node_modules/
+dist/
+build/
+
+# Local environment
+.env
+.env.*
+!.env.example
+
+# Private local kernel development state
+.cardea/

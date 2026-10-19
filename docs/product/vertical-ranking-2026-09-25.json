@@ -1,0 +1,798 @@
+{
+  "as_of": "2026-09-25",
+  "status": "desk-research hypotheses; no buyer or economic validation",
+  "scope": "24 overlapping segments and buying functions; not an exhaustive taxonomy or additive market size",
+  "profitability_weights": {
+    "value": 0.4,
+    "repeatability": 0.35,
+    "margin_defensibility": 0.25
+  },
+  "access_weights": {
+    "buyer_discoverability": 0.35,
+    "purchase_ease": 0.35,
+    "deployment_ease": 0.3
+  },
+  "priority_weights": {
+    "profitability": 0.55,
+    "access": 0.45
+  },
+  "tie_break": "Higher access, then segment name; equal scores are not substantively different.",
+  "segments": [
+    {
+      "id": "technical-services",
+      "segment": "B2B IT and software consultancies",
+      "ratings": {
+        "value": 4,
+        "repeatability": 4,
+        "margin_defensibility": 3,
+        "buyer_discoverability": 5,
+        "purchase_ease": 4,
+        "deployment_ease": 4
+      },
+      "profitability_score": 3.75,
+      "access_score": 4.35,
+      "priority_score": 4.02,
+      "buyer": "COO / managing director",
+      "proposed_workflow": "Sales \u2192 delivery \u2192 finance: signed scope to project readiness and invoice evidence.",
+      "cold_channel": "HubSpot solutions directory; public consultancy websites. Qualify technical implementation firms, excluding marketing-only agencies.",
+      "main_risk": "Technical buyers can build internally; fragmented project rules can turn delivery into consulting.",
+      "evidence_scope": "direct",
+      "sources": [
+        {
+          "title": "HubSpot public directory",
+          "url": "https://ecosystem.hubspot.com/marketplace/solutions"
+        },
+        {
+          "title": "Productive competing operations suite",
+          "url": "https://productive.io/"
+        }
+      ],
+      "priority_rank": 1,
+      "profitability_rank": 6,
+      "access_rank": 1,
+      "profit_heavy_rank": 2,
+      "access_heavy_rank": 1
+    },
+    {
+      "id": "accounting",
+      "segment": "Accounting and outsourced finance firms",
+      "ratings": {
+        "value": 4,
+        "repeatability": 5,
+        "margin_defensibility": 3,
+        "buyer_discoverability": 5,
+        "purchase_ease": 3,
+        "deployment_ease": 3
+      },
+      "profitability_score": 4.1,
+      "access_score": 3.7,
+      "priority_score": 3.92,
+      "buyer": "Managing partner / operations director",
+      "proposed_workflow": "Client services \u2192 accounting delivery \u2192 reviewer/finance: document collection, close readiness, reviewed deliverables and billing.",
+      "cold_channel": "Xero advisor directory; publicly advertised practice operations roles.",
+      "main_risk": "Karbon already combines workflow and AI. Client data boundaries, API access and professional review add work.",
+      "evidence_scope": "direct",
+      "sources": [
+        {
+          "title": "Xero advisor directory",
+          "url": "https://www.xero.com/uk/advisors/find-advisors/"
+        },
+        {
+          "title": "Karbon AI",
+          "url": "https://karbonhq.com/en-GB/feature/ai"
+        }
+      ],
+      "priority_rank": 2,
+      "profitability_rank": 2,
+      "access_rank": 5,
+      "profit_heavy_rank": 1,
+      "access_heavy_rank": 5
+    },
+    {
+      "id": "compliance-services",
+      "segment": "Cybersecurity and compliance consultancies",
+      "ratings": {
+        "value": 4,
+        "repeatability": 4,
+        "margin_defensibility": 3,
+        "buyer_discoverability": 4,
+        "purchase_ease": 4,
+        "deployment_ease": 4
+      },
+      "profitability_score": 3.75,
+      "access_score": 4.0,
+      "priority_score": 3.8625,
+      "buyer": "Founder / head of delivery",
+      "proposed_workflow": "Account management \u2192 assessment delivery \u2192 reviewer: evidence requests, remediation handoffs and accepted report preparation.",
+      "cold_channel": "Vanta service-provider ecosystem and public consultancy sites. Listing does not confer partnership or customer access.",
+      "main_risk": "Vanta and adjacent platforms already automate evidence. Need a demonstrated gap across systems, not another compliance chatbot.",
+      "evidence_scope": "direct",
+      "sources": [
+        {
+          "title": "Vanta partner ecosystem",
+          "url": "https://www.vanta.com/partners/partner-program"
+        }
+      ],
+      "priority_rank": 3,
+      "profitability_rank": 6,
+      "access_rank": 4,
+      "profit_heavy_rank": 3,
+      "access_heavy_rank": 4
+    },
+    {
+      "id": "msp",
+      "segment": "Managed IT service providers: internal operations",
+      "ratings": {
+        "value": 4,
+        "repeatability": 5,
+        "margin_defensibility": 2,
+        "buyer_discoverability": 5,
+        "purchase_ease": 3,
+        "deployment_ease": 3
+      },
+      "profitability_score": 3.85,
+      "access_score": 3.7,
+      "priority_score": 3.7825,
+      "buyer": "Owner / service delivery director",
+      "proposed_workflow": "Sales \u2192 service desk \u2192 finance: contract handoff, onboarding readiness, service evidence and billing reconciliation.",
+      "cold_channel": "Public MSP websites and vendor communities; qualify independently. No verified account list assembled.",
+      "main_risk": "Rewst is a strong specialist. Restrict first scope to MSP internal operations; managing many customer environments needs additional isolation and fleet capabilities.",
+      "evidence_scope": "direct",
+      "sources": [
+        {
+          "title": "Rewst platform",
+          "url": "https://rewst.io/platform"
+        },
+        {
+          "title": "Rewst integrations",
+          "url": "https://rewst.io/integrations"
+        }
+      ],
+      "priority_rank": 4,
+      "profitability_rank": 4,
+      "access_rank": 5,
+      "profit_heavy_rank": 4,
+      "access_heavy_rank": 6
+    },
+    {
+      "id": "ecommerce",
+      "segment": "E-commerce brands with internal operations teams",
+      "ratings": {
+        "value": 3,
+        "repeatability": 5,
+        "margin_defensibility": 1,
+        "buyer_discoverability": 5,
+        "purchase_ease": 4,
+        "deployment_ease": 4
+      },
+      "profitability_score": 3.2,
+      "access_score": 4.35,
+      "priority_score": 3.7175,
+      "buyer": "COO / head of operations",
+      "proposed_workflow": "Customer support \u2192 warehouse \u2192 finance: returns exceptions and reconciled refund evidence.",
+      "cold_channel": "Public brand websites, Shopify ecosystem and operations communities; no marketplace acceptance assumed.",
+      "main_risk": "Easy-to-reach does not mean profitable: Shopify Flow and abundant apps constrain pricing, while high-volume support can remain expensive.",
+      "evidence_scope": "direct",
+      "sources": [
+        {
+          "title": "Shopify Flow workflow examples",
+          "url": "https://help.shopify.com/en/manual/shopify-flow/getting-started/workflow-examples"
+        }
+      ],
+      "priority_rank": 5,
+      "profitability_rank": 20,
+      "access_rank": 1,
+      "profit_heavy_rank": 8,
+      "access_heavy_rank": 2
+    },
+    {
+      "id": "marketing",
+      "segment": "Marketing and creative agencies",
+      "ratings": {
+        "value": 3,
+        "repeatability": 4,
+        "margin_defensibility": 2,
+        "buyer_discoverability": 5,
+        "purchase_ease": 4,
+        "deployment_ease": 4
+      },
+      "profitability_score": 3.1,
+      "access_score": 4.35,
+      "priority_score": 3.6625,
+      "buyer": "Managing director / operations lead",
+      "proposed_workflow": "Account management \u2192 creative delivery \u2192 finance: scope changes, completion acceptance and billing handoffs.",
+      "cold_channel": "HubSpot public directory and agency websites; exclude technical consultancies counted separately.",
+      "main_risk": "Productive and agency tools cover the core. Differentiation and budgets may be weak despite easy prospect discovery.",
+      "evidence_scope": "direct",
+      "sources": [
+        {
+          "title": "HubSpot directory",
+          "url": "https://ecosystem.hubspot.com/marketplace/solutions"
+        },
+        {
+          "title": "Productive pricing and feature comparison",
+          "url": "https://productive.io/pricing/"
+        }
+      ],
+      "priority_rank": 6,
+      "profitability_rank": 23,
+      "access_rank": 1,
+      "profit_heavy_rank": 9,
+      "access_heavy_rank": 3
+    },
+    {
+      "id": "property",
+      "segment": "Property and facilities management firms",
+      "ratings": {
+        "value": 4,
+        "repeatability": 4,
+        "margin_defensibility": 2,
+        "buyer_discoverability": 5,
+        "purchase_ease": 3,
+        "deployment_ease": 3
+      },
+      "profitability_score": 3.5,
+      "access_score": 3.7,
+      "priority_score": 3.59,
+      "buyer": "Operations director / finance lead",
+      "proposed_workflow": "Resident/client services \u2192 maintenance/vendor management \u2192 finance: non-emergency job completion evidence and invoice readiness.",
+      "cold_channel": "Propertymark public expert directory; qualify multi-function firms rather than individual agents or offices.",
+      "main_risk": "AppFolio is expanding agents across operations. Local systems, thin customer margins and exceptional repairs can create support load.",
+      "evidence_scope": "direct",
+      "sources": [
+        {
+          "title": "Propertymark directory",
+          "url": "https://www.propertymark.co.uk/find-an-expert.html"
+        },
+        {
+          "title": "AppFolio agentic operations announcement",
+          "url": "https://www.appfolio.com/newsroom/appfolio-deepens-agentic-ai-across-leasing-accounting-and-resident-operations"
+        }
+      ],
+      "priority_rank": 7,
+      "profitability_rank": 13,
+      "access_rank": 5,
+      "profit_heavy_rank": 7,
+      "access_heavy_rank": 7
+    },
+    {
+      "id": "staffing",
+      "segment": "Recruitment and staffing agencies",
+      "ratings": {
+        "value": 4,
+        "repeatability": 4,
+        "margin_defensibility": 3,
+        "buyer_discoverability": 4,
+        "purchase_ease": 3,
+        "deployment_ease": 3
+      },
+      "profitability_score": 3.75,
+      "access_score": 3.35,
+      "priority_score": 3.57,
+      "buyer": "COO / operations director",
+      "proposed_workflow": "Recruitment operations \u2192 onboarding/payroll \u2192 finance: placement paperwork to payroll and invoice readiness.",
+      "cold_channel": "Agency websites and REC directory candidate; directory entry retrieval was blocked in this research.",
+      "main_risk": "Bullhorn covers the lifecycle; payroll and personal data complicate integration. Exclude automated candidate selection from the first application.",
+      "evidence_scope": "direct",
+      "sources": [
+        {
+          "title": "Bullhorn onboarding",
+          "url": "https://www.bullhorn.com/products/onboarding/"
+        },
+        {
+          "title": "Bullhorn One documentation",
+          "url": "https://kb.bullhorn.com/bhone/"
+        }
+      ],
+      "priority_rank": 8,
+      "profitability_rank": 6,
+      "access_rank": 8,
+      "profit_heavy_rank": 5,
+      "access_heavy_rank": 8
+    },
+    {
+      "id": "freight",
+      "segment": "Freight forwarders and logistics operators",
+      "ratings": {
+        "value": 5,
+        "repeatability": 4,
+        "margin_defensibility": 3,
+        "buyer_discoverability": 3,
+        "purchase_ease": 2,
+        "deployment_ease": 2
+      },
+      "profitability_score": 4.15,
+      "access_score": 2.35,
+      "priority_score": 3.34,
+      "buyer": "COO / branch operations director",
+      "proposed_workflow": "Customer service \u2192 shipment operations \u2192 finance: document gaps, exception resolution and billing evidence.",
+      "cold_channel": "Forwarder websites and trade directories; BIFA directory request returned 403, so membership entries were not verified.",
+      "main_risk": "CargoWise already automates these processes. Heterogeneous systems, integrations and operational urgency may consume the apparent high value.",
+      "evidence_scope": "direct",
+      "sources": [
+        {
+          "title": "CargoWise forwarding",
+          "url": "https://www.cargowise.com/solutions/cargowise-forwarding/"
+        },
+        {
+          "title": "CargoWise product updates",
+          "url": "https://www.cargowise.com/news/product-news/"
+        }
+      ],
+      "priority_rank": 9,
+      "profitability_rank": 1,
+      "access_rank": 16,
+      "profit_heavy_rank": 6,
+      "access_heavy_rank": 15
+    },
+    {
+      "id": "insurance-brokers",
+      "segment": "Commercial insurance brokers",
+      "ratings": {
+        "value": 4,
+        "repeatability": 4,
+        "margin_defensibility": 3,
+        "buyer_discoverability": 4,
+        "purchase_ease": 2,
+        "deployment_ease": 2
+      },
+      "profitability_score": 3.75,
+      "access_score": 2.7,
+      "priority_score": 3.2775,
+      "buyer": "COO / head of operations",
+      "proposed_workflow": "Account servicing \u2192 placement operations \u2192 finance: renewal evidence completeness and handoff preparation.",
+      "cold_channel": "Public broker websites and specialist directories; directory coverage and conversion untested.",
+      "main_risk": "Applied Epic owns much of the workflow. Sensitive records and system access need domain-specific assurance; exclude underwriting and advice.",
+      "evidence_scope": "direct",
+      "sources": [
+        {
+          "title": "Applied Epic",
+          "url": "https://www1.appliedsystems.com/en-us/solutions/for-agents/agency-management-system/applied-epic/"
+        }
+      ],
+      "priority_rank": 10,
+      "profitability_rank": 6,
+      "access_rank": 12,
+      "profit_heavy_rank": 10,
+      "access_heavy_rank": 12
+    },
+    {
+      "id": "wholesale",
+      "segment": "Wholesale distributors",
+      "ratings": {
+        "value": 4,
+        "repeatability": 4,
+        "margin_defensibility": 3,
+        "buyer_discoverability": 3,
+        "purchase_ease": 3,
+        "deployment_ease": 2
+      },
+      "profitability_score": 3.75,
+      "access_score": 2.7,
+      "priority_score": 3.2775,
+      "buyer": "COO / finance director",
+      "proposed_workflow": "Sales \u2192 warehouse/procurement \u2192 finance: order exceptions, missing delivery evidence and invoice reconciliation.",
+      "cold_channel": "Supplier and manufacturer dealer directories, trade shows and company websites; channel effectiveness untested.",
+      "main_risk": "ERP suites already own order-to-cash. Legacy access and custom inventory rules can make each deployment different.",
+      "evidence_scope": "direct",
+      "sources": [
+        {
+          "title": "NetSuite wholesale distribution",
+          "url": "https://www.netsuite.com/portal/industries/wholesale.shtml"
+        }
+      ],
+      "priority_rank": 11,
+      "profitability_rank": 6,
+      "access_rank": 12,
+      "profit_heavy_rank": 11,
+      "access_heavy_rank": 13
+    },
+    {
+      "id": "construction",
+      "segment": "Construction contractors and project operators",
+      "ratings": {
+        "value": 4,
+        "repeatability": 3,
+        "margin_defensibility": 3,
+        "buyer_discoverability": 4,
+        "purchase_ease": 3,
+        "deployment_ease": 2
+      },
+      "profitability_score": 3.4,
+      "access_score": 3.05,
+      "priority_score": 3.2425,
+      "buyer": "Commercial director / finance director",
+      "proposed_workflow": "Site operations \u2192 commercial/project controls \u2192 finance: subcontractor completion evidence and invoice review.",
+      "cold_channel": "Contractor websites and public supplier/project lists; direct acquisition channel not validated.",
+      "main_risk": "Procore already joins field and finance. Project-specific processes, subcontractor access and uneven source data reduce reuse.",
+      "evidence_scope": "direct",
+      "sources": [
+        {
+          "title": "Procore invoice management",
+          "url": "https://www.procore.com/invoice-management"
+        }
+      ],
+      "priority_rank": 12,
+      "profitability_rank": 17,
+      "access_rank": 9,
+      "profit_heavy_rank": 13,
+      "access_heavy_rank": 9
+    },
+    {
+      "id": "industrial-services",
+      "segment": "Industrial maintenance and field-service contractors",
+      "ratings": {
+        "value": 4,
+        "repeatability": 3,
+        "margin_defensibility": 3,
+        "buyer_discoverability": 4,
+        "purchase_ease": 3,
+        "deployment_ease": 2
+      },
+      "profitability_score": 3.4,
+      "access_score": 3.05,
+      "priority_score": 3.2425,
+      "buyer": "Operations / commercial director",
+      "proposed_workflow": "Dispatch \u2192 field completion review \u2192 finance: service evidence, missing parts/documents and billing handoff.",
+      "cold_channel": "Contractor and equipment-service company websites; channel and buyer qualification untested.",
+      "main_risk": "Potentially valuable project-to-cash work, but field data and installed systems vary. Current evidence is adjacent construction software, not a verified segment-specific gap.",
+      "evidence_scope": "adjacent",
+      "sources": [
+        {
+          "title": "Adjacent comparison: Procore invoice management",
+          "url": "https://www.procore.com/invoice-management"
+        }
+      ],
+      "priority_rank": 13,
+      "profitability_rank": 17,
+      "access_rank": 9,
+      "profit_heavy_rank": 14,
+      "access_heavy_rank": 10
+    },
+    {
+      "id": "law",
+      "segment": "Law firms: operational processes",
+      "ratings": {
+        "value": 4,
+        "repeatability": 4,
+        "margin_defensibility": 2,
+        "buyer_discoverability": 4,
+        "purchase_ease": 2,
+        "deployment_ease": 2
+      },
+      "profitability_score": 3.5,
+      "access_score": 2.7,
+      "priority_score": 3.14,
+      "buyer": "COO / managing partner",
+      "proposed_workflow": "Business intake \u2192 risk reviewer \u2192 matter operations/finance: intake evidence, authorized matter setup and billing readiness.",
+      "cold_channel": "Public firm websites and professional directories; identifiable firms do not imply access to decision makers.",
+      "main_risk": "Intapp already covers intake and conflicts. Confidentiality, matter permissions and specialist exceptions increase delivery effort. No autonomous legal opinions.",
+      "evidence_scope": "direct",
+      "sources": [
+        {
+          "title": "Intapp intake",
+          "url": "https://www.intapp.com/intake/"
+        }
+      ],
+      "priority_rank": 14,
+      "profitability_rank": 13,
+      "access_rank": 12,
+      "profit_heavy_rank": 16,
+      "access_heavy_rank": 14
+    },
+    {
+      "id": "hospitality",
+      "segment": "Hotel and hospitality groups",
+      "ratings": {
+        "value": 3,
+        "repeatability": 4,
+        "margin_defensibility": 2,
+        "buyer_discoverability": 4,
+        "purchase_ease": 3,
+        "deployment_ease": 2
+      },
+      "profitability_score": 3.1,
+      "access_score": 3.05,
+      "priority_score": 3.0775,
+      "buyer": "Group operations / finance director",
+      "proposed_workflow": "Property operations \u2192 procurement \u2192 finance: supplier exceptions and reconciled invoice evidence.",
+      "cold_channel": "Group websites and hospitality-system ecosystems; qualify multi-site organizations with central operations.",
+      "main_risk": "Property systems and continuous operations increase integration/support effort; willingness to pay for an additional platform is untested.",
+      "evidence_scope": "adjacent",
+      "sources": [
+        {
+          "title": "Mews product ecosystem",
+          "url": "https://www.mews.com/en/products"
+        }
+      ],
+      "priority_rank": 15,
+      "profitability_rank": 23,
+      "access_rank": 9,
+      "profit_heavy_rank": 18,
+      "access_heavy_rank": 11
+    },
+    {
+      "id": "legal-departments",
+      "segment": "Corporate legal and contract operations",
+      "ratings": {
+        "value": 5,
+        "repeatability": 4,
+        "margin_defensibility": 2,
+        "buyer_discoverability": 2,
+        "purchase_ease": 2,
+        "deployment_ease": 2
+      },
+      "profitability_score": 3.9,
+      "access_score": 2.0,
+      "priority_score": 3.045,
+      "buyer": "Legal operations director / general counsel",
+      "proposed_workflow": "Sales \u2192 legal \u2192 finance: agreed contract obligations to authorized operational handoffs.",
+      "cold_channel": "Public legal-operations communities, events and company roles; buyer discovery is more indirect than firm directories.",
+      "main_risk": "Ironclad and enterprise suites already serve the buyer; proving integration value and passing procurement can be costly.",
+      "evidence_scope": "direct",
+      "sources": [
+        {
+          "title": "Ironclad AI contract management",
+          "url": "https://ironcladapp.com/product/ai-based-contract-management"
+        }
+      ],
+      "priority_rank": 16,
+      "profitability_rank": 3,
+      "access_rank": 20,
+      "profit_heavy_rank": 12,
+      "access_heavy_rank": 18
+    },
+    {
+      "id": "foundations",
+      "segment": "Grantmaking foundations",
+      "ratings": {
+        "value": 3,
+        "repeatability": 4,
+        "margin_defensibility": 3,
+        "buyer_discoverability": 3,
+        "purchase_ease": 2,
+        "deployment_ease": 3
+      },
+      "profitability_score": 3.35,
+      "access_score": 2.65,
+      "priority_score": 3.035,
+      "buyer": "COO / grants operations director",
+      "proposed_workflow": "Program officers \u2192 due diligence/review \u2192 finance: grant evidence, disbursement readiness and reporting follow-up.",
+      "cold_channel": "Published grant portfolios, foundation websites and sector communities; applicants are not the buyer.",
+      "main_risk": "Fluxx already covers the grant lifecycle. Ability to award large grants does not establish an internal software budget.",
+      "evidence_scope": "direct",
+      "sources": [
+        {
+          "title": "Fluxx foundation grant management",
+          "url": "https://www.fluxx.io/grants-management-software-foundations"
+        }
+      ],
+      "priority_rank": 17,
+      "profitability_rank": 19,
+      "access_rank": 15,
+      "profit_heavy_rank": 17,
+      "access_heavy_rank": 16
+    },
+    {
+      "id": "manufacturing",
+      "segment": "Manufacturing back-office and procurement",
+      "ratings": {
+        "value": 5,
+        "repeatability": 3,
+        "margin_defensibility": 3,
+        "buyer_discoverability": 3,
+        "purchase_ease": 2,
+        "deployment_ease": 1
+      },
+      "profitability_score": 3.8,
+      "access_score": 2.05,
+      "priority_score": 3.0125,
+      "buyer": "Operations / procurement director",
+      "proposed_workflow": "Procurement \u2192 supplier-quality review \u2192 finance: supplier evidence, purchase exceptions and accepted invoice readiness.",
+      "cold_channel": "Manufacturer websites and supplier ecosystems; no qualified procurement-owner list verified.",
+      "main_risk": "ERP integration and company-specific approval rules are substantial. Restrict scope to office processes, not machinery or production control.",
+      "evidence_scope": "adjacent",
+      "sources": [
+        {
+          "title": "SAP spend management",
+          "url": "https://www.sap.com/products/spend-management.html"
+        }
+      ],
+      "priority_rank": 18,
+      "profitability_rank": 5,
+      "access_rank": 17,
+      "profit_heavy_rank": 15,
+      "access_heavy_rank": 17
+    },
+    {
+      "id": "healthcare",
+      "segment": "Private healthcare groups: administration",
+      "ratings": {
+        "value": 4,
+        "repeatability": 4,
+        "margin_defensibility": 2,
+        "buyer_discoverability": 3,
+        "purchase_ease": 2,
+        "deployment_ease": 1
+      },
+      "profitability_score": 3.5,
+      "access_score": 2.05,
+      "priority_score": 2.8475,
+      "buyer": "COO / revenue-cycle lead",
+      "proposed_workflow": "Scheduling/referrals \u2192 administration \u2192 finance: document and claim readiness with human review.",
+      "cold_channel": "Provider group websites; clinical-system access is a separate commercial and technical gate.",
+      "main_risk": "Existing interfaces do not imply accessible test data or installation rights. Health records and payer-specific exceptions add substantial assurance and support effort.",
+      "evidence_scope": "adjacent",
+      "sources": [
+        {
+          "title": "Epic CDS and prior-authorization integration guidance",
+          "url": "https://fhir.epic.com/Documentation?docId=cds_playbook"
+        }
+      ],
+      "priority_rank": 19,
+      "profitability_rank": 13,
+      "access_rank": 17,
+      "profit_heavy_rank": 19,
+      "access_heavy_rank": 19
+    },
+    {
+      "id": "universities",
+      "segment": "Universities and research administration",
+      "ratings": {
+        "value": 4,
+        "repeatability": 4,
+        "margin_defensibility": 2,
+        "buyer_discoverability": 3,
+        "purchase_ease": 1,
+        "deployment_ease": 2
+      },
+      "profitability_score": 3.5,
+      "access_score": 2.0,
+      "priority_score": 2.825,
+      "buyer": "Research services director with IT/procurement",
+      "proposed_workflow": "Research office \u2192 departmental administrators \u2192 finance: award setup, missing evidence and reporting readiness.",
+      "cold_channel": "University staff pages, research-administration events and public procurement.",
+      "main_risk": "Cayuse covers award workflows. Multiple institutional stakeholders and fragmented systems can make a first sale and deployment slow.",
+      "evidence_scope": "direct",
+      "sources": [
+        {
+          "title": "Cayuse award management",
+          "url": "https://www.cayuse.com/award-management/"
+        }
+      ],
+      "priority_rank": 20,
+      "profitability_rank": 13,
+      "access_rank": 20,
+      "profit_heavy_rank": 20,
+      "access_heavy_rank": 20
+    },
+    {
+      "id": "public-sector",
+      "segment": "Local government and public agencies",
+      "ratings": {
+        "value": 4,
+        "repeatability": 3,
+        "margin_defensibility": 2,
+        "buyer_discoverability": 4,
+        "purchase_ease": 1,
+        "deployment_ease": 1
+      },
+      "profitability_score": 3.15,
+      "access_score": 2.05,
+      "priority_score": 2.655,
+      "buyer": "Service director plus IT/procurement",
+      "proposed_workflow": "Service operations \u2192 review team \u2192 finance: supplier or service-case evidence and authorized handoff.",
+      "cold_channel": "Find a Tender provides a public discovery channel; bidding eligibility and suitable notices must be checked per opportunity.",
+      "main_risk": "A visible procurement channel is not easy market entry. Formal buying and support requirements may exceed the current product and vendor capacity.",
+      "evidence_scope": "adjacent",
+      "sources": [
+        {
+          "title": "UK Find a Tender guidance",
+          "url": "https://www.gov.uk/find-tender"
+        }
+      ],
+      "priority_rank": 21,
+      "profitability_rank": 21,
+      "access_rank": 17,
+      "profit_heavy_rank": 23,
+      "access_heavy_rank": 21
+    },
+    {
+      "id": "ngo",
+      "segment": "Large NGOs and humanitarian organizations",
+      "ratings": {
+        "value": 4,
+        "repeatability": 3,
+        "margin_defensibility": 2,
+        "buyer_discoverability": 3,
+        "purchase_ease": 1,
+        "deployment_ease": 2
+      },
+      "profitability_score": 3.15,
+      "access_score": 2.0,
+      "priority_score": 2.6325,
+      "buyer": "COO / CIO with program and finance sponsor",
+      "proposed_workflow": "Programs \u2192 grants/compliance \u2192 finance: field evidence to reviewed donor-reporting package and follow-up actions.",
+      "cold_channel": "NetHope public membership and events, organization websites and published tenders. No personal relationship assumed.",
+      "main_risk": "Budget ownership, donor conditions and heterogeneous country operations need validation. Private deployment is not yet private model inference; existing nonprofit software offers also compete.",
+      "evidence_scope": "direct",
+      "sources": [
+        {
+          "title": "NetHope organization and ecosystem",
+          "url": "https://nethope.org/who-we-are/"
+        },
+        {
+          "title": "NetHope AI governance toolkit",
+          "url": "https://nethope.org/toolkits/ai-governance-and-the-nonprofit-sector-mapping-the-missing-middle/"
+        }
+      ],
+      "priority_rank": 22,
+      "profitability_rank": 21,
+      "access_rank": 20,
+      "profit_heavy_rank": 24,
+      "access_heavy_rank": 22
+    },
+    {
+      "id": "financial-services",
+      "segment": "Banks, lenders and regulated financial operations",
+      "ratings": {
+        "value": 5,
+        "repeatability": 3,
+        "margin_defensibility": 2,
+        "buyer_discoverability": 2,
+        "purchase_ease": 1,
+        "deployment_ease": 1
+      },
+      "profitability_score": 3.55,
+      "access_score": 1.35,
+      "priority_score": 2.56,
+      "buyer": "Operations transformation lead with security/procurement",
+      "proposed_workflow": "Relationship operations \u2192 compliance reviewer \u2192 account operations: onboarding evidence and handoff tracking.",
+      "cold_channel": "Public company roles, vendor programs and procurement; no readily accessible pilot channel verified.",
+      "main_risk": "ServiceNow and established platforms already orchestrate onboarding. Vendor assurance and operational support could overwhelm early revenue. Exclude credit or investment decisions.",
+      "evidence_scope": "direct",
+      "sources": [
+        {
+          "title": "ServiceNow financial-services onboarding",
+          "url": "https://www.servicenow.com/content/dam/servicenow-assets/public/en-us/doc-type/resource-center/data-sheet/on-boarding-use-case-financial-services.pdf"
+        }
+      ],
+      "priority_rank": 23,
+      "profitability_rank": 11,
+      "access_rank": 23,
+      "profit_heavy_rank": 21,
+      "access_heavy_rank": 23
+    },
+    {
+      "id": "life-sciences",
+      "segment": "Life-sciences and clinical-research organizations",
+      "ratings": {
+        "value": 5,
+        "repeatability": 3,
+        "margin_defensibility": 2,
+        "buyer_discoverability": 2,
+        "purchase_ease": 1,
+        "deployment_ease": 1
+      },
+      "profitability_score": 3.55,
+      "access_score": 1.35,
+      "priority_score": 2.56,
+      "buyer": "Clinical operations / quality operations director",
+      "proposed_workflow": "Study operations \u2192 document/quality review \u2192 finance: evidence completeness and site-payment readiness.",
+      "cold_channel": "Public sponsor/CRO websites and industry events; no qualified buyer-access channel verified.",
+      "main_risk": "Veeva covers clinical operations. Domain validation, confidential trial data and specialist support are major unknown costs. Exclude clinical decisions.",
+      "evidence_scope": "direct",
+      "sources": [
+        {
+          "title": "Veeva clinical operations",
+          "url": "https://www.veeva.com/products/clinical-operations/"
+        }
+      ],
+      "priority_rank": 24,
+      "profitability_rank": 11,
+      "access_rank": 23,
+      "profit_heavy_rank": 22,
+      "access_heavy_rank": 24
+    }
+  ]
+}

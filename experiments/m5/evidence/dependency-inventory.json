@@ -1,0 +1,754 @@
+[
+  {
+    "name": "a2a-sdk",
+    "version": "1.1.5",
+    "license_expression": "Apache-2.0",
+    "license_classifiers": [
+      "License :: OSI Approved :: Apache Software License"
+    ],
+    "license_files": [
+      "a2a/server/tasks/copying_task_store.py",
+      "a2a_sdk-1.1.5.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "aiosqlite",
+    "version": "0.22.1",
+    "license_expression": null,
+    "license_classifiers": [
+      "License :: OSI Approved :: MIT License"
+    ],
+    "license_files": [
+      "aiosqlite-0.22.1.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "alembic",
+    "version": "1.20.0",
+    "license_expression": "MIT",
+    "license_classifiers": [],
+    "license_files": [
+      "alembic-1.20.0.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "annotated-doc",
+    "version": "0.0.4",
+    "license_expression": "MIT",
+    "license_classifiers": [],
+    "license_files": [
+      "annotated_doc-0.0.4.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "annotated-types",
+    "version": "0.7.0",
+    "license_expression": null,
+    "license_classifiers": [
+      "License :: OSI Approved :: MIT License"
+    ],
+    "license_files": [
+      "annotated_types-0.7.0.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "anyio",
+    "version": "4.13.0",
+    "license_expression": "MIT",
+    "license_classifiers": [],
+    "license_files": [
+      "anyio-4.13.0.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "attrs",
+    "version": "26.1.0",
+    "license_expression": "MIT",
+    "license_classifiers": [],
+    "license_files": [
+      "attrs-26.1.0.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "Authlib",
+    "version": "1.8.0",
+    "license_expression": null,
+    "license_classifiers": [
+      "License :: OSI Approved :: BSD License"
+    ],
+    "license_files": [
+      "authlib-1.8.0.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "casbin",
+    "version": "1.43.0",
+    "license_expression": null,
+    "license_classifiers": [
+      "License :: OSI Approved :: Apache Software License"
+    ],
+    "license_files": [
+      "casbin-1.43.0.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "certifi",
+    "version": "2026.5.20",
+    "license_expression": null,
+    "license_classifiers": [
+      "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)"
+    ],
+    "license_files": [
+      "certifi-2026.5.20.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "cffi",
+    "version": "2.1.1",
+    "license_expression": "MIT-0",
+    "license_classifiers": [],
+    "license_files": [
+      "cffi-2.1.1.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "charset-normalizer",
+    "version": "3.5.1",
+    "license_expression": null,
+    "license_classifiers": [],
+    "license_files": [
+      "charset_normalizer-3.5.1.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "click",
+    "version": "8.4.1",
+    "license_expression": "BSD-3-Clause",
+    "license_classifiers": [],
+    "license_files": [
+      "click-8.4.1.dist-info/licenses/LICENSE.txt"
+    ]
+  },
+  {
+    "name": "cryptography",
+    "version": "50.0.1",
+    "license_expression": "Apache-2.0 OR BSD-3-Clause",
+    "license_classifiers": [],
+    "license_files": [
+      "cryptography-50.0.1.dist-info/licenses/LICENSE",
+      "cryptography-50.0.1.dist-info/licenses/LICENSE.APACHE",
+      "cryptography-50.0.1.dist-info/licenses/LICENSE.BSD"
+    ]
+  },
+  {
+    "name": "dbos",
+    "version": "3.0.0",
+    "license_expression": null,
+    "license_classifiers": [
+      "License :: OSI Approved :: MIT License"
+    ],
+    "license_files": [
+      "dbos-3.0.0.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "fastapi",
+    "version": "0.136.3",
+    "license_expression": "MIT",
+    "license_classifiers": [],
+    "license_files": [
+      "fastapi-0.136.3.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "google-api-core",
+    "version": "2.38.0",
+    "license_expression": null,
+    "license_classifiers": [
+      "License :: OSI Approved :: Apache Software License"
+    ],
+    "license_files": [
+      "google_api_core-2.38.0.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "google-auth",
+    "version": "2.58.0",
+    "license_expression": null,
+    "license_classifiers": [
+      "License :: OSI Approved :: Apache Software License"
+    ],
+    "license_files": [
+      "google_auth-2.58.0.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "googleapis-common-protos",
+    "version": "1.75.3",
+    "license_expression": "Apache-2.0",
+    "license_classifiers": [],
+    "license_files": [
+      "googleapis_common_protos-1.75.3.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "greenlet",
+    "version": "3.5.6",
+    "license_expression": "MIT AND PSF-2.0",
+    "license_classifiers": [],
+    "license_files": [
+      "greenlet-3.5.6.dist-info/licenses/LICENSE",
+      "greenlet-3.5.6.dist-info/licenses/LICENSE.PSF"
+    ]
+  },
+  {
+    "name": "grpcio",
+    "version": "1.84.0",
+    "license_expression": "Apache-2.0",
+    "license_classifiers": [],
+    "license_files": [
+      "grpcio-1.84.0.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "h11",
+    "version": "0.16.0",
+    "license_expression": null,
+    "license_classifiers": [
+      "License :: OSI Approved :: MIT License"
+    ],
+    "license_files": [
+      "h11-0.16.0.dist-info/licenses/LICENSE.txt"
+    ]
+  },
+  {
+    "name": "httpcore",
+    "version": "1.0.9",
+    "license_expression": "BSD-3-Clause",
+    "license_classifiers": [
+      "License :: OSI Approved :: BSD License"
+    ],
+    "license_files": [
+      "httpcore-1.0.9.dist-info/licenses/LICENSE.md"
+    ]
+  },
+  {
+    "name": "httpcore2",
+    "version": "2.13.1",
+    "license_expression": "BSD-3-Clause",
+    "license_classifiers": [
+      "License :: OSI Approved :: BSD License"
+    ],
+    "license_files": [
+      "httpcore2-2.13.1.dist-info/licenses/LICENSE.md"
+    ]
+  },
+  {
+    "name": "httptools",
+    "version": "0.8.0",
+    "license_expression": "MIT",
+    "license_classifiers": [],
+    "license_files": [
+      "httptools-0.8.0.dist-info/licenses/LICENSE",
+      "httptools-0.8.0.dist-info/licenses/vendor/http-parser/LICENSE-MIT",
+      "httptools-0.8.0.dist-info/licenses/vendor/llhttp/LICENSE"
+    ]
+  },
+  {
+    "name": "httpx",
+    "version": "0.28.1",
+    "license_expression": null,
+    "license_classifiers": [
+      "License :: OSI Approved :: BSD License"
+    ],
+    "license_files": [
+      "httpx-0.28.1.dist-info/licenses/LICENSE.md"
+    ]
+  },
+  {
+    "name": "httpx2",
+    "version": "2.13.1",
+    "license_expression": "BSD-3-Clause",
+    "license_classifiers": [
+      "License :: OSI Approved :: BSD License"
+    ],
+    "license_files": [
+      "httpx2-2.13.1.dist-info/licenses/LICENSE.md"
+    ]
+  },
+  {
+    "name": "idna",
+    "version": "3.18",
+    "license_expression": "BSD-3-Clause",
+    "license_classifiers": [],
+    "license_files": [
+      "idna-3.18.dist-info/licenses/LICENSE.md"
+    ]
+  },
+  {
+    "name": "joserfc",
+    "version": "1.7.5",
+    "license_expression": null,
+    "license_classifiers": [
+      "License :: OSI Approved :: BSD License"
+    ],
+    "license_files": [
+      "joserfc-1.7.5.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "json-rpc",
+    "version": "1.15.0",
+    "license_expression": null,
+    "license_classifiers": [
+      "License :: OSI Approved :: MIT License"
+    ],
+    "license_files": [
+      "json_rpc-1.15.0.dist-info/LICENSE.txt"
+    ]
+  },
+  {
+    "name": "jsonpath-python",
+    "version": "1.1.6",
+    "license_expression": null,
+    "license_classifiers": [
+      "License :: OSI Approved :: MIT License"
+    ],
+    "license_files": [
+      "jsonpath_python-1.1.6.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "jsonschema",
+    "version": "4.26.0",
+    "license_expression": "MIT",
+    "license_classifiers": [],
+    "license_files": [
+      "jsonschema-4.26.0.dist-info/licenses/COPYING"
+    ]
+  },
+  {
+    "name": "jsonschema-specifications",
+    "version": "2025.9.1",
+    "license_expression": "MIT",
+    "license_classifiers": [],
+    "license_files": [
+      "jsonschema_specifications-2025.9.1.dist-info/licenses/COPYING"
+    ]
+  },
+  {
+    "name": "Mako",
+    "version": "1.4.3",
+    "license_expression": "MIT",
+    "license_classifiers": [],
+    "license_files": [
+      "mako-1.4.3.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "MarkupSafe",
+    "version": "3.0.3",
+    "license_expression": "BSD-3-Clause",
+    "license_classifiers": [],
+    "license_files": [
+      "markupsafe-3.0.3.dist-info/licenses/LICENSE.txt"
+    ]
+  },
+  {
+    "name": "mcp",
+    "version": "2.2.0",
+    "license_expression": null,
+    "license_classifiers": [
+      "License :: OSI Approved :: MIT License"
+    ],
+    "license_files": [
+      "mcp-2.2.0.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "mcp-types",
+    "version": "2.2.0",
+    "license_expression": null,
+    "license_classifiers": [
+      "License :: OSI Approved :: MIT License"
+    ],
+    "license_files": [
+      "mcp_types-2.2.0.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "openrouter",
+    "version": "1.2.22",
+    "license_expression": null,
+    "license_classifiers": [],
+    "license_files": [
+      "openrouter-1.2.22.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "opentelemetry-api",
+    "version": "1.44.0",
+    "license_expression": "Apache-2.0",
+    "license_classifiers": [],
+    "license_files": [
+      "opentelemetry_api-1.44.0.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "packaging",
+    "version": "26.2",
+    "license_expression": "Apache-2.0 OR BSD-2-Clause",
+    "license_classifiers": [],
+    "license_files": [
+      "packaging-26.2.dist-info/licenses/LICENSE",
+      "packaging-26.2.dist-info/licenses/LICENSE.APACHE",
+      "packaging-26.2.dist-info/licenses/LICENSE.BSD",
+      "packaging/licenses/__init__.py",
+      "packaging/licenses/_spdx.py"
+    ]
+  },
+  {
+    "name": "pem",
+    "version": "23.1.0",
+    "license_expression": "MIT",
+    "license_classifiers": [
+      "License :: OSI Approved :: MIT License"
+    ],
+    "license_files": [
+      "pem-23.1.0.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "pip",
+    "version": "25.1.1",
+    "license_expression": null,
+    "license_classifiers": [
+      "License :: OSI Approved :: MIT License"
+    ],
+    "license_files": [
+      "pip-25.1.1.dist-info/licenses/AUTHORS.txt",
+      "pip-25.1.1.dist-info/licenses/LICENSE.txt",
+      "pip/_vendor/packaging/licenses/__init__.py",
+      "pip/_vendor/packaging/licenses/__pycache__/__init__.cpython-313.pyc",
+      "pip/_vendor/packaging/licenses/__pycache__/_spdx.cpython-313.pyc",
+      "pip/_vendor/packaging/licenses/_spdx.py"
+    ]
+  },
+  {
+    "name": "proto-plus",
+    "version": "1.28.4",
+    "license_expression": null,
+    "license_classifiers": [
+      "License :: OSI Approved :: Apache Software License"
+    ],
+    "license_files": [
+      "proto_plus-1.28.4.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "protobuf",
+    "version": "7.36.2",
+    "license_expression": null,
+    "license_classifiers": [],
+    "license_files": [
+      "protobuf-7.36.2.dist-info/LICENSE"
+    ]
+  },
+  {
+    "name": "psycopg",
+    "version": "3.3.6",
+    "license_expression": "LGPL-3.0-only",
+    "license_classifiers": [],
+    "license_files": [
+      "psycopg-3.3.6.dist-info/licenses/LICENSE.txt"
+    ]
+  },
+  {
+    "name": "psycopg-binary",
+    "version": "3.3.6",
+    "license_expression": "LGPL-3.0-only",
+    "license_classifiers": [],
+    "license_files": [
+      "psycopg_binary-3.3.6.dist-info/licenses/LICENSE.txt"
+    ]
+  },
+  {
+    "name": "pyasn1",
+    "version": "0.6.4",
+    "license_expression": null,
+    "license_classifiers": [],
+    "license_files": [
+      "pyasn1-0.6.4.dist-info/licenses/LICENSE.rst"
+    ]
+  },
+  {
+    "name": "pyasn1_modules",
+    "version": "0.4.2",
+    "license_expression": null,
+    "license_classifiers": [
+      "License :: OSI Approved :: BSD License"
+    ],
+    "license_files": [
+      "pyasn1_modules-0.4.2.dist-info/licenses/LICENSE.txt"
+    ]
+  },
+  {
+    "name": "pycparser",
+    "version": "3.0",
+    "license_expression": "BSD-3-Clause",
+    "license_classifiers": [],
+    "license_files": [
+      "pycparser-3.0.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "pydantic",
+    "version": "2.12.5",
+    "license_expression": "MIT",
+    "license_classifiers": [],
+    "license_files": [
+      "pydantic-2.12.5.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "pydantic_core",
+    "version": "2.41.5",
+    "license_expression": "MIT",
+    "license_classifiers": [],
+    "license_files": [
+      "pydantic_core-2.41.5.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "PyJWT",
+    "version": "2.13.0",
+    "license_expression": "MIT",
+    "license_classifiers": [],
+    "license_files": [
+      "pyjwt-2.13.0.dist-info/licenses/AUTHORS.rst",
+      "pyjwt-2.13.0.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "python-dateutil",
+    "version": "2.9.0.post0",
+    "license_expression": null,
+    "license_classifiers": [
+      "License :: OSI Approved :: BSD License",
+      "License :: OSI Approved :: Apache Software License"
+    ],
+    "license_files": [
+      "python_dateutil-2.9.0.post0.dist-info/LICENSE"
+    ]
+  },
+  {
+    "name": "python-dotenv",
+    "version": "1.2.2",
+    "license_expression": null,
+    "license_classifiers": [],
+    "license_files": [
+      "python_dotenv-1.2.2.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "python-multipart",
+    "version": "0.0.32",
+    "license_expression": "Apache-2.0",
+    "license_classifiers": [
+      "License :: OSI Approved :: Apache Software License"
+    ],
+    "license_files": [
+      "python_multipart-0.0.32.dist-info/licenses/LICENSE.txt"
+    ]
+  },
+  {
+    "name": "PyYAML",
+    "version": "6.0.3",
+    "license_expression": null,
+    "license_classifiers": [
+      "License :: OSI Approved :: MIT License"
+    ],
+    "license_files": [
+      "pyyaml-6.0.3.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "referencing",
+    "version": "0.37.0",
+    "license_expression": "MIT",
+    "license_classifiers": [],
+    "license_files": [
+      "referencing-0.37.0.dist-info/licenses/COPYING"
+    ]
+  },
+  {
+    "name": "requests",
+    "version": "2.34.2",
+    "license_expression": null,
+    "license_classifiers": [
+      "License :: OSI Approved :: Apache Software License"
+    ],
+    "license_files": [
+      "requests-2.34.2.dist-info/licenses/LICENSE",
+      "requests-2.34.2.dist-info/licenses/NOTICE"
+    ]
+  },
+  {
+    "name": "rfc8785",
+    "version": "0.1.4",
+    "license_expression": null,
+    "license_classifiers": [
+      "License :: OSI Approved :: Apache Software License"
+    ],
+    "license_files": [
+      "rfc8785-0.1.4.dist-info/LICENSE"
+    ]
+  },
+  {
+    "name": "rpds-py",
+    "version": "2026.6.3",
+    "license_expression": "MIT",
+    "license_classifiers": [],
+    "license_files": [
+      "rpds_py-2026.6.3.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "simpleeval",
+    "version": "1.0.8",
+    "license_expression": null,
+    "license_classifiers": [
+      "License :: OSI Approved :: MIT License"
+    ],
+    "license_files": [
+      "simpleeval-1.0.8.dist-info/licenses/LICENCE"
+    ]
+  },
+  {
+    "name": "six",
+    "version": "1.17.0",
+    "license_expression": null,
+    "license_classifiers": [
+      "License :: OSI Approved :: MIT License"
+    ],
+    "license_files": [
+      "six-1.17.0.dist-info/LICENSE"
+    ]
+  },
+  {
+    "name": "spiffe",
+    "version": "0.3.1",
+    "license_expression": "Apache-2.0",
+    "license_classifiers": [],
+    "license_files": [
+      "spiffe-0.3.1.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "SQLAlchemy",
+    "version": "2.0.54",
+    "license_expression": null,
+    "license_classifiers": [],
+    "license_files": [
+      "sqlalchemy-2.0.54.dist-info/licenses/AUTHORS",
+      "sqlalchemy-2.0.54.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "sse-starlette",
+    "version": "3.4.11",
+    "license_expression": "BSD-3-Clause",
+    "license_classifiers": [],
+    "license_files": [
+      "sse_starlette-3.4.11.dist-info/licenses/AUTHORS",
+      "sse_starlette-3.4.11.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "starlette",
+    "version": "1.2.1",
+    "license_expression": "BSD-3-Clause",
+    "license_classifiers": [],
+    "license_files": [
+      "starlette-1.2.1.dist-info/licenses/LICENSE.md"
+    ]
+  },
+  {
+    "name": "truststore",
+    "version": "0.10.4",
+    "license_expression": "MIT",
+    "license_classifiers": [],
+    "license_files": [
+      "truststore-0.10.4.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "typing-inspection",
+    "version": "0.4.2",
+    "license_expression": "MIT",
+    "license_classifiers": [],
+    "license_files": [
+      "typing_inspection-0.4.2.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "typing_extensions",
+    "version": "4.15.0",
+    "license_expression": "PSF-2.0",
+    "license_classifiers": [],
+    "license_files": [
+      "typing_extensions-4.15.0.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "urllib3",
+    "version": "2.8.0",
+    "license_expression": "MIT",
+    "license_classifiers": [],
+    "license_files": [
+      "urllib3-2.8.0.dist-info/licenses/LICENSE.txt"
+    ]
+  },
+  {
+    "name": "uvicorn",
+    "version": "0.49.0",
+    "license_expression": "BSD-3-Clause",
+    "license_classifiers": [],
+    "license_files": [
+      "uvicorn-0.49.0.dist-info/licenses/LICENSE.md"
+    ]
+  },
+  {
+    "name": "uvloop",
+    "version": "0.22.1",
+    "license_expression": null,
+    "license_classifiers": [
+      "License :: OSI Approved :: Apache Software License",
+      "License :: OSI Approved :: MIT License"
+    ],
+    "license_files": [
+      "uvloop-0.22.1.dist-info/licenses/LICENSE-APACHE",
+      "uvloop-0.22.1.dist-info/licenses/LICENSE-MIT"
+    ]
+  },
+  {
+    "name": "watchfiles",
+    "version": "1.2.0",
+    "license_expression": null,
+    "license_classifiers": [
+      "License :: OSI Approved :: MIT License"
+    ],
+    "license_files": [
+      "watchfiles-1.2.0.dist-info/licenses/LICENSE"
+    ]
+  },
+  {
+    "name": "websockets",
+    "version": "16.0",
+    "license_expression": "BSD-3-Clause",
+    "license_classifiers": [],
+    "license_files": [
+      "websockets-16.0.dist-info/licenses/LICENSE"
+    ]
+  }
+]

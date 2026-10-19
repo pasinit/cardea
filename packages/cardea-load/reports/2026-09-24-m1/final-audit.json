@@ -1,0 +1,128 @@
+{
+  "schema_version": "1",
+  "passed": true,
+  "violations": [],
+  "points": [
+    {
+      "point": "reference/r1-1rps",
+      "acknowledged": 20,
+      "persisted_in_scope": 20
+    },
+    {
+      "point": "reference/r1-5rps",
+      "acknowledged": 100,
+      "persisted_in_scope": 100
+    },
+    {
+      "point": "reference/r1-10rps",
+      "acknowledged": 200,
+      "persisted_in_scope": 200
+    },
+    {
+      "point": "reference/r1-25rps",
+      "acknowledged": 500,
+      "persisted_in_scope": 500
+    },
+    {
+      "point": "reference/r1-50rps",
+      "acknowledged": 487,
+      "persisted_in_scope": 487
+    },
+    {
+      "point": "reference/r2-1rps",
+      "acknowledged": 20,
+      "persisted_in_scope": 20
+    },
+    {
+      "point": "reference/r2-5rps",
+      "acknowledged": 100,
+      "persisted_in_scope": 100
+    },
+    {
+      "point": "reference/r2-10rps",
+      "acknowledged": 200,
+      "persisted_in_scope": 200
+    },
+    {
+      "point": "reference/r2-25rps",
+      "acknowledged": 500,
+      "persisted_in_scope": 500
+    },
+    {
+      "point": "reference/r2-50rps",
+      "acknowledged": 491,
+      "persisted_in_scope": 491
+    },
+    {
+      "point": "reference/r3-1rps",
+      "acknowledged": 20,
+      "persisted_in_scope": 20
+    },
+    {
+      "point": "reference/r3-5rps",
+      "acknowledged": 100,
+      "persisted_in_scope": 100
+    },
+    {
+      "point": "reference/r3-10rps",
+      "acknowledged": 200,
+      "persisted_in_scope": 200
+    },
+    {
+      "point": "reference/r3-25rps",
+      "acknowledged": 500,
+      "persisted_in_scope": 500
+    },
+    {
+      "point": "reference/r3-50rps",
+      "acknowledged": 485,
+      "persisted_in_scope": 485
+    },
+    {
+      "point": "comparison/r1-1rps",
+      "acknowledged": 20,
+      "persisted_in_scope": 20
+    },
+    {
+      "point": "comparison/r1-5rps",
+      "acknowledged": 100,
+      "persisted_in_scope": 100
+    },
+    {
+      "point": "comparison/r1-10rps",
+      "acknowledged": 200,
+      "persisted_in_scope": 200
+    },
+    {
+      "point": "comparison/r1-25rps",
+      "acknowledged": 500,
+      "persisted_in_scope": 500
+    },
+    {
+      "point": "comparison/r1-50rps",
+      "acknowledged": 493,
+      "persisted_in_scope": 493
+    },
+    {
+      "point": "stress/crash-restart",
+      "acknowledged": 218,
+      "persisted_in_scope": 218
+    },
+    {
+      "point": "stress/live-revocation",
+      "acknowledged": 49,
+      "persisted_in_scope": 49
+    },
+    {
+      "point": "stress/provider-outage",
+      "acknowledged": 82,
+      "persisted_in_scope": 82
+    },
+    {
+      "point": "stress/soak",
+      "acknowledged": 1500,
+      "persisted_in_scope": 1500
+    }
+  ],
+  "script_sha256": "d578ebf676238d3a3cc32cefe4f7b6fd024d76a34785743bd0f88b45519dbf73"
+}

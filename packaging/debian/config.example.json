@@ -1,0 +1,7 @@
+{
+  "data_dir": "/var/lib/cardea",
+  "spiffe_socket": "unix:///run/spire/sockets/agent.sock",
+  "trust_domain": "example.invalid",
+  "runtime_spiffe_id": "spiffe://example.invalid/cardea/runtime",
+  "host_execution": true
+}

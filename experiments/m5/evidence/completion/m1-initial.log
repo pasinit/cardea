@@ -1,0 +1,82 @@
+"/home/user/.local/bin/uv" run --locked --project apps/api pytest -q -c experiments/m1/pytest.ini experiments/m1/tests
+......................F.......................                           [100%]
+=================================== FAILURES ===================================
+_______________________ test_backup_restore_shared_wait ________________________
+
+service = <harness.ServiceLab object at 0x115b02f00>
+
+    def test_backup_restore_shared_wait(service):
+        first = service.start()
+        task_id = service.client.submit(request(wait_for_event=True)).task.task_id
+        service.wait_state(task_id, "waiting")
+        receipt = service.client.request("GET", f"/tasks/{task_id}/receipt")
+        with pytest.raises(Fault, match="active service"):
+            backup(service.data, service.root / "blocked.sqlite3")
+        service.stop(first)
+        snapshot = service.root / "snapshot.sqlite3"
+        backup(service.data, snapshot)
+        service.start()
+        service.client.control(task_id, Signal(request_id="after-snapshot"), cancel=True)
+        service.stop(service.processes[-1])
+        restore(service.data, snapshot)
+>       service.start()
+
+experiments/m1/tests/test_service.py:164: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <harness.ServiceLab object at 0x115b02f00>, barrier = ''
+
+    def start(self, barrier: str = "") -> subprocess.Popen[bytes]:
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("DBOS_", "OTEL_", "M1_"))}
+        env.update(PYTHONPATH=str(ROOT / "apps/api/src"), M1_CONFIG=str(self.config_path), M1_BARRIER=barrier)
+        with (self.root / f"daemon-{len(self.processes)}.log").open("wb") as log:
+            process = subprocess.Popen([sys.executable, str(ROOT / "experiments/m1/daemon_probe.py")],
+                cwd=self.root, env=env, stdout=log, stderr=subprocess.STDOUT)
+        self.processes.append(process)
+        def ready() -> None:
+            if process.poll() is not None:
+                raise AssertionError(self.logs())
+            assert self.client.request("GET", "/system")["schema_version"] == "0.2"
+        try:
+            wait_for(ready)
+        except Exception:
+>           raise AssertionError(self.logs()) from None
+E           AssertionError: I0925 04:13:20.268851 11369338 ev_poll_posix.cc:587] FD from fork parent still in poll list: fd(15, generation: 1)
+E           I0925 04:13:20.269000 11369338 ev_poll_posix.cc:587] FD from fork parent still in poll list: fd(15, generation: 1)
+E           I0925 04:13:20.269016 11369338 ev_poll_posix.cc:587] FD from fork parent still in poll list: fd(15, generation: 1)
+E           I0925 04:13:20.269023 11369338 ev_poll_posix.cc:587] FD from fork parent still in poll list: fd(15, generation: 1)
+E           I0925 04:13:20.269035 11369338 ev_poll_posix.cc:587] FD from fork parent still in poll list: fd(15, generation: 1)
+E           I0925 04:13:20.269041 11369338 ev_poll_posix.cc:587] FD from fork parent still in poll list: fd(15, generation: 1)
+E           I0925 04:13:20.269050 11369338 ev_poll_posix.cc:587] FD from fork parent still in poll list: fd(15, generation: 1)
+E           I0925 04:13:20.269056 11369338 ev_poll_posix.cc:587] FD from fork parent still in poll list: fd(15, generation: 1)
+E           I0925 04:13:20.269063 11369338 ev_poll_posix.cc:587] FD from fork parent still in poll list: fd(15, generation: 1)
+E           I0925 04:13:20.269072 11369338 ev_poll_posix.cc:587] FD from fork parent still in poll list: fd(15, generation: 1)
+E           I0925 04:13:20.269077 11369338 ev_poll_posix.cc:587] FD from fork parent still in poll list: fd(15, generation: 1)
+E           I0925 04:13:20.269082 11369338 ev_poll_posix.cc:587] FD from fork parent still in poll list: fd(15, generation: 1)
+E           I0925 04:13:20.269087 11369338 ev_poll_posix.cc:587] FD from fork parent still in poll list: fd(15, generation: 1)
+E           I0925 04:13:20.269092 11369338 ev_poll_posix.cc:587] FD from fork parent still in poll list: fd(15, generation: 1)
+E           I0925 04:13:20.269097 11369338 ev_poll_posix.cc:587] FD from fork parent still in poll list: fd(15, generation: 1)
+E           
+E           I0925 04:13:24.526794 11369474 ev_poll_posix.cc:587] FD from fork parent still in poll list: fd(15, generation: 1)
+E           
+E           I0925 04:13:27.135781 11369530 ev_poll_posix.cc:587] FD from fork parent still in poll list: fd(15, generation: 1)
+E           Traceback (most recent call last):
+E             File "/home/user/src/cardea/experiments/m1/daemon_probe.py", line 26, in <module>
+E               serve(config, fault=barrier)
+E             File "/home/user/src/cardea/apps/api/src/cardea/service/server.py", line 80, in serve
+E               kernel = Kernel(database, auth, fault, host=host, model=model)
+E                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E             File "/home/user/src/cardea/apps/api/src/cardea/service/kernel.py", line 227, in __init__
+E               self.runtime_id = auth.runtime_proof().resolve(conn)
+E                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E             File "/home/user/src/cardea/apps/api/src/cardea/service/auth.py", line 36, in resolve
+E               Policy(conn).principal(principal)
+E             File "/home/user/src/cardea/apps/api/src/cardea/service/policy.py", line 67, in principal
+E               raise Fault("principal_disabled", "Principal is unknown or disabled")
+E           cardea.service.database.Fault: Principal is unknown or disabled
+
+experiments/m1/harness.py:92: AssertionError
+=========================== short test summary info ============================
+FAILED experiments/m1/tests/test_service.py::test_backup_restore_shared_wait
+1 failed, 45 passed in 272.37s (0:04:32)
+make: *** [m1-test] Error 1

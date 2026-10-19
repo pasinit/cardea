@@ -1,0 +1,6 @@
+cd apps/api && "/home/user/.local/bin/uv" run mypy src tests
+Success: no issues found in 67 source files
+
+> cardea-web@0.1.0 typecheck
+> tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json
+

@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /opt/venvs/cardea-kernel/bin/python -I /usr/lib/cardea/main.py "$@"

@@ -1,0 +1,4 @@
+"/home/user/.local/bin/uv" run --locked --project apps/api ruff check --config apps/api/pyproject.toml experiments/m4
+All checks passed!
+"/home/user/.local/bin/uv" run --locked --project apps/api mypy --follow-imports=silent --ignore-missing-imports --check-untyped-defs experiments/m4
+Success: no issues found in 5 source files

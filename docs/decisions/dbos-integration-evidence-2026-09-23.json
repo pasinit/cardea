@@ -1,0 +1,2200 @@
+{
+  "schema_version": 1,
+  "recorded_date": "2026-09-23",
+  "decision": "ADR-008; bounded integration verified; shared-store native transactions selected as integration direction, production adoption/migration open",
+  "interpretation": "28 local observation cases against actual Cardea storage, including two negative controls; not 28 completed production acceptance requirements.",
+  "environment": {
+    "os": "Darwin",
+    "os_version": "26.6.2",
+    "machine": "arm64",
+    "python": "3.12.0",
+    "sqlite": "3.42.0",
+    "storage": "private disposable SQLite; Cardea and DBOS share one file except explicit split-store controls; fictional provider uses separate file",
+    "recovery": "stable executor restart after confirmed death; explicit public resume after lease expiry for distinct-executor takeover",
+    "dbos_notifications": "polling; no Conductor or distributed recovery service",
+    "parent_dbos_environment_present": false
+  },
+  "dependencies": {
+    "PyYAML": "6.0.3",
+    "Pygments": "2.21.0",
+    "SQLAlchemy": "2.0.54",
+    "annotated-types": "0.8.0",
+    "click": "8.5.0",
+    "dbos": "3.0.0",
+    "greenlet": "3.5.6",
+    "iniconfig": "2.3.0",
+    "packaging": "26.3",
+    "pluggy": "1.6.0",
+    "psycopg": "3.3.6",
+    "psycopg-binary": "3.3.6",
+    "pydantic": "2.13.5",
+    "pydantic_core": "2.46.5",
+    "pytest": "9.0.3",
+    "python-dateutil": "2.9.0.post0",
+    "six": "1.17.0",
+    "typing-inspection": "0.4.4",
+    "typing_extensions": "4.16.0",
+    "websockets": "17.1"
+  },
+  "direct_composition_licenses": {
+    "dbos": {
+      "version": "3.0.0",
+      "license_expression": null,
+      "license_classifiers": [
+        "License :: OSI Approved :: MIT License"
+      ],
+      "license_metadata": "MIT",
+      "license_files_sha256": {
+        "dbos-3.0.0.dist-info/licenses/LICENSE": "546662b7f6b9fa4770f564fa7d8e63c40595c0643380b1723d6adc55552154d5"
+      }
+    },
+    "SQLAlchemy": {
+      "version": "2.0.54",
+      "license_expression": null,
+      "license_classifiers": [],
+      "license_metadata": "MIT",
+      "license_files_sha256": {
+        "sqlalchemy-2.0.54.dist-info/licenses/AUTHORS": "dc1db0b5d17455adc37b693ff8e409c9a80f603e441695825518c36f786c963e",
+        "sqlalchemy-2.0.54.dist-info/licenses/LICENSE": "e862bb5b904fb5513c3e14288d7a25a12eb0ecc7847a0a965d310e9a955e7cb9"
+      }
+    },
+    "pydantic": {
+      "version": "2.13.5",
+      "license_expression": "MIT",
+      "license_classifiers": [],
+      "license_metadata": null,
+      "license_files_sha256": {
+        "pydantic-2.13.5.dist-info/licenses/LICENSE": "a9e186f3ca16b5eef84318e7a701721351a00cb7b8ae3a4394b67b49e3529ef3"
+      }
+    }
+  },
+  "license_and_maintenance_scope": "DBOS 3.0.0 release/license assessment inherited from ADR-002/003; pinned inventory here is not a transitive vulnerability audit. SQLite is public domain.",
+  "command": "uv run --project experiments/dbos-integration --locked pytest -q experiments/dbos-integration/tests --junitxml=/tmp/cardea-dbos-integration-fit.xml",
+  "reproduction_command": "make dbos-integration-fit",
+  "summary": {
+    "tests": 28,
+    "errors": 0,
+    "failures": 0,
+    "skipped": 0,
+    "duration_seconds": 109.041,
+    "warnings": [
+      "Two pytest record_property/xunit2 compatibility warnings; observation properties are present and extracted."
+    ]
+  },
+  "source_sha256": {
+    "experiments/dbos-integration/.python-version": "7b55f8e67b5623c4bef3fa691288da9437d79d3aba156de48d481db32ac7d16d",
+    "experiments/dbos-integration/adapter.py": "5a9a4beeeb6a372750f46d36de123472822af2f69bd09485e1163852654fa2ef",
+    "experiments/dbos-integration/pyproject.toml": "f37182daa84b3da6c92c8b3602a642fdbeb7658427dcc356d614ba722877e088",
+    "experiments/dbos-integration/submit.py": "245cd8a249310f2d79c89c0b0efa61fc1e1e6681cbad91dfa4c9b6bb795a9950",
+    "experiments/dbos-integration/tests/conftest.py": "d489ccd41c1ed3f1e9a111fbeff85c0d96382a3a3926c42a52892918213c9b90",
+    "experiments/dbos-integration/tests/test_integration.py": "6d60ca2fd66ba02c22884a508555698fe7d52258ea6147e54f342669cb85f2eb",
+    "experiments/dbos-integration/uv.lock": "74123a7f4a316067f9ce1e482e9d28bc202d53384942b514e86d76c33c6d1951",
+    "experiments/dbos-integration/worker.py": "cec7211030fb02f44c5ece3189313616d92576ab28efbb86b8d6c40242cecf7a"
+  },
+  "reused_kernel_source_sha256": {
+    "apps/api/src/cardea/kernel/__init__.py": "8650a4493ed6ec15e25aabbd79ef88dc7ce04abffe4bb91441219eafc1249ee8",
+    "apps/api/src/cardea/kernel/cli.py": "29434e6a6927db393d9a91e1db31931badaf39eec37c2aca32aed18194928ae3",
+    "apps/api/src/cardea/kernel/demo.py": "9178cfb3b95afc953921a6cd38efa945058d8c1d4fcfd51276f48853ac3f3da2",
+    "apps/api/src/cardea/kernel/lifecycle.py": "04e9c0352d55ae883020480c8e0c24df06276752eb1e4431411203f1897a1e36",
+    "apps/api/src/cardea/kernel/models.py": "24b5def7e41f4a1ee0454168fef0bfdbdca7615e95833cc5a6f52665514919d0",
+    "apps/api/src/cardea/kernel/schema.py": "da600890e00367b0a9dd9c8eec2085108485d9f4891d373e347371d1b5aa3ac0",
+    "apps/api/src/cardea/kernel/smoke.py": "f33915db3fe13b309163f00b975ec7b42b294763e00cb71b511b82a23f3fa9f1",
+    "apps/api/src/cardea/kernel/store.py": "190eb4283f55d9923f4ce9239a2902d0f1676b16208eba9d813db5272737b559"
+  },
+  "installed_dbos_source_sha256": {
+    "_client.py": "0ffda8a4d1b16fafd4b9707de0dabfb0fec7416520b8e917ab8c4028108871d9",
+    "_datasource.py": "64c4baed27c4effbd8348c12290fa42cc7343a3c127c12ade17abbb0667d538a",
+    "_datasource_sqlite.py": "0f85c865e9df1802e1e02c25bb682ec022c8a6eb05c401f2ac81d5815785c245",
+    "_recovery.py": "85bbae10c0f3bee2709735586fe6efbf1392ed1d7c8c4b7b702c6dfdefed6500"
+  },
+  "junit_sha256": "ddd2d251658021e7b931e92ad832e11004989ff3adbe9c30ee76238e37beeff5",
+  "regression_checks": {
+    "make test": {
+      "backend_passed": 138,
+      "frontend_passed": 4
+    },
+    "make lint": "passed",
+    "make typecheck": "passed",
+    "isolated_ruff": "passed",
+    "isolated_format": "passed: 5 source files",
+    "isolated_strict_mypy": "passed: 5 source files"
+  },
+  "unverified": [
+    "production schema migration, upgrade and backup/restore",
+    "SPIRE/OIDC integration and authenticated task/supervisor bindings",
+    "production admission/grant policy and transitive live authority ceiling",
+    "in-flight remote-effect revocation and outcome reconciliation",
+    "automatic failure detection and distributed recovery ownership",
+    "Debian service, confinement, reboot and host cancellation",
+    "multi-task load, event/wait projection and races, deadlines, resource budgets"
+  ],
+  "cases": [
+    {
+      "name": "test_shared_store_smoke",
+      "duration_seconds": 2.962,
+      "outcome": "passed",
+      "observations": {
+        "result": "succeeded",
+        "tasks": [
+          [
+            "integration-task",
+            5,
+            "succeeded"
+          ]
+        ],
+        "operations": [
+          [
+            "succeeded",
+            2,
+            "{\"schema_version\":\"0.1\",\"receipt_id\":\"receipt-9170b88fa8df4676a76a51bc93572e48\",\"request\":{\"schema_version\":\"0.1\",\"operation_id\":\"write-output\",\"task_id\":\"integration-task\",\"subject_id\":\"fit-agent\",\"name\":\"objects.write\",\"resource\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\"},\"arguments\":{\"value\":1},\"deadline\":\"2030-01-01T00:00:00Z\"},\"request_digest\":\"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\",\"grant_ids\":[\"fictional-grant\"],\"retry_class\":\"reconciliation_required\",\"state\":\"succeeded\",\"revision\":2,\"created_at\":\"2026-09-23T07:41:08.907903Z\",\"updated_at\":\"2026-09-23T07:41:08.908566Z\",\"usage\":{\"schema_version\":\"0.1\",\"steps\":0,\"model_calls\":0,\"model_tokens\":0,\"tool_milliseconds\":0,\"output_bytes\":0},\"result\":{\"artifact\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\",\"version\":1,\"content_digest\":\"48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6\"}},\"failure\":null,\"reconciliation_evidence\":[]}"
+          ]
+        ],
+        "events": [
+          [
+            1,
+            "task.submitted",
+            "{\"revision\": 0, \"state\": \"queued\"}"
+          ],
+          [
+            2,
+            "task.transitioned",
+            "{\"revision\": 1, \"state\": \"running\"}"
+          ],
+          [
+            3,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-9170b88fa8df4676a76a51bc93572e48\", \"revision\": 0, \"state\": \"accepted\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            4,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-9170b88fa8df4676a76a51bc93572e48\", \"revision\": 1, \"state\": \"running\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            5,
+            "object.written",
+            "{\"resource_id\": \"output\", \"version\": 1, \"content_digest\": \"48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6\"}"
+          ],
+          [
+            6,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-9170b88fa8df4676a76a51bc93572e48\", \"revision\": 2, \"state\": \"succeeded\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            7,
+            "task.transitioned",
+            "{\"revision\": 2, \"state\": \"suspended\"}"
+          ],
+          [
+            8,
+            "task.transitioned",
+            "{\"revision\": 3, \"state\": \"queued\"}"
+          ],
+          [
+            9,
+            "task.transitioned",
+            "{\"revision\": 4, \"state\": \"running\"}"
+          ],
+          [
+            10,
+            "object.written",
+            "{\"resource_id\": \"verification\", \"version\": 1, \"content_digest\": \"28fad55644937e012097516f09a981e2fcc7995359b542e62e0794ec005a3800\"}"
+          ],
+          [
+            11,
+            "task.transitioned",
+            "{\"revision\": 5, \"state\": \"succeeded\"}"
+          ]
+        ],
+        "objects": [
+          [
+            "fit",
+            "output",
+            1,
+            "48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6"
+          ],
+          [
+            "fit",
+            "verification",
+            1,
+            "28fad55644937e012097516f09a981e2fcc7995359b542e62e0794ec005a3800"
+          ]
+        ],
+        "provider_effects": 0,
+        "engine_status": "SUCCESS",
+        "engine_executor": "local-stable"
+      }
+    },
+    {
+      "name": "test_atomic_admission_and_enqueue[admission.written-False]",
+      "duration_seconds": 3.321,
+      "outcome": "passed",
+      "observations": {
+        "result": "succeeded",
+        "tasks": [
+          [
+            "integration-task",
+            5,
+            "succeeded"
+          ]
+        ],
+        "operations": [
+          [
+            "succeeded",
+            2,
+            "{\"schema_version\":\"0.1\",\"receipt_id\":\"receipt-bdd11e8e5de24359ab929f89625a4cca\",\"request\":{\"schema_version\":\"0.1\",\"operation_id\":\"write-output\",\"task_id\":\"integration-task\",\"subject_id\":\"fit-agent\",\"name\":\"objects.write\",\"resource\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\"},\"arguments\":{\"value\":1},\"deadline\":\"2030-01-01T00:00:00Z\"},\"request_digest\":\"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\",\"grant_ids\":[\"fictional-grant\"],\"retry_class\":\"reconciliation_required\",\"state\":\"succeeded\",\"revision\":2,\"created_at\":\"2026-09-23T07:41:12.229058Z\",\"updated_at\":\"2026-09-23T07:41:12.229699Z\",\"usage\":{\"schema_version\":\"0.1\",\"steps\":0,\"model_calls\":0,\"model_tokens\":0,\"tool_milliseconds\":0,\"output_bytes\":0},\"result\":{\"artifact\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\",\"version\":1,\"content_digest\":\"48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6\"}},\"failure\":null,\"reconciliation_evidence\":[]}"
+          ]
+        ],
+        "events": [
+          [
+            1,
+            "task.submitted",
+            "{\"revision\": 0, \"state\": \"queued\"}"
+          ],
+          [
+            2,
+            "task.transitioned",
+            "{\"revision\": 1, \"state\": \"running\"}"
+          ],
+          [
+            3,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-bdd11e8e5de24359ab929f89625a4cca\", \"revision\": 0, \"state\": \"accepted\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            4,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-bdd11e8e5de24359ab929f89625a4cca\", \"revision\": 1, \"state\": \"running\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            5,
+            "object.written",
+            "{\"resource_id\": \"output\", \"version\": 1, \"content_digest\": \"48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6\"}"
+          ],
+          [
+            6,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-bdd11e8e5de24359ab929f89625a4cca\", \"revision\": 2, \"state\": \"succeeded\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            7,
+            "task.transitioned",
+            "{\"revision\": 2, \"state\": \"suspended\"}"
+          ],
+          [
+            8,
+            "task.transitioned",
+            "{\"revision\": 3, \"state\": \"queued\"}"
+          ],
+          [
+            9,
+            "task.transitioned",
+            "{\"revision\": 4, \"state\": \"running\"}"
+          ],
+          [
+            10,
+            "object.written",
+            "{\"resource_id\": \"verification\", \"version\": 1, \"content_digest\": \"28fad55644937e012097516f09a981e2fcc7995359b542e62e0794ec005a3800\"}"
+          ],
+          [
+            11,
+            "task.transitioned",
+            "{\"revision\": 5, \"state\": \"succeeded\"}"
+          ]
+        ],
+        "objects": [
+          [
+            "fit",
+            "output",
+            1,
+            "48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6"
+          ],
+          [
+            "fit",
+            "verification",
+            1,
+            "28fad55644937e012097516f09a981e2fcc7995359b542e62e0794ec005a3800"
+          ]
+        ],
+        "provider_effects": 0,
+        "engine_status": "SUCCESS",
+        "engine_executor": "local-stable"
+      }
+    },
+    {
+      "name": "test_atomic_admission_and_enqueue[enqueue.written-False]",
+      "duration_seconds": 3.373,
+      "outcome": "passed",
+      "observations": {
+        "result": "succeeded",
+        "tasks": [
+          [
+            "integration-task",
+            5,
+            "succeeded"
+          ]
+        ],
+        "operations": [
+          [
+            "succeeded",
+            2,
+            "{\"schema_version\":\"0.1\",\"receipt_id\":\"receipt-5c1652528c49494ea52edd57deec3a6b\",\"request\":{\"schema_version\":\"0.1\",\"operation_id\":\"write-output\",\"task_id\":\"integration-task\",\"subject_id\":\"fit-agent\",\"name\":\"objects.write\",\"resource\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\"},\"arguments\":{\"value\":1},\"deadline\":\"2030-01-01T00:00:00Z\"},\"request_digest\":\"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\",\"grant_ids\":[\"fictional-grant\"],\"retry_class\":\"reconciliation_required\",\"state\":\"succeeded\",\"revision\":2,\"created_at\":\"2026-09-23T07:41:15.563800Z\",\"updated_at\":\"2026-09-23T07:41:15.564504Z\",\"usage\":{\"schema_version\":\"0.1\",\"steps\":0,\"model_calls\":0,\"model_tokens\":0,\"tool_milliseconds\":0,\"output_bytes\":0},\"result\":{\"artifact\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\",\"version\":1,\"content_digest\":\"48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6\"}},\"failure\":null,\"reconciliation_evidence\":[]}"
+          ]
+        ],
+        "events": [
+          [
+            1,
+            "task.submitted",
+            "{\"revision\": 0, \"state\": \"queued\"}"
+          ],
+          [
+            2,
+            "task.transitioned",
+            "{\"revision\": 1, \"state\": \"running\"}"
+          ],
+          [
+            3,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-5c1652528c49494ea52edd57deec3a6b\", \"revision\": 0, \"state\": \"accepted\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            4,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-5c1652528c49494ea52edd57deec3a6b\", \"revision\": 1, \"state\": \"running\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            5,
+            "object.written",
+            "{\"resource_id\": \"output\", \"version\": 1, \"content_digest\": \"48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6\"}"
+          ],
+          [
+            6,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-5c1652528c49494ea52edd57deec3a6b\", \"revision\": 2, \"state\": \"succeeded\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            7,
+            "task.transitioned",
+            "{\"revision\": 2, \"state\": \"suspended\"}"
+          ],
+          [
+            8,
+            "task.transitioned",
+            "{\"revision\": 3, \"state\": \"queued\"}"
+          ],
+          [
+            9,
+            "task.transitioned",
+            "{\"revision\": 4, \"state\": \"running\"}"
+          ],
+          [
+            10,
+            "object.written",
+            "{\"resource_id\": \"verification\", \"version\": 1, \"content_digest\": \"28fad55644937e012097516f09a981e2fcc7995359b542e62e0794ec005a3800\"}"
+          ],
+          [
+            11,
+            "task.transitioned",
+            "{\"revision\": 5, \"state\": \"succeeded\"}"
+          ]
+        ],
+        "objects": [
+          [
+            "fit",
+            "output",
+            1,
+            "48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6"
+          ],
+          [
+            "fit",
+            "verification",
+            1,
+            "28fad55644937e012097516f09a981e2fcc7995359b542e62e0794ec005a3800"
+          ]
+        ],
+        "provider_effects": 0,
+        "engine_status": "SUCCESS",
+        "engine_executor": "local-stable"
+      }
+    },
+    {
+      "name": "test_atomic_admission_and_enqueue[admission.before_commit-False]",
+      "duration_seconds": 3.389,
+      "outcome": "passed",
+      "observations": {
+        "result": "succeeded",
+        "tasks": [
+          [
+            "integration-task",
+            5,
+            "succeeded"
+          ]
+        ],
+        "operations": [
+          [
+            "succeeded",
+            2,
+            "{\"schema_version\":\"0.1\",\"receipt_id\":\"receipt-4f978ca7821449a69c6f750df8b5e1ff\",\"request\":{\"schema_version\":\"0.1\",\"operation_id\":\"write-output\",\"task_id\":\"integration-task\",\"subject_id\":\"fit-agent\",\"name\":\"objects.write\",\"resource\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\"},\"arguments\":{\"value\":1},\"deadline\":\"2030-01-01T00:00:00Z\"},\"request_digest\":\"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\",\"grant_ids\":[\"fictional-grant\"],\"retry_class\":\"reconciliation_required\",\"state\":\"succeeded\",\"revision\":2,\"created_at\":\"2026-09-23T07:41:18.925954Z\",\"updated_at\":\"2026-09-23T07:41:18.926665Z\",\"usage\":{\"schema_version\":\"0.1\",\"steps\":0,\"model_calls\":0,\"model_tokens\":0,\"tool_milliseconds\":0,\"output_bytes\":0},\"result\":{\"artifact\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\",\"version\":1,\"content_digest\":\"48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6\"}},\"failure\":null,\"reconciliation_evidence\":[]}"
+          ]
+        ],
+        "events": [
+          [
+            1,
+            "task.submitted",
+            "{\"revision\": 0, \"state\": \"queued\"}"
+          ],
+          [
+            2,
+            "task.transitioned",
+            "{\"revision\": 1, \"state\": \"running\"}"
+          ],
+          [
+            3,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-4f978ca7821449a69c6f750df8b5e1ff\", \"revision\": 0, \"state\": \"accepted\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            4,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-4f978ca7821449a69c6f750df8b5e1ff\", \"revision\": 1, \"state\": \"running\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            5,
+            "object.written",
+            "{\"resource_id\": \"output\", \"version\": 1, \"content_digest\": \"48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6\"}"
+          ],
+          [
+            6,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-4f978ca7821449a69c6f750df8b5e1ff\", \"revision\": 2, \"state\": \"succeeded\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            7,
+            "task.transitioned",
+            "{\"revision\": 2, \"state\": \"suspended\"}"
+          ],
+          [
+            8,
+            "task.transitioned",
+            "{\"revision\": 3, \"state\": \"queued\"}"
+          ],
+          [
+            9,
+            "task.transitioned",
+            "{\"revision\": 4, \"state\": \"running\"}"
+          ],
+          [
+            10,
+            "object.written",
+            "{\"resource_id\": \"verification\", \"version\": 1, \"content_digest\": \"28fad55644937e012097516f09a981e2fcc7995359b542e62e0794ec005a3800\"}"
+          ],
+          [
+            11,
+            "task.transitioned",
+            "{\"revision\": 5, \"state\": \"succeeded\"}"
+          ]
+        ],
+        "objects": [
+          [
+            "fit",
+            "output",
+            1,
+            "48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6"
+          ],
+          [
+            "fit",
+            "verification",
+            1,
+            "28fad55644937e012097516f09a981e2fcc7995359b542e62e0794ec005a3800"
+          ]
+        ],
+        "provider_effects": 0,
+        "engine_status": "SUCCESS",
+        "engine_executor": "local-stable"
+      }
+    },
+    {
+      "name": "test_atomic_admission_and_enqueue[admission.after_commit-True]",
+      "duration_seconds": 2.931,
+      "outcome": "passed",
+      "observations": {
+        "result": "succeeded",
+        "tasks": [
+          [
+            "integration-task",
+            5,
+            "succeeded"
+          ]
+        ],
+        "operations": [
+          [
+            "succeeded",
+            2,
+            "{\"schema_version\":\"0.1\",\"receipt_id\":\"receipt-273aa505215d44c3b0b12f14396de4bc\",\"request\":{\"schema_version\":\"0.1\",\"operation_id\":\"write-output\",\"task_id\":\"integration-task\",\"subject_id\":\"fit-agent\",\"name\":\"objects.write\",\"resource\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\"},\"arguments\":{\"value\":1},\"deadline\":\"2030-01-01T00:00:00Z\"},\"request_digest\":\"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\",\"grant_ids\":[\"fictional-grant\"],\"retry_class\":\"reconciliation_required\",\"state\":\"succeeded\",\"revision\":2,\"created_at\":\"2026-09-23T07:41:21.886953Z\",\"updated_at\":\"2026-09-23T07:41:21.887656Z\",\"usage\":{\"schema_version\":\"0.1\",\"steps\":0,\"model_calls\":0,\"model_tokens\":0,\"tool_milliseconds\":0,\"output_bytes\":0},\"result\":{\"artifact\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\",\"version\":1,\"content_digest\":\"48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6\"}},\"failure\":null,\"reconciliation_evidence\":[]}"
+          ]
+        ],
+        "events": [
+          [
+            1,
+            "task.submitted",
+            "{\"revision\": 0, \"state\": \"queued\"}"
+          ],
+          [
+            2,
+            "task.transitioned",
+            "{\"revision\": 1, \"state\": \"running\"}"
+          ],
+          [
+            3,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-273aa505215d44c3b0b12f14396de4bc\", \"revision\": 0, \"state\": \"accepted\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            4,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-273aa505215d44c3b0b12f14396de4bc\", \"revision\": 1, \"state\": \"running\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            5,
+            "object.written",
+            "{\"resource_id\": \"output\", \"version\": 1, \"content_digest\": \"48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6\"}"
+          ],
+          [
+            6,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-273aa505215d44c3b0b12f14396de4bc\", \"revision\": 2, \"state\": \"succeeded\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            7,
+            "task.transitioned",
+            "{\"revision\": 2, \"state\": \"suspended\"}"
+          ],
+          [
+            8,
+            "task.transitioned",
+            "{\"revision\": 3, \"state\": \"queued\"}"
+          ],
+          [
+            9,
+            "task.transitioned",
+            "{\"revision\": 4, \"state\": \"running\"}"
+          ],
+          [
+            10,
+            "object.written",
+            "{\"resource_id\": \"verification\", \"version\": 1, \"content_digest\": \"28fad55644937e012097516f09a981e2fcc7995359b542e62e0794ec005a3800\"}"
+          ],
+          [
+            11,
+            "task.transitioned",
+            "{\"revision\": 5, \"state\": \"succeeded\"}"
+          ]
+        ],
+        "objects": [
+          [
+            "fit",
+            "output",
+            1,
+            "48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6"
+          ],
+          [
+            "fit",
+            "verification",
+            1,
+            "28fad55644937e012097516f09a981e2fcc7995359b542e62e0794ec005a3800"
+          ]
+        ],
+        "provider_effects": 0,
+        "engine_status": "SUCCESS",
+        "engine_executor": "local-stable"
+      }
+    },
+    {
+      "name": "test_separate_commits_expose_both_gaps[False]",
+      "duration_seconds": 1.412,
+      "outcome": "passed",
+      "observations": {
+        "tasks": [
+          [
+            "integration-task",
+            0,
+            "queued"
+          ]
+        ],
+        "operations": [],
+        "events": [
+          [
+            1,
+            "task.submitted",
+            "{\"revision\": 0, \"state\": \"queued\"}"
+          ]
+        ],
+        "objects": [],
+        "provider_effects": 0,
+        "engine_status": null,
+        "engine_executor": null
+      }
+    },
+    {
+      "name": "test_separate_commits_expose_both_gaps[True]",
+      "duration_seconds": 1.416,
+      "outcome": "passed",
+      "observations": {
+        "tasks": [],
+        "operations": [],
+        "events": [],
+        "objects": [],
+        "provider_effects": 0,
+        "engine_status": "ENQUEUED",
+        "engine_executor": null
+      }
+    },
+    {
+      "name": "test_datasource_commit_and_checkpoint_replay[publish.before_commit-0]",
+      "duration_seconds": 5.417,
+      "outcome": "passed",
+      "observations": {
+        "before_restart": {
+          "tasks": [
+            [
+              "integration-task",
+              1,
+              "running"
+            ]
+          ],
+          "operations": [],
+          "events": [
+            [
+              1,
+              "task.submitted",
+              "{\"revision\": 0, \"state\": \"queued\"}"
+            ],
+            [
+              2,
+              "task.transitioned",
+              "{\"revision\": 1, \"state\": \"running\"}"
+            ]
+          ],
+          "objects": [],
+          "provider_effects": 0,
+          "engine_status": "PENDING",
+          "engine_executor": "local-stable"
+        },
+        "result": "succeeded",
+        "tasks": [
+          [
+            "integration-task",
+            7,
+            "succeeded"
+          ]
+        ],
+        "operations": [
+          [
+            "succeeded",
+            2,
+            "{\"schema_version\":\"0.1\",\"receipt_id\":\"receipt-02ee97ab945a4cdbbbfbd78c29b2c573\",\"request\":{\"schema_version\":\"0.1\",\"operation_id\":\"write-output\",\"task_id\":\"integration-task\",\"subject_id\":\"fit-agent\",\"name\":\"objects.write\",\"resource\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\"},\"arguments\":{\"value\":1},\"deadline\":\"2030-01-01T00:00:00Z\"},\"request_digest\":\"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\",\"grant_ids\":[\"fictional-grant\"],\"retry_class\":\"reconciliation_required\",\"state\":\"succeeded\",\"revision\":2,\"created_at\":\"2026-09-23T07:41:30.790358Z\",\"updated_at\":\"2026-09-23T07:41:30.792004Z\",\"usage\":{\"schema_version\":\"0.1\",\"steps\":0,\"model_calls\":0,\"model_tokens\":0,\"tool_milliseconds\":0,\"output_bytes\":0},\"result\":{\"artifact\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\",\"version\":1,\"content_digest\":\"48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6\"}},\"failure\":null,\"reconciliation_evidence\":[]}"
+          ]
+        ],
+        "events": [
+          [
+            1,
+            "task.submitted",
+            "{\"revision\": 0, \"state\": \"queued\"}"
+          ],
+          [
+            2,
+            "task.transitioned",
+            "{\"revision\": 1, \"state\": \"running\"}"
+          ],
+          [
+            3,
+            "task.recovered",
+            "{\"revision\": 2, \"state\": \"queued\"}"
+          ],
+          [
+            4,
+            "task.transitioned",
+            "{\"revision\": 3, \"state\": \"running\"}"
+          ],
+          [
+            5,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-02ee97ab945a4cdbbbfbd78c29b2c573\", \"revision\": 0, \"state\": \"accepted\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            6,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-02ee97ab945a4cdbbbfbd78c29b2c573\", \"revision\": 1, \"state\": \"running\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            7,
+            "object.written",
+            "{\"resource_id\": \"output\", \"version\": 1, \"content_digest\": \"48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6\"}"
+          ],
+          [
+            8,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-02ee97ab945a4cdbbbfbd78c29b2c573\", \"revision\": 2, \"state\": \"succeeded\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            9,
+            "task.transitioned",
+            "{\"revision\": 4, \"state\": \"suspended\"}"
+          ],
+          [
+            10,
+            "task.transitioned",
+            "{\"revision\": 5, \"state\": \"queued\"}"
+          ],
+          [
+            11,
+            "task.transitioned",
+            "{\"revision\": 6, \"state\": \"running\"}"
+          ],
+          [
+            12,
+            "object.written",
+            "{\"resource_id\": \"verification\", \"version\": 1, \"content_digest\": \"28fad55644937e012097516f09a981e2fcc7995359b542e62e0794ec005a3800\"}"
+          ],
+          [
+            13,
+            "task.transitioned",
+            "{\"revision\": 7, \"state\": \"succeeded\"}"
+          ]
+        ],
+        "objects": [
+          [
+            "fit",
+            "output",
+            1,
+            "48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6"
+          ],
+          [
+            "fit",
+            "verification",
+            1,
+            "28fad55644937e012097516f09a981e2fcc7995359b542e62e0794ec005a3800"
+          ]
+        ],
+        "provider_effects": 0,
+        "engine_status": "SUCCESS",
+        "engine_executor": "local-stable"
+      }
+    },
+    {
+      "name": "test_datasource_commit_and_checkpoint_replay[publish.after_commit-1]",
+      "duration_seconds": 3.353,
+      "outcome": "passed",
+      "observations": {
+        "before_restart": {
+          "tasks": [
+            [
+              "integration-task",
+              2,
+              "suspended"
+            ]
+          ],
+          "operations": [
+            [
+              "succeeded",
+              2,
+              "{\"schema_version\":\"0.1\",\"receipt_id\":\"receipt-8e94d9b9a37246b19d97bbf83ce49c15\",\"request\":{\"schema_version\":\"0.1\",\"operation_id\":\"write-output\",\"task_id\":\"integration-task\",\"subject_id\":\"fit-agent\",\"name\":\"objects.write\",\"resource\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\"},\"arguments\":{\"value\":1},\"deadline\":\"2030-01-01T00:00:00Z\"},\"request_digest\":\"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\",\"grant_ids\":[\"fictional-grant\"],\"retry_class\":\"reconciliation_required\",\"state\":\"succeeded\",\"revision\":2,\"created_at\":\"2026-09-23T07:41:33.080141Z\",\"updated_at\":\"2026-09-23T07:41:33.080863Z\",\"usage\":{\"schema_version\":\"0.1\",\"steps\":0,\"model_calls\":0,\"model_tokens\":0,\"tool_milliseconds\":0,\"output_bytes\":0},\"result\":{\"artifact\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\",\"version\":1,\"content_digest\":\"48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6\"}},\"failure\":null,\"reconciliation_evidence\":[]}"
+            ]
+          ],
+          "events": [
+            [
+              1,
+              "task.submitted",
+              "{\"revision\": 0, \"state\": \"queued\"}"
+            ],
+            [
+              2,
+              "task.transitioned",
+              "{\"revision\": 1, \"state\": \"running\"}"
+            ],
+            [
+              3,
+              "operation.transitioned",
+              "{\"receipt_id\": \"receipt-8e94d9b9a37246b19d97bbf83ce49c15\", \"revision\": 0, \"state\": \"accepted\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+            ],
+            [
+              4,
+              "operation.transitioned",
+              "{\"receipt_id\": \"receipt-8e94d9b9a37246b19d97bbf83ce49c15\", \"revision\": 1, \"state\": \"running\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+            ],
+            [
+              5,
+              "object.written",
+              "{\"resource_id\": \"output\", \"version\": 1, \"content_digest\": \"48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6\"}"
+            ],
+            [
+              6,
+              "operation.transitioned",
+              "{\"receipt_id\": \"receipt-8e94d9b9a37246b19d97bbf83ce49c15\", \"revision\": 2, \"state\": \"succeeded\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+            ],
+            [
+              7,
+              "task.transitioned",
+              "{\"revision\": 2, \"state\": \"suspended\"}"
+            ]
+          ],
+          "objects": [
+            [
+              "fit",
+              "output",
+              1,
+              "48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6"
+            ]
+          ],
+          "provider_effects": 0,
+          "engine_status": "PENDING",
+          "engine_executor": "local-stable"
+        },
+        "result": "succeeded",
+        "tasks": [
+          [
+            "integration-task",
+            5,
+            "succeeded"
+          ]
+        ],
+        "operations": [
+          [
+            "succeeded",
+            2,
+            "{\"schema_version\":\"0.1\",\"receipt_id\":\"receipt-8e94d9b9a37246b19d97bbf83ce49c15\",\"request\":{\"schema_version\":\"0.1\",\"operation_id\":\"write-output\",\"task_id\":\"integration-task\",\"subject_id\":\"fit-agent\",\"name\":\"objects.write\",\"resource\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\"},\"arguments\":{\"value\":1},\"deadline\":\"2030-01-01T00:00:00Z\"},\"request_digest\":\"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\",\"grant_ids\":[\"fictional-grant\"],\"retry_class\":\"reconciliation_required\",\"state\":\"succeeded\",\"revision\":2,\"created_at\":\"2026-09-23T07:41:33.080141Z\",\"updated_at\":\"2026-09-23T07:41:33.080863Z\",\"usage\":{\"schema_version\":\"0.1\",\"steps\":0,\"model_calls\":0,\"model_tokens\":0,\"tool_milliseconds\":0,\"output_bytes\":0},\"result\":{\"artifact\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\",\"version\":1,\"content_digest\":\"48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6\"}},\"failure\":null,\"reconciliation_evidence\":[]}"
+          ]
+        ],
+        "events": [
+          [
+            1,
+            "task.submitted",
+            "{\"revision\": 0, \"state\": \"queued\"}"
+          ],
+          [
+            2,
+            "task.transitioned",
+            "{\"revision\": 1, \"state\": \"running\"}"
+          ],
+          [
+            3,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-8e94d9b9a37246b19d97bbf83ce49c15\", \"revision\": 0, \"state\": \"accepted\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            4,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-8e94d9b9a37246b19d97bbf83ce49c15\", \"revision\": 1, \"state\": \"running\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            5,
+            "object.written",
+            "{\"resource_id\": \"output\", \"version\": 1, \"content_digest\": \"48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6\"}"
+          ],
+          [
+            6,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-8e94d9b9a37246b19d97bbf83ce49c15\", \"revision\": 2, \"state\": \"succeeded\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            7,
+            "task.transitioned",
+            "{\"revision\": 2, \"state\": \"suspended\"}"
+          ],
+          [
+            8,
+            "task.transitioned",
+            "{\"revision\": 3, \"state\": \"queued\"}"
+          ],
+          [
+            9,
+            "task.transitioned",
+            "{\"revision\": 4, \"state\": \"running\"}"
+          ],
+          [
+            10,
+            "object.written",
+            "{\"resource_id\": \"verification\", \"version\": 1, \"content_digest\": \"28fad55644937e012097516f09a981e2fcc7995359b542e62e0794ec005a3800\"}"
+          ],
+          [
+            11,
+            "task.transitioned",
+            "{\"revision\": 5, \"state\": \"succeeded\"}"
+          ]
+        ],
+        "objects": [
+          [
+            "fit",
+            "output",
+            1,
+            "48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6"
+          ],
+          [
+            "fit",
+            "verification",
+            1,
+            "28fad55644937e012097516f09a981e2fcc7995359b542e62e0794ec005a3800"
+          ]
+        ],
+        "provider_effects": 0,
+        "engine_status": "SUCCESS",
+        "engine_executor": "local-stable"
+      }
+    },
+    {
+      "name": "test_terminal_commit_recovery[finish.before_commit]",
+      "duration_seconds": 5.461,
+      "outcome": "passed",
+      "observations": {
+        "before_restart": {
+          "tasks": [
+            [
+              "integration-task",
+              4,
+              "running"
+            ]
+          ],
+          "operations": [
+            [
+              "succeeded",
+              2,
+              "{\"schema_version\":\"0.1\",\"receipt_id\":\"receipt-95c80b83be3c467bb0741f6fb8053153\",\"request\":{\"schema_version\":\"0.1\",\"operation_id\":\"write-output\",\"task_id\":\"integration-task\",\"subject_id\":\"fit-agent\",\"name\":\"objects.write\",\"resource\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\"},\"arguments\":{\"value\":1},\"deadline\":\"2030-01-01T00:00:00Z\"},\"request_digest\":\"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\",\"grant_ids\":[\"fictional-grant\"],\"retry_class\":\"reconciliation_required\",\"state\":\"succeeded\",\"revision\":2,\"created_at\":\"2026-09-23T07:41:36.494031Z\",\"updated_at\":\"2026-09-23T07:41:36.494669Z\",\"usage\":{\"schema_version\":\"0.1\",\"steps\":0,\"model_calls\":0,\"model_tokens\":0,\"tool_milliseconds\":0,\"output_bytes\":0},\"result\":{\"artifact\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\",\"version\":1,\"content_digest\":\"48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6\"}},\"failure\":null,\"reconciliation_evidence\":[]}"
+            ]
+          ],
+          "events": [
+            [
+              1,
+              "task.submitted",
+              "{\"revision\": 0, \"state\": \"queued\"}"
+            ],
+            [
+              2,
+              "task.transitioned",
+              "{\"revision\": 1, \"state\": \"running\"}"
+            ],
+            [
+              3,
+              "operation.transitioned",
+              "{\"receipt_id\": \"receipt-95c80b83be3c467bb0741f6fb8053153\", \"revision\": 0, \"state\": \"accepted\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+            ],
+            [
+              4,
+              "operation.transitioned",
+              "{\"receipt_id\": \"receipt-95c80b83be3c467bb0741f6fb8053153\", \"revision\": 1, \"state\": \"running\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+            ],
+            [
+              5,
+              "object.written",
+              "{\"resource_id\": \"output\", \"version\": 1, \"content_digest\": \"48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6\"}"
+            ],
+            [
+              6,
+              "operation.transitioned",
+              "{\"receipt_id\": \"receipt-95c80b83be3c467bb0741f6fb8053153\", \"revision\": 2, \"state\": \"succeeded\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+            ],
+            [
+              7,
+              "task.transitioned",
+              "{\"revision\": 2, \"state\": \"suspended\"}"
+            ],
+            [
+              8,
+              "task.transitioned",
+              "{\"revision\": 3, \"state\": \"queued\"}"
+            ],
+            [
+              9,
+              "task.transitioned",
+              "{\"revision\": 4, \"state\": \"running\"}"
+            ]
+          ],
+          "objects": [
+            [
+              "fit",
+              "output",
+              1,
+              "48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6"
+            ]
+          ],
+          "provider_effects": 0,
+          "engine_status": "PENDING",
+          "engine_executor": "local-stable"
+        },
+        "result": "succeeded",
+        "tasks": [
+          [
+            "integration-task",
+            7,
+            "succeeded"
+          ]
+        ],
+        "operations": [
+          [
+            "succeeded",
+            2,
+            "{\"schema_version\":\"0.1\",\"receipt_id\":\"receipt-95c80b83be3c467bb0741f6fb8053153\",\"request\":{\"schema_version\":\"0.1\",\"operation_id\":\"write-output\",\"task_id\":\"integration-task\",\"subject_id\":\"fit-agent\",\"name\":\"objects.write\",\"resource\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\"},\"arguments\":{\"value\":1},\"deadline\":\"2030-01-01T00:00:00Z\"},\"request_digest\":\"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\",\"grant_ids\":[\"fictional-grant\"],\"retry_class\":\"reconciliation_required\",\"state\":\"succeeded\",\"revision\":2,\"created_at\":\"2026-09-23T07:41:36.494031Z\",\"updated_at\":\"2026-09-23T07:41:36.494669Z\",\"usage\":{\"schema_version\":\"0.1\",\"steps\":0,\"model_calls\":0,\"model_tokens\":0,\"tool_milliseconds\":0,\"output_bytes\":0},\"result\":{\"artifact\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\",\"version\":1,\"content_digest\":\"48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6\"}},\"failure\":null,\"reconciliation_evidence\":[]}"
+          ]
+        ],
+        "events": [
+          [
+            1,
+            "task.submitted",
+            "{\"revision\": 0, \"state\": \"queued\"}"
+          ],
+          [
+            2,
+            "task.transitioned",
+            "{\"revision\": 1, \"state\": \"running\"}"
+          ],
+          [
+            3,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-95c80b83be3c467bb0741f6fb8053153\", \"revision\": 0, \"state\": \"accepted\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            4,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-95c80b83be3c467bb0741f6fb8053153\", \"revision\": 1, \"state\": \"running\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            5,
+            "object.written",
+            "{\"resource_id\": \"output\", \"version\": 1, \"content_digest\": \"48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6\"}"
+          ],
+          [
+            6,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-95c80b83be3c467bb0741f6fb8053153\", \"revision\": 2, \"state\": \"succeeded\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            7,
+            "task.transitioned",
+            "{\"revision\": 2, \"state\": \"suspended\"}"
+          ],
+          [
+            8,
+            "task.transitioned",
+            "{\"revision\": 3, \"state\": \"queued\"}"
+          ],
+          [
+            9,
+            "task.transitioned",
+            "{\"revision\": 4, \"state\": \"running\"}"
+          ],
+          [
+            10,
+            "task.recovered",
+            "{\"revision\": 5, \"state\": \"queued\"}"
+          ],
+          [
+            11,
+            "task.transitioned",
+            "{\"revision\": 6, \"state\": \"running\"}"
+          ],
+          [
+            12,
+            "object.written",
+            "{\"resource_id\": \"verification\", \"version\": 1, \"content_digest\": \"28fad55644937e012097516f09a981e2fcc7995359b542e62e0794ec005a3800\"}"
+          ],
+          [
+            13,
+            "task.transitioned",
+            "{\"revision\": 7, \"state\": \"succeeded\"}"
+          ]
+        ],
+        "objects": [
+          [
+            "fit",
+            "output",
+            1,
+            "48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6"
+          ],
+          [
+            "fit",
+            "verification",
+            1,
+            "28fad55644937e012097516f09a981e2fcc7995359b542e62e0794ec005a3800"
+          ]
+        ],
+        "provider_effects": 0,
+        "engine_status": "SUCCESS",
+        "engine_executor": "local-stable"
+      }
+    },
+    {
+      "name": "test_terminal_commit_recovery[finish.after_commit]",
+      "duration_seconds": 3.411,
+      "outcome": "passed",
+      "observations": {
+        "before_restart": {
+          "tasks": [
+            [
+              "integration-task",
+              5,
+              "succeeded"
+            ]
+          ],
+          "operations": [
+            [
+              "succeeded",
+              2,
+              "{\"schema_version\":\"0.1\",\"receipt_id\":\"receipt-9c3de34915824124aa98c4e1ff4f5906\",\"request\":{\"schema_version\":\"0.1\",\"operation_id\":\"write-output\",\"task_id\":\"integration-task\",\"subject_id\":\"fit-agent\",\"name\":\"objects.write\",\"resource\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\"},\"arguments\":{\"value\":1},\"deadline\":\"2030-01-01T00:00:00Z\"},\"request_digest\":\"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\",\"grant_ids\":[\"fictional-grant\"],\"retry_class\":\"reconciliation_required\",\"state\":\"succeeded\",\"revision\":2,\"created_at\":\"2026-09-23T07:41:41.910847Z\",\"updated_at\":\"2026-09-23T07:41:41.911534Z\",\"usage\":{\"schema_version\":\"0.1\",\"steps\":0,\"model_calls\":0,\"model_tokens\":0,\"tool_milliseconds\":0,\"output_bytes\":0},\"result\":{\"artifact\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\",\"version\":1,\"content_digest\":\"48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6\"}},\"failure\":null,\"reconciliation_evidence\":[]}"
+            ]
+          ],
+          "events": [
+            [
+              1,
+              "task.submitted",
+              "{\"revision\": 0, \"state\": \"queued\"}"
+            ],
+            [
+              2,
+              "task.transitioned",
+              "{\"revision\": 1, \"state\": \"running\"}"
+            ],
+            [
+              3,
+              "operation.transitioned",
+              "{\"receipt_id\": \"receipt-9c3de34915824124aa98c4e1ff4f5906\", \"revision\": 0, \"state\": \"accepted\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+            ],
+            [
+              4,
+              "operation.transitioned",
+              "{\"receipt_id\": \"receipt-9c3de34915824124aa98c4e1ff4f5906\", \"revision\": 1, \"state\": \"running\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+            ],
+            [
+              5,
+              "object.written",
+              "{\"resource_id\": \"output\", \"version\": 1, \"content_digest\": \"48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6\"}"
+            ],
+            [
+              6,
+              "operation.transitioned",
+              "{\"receipt_id\": \"receipt-9c3de34915824124aa98c4e1ff4f5906\", \"revision\": 2, \"state\": \"succeeded\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+            ],
+            [
+              7,
+              "task.transitioned",
+              "{\"revision\": 2, \"state\": \"suspended\"}"
+            ],
+            [
+              8,
+              "task.transitioned",
+              "{\"revision\": 3, \"state\": \"queued\"}"
+            ],
+            [
+              9,
+              "task.transitioned",
+              "{\"revision\": 4, \"state\": \"running\"}"
+            ],
+            [
+              10,
+              "object.written",
+              "{\"resource_id\": \"verification\", \"version\": 1, \"content_digest\": \"28fad55644937e012097516f09a981e2fcc7995359b542e62e0794ec005a3800\"}"
+            ],
+            [
+              11,
+              "task.transitioned",
+              "{\"revision\": 5, \"state\": \"succeeded\"}"
+            ]
+          ],
+          "objects": [
+            [
+              "fit",
+              "output",
+              1,
+              "48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6"
+            ],
+            [
+              "fit",
+              "verification",
+              1,
+              "28fad55644937e012097516f09a981e2fcc7995359b542e62e0794ec005a3800"
+            ]
+          ],
+          "provider_effects": 0,
+          "engine_status": "PENDING",
+          "engine_executor": "local-stable"
+        },
+        "result": "succeeded",
+        "tasks": [
+          [
+            "integration-task",
+            5,
+            "succeeded"
+          ]
+        ],
+        "operations": [
+          [
+            "succeeded",
+            2,
+            "{\"schema_version\":\"0.1\",\"receipt_id\":\"receipt-9c3de34915824124aa98c4e1ff4f5906\",\"request\":{\"schema_version\":\"0.1\",\"operation_id\":\"write-output\",\"task_id\":\"integration-task\",\"subject_id\":\"fit-agent\",\"name\":\"objects.write\",\"resource\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\"},\"arguments\":{\"value\":1},\"deadline\":\"2030-01-01T00:00:00Z\"},\"request_digest\":\"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\",\"grant_ids\":[\"fictional-grant\"],\"retry_class\":\"reconciliation_required\",\"state\":\"succeeded\",\"revision\":2,\"created_at\":\"2026-09-23T07:41:41.910847Z\",\"updated_at\":\"2026-09-23T07:41:41.911534Z\",\"usage\":{\"schema_version\":\"0.1\",\"steps\":0,\"model_calls\":0,\"model_tokens\":0,\"tool_milliseconds\":0,\"output_bytes\":0},\"result\":{\"artifact\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\",\"version\":1,\"content_digest\":\"48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6\"}},\"failure\":null,\"reconciliation_evidence\":[]}"
+          ]
+        ],
+        "events": [
+          [
+            1,
+            "task.submitted",
+            "{\"revision\": 0, \"state\": \"queued\"}"
+          ],
+          [
+            2,
+            "task.transitioned",
+            "{\"revision\": 1, \"state\": \"running\"}"
+          ],
+          [
+            3,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-9c3de34915824124aa98c4e1ff4f5906\", \"revision\": 0, \"state\": \"accepted\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            4,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-9c3de34915824124aa98c4e1ff4f5906\", \"revision\": 1, \"state\": \"running\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            5,
+            "object.written",
+            "{\"resource_id\": \"output\", \"version\": 1, \"content_digest\": \"48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6\"}"
+          ],
+          [
+            6,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-9c3de34915824124aa98c4e1ff4f5906\", \"revision\": 2, \"state\": \"succeeded\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            7,
+            "task.transitioned",
+            "{\"revision\": 2, \"state\": \"suspended\"}"
+          ],
+          [
+            8,
+            "task.transitioned",
+            "{\"revision\": 3, \"state\": \"queued\"}"
+          ],
+          [
+            9,
+            "task.transitioned",
+            "{\"revision\": 4, \"state\": \"running\"}"
+          ],
+          [
+            10,
+            "object.written",
+            "{\"resource_id\": \"verification\", \"version\": 1, \"content_digest\": \"28fad55644937e012097516f09a981e2fcc7995359b542e62e0794ec005a3800\"}"
+          ],
+          [
+            11,
+            "task.transitioned",
+            "{\"revision\": 5, \"state\": \"succeeded\"}"
+          ]
+        ],
+        "objects": [
+          [
+            "fit",
+            "output",
+            1,
+            "48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6"
+          ],
+          [
+            "fit",
+            "verification",
+            1,
+            "28fad55644937e012097516f09a981e2fcc7995359b542e62e0794ec005a3800"
+          ]
+        ],
+        "provider_effects": 0,
+        "engine_status": "SUCCESS",
+        "engine_executor": "local-stable"
+      }
+    },
+    {
+      "name": "test_external_effect_gap_is_not_blindly_retried[intent.after_commit-0-failed]",
+      "duration_seconds": 5.534,
+      "outcome": "passed",
+      "observations": {
+        "result": "failed",
+        "tasks": [
+          [
+            "integration-task",
+            2,
+            "failed"
+          ]
+        ],
+        "operations": [
+          [
+            "outcome_unknown",
+            2,
+            "{\"schema_version\":\"0.1\",\"receipt_id\":\"receipt-020a67fb65de4bfe98ef66260e16bf57\",\"request\":{\"schema_version\":\"0.1\",\"operation_id\":\"write-output\",\"task_id\":\"integration-task\",\"subject_id\":\"fit-agent\",\"name\":\"objects.write\",\"resource\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\"},\"arguments\":{\"value\":1},\"deadline\":\"2030-01-01T00:00:00Z\"},\"request_digest\":\"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\",\"grant_ids\":[\"fictional-grant\"],\"retry_class\":\"reconciliation_required\",\"state\":\"outcome_unknown\",\"revision\":2,\"created_at\":\"2026-09-23T07:41:45.343746Z\",\"updated_at\":\"2026-09-23T07:41:48.391747Z\",\"usage\":{\"schema_version\":\"0.1\",\"steps\":0,\"model_calls\":0,\"model_tokens\":0,\"tool_milliseconds\":0,\"output_bytes\":0},\"result\":null,\"failure\":{\"schema_version\":\"0.1\",\"code\":\"worker_lost\",\"message\":\"Worker lease expired.\",\"retryable\":false,\"details\":{}},\"reconciliation_evidence\":[]}"
+          ]
+        ],
+        "events": [
+          [
+            1,
+            "task.submitted",
+            "{\"revision\": 0, \"state\": \"queued\"}"
+          ],
+          [
+            2,
+            "task.transitioned",
+            "{\"revision\": 1, \"state\": \"running\"}"
+          ],
+          [
+            3,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-020a67fb65de4bfe98ef66260e16bf57\", \"revision\": 0, \"state\": \"accepted\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            4,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-020a67fb65de4bfe98ef66260e16bf57\", \"revision\": 1, \"state\": \"running\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            5,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-020a67fb65de4bfe98ef66260e16bf57\", \"revision\": 2, \"state\": \"outcome_unknown\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            6,
+            "task.recovered",
+            "{\"revision\": 2, \"state\": \"failed\"}"
+          ]
+        ],
+        "objects": [],
+        "provider_effects": 0,
+        "engine_status": "SUCCESS",
+        "engine_executor": "local-stable"
+      }
+    },
+    {
+      "name": "test_external_effect_gap_is_not_blindly_retried[effect.after_commit-1-failed]",
+      "duration_seconds": 5.402,
+      "outcome": "passed",
+      "observations": {
+        "result": "failed",
+        "tasks": [
+          [
+            "integration-task",
+            2,
+            "failed"
+          ]
+        ],
+        "operations": [
+          [
+            "outcome_unknown",
+            2,
+            "{\"schema_version\":\"0.1\",\"receipt_id\":\"receipt-eea8c0e10e344b9c8e1f11a71348efdb\",\"request\":{\"schema_version\":\"0.1\",\"operation_id\":\"write-output\",\"task_id\":\"integration-task\",\"subject_id\":\"fit-agent\",\"name\":\"objects.write\",\"resource\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\"},\"arguments\":{\"value\":1},\"deadline\":\"2030-01-01T00:00:00Z\"},\"request_digest\":\"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\",\"grant_ids\":[\"fictional-grant\"],\"retry_class\":\"reconciliation_required\",\"state\":\"outcome_unknown\",\"revision\":2,\"created_at\":\"2026-09-23T07:41:50.820963Z\",\"updated_at\":\"2026-09-23T07:41:53.854154Z\",\"usage\":{\"schema_version\":\"0.1\",\"steps\":0,\"model_calls\":0,\"model_tokens\":0,\"tool_milliseconds\":0,\"output_bytes\":0},\"result\":null,\"failure\":{\"schema_version\":\"0.1\",\"code\":\"worker_lost\",\"message\":\"Worker lease expired.\",\"retryable\":false,\"details\":{}},\"reconciliation_evidence\":[]}"
+          ]
+        ],
+        "events": [
+          [
+            1,
+            "task.submitted",
+            "{\"revision\": 0, \"state\": \"queued\"}"
+          ],
+          [
+            2,
+            "task.transitioned",
+            "{\"revision\": 1, \"state\": \"running\"}"
+          ],
+          [
+            3,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-eea8c0e10e344b9c8e1f11a71348efdb\", \"revision\": 0, \"state\": \"accepted\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            4,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-eea8c0e10e344b9c8e1f11a71348efdb\", \"revision\": 1, \"state\": \"running\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            5,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-eea8c0e10e344b9c8e1f11a71348efdb\", \"revision\": 2, \"state\": \"outcome_unknown\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            6,
+            "task.recovered",
+            "{\"revision\": 2, \"state\": \"failed\"}"
+          ]
+        ],
+        "objects": [],
+        "provider_effects": 1,
+        "engine_status": "SUCCESS",
+        "engine_executor": "local-stable"
+      }
+    },
+    {
+      "name": "test_external_effect_gap_is_not_blindly_retried[receipt.after_commit-1-succeeded]",
+      "duration_seconds": 3.435,
+      "outcome": "passed",
+      "observations": {
+        "result": "succeeded",
+        "tasks": [
+          [
+            "integration-task",
+            5,
+            "succeeded"
+          ]
+        ],
+        "operations": [
+          [
+            "succeeded",
+            2,
+            "{\"schema_version\":\"0.1\",\"receipt_id\":\"receipt-919adcb6d9184d84a2930498e16e1a82\",\"request\":{\"schema_version\":\"0.1\",\"operation_id\":\"write-output\",\"task_id\":\"integration-task\",\"subject_id\":\"fit-agent\",\"name\":\"objects.write\",\"resource\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\"},\"arguments\":{\"value\":1},\"deadline\":\"2030-01-01T00:00:00Z\"},\"request_digest\":\"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\",\"grant_ids\":[\"fictional-grant\"],\"retry_class\":\"reconciliation_required\",\"state\":\"succeeded\",\"revision\":2,\"created_at\":\"2026-09-23T07:41:56.300222Z\",\"updated_at\":\"2026-09-23T07:41:56.302139Z\",\"usage\":{\"schema_version\":\"0.1\",\"steps\":0,\"model_calls\":0,\"model_tokens\":0,\"tool_milliseconds\":0,\"output_bytes\":0},\"result\":{\"artifact\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\",\"version\":1,\"content_digest\":\"48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6\"}},\"failure\":null,\"reconciliation_evidence\":[]}"
+          ]
+        ],
+        "events": [
+          [
+            1,
+            "task.submitted",
+            "{\"revision\": 0, \"state\": \"queued\"}"
+          ],
+          [
+            2,
+            "task.transitioned",
+            "{\"revision\": 1, \"state\": \"running\"}"
+          ],
+          [
+            3,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-919adcb6d9184d84a2930498e16e1a82\", \"revision\": 0, \"state\": \"accepted\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            4,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-919adcb6d9184d84a2930498e16e1a82\", \"revision\": 1, \"state\": \"running\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            5,
+            "object.written",
+            "{\"resource_id\": \"output\", \"version\": 1, \"content_digest\": \"48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6\"}"
+          ],
+          [
+            6,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-919adcb6d9184d84a2930498e16e1a82\", \"revision\": 2, \"state\": \"succeeded\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            7,
+            "task.transitioned",
+            "{\"revision\": 2, \"state\": \"suspended\"}"
+          ],
+          [
+            8,
+            "task.transitioned",
+            "{\"revision\": 3, \"state\": \"queued\"}"
+          ],
+          [
+            9,
+            "task.transitioned",
+            "{\"revision\": 4, \"state\": \"running\"}"
+          ],
+          [
+            10,
+            "object.written",
+            "{\"resource_id\": \"verification\", \"version\": 1, \"content_digest\": \"28fad55644937e012097516f09a981e2fcc7995359b542e62e0794ec005a3800\"}"
+          ],
+          [
+            11,
+            "task.transitioned",
+            "{\"revision\": 5, \"state\": \"succeeded\"}"
+          ]
+        ],
+        "objects": [
+          [
+            "fit",
+            "output",
+            1,
+            "48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6"
+          ],
+          [
+            "fit",
+            "verification",
+            1,
+            "28fad55644937e012097516f09a981e2fcc7995359b542e62e0794ec005a3800"
+          ]
+        ],
+        "provider_effects": 1,
+        "engine_status": "SUCCESS",
+        "engine_executor": "local-stable"
+      }
+    },
+    {
+      "name": "test_conflicting_admission_and_operation_receipt",
+      "duration_seconds": 3.003,
+      "outcome": "passed",
+      "observations": {
+        "result": "succeeded",
+        "tasks": [
+          [
+            "integration-task",
+            5,
+            "succeeded"
+          ]
+        ],
+        "operations": [
+          [
+            "succeeded",
+            2,
+            "{\"schema_version\":\"0.1\",\"receipt_id\":\"receipt-cc086fe2c17a49e2a6380b13063bbd2e\",\"request\":{\"schema_version\":\"0.1\",\"operation_id\":\"write-output\",\"task_id\":\"integration-task\",\"subject_id\":\"fit-agent\",\"name\":\"objects.write\",\"resource\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\"},\"arguments\":{\"value\":1},\"deadline\":\"2030-01-01T00:00:00Z\"},\"request_digest\":\"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\",\"grant_ids\":[\"fictional-grant\"],\"retry_class\":\"reconciliation_required\",\"state\":\"succeeded\",\"revision\":2,\"created_at\":\"2026-09-23T07:41:59.742446Z\",\"updated_at\":\"2026-09-23T07:41:59.743164Z\",\"usage\":{\"schema_version\":\"0.1\",\"steps\":0,\"model_calls\":0,\"model_tokens\":0,\"tool_milliseconds\":0,\"output_bytes\":0},\"result\":{\"artifact\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\",\"version\":1,\"content_digest\":\"48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6\"}},\"failure\":null,\"reconciliation_evidence\":[]}"
+          ]
+        ],
+        "events": [
+          [
+            1,
+            "task.submitted",
+            "{\"revision\": 0, \"state\": \"queued\"}"
+          ],
+          [
+            2,
+            "task.transitioned",
+            "{\"revision\": 1, \"state\": \"running\"}"
+          ],
+          [
+            3,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-cc086fe2c17a49e2a6380b13063bbd2e\", \"revision\": 0, \"state\": \"accepted\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            4,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-cc086fe2c17a49e2a6380b13063bbd2e\", \"revision\": 1, \"state\": \"running\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            5,
+            "object.written",
+            "{\"resource_id\": \"output\", \"version\": 1, \"content_digest\": \"48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6\"}"
+          ],
+          [
+            6,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-cc086fe2c17a49e2a6380b13063bbd2e\", \"revision\": 2, \"state\": \"succeeded\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            7,
+            "task.transitioned",
+            "{\"revision\": 2, \"state\": \"suspended\"}"
+          ],
+          [
+            8,
+            "task.transitioned",
+            "{\"revision\": 3, \"state\": \"queued\"}"
+          ],
+          [
+            9,
+            "task.transitioned",
+            "{\"revision\": 4, \"state\": \"running\"}"
+          ],
+          [
+            10,
+            "object.written",
+            "{\"resource_id\": \"verification\", \"version\": 1, \"content_digest\": \"28fad55644937e012097516f09a981e2fcc7995359b542e62e0794ec005a3800\"}"
+          ],
+          [
+            11,
+            "task.transitioned",
+            "{\"revision\": 5, \"state\": \"succeeded\"}"
+          ]
+        ],
+        "objects": [
+          [
+            "fit",
+            "output",
+            1,
+            "48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6"
+          ],
+          [
+            "fit",
+            "verification",
+            1,
+            "28fad55644937e012097516f09a981e2fcc7995359b542e62e0794ec005a3800"
+          ]
+        ],
+        "provider_effects": 0,
+        "engine_status": "SUCCESS",
+        "engine_executor": "local-stable"
+      }
+    },
+    {
+      "name": "test_bad_artifact_rejected_even_when_engine_finishes",
+      "duration_seconds": 2.997,
+      "outcome": "passed",
+      "observations": {
+        "result": "failed",
+        "tasks": [
+          [
+            "integration-task",
+            5,
+            "failed"
+          ]
+        ],
+        "operations": [
+          [
+            "succeeded",
+            2,
+            "{\"schema_version\":\"0.1\",\"receipt_id\":\"receipt-dadba63fc6d141abb0f32e38ae04c919\",\"request\":{\"schema_version\":\"0.1\",\"operation_id\":\"write-output\",\"task_id\":\"integration-task\",\"subject_id\":\"fit-agent\",\"name\":\"objects.write\",\"resource\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\"},\"arguments\":{\"value\":1},\"deadline\":\"2030-01-01T00:00:00Z\"},\"request_digest\":\"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\",\"grant_ids\":[\"fictional-grant\"],\"retry_class\":\"reconciliation_required\",\"state\":\"succeeded\",\"revision\":2,\"created_at\":\"2026-09-23T07:42:02.704897Z\",\"updated_at\":\"2026-09-23T07:42:02.705601Z\",\"usage\":{\"schema_version\":\"0.1\",\"steps\":0,\"model_calls\":0,\"model_tokens\":0,\"tool_milliseconds\":0,\"output_bytes\":0},\"result\":{\"artifact\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\",\"version\":1,\"content_digest\":\"f32d4354160a457984a54414824b84c196a5ddf65d6ee6c992317a5fb7a53b0c\"}},\"failure\":null,\"reconciliation_evidence\":[]}"
+          ]
+        ],
+        "events": [
+          [
+            1,
+            "task.submitted",
+            "{\"revision\": 0, \"state\": \"queued\"}"
+          ],
+          [
+            2,
+            "task.transitioned",
+            "{\"revision\": 1, \"state\": \"running\"}"
+          ],
+          [
+            3,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-dadba63fc6d141abb0f32e38ae04c919\", \"revision\": 0, \"state\": \"accepted\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            4,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-dadba63fc6d141abb0f32e38ae04c919\", \"revision\": 1, \"state\": \"running\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            5,
+            "object.written",
+            "{\"resource_id\": \"output\", \"version\": 1, \"content_digest\": \"f32d4354160a457984a54414824b84c196a5ddf65d6ee6c992317a5fb7a53b0c\"}"
+          ],
+          [
+            6,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-dadba63fc6d141abb0f32e38ae04c919\", \"revision\": 2, \"state\": \"succeeded\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            7,
+            "task.transitioned",
+            "{\"revision\": 2, \"state\": \"suspended\"}"
+          ],
+          [
+            8,
+            "task.transitioned",
+            "{\"revision\": 3, \"state\": \"queued\"}"
+          ],
+          [
+            9,
+            "task.transitioned",
+            "{\"revision\": 4, \"state\": \"running\"}"
+          ],
+          [
+            10,
+            "object.written",
+            "{\"resource_id\": \"verification\", \"version\": 1, \"content_digest\": \"a17a76028231dfa0a37432ee421d554f62e6ac693ecdbc5a0c00d4b9640f655d\"}"
+          ],
+          [
+            11,
+            "task.transitioned",
+            "{\"revision\": 5, \"state\": \"failed\"}"
+          ]
+        ],
+        "objects": [
+          [
+            "fit",
+            "output",
+            1,
+            "f32d4354160a457984a54414824b84c196a5ddf65d6ee6c992317a5fb7a53b0c"
+          ],
+          [
+            "fit",
+            "verification",
+            1,
+            "a17a76028231dfa0a37432ee421d554f62e6ac693ecdbc5a0c00d4b9640f655d"
+          ]
+        ],
+        "provider_effects": 0,
+        "engine_status": "SUCCESS",
+        "engine_executor": "local-stable"
+      }
+    },
+    {
+      "name": "test_resume_rechecks_fictional_ceiling[supervisor_enabled]",
+      "duration_seconds": 5.412,
+      "outcome": "passed",
+      "observations": {
+        "result": "failed",
+        "tasks": [
+          [
+            "integration-task",
+            3,
+            "failed"
+          ]
+        ],
+        "operations": [],
+        "events": [
+          [
+            1,
+            "task.submitted",
+            "{\"revision\": 0, \"state\": \"queued\"}"
+          ],
+          [
+            2,
+            "task.transitioned",
+            "{\"revision\": 1, \"state\": \"running\"}"
+          ],
+          [
+            3,
+            "task.recovered",
+            "{\"revision\": 2, \"state\": \"queued\"}"
+          ],
+          [
+            4,
+            "task.transitioned",
+            "{\"revision\": 3, \"state\": \"failed\"}"
+          ]
+        ],
+        "objects": [],
+        "provider_effects": 0,
+        "engine_status": "SUCCESS",
+        "engine_executor": "local-stable"
+      }
+    },
+    {
+      "name": "test_resume_rechecks_fictional_ceiling[supervisor_permission]",
+      "duration_seconds": 5.408,
+      "outcome": "passed",
+      "observations": {
+        "result": "failed",
+        "tasks": [
+          [
+            "integration-task",
+            3,
+            "failed"
+          ]
+        ],
+        "operations": [],
+        "events": [
+          [
+            1,
+            "task.submitted",
+            "{\"revision\": 0, \"state\": \"queued\"}"
+          ],
+          [
+            2,
+            "task.transitioned",
+            "{\"revision\": 1, \"state\": \"running\"}"
+          ],
+          [
+            3,
+            "task.recovered",
+            "{\"revision\": 2, \"state\": \"queued\"}"
+          ],
+          [
+            4,
+            "task.transitioned",
+            "{\"revision\": 3, \"state\": \"failed\"}"
+          ]
+        ],
+        "objects": [],
+        "provider_effects": 0,
+        "engine_status": "SUCCESS",
+        "engine_executor": "local-stable"
+      }
+    },
+    {
+      "name": "test_resume_rechecks_fictional_ceiling[supervisor_delegation]",
+      "duration_seconds": 5.546,
+      "outcome": "passed",
+      "observations": {
+        "result": "failed",
+        "tasks": [
+          [
+            "integration-task",
+            3,
+            "failed"
+          ]
+        ],
+        "operations": [],
+        "events": [
+          [
+            1,
+            "task.submitted",
+            "{\"revision\": 0, \"state\": \"queued\"}"
+          ],
+          [
+            2,
+            "task.transitioned",
+            "{\"revision\": 1, \"state\": \"running\"}"
+          ],
+          [
+            3,
+            "task.recovered",
+            "{\"revision\": 2, \"state\": \"queued\"}"
+          ],
+          [
+            4,
+            "task.transitioned",
+            "{\"revision\": 3, \"state\": \"failed\"}"
+          ]
+        ],
+        "objects": [],
+        "provider_effects": 0,
+        "engine_status": "SUCCESS",
+        "engine_executor": "local-stable"
+      }
+    },
+    {
+      "name": "test_resume_rechecks_fictional_ceiling[ancestor]",
+      "duration_seconds": 5.412,
+      "outcome": "passed",
+      "observations": {
+        "result": "failed",
+        "tasks": [
+          [
+            "integration-task",
+            3,
+            "failed"
+          ]
+        ],
+        "operations": [],
+        "events": [
+          [
+            1,
+            "task.submitted",
+            "{\"revision\": 0, \"state\": \"queued\"}"
+          ],
+          [
+            2,
+            "task.transitioned",
+            "{\"revision\": 1, \"state\": \"running\"}"
+          ],
+          [
+            3,
+            "task.recovered",
+            "{\"revision\": 2, \"state\": \"queued\"}"
+          ],
+          [
+            4,
+            "task.transitioned",
+            "{\"revision\": 3, \"state\": \"failed\"}"
+          ]
+        ],
+        "objects": [],
+        "provider_effects": 0,
+        "engine_status": "SUCCESS",
+        "engine_executor": "local-stable"
+      }
+    },
+    {
+      "name": "test_resume_rechecks_fictional_ceiling[task_grant]",
+      "duration_seconds": 5.428,
+      "outcome": "passed",
+      "observations": {
+        "result": "failed",
+        "tasks": [
+          [
+            "integration-task",
+            3,
+            "failed"
+          ]
+        ],
+        "operations": [],
+        "events": [
+          [
+            1,
+            "task.submitted",
+            "{\"revision\": 0, \"state\": \"queued\"}"
+          ],
+          [
+            2,
+            "task.transitioned",
+            "{\"revision\": 1, \"state\": \"running\"}"
+          ],
+          [
+            3,
+            "task.recovered",
+            "{\"revision\": 2, \"state\": \"queued\"}"
+          ],
+          [
+            4,
+            "task.transitioned",
+            "{\"revision\": 3, \"state\": \"failed\"}"
+          ]
+        ],
+        "objects": [],
+        "provider_effects": 0,
+        "engine_status": "SUCCESS",
+        "engine_executor": "local-stable"
+      }
+    },
+    {
+      "name": "test_resume_rechecks_fictional_ceiling[platform]",
+      "duration_seconds": 5.437,
+      "outcome": "passed",
+      "observations": {
+        "result": "failed",
+        "tasks": [
+          [
+            "integration-task",
+            3,
+            "failed"
+          ]
+        ],
+        "operations": [],
+        "events": [
+          [
+            1,
+            "task.submitted",
+            "{\"revision\": 0, \"state\": \"queued\"}"
+          ],
+          [
+            2,
+            "task.transitioned",
+            "{\"revision\": 1, \"state\": \"running\"}"
+          ],
+          [
+            3,
+            "task.recovered",
+            "{\"revision\": 2, \"state\": \"queued\"}"
+          ],
+          [
+            4,
+            "task.transitioned",
+            "{\"revision\": 3, \"state\": \"failed\"}"
+          ]
+        ],
+        "objects": [],
+        "provider_effects": 0,
+        "engine_status": "SUCCESS",
+        "engine_executor": "local-stable"
+      }
+    },
+    {
+      "name": "test_mutation_failure_cannot_commit_borrowed_transaction",
+      "duration_seconds": 1.049,
+      "outcome": "passed",
+      "observations": {
+        "tasks": [],
+        "operations": [],
+        "events": [],
+        "objects": [],
+        "provider_effects": 0,
+        "engine_status": null,
+        "engine_executor": null
+      }
+    },
+    {
+      "name": "test_distinct_executor_takeover_fences_old_broker",
+      "duration_seconds": 6.623,
+      "outcome": "passed",
+      "observations": {
+        "result": "succeeded",
+        "takeover": "explicit public resume to executor-b after lease expiry; old broker denied",
+        "tasks": [
+          [
+            "integration-task",
+            7,
+            "succeeded"
+          ]
+        ],
+        "operations": [
+          [
+            "succeeded",
+            2,
+            "{\"schema_version\":\"0.1\",\"receipt_id\":\"receipt-47d61d37d1b54a6ba1d0bb8c914b86a0\",\"request\":{\"schema_version\":\"0.1\",\"operation_id\":\"write-output\",\"task_id\":\"integration-task\",\"subject_id\":\"fit-agent\",\"name\":\"objects.write\",\"resource\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\"},\"arguments\":{\"value\":1},\"deadline\":\"2030-01-01T00:00:00Z\"},\"request_digest\":\"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\",\"grant_ids\":[\"fictional-grant\"],\"retry_class\":\"reconciliation_required\",\"state\":\"succeeded\",\"revision\":2,\"created_at\":\"2026-09-23T07:42:42.949630Z\",\"updated_at\":\"2026-09-23T07:42:42.950327Z\",\"usage\":{\"schema_version\":\"0.1\",\"steps\":0,\"model_calls\":0,\"model_tokens\":0,\"tool_milliseconds\":0,\"output_bytes\":0},\"result\":{\"artifact\":{\"schema_version\":\"0.1\",\"namespace\":\"fit\",\"resource_id\":\"output\",\"version\":1,\"content_digest\":\"48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6\"}},\"failure\":null,\"reconciliation_evidence\":[]}"
+          ]
+        ],
+        "events": [
+          [
+            1,
+            "task.submitted",
+            "{\"revision\": 0, \"state\": \"queued\"}"
+          ],
+          [
+            2,
+            "task.transitioned",
+            "{\"revision\": 1, \"state\": \"running\"}"
+          ],
+          [
+            3,
+            "task.recovered",
+            "{\"revision\": 2, \"state\": \"queued\"}"
+          ],
+          [
+            4,
+            "task.transitioned",
+            "{\"revision\": 3, \"state\": \"running\"}"
+          ],
+          [
+            5,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-47d61d37d1b54a6ba1d0bb8c914b86a0\", \"revision\": 0, \"state\": \"accepted\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            6,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-47d61d37d1b54a6ba1d0bb8c914b86a0\", \"revision\": 1, \"state\": \"running\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            7,
+            "object.written",
+            "{\"resource_id\": \"output\", \"version\": 1, \"content_digest\": \"48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6\"}"
+          ],
+          [
+            8,
+            "operation.transitioned",
+            "{\"receipt_id\": \"receipt-47d61d37d1b54a6ba1d0bb8c914b86a0\", \"revision\": 2, \"state\": \"succeeded\", \"request_digest\": \"233b5d4fad2080deaff377d37c288822a6c40ce2c4a78442df882e150a216b9d\"}"
+          ],
+          [
+            9,
+            "task.transitioned",
+            "{\"revision\": 4, \"state\": \"suspended\"}"
+          ],
+          [
+            10,
+            "task.transitioned",
+            "{\"revision\": 5, \"state\": \"queued\"}"
+          ],
+          [
+            11,
+            "task.transitioned",
+            "{\"revision\": 6, \"state\": \"running\"}"
+          ],
+          [
+            12,
+            "object.written",
+            "{\"resource_id\": \"verification\", \"version\": 1, \"content_digest\": \"28fad55644937e012097516f09a981e2fcc7995359b542e62e0794ec005a3800\"}"
+          ],
+          [
+            13,
+            "task.transitioned",
+            "{\"revision\": 7, \"state\": \"succeeded\"}"
+          ]
+        ],
+        "objects": [
+          [
+            "fit",
+            "output",
+            1,
+            "48208f9428d64634bd8e28ff345bf0eab60d53c18fa2fbdb0b9bc1e84df2b5f6"
+          ],
+          [
+            "fit",
+            "verification",
+            1,
+            "28fad55644937e012097516f09a981e2fcc7995359b542e62e0794ec005a3800"
+          ]
+        ],
+        "provider_effects": 0,
+        "engine_status": "SUCCESS",
+        "engine_executor": "executor-b"
+      }
+    },
+    {
+      "name": "test_revocation_at_new_dispatch_and_retry[False]",
+      "duration_seconds": 2.934,
+      "outcome": "passed",
+      "observations": {
+        "result": "failed",
+        "tasks": [
+          [
+            "integration-task",
+            2,
+            "failed"
+          ]
+        ],
+        "operations": [],
+        "events": [
+          [
+            1,
+            "task.submitted",
+            "{\"revision\": 0, \"state\": \"queued\"}"
+          ],
+          [
+            2,
+            "task.transitioned",
+            "{\"revision\": 1, \"state\": \"running\"}"
+          ],
+          [
+            3,
+            "task.transitioned",
+            "{\"revision\": 2, \"state\": \"failed\"}"
+          ]
+        ],
+        "objects": [],
+        "provider_effects": 0,
+        "engine_status": "SUCCESS",
+        "engine_executor": "local-stable"
+      }
+    },
+    {
+      "name": "test_revocation_at_new_dispatch_and_retry[True]",
+      "duration_seconds": 2.94,
+      "outcome": "passed",
+      "observations": {
+        "result": "failed",
+        "tasks": [
+          [
+            "integration-task",
+            2,
+            "failed"
+          ]
+        ],
+        "operations": [],
+        "events": [
+          [
+            1,
+            "task.submitted",
+            "{\"revision\": 0, \"state\": \"queued\"}"
+          ],
+          [
+            2,
+            "task.transitioned",
+            "{\"revision\": 1, \"state\": \"running\"}"
+          ],
+          [
+            3,
+            "task.transitioned",
+            "{\"revision\": 2, \"state\": \"failed\"}"
+          ]
+        ],
+        "objects": [],
+        "provider_effects": 0,
+        "engine_status": "SUCCESS",
+        "engine_executor": "local-stable"
+      }
+    },
+    {
+      "name": "test_engine_resume_cannot_reopen_cancelled_cardea_task",
+      "duration_seconds": 2.997,
+      "outcome": "passed",
+      "observations": {
+        "result": "cancelled",
+        "tasks": [
+          [
+            "integration-task",
+            1,
+            "cancelled"
+          ]
+        ],
+        "operations": [],
+        "events": [
+          [
+            1,
+            "task.submitted",
+            "{\"revision\": 0, \"state\": \"queued\"}"
+          ],
+          [
+            2,
+            "task.transitioned",
+            "{\"revision\": 1, \"state\": \"cancelled\"}"
+          ]
+        ],
+        "objects": [],
+        "provider_effects": 0,
+        "engine_status": "SUCCESS",
+        "engine_executor": "local-stable"
+      }
+    },
+    {
+      "name": "test_existing_cardea_schema_and_data_survive_bootstrap",
+      "duration_seconds": 3.007,
+      "outcome": "passed",
+      "observations": "Assertions recorded in source; no additional durable snapshot property."
+    }
+  ]
+}

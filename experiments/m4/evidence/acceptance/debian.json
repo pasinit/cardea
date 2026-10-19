@@ -1,0 +1,1257 @@
+[
+  {
+    "case": "native-success",
+    "parent": {
+      "schema_version": "0.1",
+      "task_id": "task-1ea3292b5c654ce8945b13157e7e2d6d",
+      "agent_id": "agent-a",
+      "objective": "Verify the delegated input hash and copy",
+      "runtime_id": "delegation-v1",
+      "verifier_id": "delegation-verifier-v1",
+      "capability_ids": [
+        "grant-task-1ea3292b5c654ce8945b13157e7e2d6d"
+      ],
+      "budget_account_id": "budget-task-1ea3292b5c654ce8945b13157e7e2d6d",
+      "limits": {
+        "schema_version": "0.1",
+        "max_steps": 2,
+        "max_model_calls": 0,
+        "max_model_tokens": 0,
+        "max_tool_milliseconds": 20000,
+        "max_output_bytes": 163840,
+        "max_concurrent_operations": 2,
+        "deadline": "2026-09-24T21:05:43.688849Z"
+      },
+      "parent_task_id": null,
+      "state": "succeeded",
+      "revision": 2,
+      "created_at": "2026-09-24T20:55:43.688849Z",
+      "updated_at": "2026-09-24T20:55:56.412036Z",
+      "checkpoint": null,
+      "wait": null,
+      "lease": null,
+      "verification": {
+        "schema_version": "0.1",
+        "verification_id": "verification-task-1ea3292b5c654ce8945b13157e7e2d6d",
+        "task_id": "task-1ea3292b5c654ce8945b13157e7e2d6d",
+        "verifier_id": "delegation-verifier-v1",
+        "checked_at": "2026-09-24T20:55:56.412036Z",
+        "passed": true,
+        "artifacts": [
+          {
+            "schema_version": "0.1",
+            "namespace": "test",
+            "resource_id": "task-1ea3292b5c654ce8945b13157e7e2d6d.output",
+            "version": 1,
+            "content_digest": "e03546c0bdef5d512a1b55782e7900853bf35ec33df249293dad32f1d70bb432"
+          }
+        ],
+        "evidence": [
+          {
+            "schema_version": "0.1",
+            "namespace": "test",
+            "resource_id": "task-1ea3292b5c654ce8945b13157e7e2d6d.verification"
+          }
+        ]
+      },
+      "failure": null
+    },
+    "children": [
+      {
+        "schema_version": "0.1",
+        "task_id": "task-221f2aa0e0e64e0d9c956a06d146ab97",
+        "agent_id": "agent-b",
+        "objective": "host.sha256 for task-1ea3292b5c654ce8945b13157e7e2d6d slot 0",
+        "runtime_id": "host-sha256-v1",
+        "verifier_id": "sha256-verifier-v1",
+        "capability_ids": [
+          "grant-task-221f2aa0e0e64e0d9c956a06d146ab97"
+        ],
+        "budget_account_id": "budget-task-221f2aa0e0e64e0d9c956a06d146ab97",
+        "limits": {
+          "schema_version": "0.1",
+          "max_steps": 2,
+          "max_model_calls": 0,
+          "max_model_tokens": 0,
+          "max_tool_milliseconds": 10000,
+          "max_output_bytes": 65536,
+          "max_concurrent_operations": 1,
+          "deadline": "2026-09-24T21:05:43.688849Z"
+        },
+        "parent_task_id": "task-1ea3292b5c654ce8945b13157e7e2d6d",
+        "state": "succeeded",
+        "revision": 2,
+        "created_at": "2026-09-24T20:55:45.083380Z",
+        "updated_at": "2026-09-24T20:55:50.991391Z",
+        "checkpoint": null,
+        "wait": null,
+        "lease": null,
+        "verification": {
+          "schema_version": "0.1",
+          "verification_id": "verification-task-221f2aa0e0e64e0d9c956a06d146ab97",
+          "task_id": "task-221f2aa0e0e64e0d9c956a06d146ab97",
+          "verifier_id": "sha256-verifier-v1",
+          "checked_at": "2026-09-24T20:55:50.991391Z",
+          "passed": true,
+          "artifacts": [
+            {
+              "schema_version": "0.1",
+              "namespace": "test",
+              "resource_id": "task-221f2aa0e0e64e0d9c956a06d146ab97.output",
+              "version": 1,
+              "content_digest": "f3b6f6b1e58e0ac80acdefc220343bb2d808530cd9e80016601bc8ec32aa65ce"
+            }
+          ],
+          "evidence": [
+            {
+              "schema_version": "0.1",
+              "namespace": "test",
+              "resource_id": "task-221f2aa0e0e64e0d9c956a06d146ab97.verification"
+            }
+          ]
+        },
+        "failure": null
+      },
+      {
+        "schema_version": "0.1",
+        "task_id": "task-0da7a9873e834f27a3c1f5cbbe1b2025",
+        "agent_id": "agent-b",
+        "objective": "host.copy for task-1ea3292b5c654ce8945b13157e7e2d6d slot 1",
+        "runtime_id": "host-copy-v1",
+        "verifier_id": "copy-verifier-v1",
+        "capability_ids": [
+          "grant-task-0da7a9873e834f27a3c1f5cbbe1b2025"
+        ],
+        "budget_account_id": "budget-task-0da7a9873e834f27a3c1f5cbbe1b2025",
+        "limits": {
+          "schema_version": "0.1",
+          "max_steps": 2,
+          "max_model_calls": 0,
+          "max_model_tokens": 0,
+          "max_tool_milliseconds": 10000,
+          "max_output_bytes": 65536,
+          "max_concurrent_operations": 1,
+          "deadline": "2026-09-24T21:05:43.688849Z"
+        },
+        "parent_task_id": "task-1ea3292b5c654ce8945b13157e7e2d6d",
+        "state": "succeeded",
+        "revision": 2,
+        "created_at": "2026-09-24T20:55:47.769978Z",
+        "updated_at": "2026-09-24T20:55:53.877424Z",
+        "checkpoint": null,
+        "wait": null,
+        "lease": null,
+        "verification": {
+          "schema_version": "0.1",
+          "verification_id": "verification-task-0da7a9873e834f27a3c1f5cbbe1b2025",
+          "task_id": "task-0da7a9873e834f27a3c1f5cbbe1b2025",
+          "verifier_id": "copy-verifier-v1",
+          "checked_at": "2026-09-24T20:55:53.877424Z",
+          "passed": true,
+          "artifacts": [
+            {
+              "schema_version": "0.1",
+              "namespace": "test",
+              "resource_id": "task-0da7a9873e834f27a3c1f5cbbe1b2025.output",
+              "version": 1,
+              "content_digest": "ed3225d9e91a4781b3de30daf6550b33dd9cc80a14ecbe1b2c143b4f0d17d332"
+            }
+          ],
+          "evidence": [
+            {
+              "schema_version": "0.1",
+              "namespace": "test",
+              "resource_id": "task-0da7a9873e834f27a3c1f5cbbe1b2025.verification"
+            }
+          ]
+        },
+        "failure": null
+      }
+    ],
+    "links": [
+      [
+        0,
+        "task-221f2aa0e0e64e0d9c956a06d146ab97",
+        "task-1ea3292b5c654ce8945b13157e7e2d6d.0"
+      ],
+      [
+        1,
+        "task-0da7a9873e834f27a3c1f5cbbe1b2025",
+        "task-1ea3292b5c654ce8945b13157e7e2d6d.1"
+      ]
+    ],
+    "receipts": [
+      {
+        "schema_version": "0.1",
+        "receipt_id": "receipt-f1df72a1b7564947bfcc56c57e800df9",
+        "request": {
+          "schema_version": "0.1",
+          "operation_id": "execute",
+          "task_id": "task-221f2aa0e0e64e0d9c956a06d146ab97",
+          "subject_id": "agent-b",
+          "name": "host.sha256",
+          "resource": {
+            "schema_version": "0.1",
+            "namespace": "test",
+            "resource_id": "task-221f2aa0e0e64e0d9c956a06d146ab97"
+          },
+          "arguments": {
+            "payload": {
+              "one": 1
+            },
+            "reserved_tool_milliseconds": 10000,
+            "reserved_output_bytes": 65536,
+            "host_profile": "debian-local-v1",
+            "launcher_sha256": "6556969d50c19830bbf484cb7472d263b5590defb4b32d1df03db45a395d699b",
+            "policy_revision": "2"
+          },
+          "deadline": "2026-09-24T21:05:43.688849Z"
+        },
+        "request_digest": "ebbc197320085bd168f8f53e9967821657fee8b6eb9e9f5fc168dc7091d541e2",
+        "grant_ids": [
+          "grant-task-221f2aa0e0e64e0d9c956a06d146ab97"
+        ],
+        "retry_class": "reconciliation_required",
+        "state": "succeeded",
+        "revision": 2,
+        "created_at": "2026-09-24T20:55:46.038419Z",
+        "updated_at": "2026-09-24T20:55:50.975340Z",
+        "usage": {
+          "schema_version": "0.1",
+          "steps": 1,
+          "model_calls": 0,
+          "model_tokens": 0,
+          "tool_milliseconds": 756,
+          "output_bytes": 91
+        },
+        "result": {
+          "host": {
+            "state": "finished",
+            "result": "success",
+            "exit_status": "0",
+            "output": "eyJzaGEyNTYiOiAiMzM1OTI5YTRlNTliMDg2MGVjMDRjNjIwYzEyODRkYWNlNzRjMDBmN2VhZGFhZGNlN2ExOGQ2ZGViYTZjNTQ0ZSIsICJieXRlcyI6IDl9Cg==",
+            "cpu_ns": "400514000",
+            "memory_peak": "5840896",
+            "wall_ms": 756
+          },
+          "verified_output": {
+            "sha256": "335929a4e59b0860ec04c620c1284dace74c00f7eadaadce7a18d6deba6c544e",
+            "bytes": 9
+          }
+        },
+        "failure": null,
+        "reconciliation_evidence": []
+      },
+      {
+        "schema_version": "0.1",
+        "receipt_id": "receipt-0d0773fa503740eeb258864300d1a51c",
+        "request": {
+          "schema_version": "0.1",
+          "operation_id": "execute",
+          "task_id": "task-0da7a9873e834f27a3c1f5cbbe1b2025",
+          "subject_id": "agent-b",
+          "name": "host.copy",
+          "resource": {
+            "schema_version": "0.1",
+            "namespace": "test",
+            "resource_id": "task-0da7a9873e834f27a3c1f5cbbe1b2025"
+          },
+          "arguments": {
+            "payload": {
+              "two": 2
+            },
+            "reserved_tool_milliseconds": 10000,
+            "reserved_output_bytes": 65536,
+            "host_profile": "debian-local-v1",
+            "launcher_sha256": "6556969d50c19830bbf484cb7472d263b5590defb4b32d1df03db45a395d699b",
+            "policy_revision": "2"
+          },
+          "deadline": "2026-09-24T21:05:43.688849Z"
+        },
+        "request_digest": "cb4bf062d3ddf7b9ea885089dd38b02d886050b47f8d8282564cabf3cc42fb55",
+        "grant_ids": [
+          "grant-task-0da7a9873e834f27a3c1f5cbbe1b2025"
+        ],
+        "retry_class": "reconciliation_required",
+        "state": "succeeded",
+        "revision": 2,
+        "created_at": "2026-09-24T20:55:49.305197Z",
+        "updated_at": "2026-09-24T20:55:53.864758Z",
+        "usage": {
+          "schema_version": "0.1",
+          "steps": 1,
+          "model_calls": 0,
+          "model_tokens": 0,
+          "tool_milliseconds": 722,
+          "output_bytes": 47
+        },
+        "result": {
+          "host": {
+            "state": "finished",
+            "result": "success",
+            "exit_status": "0",
+            "output": "eyJjb250ZW50X2Jhc2U2NCI6ICJleUowZDI4aU9qSjkiLCAiYnl0ZXMiOiA5fQo=",
+            "cpu_ns": "364395000",
+            "memory_peak": "5124096",
+            "wall_ms": 722
+          },
+          "verified_output": {
+            "content_base64": "eyJ0d28iOjJ9",
+            "bytes": 9
+          }
+        },
+        "failure": null,
+        "reconciliation_evidence": []
+      }
+    ]
+  },
+  {
+    "case": "delegation.child_admitted",
+    "parent": {
+      "schema_version": "0.1",
+      "task_id": "task-9e5f05b33a184c2eb6866f08e19d95a5",
+      "agent_id": "agent-a",
+      "objective": "Verify the delegated input hash and copy",
+      "runtime_id": "delegation-v1",
+      "verifier_id": "delegation-verifier-v1",
+      "capability_ids": [
+        "grant-task-9e5f05b33a184c2eb6866f08e19d95a5"
+      ],
+      "budget_account_id": "budget-task-9e5f05b33a184c2eb6866f08e19d95a5",
+      "limits": {
+        "schema_version": "0.1",
+        "max_steps": 2,
+        "max_model_calls": 0,
+        "max_model_tokens": 0,
+        "max_tool_milliseconds": 20000,
+        "max_output_bytes": 163840,
+        "max_concurrent_operations": 2,
+        "deadline": "2026-09-24T21:06:14.569838Z"
+      },
+      "parent_task_id": null,
+      "state": "succeeded",
+      "revision": 2,
+      "created_at": "2026-09-24T20:56:14.569838Z",
+      "updated_at": "2026-09-24T20:56:45.787865Z",
+      "checkpoint": null,
+      "wait": null,
+      "lease": null,
+      "verification": {
+        "schema_version": "0.1",
+        "verification_id": "verification-task-9e5f05b33a184c2eb6866f08e19d95a5",
+        "task_id": "task-9e5f05b33a184c2eb6866f08e19d95a5",
+        "verifier_id": "delegation-verifier-v1",
+        "checked_at": "2026-09-24T20:56:45.787865Z",
+        "passed": true,
+        "artifacts": [
+          {
+            "schema_version": "0.1",
+            "namespace": "test",
+            "resource_id": "task-9e5f05b33a184c2eb6866f08e19d95a5.output",
+            "version": 1,
+            "content_digest": "fdc606fb8e2806c2a6ef611dc0e7d3fa42d713aaf55a291714504db8cb3063a6"
+          }
+        ],
+        "evidence": [
+          {
+            "schema_version": "0.1",
+            "namespace": "test",
+            "resource_id": "task-9e5f05b33a184c2eb6866f08e19d95a5.verification"
+          }
+        ]
+      },
+      "failure": null
+    },
+    "children": [
+      {
+        "schema_version": "0.1",
+        "task_id": "task-1d20b5c4f9cc48748602d3827a21208f",
+        "agent_id": "agent-b",
+        "objective": "host.sha256 for task-9e5f05b33a184c2eb6866f08e19d95a5 slot 0",
+        "runtime_id": "host-sha256-v1",
+        "verifier_id": "sha256-verifier-v1",
+        "capability_ids": [
+          "grant-task-1d20b5c4f9cc48748602d3827a21208f"
+        ],
+        "budget_account_id": "budget-task-1d20b5c4f9cc48748602d3827a21208f",
+        "limits": {
+          "schema_version": "0.1",
+          "max_steps": 2,
+          "max_model_calls": 0,
+          "max_model_tokens": 0,
+          "max_tool_milliseconds": 10000,
+          "max_output_bytes": 65536,
+          "max_concurrent_operations": 1,
+          "deadline": "2026-09-24T21:06:14.569838Z"
+        },
+        "parent_task_id": "task-9e5f05b33a184c2eb6866f08e19d95a5",
+        "state": "succeeded",
+        "revision": 2,
+        "created_at": "2026-09-24T20:56:15.686586Z",
+        "updated_at": "2026-09-24T20:56:40.508835Z",
+        "checkpoint": null,
+        "wait": null,
+        "lease": null,
+        "verification": {
+          "schema_version": "0.1",
+          "verification_id": "verification-task-1d20b5c4f9cc48748602d3827a21208f",
+          "task_id": "task-1d20b5c4f9cc48748602d3827a21208f",
+          "verifier_id": "sha256-verifier-v1",
+          "checked_at": "2026-09-24T20:56:40.508835Z",
+          "passed": true,
+          "artifacts": [
+            {
+              "schema_version": "0.1",
+              "namespace": "test",
+              "resource_id": "task-1d20b5c4f9cc48748602d3827a21208f.output",
+              "version": 1,
+              "content_digest": "f3b6f6b1e58e0ac80acdefc220343bb2d808530cd9e80016601bc8ec32aa65ce"
+            }
+          ],
+          "evidence": [
+            {
+              "schema_version": "0.1",
+              "namespace": "test",
+              "resource_id": "task-1d20b5c4f9cc48748602d3827a21208f.verification"
+            }
+          ]
+        },
+        "failure": null
+      },
+      {
+        "schema_version": "0.1",
+        "task_id": "task-c0d54ceefcfb47f5a7834ca738a0d258",
+        "agent_id": "agent-b",
+        "objective": "host.copy for task-9e5f05b33a184c2eb6866f08e19d95a5 slot 1",
+        "runtime_id": "host-copy-v1",
+        "verifier_id": "copy-verifier-v1",
+        "capability_ids": [
+          "grant-task-c0d54ceefcfb47f5a7834ca738a0d258"
+        ],
+        "budget_account_id": "budget-task-c0d54ceefcfb47f5a7834ca738a0d258",
+        "limits": {
+          "schema_version": "0.1",
+          "max_steps": 2,
+          "max_model_calls": 0,
+          "max_model_tokens": 0,
+          "max_tool_milliseconds": 10000,
+          "max_output_bytes": 65536,
+          "max_concurrent_operations": 1,
+          "deadline": "2026-09-24T21:06:14.569838Z"
+        },
+        "parent_task_id": "task-9e5f05b33a184c2eb6866f08e19d95a5",
+        "state": "succeeded",
+        "revision": 2,
+        "created_at": "2026-09-24T20:56:37.817190Z",
+        "updated_at": "2026-09-24T20:56:42.739789Z",
+        "checkpoint": null,
+        "wait": null,
+        "lease": null,
+        "verification": {
+          "schema_version": "0.1",
+          "verification_id": "verification-task-c0d54ceefcfb47f5a7834ca738a0d258",
+          "task_id": "task-c0d54ceefcfb47f5a7834ca738a0d258",
+          "verifier_id": "copy-verifier-v1",
+          "checked_at": "2026-09-24T20:56:42.739789Z",
+          "passed": true,
+          "artifacts": [
+            {
+              "schema_version": "0.1",
+              "namespace": "test",
+              "resource_id": "task-c0d54ceefcfb47f5a7834ca738a0d258.output",
+              "version": 1,
+              "content_digest": "ed3225d9e91a4781b3de30daf6550b33dd9cc80a14ecbe1b2c143b4f0d17d332"
+            }
+          ],
+          "evidence": [
+            {
+              "schema_version": "0.1",
+              "namespace": "test",
+              "resource_id": "task-c0d54ceefcfb47f5a7834ca738a0d258.verification"
+            }
+          ]
+        },
+        "failure": null
+      }
+    ],
+    "links": [
+      [
+        0,
+        "task-1d20b5c4f9cc48748602d3827a21208f",
+        "task-9e5f05b33a184c2eb6866f08e19d95a5.0"
+      ],
+      [
+        1,
+        "task-c0d54ceefcfb47f5a7834ca738a0d258",
+        "task-9e5f05b33a184c2eb6866f08e19d95a5.1"
+      ]
+    ],
+    "receipts": [
+      {
+        "schema_version": "0.1",
+        "receipt_id": "receipt-376b8fc9e9c24ed6b76e32394df2f94e",
+        "request": {
+          "schema_version": "0.1",
+          "operation_id": "execute",
+          "task_id": "task-1d20b5c4f9cc48748602d3827a21208f",
+          "subject_id": "agent-b",
+          "name": "host.sha256",
+          "resource": {
+            "schema_version": "0.1",
+            "namespace": "test",
+            "resource_id": "task-1d20b5c4f9cc48748602d3827a21208f"
+          },
+          "arguments": {
+            "payload": {
+              "one": 1
+            },
+            "reserved_tool_milliseconds": 10000,
+            "reserved_output_bytes": 65536,
+            "host_profile": "debian-local-v1",
+            "launcher_sha256": "6556969d50c19830bbf484cb7472d263b5590defb4b32d1df03db45a395d699b",
+            "policy_revision": "2"
+          },
+          "deadline": "2026-09-24T21:06:14.569838Z"
+        },
+        "request_digest": "e4f6e6485b0da8edae4ea2b4e0352b41919c7a69ac34a6daae78fdeedecbf876",
+        "grant_ids": [
+          "grant-task-1d20b5c4f9cc48748602d3827a21208f"
+        ],
+        "retry_class": "reconciliation_required",
+        "state": "succeeded",
+        "revision": 2,
+        "created_at": "2026-09-24T20:56:34.623200Z",
+        "updated_at": "2026-09-24T20:56:40.491314Z",
+        "usage": {
+          "schema_version": "0.1",
+          "steps": 1,
+          "model_calls": 0,
+          "model_tokens": 0,
+          "tool_milliseconds": 748,
+          "output_bytes": 91
+        },
+        "result": {
+          "host": {
+            "state": "finished",
+            "result": "success",
+            "exit_status": "0",
+            "output": "eyJzaGEyNTYiOiAiMzM1OTI5YTRlNTliMDg2MGVjMDRjNjIwYzEyODRkYWNlNzRjMDBmN2VhZGFhZGNlN2ExOGQ2ZGViYTZjNTQ0ZSIsICJieXRlcyI6IDl9Cg==",
+            "cpu_ns": "391005000",
+            "memory_peak": "5890048",
+            "wall_ms": 748
+          },
+          "verified_output": {
+            "sha256": "335929a4e59b0860ec04c620c1284dace74c00f7eadaadce7a18d6deba6c544e",
+            "bytes": 9
+          }
+        },
+        "failure": null,
+        "reconciliation_evidence": []
+      },
+      {
+        "schema_version": "0.1",
+        "receipt_id": "receipt-f0afc1c4bb984892bc14c15cf2455607",
+        "request": {
+          "schema_version": "0.1",
+          "operation_id": "execute",
+          "task_id": "task-c0d54ceefcfb47f5a7834ca738a0d258",
+          "subject_id": "agent-b",
+          "name": "host.copy",
+          "resource": {
+            "schema_version": "0.1",
+            "namespace": "test",
+            "resource_id": "task-c0d54ceefcfb47f5a7834ca738a0d258"
+          },
+          "arguments": {
+            "payload": {
+              "two": 2
+            },
+            "reserved_tool_milliseconds": 10000,
+            "reserved_output_bytes": 65536,
+            "host_profile": "debian-local-v1",
+            "launcher_sha256": "6556969d50c19830bbf484cb7472d263b5590defb4b32d1df03db45a395d699b",
+            "policy_revision": "2"
+          },
+          "deadline": "2026-09-24T21:06:14.569838Z"
+        },
+        "request_digest": "5b96c9bc73e7c30ccd6adf3c8c2a6a9384006234c09d081333b7da4f709458af",
+        "grant_ids": [
+          "grant-task-c0d54ceefcfb47f5a7834ca738a0d258"
+        ],
+        "retry_class": "reconciliation_required",
+        "state": "succeeded",
+        "revision": 2,
+        "created_at": "2026-09-24T20:56:38.814318Z",
+        "updated_at": "2026-09-24T20:56:42.704311Z",
+        "usage": {
+          "schema_version": "0.1",
+          "steps": 1,
+          "model_calls": 0,
+          "model_tokens": 0,
+          "tool_milliseconds": 682,
+          "output_bytes": 47
+        },
+        "result": {
+          "host": {
+            "state": "finished",
+            "result": "success",
+            "exit_status": "0",
+            "output": "eyJjb250ZW50X2Jhc2U2NCI6ICJleUowZDI4aU9qSjkiLCAiYnl0ZXMiOiA5fQo=",
+            "cpu_ns": "356771000",
+            "memory_peak": "5107712",
+            "wall_ms": 682
+          },
+          "verified_output": {
+            "content_base64": "eyJ0d28iOjJ9",
+            "bytes": 9
+          }
+        },
+        "failure": null,
+        "reconciliation_evidence": []
+      }
+    ]
+  },
+  {
+    "case": "delegation.before_verify",
+    "parent": {
+      "schema_version": "0.1",
+      "task_id": "task-885a0549c49243579dbf6ef6fa2b1fbf",
+      "agent_id": "agent-a",
+      "objective": "Verify the delegated input hash and copy",
+      "runtime_id": "delegation-v1",
+      "verifier_id": "delegation-verifier-v1",
+      "capability_ids": [
+        "grant-task-885a0549c49243579dbf6ef6fa2b1fbf"
+      ],
+      "budget_account_id": "budget-task-885a0549c49243579dbf6ef6fa2b1fbf",
+      "limits": {
+        "schema_version": "0.1",
+        "max_steps": 2,
+        "max_model_calls": 0,
+        "max_model_tokens": 0,
+        "max_tool_milliseconds": 20000,
+        "max_output_bytes": 163840,
+        "max_concurrent_operations": 2,
+        "deadline": "2026-09-24T21:07:04.612147Z"
+      },
+      "parent_task_id": null,
+      "state": "succeeded",
+      "revision": 2,
+      "created_at": "2026-09-24T20:57:04.612147Z",
+      "updated_at": "2026-09-24T20:57:37.270870Z",
+      "checkpoint": null,
+      "wait": null,
+      "lease": null,
+      "verification": {
+        "schema_version": "0.1",
+        "verification_id": "verification-task-885a0549c49243579dbf6ef6fa2b1fbf",
+        "task_id": "task-885a0549c49243579dbf6ef6fa2b1fbf",
+        "verifier_id": "delegation-verifier-v1",
+        "checked_at": "2026-09-24T20:57:37.270870Z",
+        "passed": true,
+        "artifacts": [
+          {
+            "schema_version": "0.1",
+            "namespace": "test",
+            "resource_id": "task-885a0549c49243579dbf6ef6fa2b1fbf.output",
+            "version": 1,
+            "content_digest": "6b1a87437d177a73981a5fb79c21ed1d58caf4f9d845b9148d831a43290945f3"
+          }
+        ],
+        "evidence": [
+          {
+            "schema_version": "0.1",
+            "namespace": "test",
+            "resource_id": "task-885a0549c49243579dbf6ef6fa2b1fbf.verification"
+          }
+        ]
+      },
+      "failure": null
+    },
+    "children": [
+      {
+        "schema_version": "0.1",
+        "task_id": "task-374332429456480cbd897230312299fd",
+        "agent_id": "agent-b",
+        "objective": "host.sha256 for task-885a0549c49243579dbf6ef6fa2b1fbf slot 0",
+        "runtime_id": "host-sha256-v1",
+        "verifier_id": "sha256-verifier-v1",
+        "capability_ids": [
+          "grant-task-374332429456480cbd897230312299fd"
+        ],
+        "budget_account_id": "budget-task-374332429456480cbd897230312299fd",
+        "limits": {
+          "schema_version": "0.1",
+          "max_steps": 2,
+          "max_model_calls": 0,
+          "max_model_tokens": 0,
+          "max_tool_milliseconds": 10000,
+          "max_output_bytes": 65536,
+          "max_concurrent_operations": 1,
+          "deadline": "2026-09-24T21:07:04.612147Z"
+        },
+        "parent_task_id": "task-885a0549c49243579dbf6ef6fa2b1fbf",
+        "state": "succeeded",
+        "revision": 2,
+        "created_at": "2026-09-24T20:57:05.744463Z",
+        "updated_at": "2026-09-24T20:57:11.395786Z",
+        "checkpoint": null,
+        "wait": null,
+        "lease": null,
+        "verification": {
+          "schema_version": "0.1",
+          "verification_id": "verification-task-374332429456480cbd897230312299fd",
+          "task_id": "task-374332429456480cbd897230312299fd",
+          "verifier_id": "sha256-verifier-v1",
+          "checked_at": "2026-09-24T20:57:11.395786Z",
+          "passed": true,
+          "artifacts": [
+            {
+              "schema_version": "0.1",
+              "namespace": "test",
+              "resource_id": "task-374332429456480cbd897230312299fd.output",
+              "version": 1,
+              "content_digest": "f3b6f6b1e58e0ac80acdefc220343bb2d808530cd9e80016601bc8ec32aa65ce"
+            }
+          ],
+          "evidence": [
+            {
+              "schema_version": "0.1",
+              "namespace": "test",
+              "resource_id": "task-374332429456480cbd897230312299fd.verification"
+            }
+          ]
+        },
+        "failure": null
+      },
+      {
+        "schema_version": "0.1",
+        "task_id": "task-f0ddc0ff1f214e56b2b6b30d2716950f",
+        "agent_id": "agent-b",
+        "objective": "host.copy for task-885a0549c49243579dbf6ef6fa2b1fbf slot 1",
+        "runtime_id": "host-copy-v1",
+        "verifier_id": "copy-verifier-v1",
+        "capability_ids": [
+          "grant-task-f0ddc0ff1f214e56b2b6b30d2716950f"
+        ],
+        "budget_account_id": "budget-task-f0ddc0ff1f214e56b2b6b30d2716950f",
+        "limits": {
+          "schema_version": "0.1",
+          "max_steps": 2,
+          "max_model_calls": 0,
+          "max_model_tokens": 0,
+          "max_tool_milliseconds": 10000,
+          "max_output_bytes": 65536,
+          "max_concurrent_operations": 1,
+          "deadline": "2026-09-24T21:07:04.612147Z"
+        },
+        "parent_task_id": "task-885a0549c49243579dbf6ef6fa2b1fbf",
+        "state": "succeeded",
+        "revision": 2,
+        "created_at": "2026-09-24T20:57:08.416621Z",
+        "updated_at": "2026-09-24T20:57:13.563589Z",
+        "checkpoint": null,
+        "wait": null,
+        "lease": null,
+        "verification": {
+          "schema_version": "0.1",
+          "verification_id": "verification-task-f0ddc0ff1f214e56b2b6b30d2716950f",
+          "task_id": "task-f0ddc0ff1f214e56b2b6b30d2716950f",
+          "verifier_id": "copy-verifier-v1",
+          "checked_at": "2026-09-24T20:57:13.563589Z",
+          "passed": true,
+          "artifacts": [
+            {
+              "schema_version": "0.1",
+              "namespace": "test",
+              "resource_id": "task-f0ddc0ff1f214e56b2b6b30d2716950f.output",
+              "version": 1,
+              "content_digest": "ed3225d9e91a4781b3de30daf6550b33dd9cc80a14ecbe1b2c143b4f0d17d332"
+            }
+          ],
+          "evidence": [
+            {
+              "schema_version": "0.1",
+              "namespace": "test",
+              "resource_id": "task-f0ddc0ff1f214e56b2b6b30d2716950f.verification"
+            }
+          ]
+        },
+        "failure": null
+      }
+    ],
+    "links": [
+      [
+        0,
+        "task-374332429456480cbd897230312299fd",
+        "task-885a0549c49243579dbf6ef6fa2b1fbf.0"
+      ],
+      [
+        1,
+        "task-f0ddc0ff1f214e56b2b6b30d2716950f",
+        "task-885a0549c49243579dbf6ef6fa2b1fbf.1"
+      ]
+    ],
+    "receipts": [
+      {
+        "schema_version": "0.1",
+        "receipt_id": "receipt-344989780a584061875d9c847fc912f1",
+        "request": {
+          "schema_version": "0.1",
+          "operation_id": "execute",
+          "task_id": "task-374332429456480cbd897230312299fd",
+          "subject_id": "agent-b",
+          "name": "host.sha256",
+          "resource": {
+            "schema_version": "0.1",
+            "namespace": "test",
+            "resource_id": "task-374332429456480cbd897230312299fd"
+          },
+          "arguments": {
+            "payload": {
+              "one": 1
+            },
+            "reserved_tool_milliseconds": 10000,
+            "reserved_output_bytes": 65536,
+            "host_profile": "debian-local-v1",
+            "launcher_sha256": "6556969d50c19830bbf484cb7472d263b5590defb4b32d1df03db45a395d699b",
+            "policy_revision": "2"
+          },
+          "deadline": "2026-09-24T21:07:04.612147Z"
+        },
+        "request_digest": "93ed9c9f527107b21af7a27d38016183b7671551dd8d16c5aaa06902dc265a36",
+        "grant_ids": [
+          "grant-task-374332429456480cbd897230312299fd"
+        ],
+        "retry_class": "reconciliation_required",
+        "state": "succeeded",
+        "revision": 2,
+        "created_at": "2026-09-24T20:57:06.668789Z",
+        "updated_at": "2026-09-24T20:57:11.383395Z",
+        "usage": {
+          "schema_version": "0.1",
+          "steps": 1,
+          "model_calls": 0,
+          "model_tokens": 0,
+          "tool_milliseconds": 769,
+          "output_bytes": 91
+        },
+        "result": {
+          "host": {
+            "state": "finished",
+            "result": "success",
+            "exit_status": "0",
+            "output": "eyJzaGEyNTYiOiAiMzM1OTI5YTRlNTliMDg2MGVjMDRjNjIwYzEyODRkYWNlNzRjMDBmN2VhZGFhZGNlN2ExOGQ2ZGViYTZjNTQ0ZSIsICJieXRlcyI6IDl9Cg==",
+            "cpu_ns": "387509000",
+            "memory_peak": "5877760",
+            "wall_ms": 769
+          },
+          "verified_output": {
+            "sha256": "335929a4e59b0860ec04c620c1284dace74c00f7eadaadce7a18d6deba6c544e",
+            "bytes": 9
+          }
+        },
+        "failure": null,
+        "reconciliation_evidence": []
+      },
+      {
+        "schema_version": "0.1",
+        "receipt_id": "receipt-55268715a04c4edea2719decec61ee72",
+        "request": {
+          "schema_version": "0.1",
+          "operation_id": "execute",
+          "task_id": "task-f0ddc0ff1f214e56b2b6b30d2716950f",
+          "subject_id": "agent-b",
+          "name": "host.copy",
+          "resource": {
+            "schema_version": "0.1",
+            "namespace": "test",
+            "resource_id": "task-f0ddc0ff1f214e56b2b6b30d2716950f"
+          },
+          "arguments": {
+            "payload": {
+              "two": 2
+            },
+            "reserved_tool_milliseconds": 10000,
+            "reserved_output_bytes": 65536,
+            "host_profile": "debian-local-v1",
+            "launcher_sha256": "6556969d50c19830bbf484cb7472d263b5590defb4b32d1df03db45a395d699b",
+            "policy_revision": "2"
+          },
+          "deadline": "2026-09-24T21:07:04.612147Z"
+        },
+        "request_digest": "472504fedc82224a7fa703d476b535c81bf0bbc81d31918569e382e521f1dbd4",
+        "grant_ids": [
+          "grant-task-f0ddc0ff1f214e56b2b6b30d2716950f"
+        ],
+        "retry_class": "reconciliation_required",
+        "state": "succeeded",
+        "revision": 2,
+        "created_at": "2026-09-24T20:57:09.914362Z",
+        "updated_at": "2026-09-24T20:57:13.540690Z",
+        "usage": {
+          "schema_version": "0.1",
+          "steps": 1,
+          "model_calls": 0,
+          "model_tokens": 0,
+          "tool_milliseconds": 678,
+          "output_bytes": 47
+        },
+        "result": {
+          "host": {
+            "state": "finished",
+            "result": "success",
+            "exit_status": "0",
+            "output": "eyJjb250ZW50X2Jhc2U2NCI6ICJleUowZDI4aU9qSjkiLCAiYnl0ZXMiOiA5fQo=",
+            "cpu_ns": "361991000",
+            "memory_peak": "5111808",
+            "wall_ms": 678
+          },
+          "verified_output": {
+            "content_base64": "eyJ0d28iOjJ9",
+            "bytes": 9
+          }
+        },
+        "failure": null,
+        "reconciliation_evidence": []
+      }
+    ]
+  },
+  {
+    "case": "revoked",
+    "parent": {
+      "schema_version": "0.1",
+      "task_id": "task-99fd53c3d17e4006912f7e798ada96fb",
+      "agent_id": "agent-a",
+      "objective": "Verify the delegated input hash and copy",
+      "runtime_id": "delegation-v1",
+      "verifier_id": "delegation-verifier-v1",
+      "capability_ids": [
+        "grant-task-99fd53c3d17e4006912f7e798ada96fb"
+      ],
+      "budget_account_id": "budget-task-99fd53c3d17e4006912f7e798ada96fb",
+      "limits": {
+        "schema_version": "0.1",
+        "max_steps": 2,
+        "max_model_calls": 0,
+        "max_model_tokens": 0,
+        "max_tool_milliseconds": 20000,
+        "max_output_bytes": 163840,
+        "max_concurrent_operations": 2,
+        "deadline": "2026-09-24T21:07:55.209778Z"
+      },
+      "parent_task_id": null,
+      "state": "failed",
+      "revision": 2,
+      "created_at": "2026-09-24T20:57:55.209778Z",
+      "updated_at": "2026-09-24T20:57:56.380574Z",
+      "checkpoint": null,
+      "wait": null,
+      "lease": null,
+      "verification": null,
+      "failure": {
+        "schema_version": "0.1",
+        "code": "peer_discovery_denied",
+        "message": "Delegation could not satisfy its bounded objective",
+        "retryable": false,
+        "details": {}
+      }
+    },
+    "children": [],
+    "links": [],
+    "receipts": []
+  },
+  {
+    "case": "cancel",
+    "parent": {
+      "schema_version": "0.1",
+      "task_id": "task-8d05242952bf42d0ad647a33d6ec81d3",
+      "agent_id": "agent-a",
+      "objective": "Verify the delegated input hash and copy",
+      "runtime_id": "delegation-v1",
+      "verifier_id": "delegation-verifier-v1",
+      "capability_ids": [
+        "grant-task-8d05242952bf42d0ad647a33d6ec81d3"
+      ],
+      "budget_account_id": "budget-task-8d05242952bf42d0ad647a33d6ec81d3",
+      "limits": {
+        "schema_version": "0.1",
+        "max_steps": 2,
+        "max_model_calls": 0,
+        "max_model_tokens": 0,
+        "max_tool_milliseconds": 20000,
+        "max_output_bytes": 163840,
+        "max_concurrent_operations": 2,
+        "deadline": "2026-09-24T21:08:14.267310Z"
+      },
+      "parent_task_id": null,
+      "state": "cancelled",
+      "revision": 2,
+      "created_at": "2026-09-24T20:58:14.267310Z",
+      "updated_at": "2026-09-24T20:58:21.584273Z",
+      "checkpoint": null,
+      "wait": null,
+      "lease": null,
+      "verification": null,
+      "failure": null
+    },
+    "children": [
+      {
+        "schema_version": "0.1",
+        "task_id": "task-345313cdd88a41c1a09ef277ccbee289",
+        "agent_id": "agent-b",
+        "objective": "host.sha256 for task-8d05242952bf42d0ad647a33d6ec81d3 slot 0",
+        "runtime_id": "host-sha256-v1",
+        "verifier_id": "sha256-verifier-v1",
+        "capability_ids": [
+          "grant-task-345313cdd88a41c1a09ef277ccbee289"
+        ],
+        "budget_account_id": "budget-task-345313cdd88a41c1a09ef277ccbee289",
+        "limits": {
+          "schema_version": "0.1",
+          "max_steps": 2,
+          "max_model_calls": 0,
+          "max_model_tokens": 0,
+          "max_tool_milliseconds": 10000,
+          "max_output_bytes": 65536,
+          "max_concurrent_operations": 1,
+          "deadline": "2026-09-24T21:08:14.267310Z"
+        },
+        "parent_task_id": "task-8d05242952bf42d0ad647a33d6ec81d3",
+        "state": "cancelled",
+        "revision": 2,
+        "created_at": "2026-09-24T20:58:15.473119Z",
+        "updated_at": "2026-09-24T20:58:19.755561Z",
+        "checkpoint": null,
+        "wait": null,
+        "lease": null,
+        "verification": null,
+        "failure": null
+      },
+      {
+        "schema_version": "0.1",
+        "task_id": "task-446540d8c6744d9b99581d0ef667203d",
+        "agent_id": "agent-b",
+        "objective": "host.copy for task-8d05242952bf42d0ad647a33d6ec81d3 slot 1",
+        "runtime_id": "host-copy-v1",
+        "verifier_id": "copy-verifier-v1",
+        "capability_ids": [
+          "grant-task-446540d8c6744d9b99581d0ef667203d"
+        ],
+        "budget_account_id": "budget-task-446540d8c6744d9b99581d0ef667203d",
+        "limits": {
+          "schema_version": "0.1",
+          "max_steps": 2,
+          "max_model_calls": 0,
+          "max_model_tokens": 0,
+          "max_tool_milliseconds": 10000,
+          "max_output_bytes": 65536,
+          "max_concurrent_operations": 1,
+          "deadline": "2026-09-24T21:08:14.267310Z"
+        },
+        "parent_task_id": "task-8d05242952bf42d0ad647a33d6ec81d3",
+        "state": "cancelled",
+        "revision": 1,
+        "created_at": "2026-09-24T20:58:17.913725Z",
+        "updated_at": "2026-09-24T20:58:18.178725Z",
+        "checkpoint": null,
+        "wait": null,
+        "lease": null,
+        "verification": null,
+        "failure": null
+      }
+    ],
+    "links": [
+      [
+        0,
+        "task-345313cdd88a41c1a09ef277ccbee289",
+        "task-8d05242952bf42d0ad647a33d6ec81d3.0"
+      ],
+      [
+        1,
+        "task-446540d8c6744d9b99581d0ef667203d",
+        "task-8d05242952bf42d0ad647a33d6ec81d3.1"
+      ]
+    ],
+    "receipts": [
+      {
+        "schema_version": "0.1",
+        "receipt_id": "receipt-ad9782173a834b53aceb94d891a3a836",
+        "request": {
+          "schema_version": "0.1",
+          "operation_id": "execute",
+          "task_id": "task-345313cdd88a41c1a09ef277ccbee289",
+          "subject_id": "agent-b",
+          "name": "host.sha256",
+          "resource": {
+            "schema_version": "0.1",
+            "namespace": "test",
+            "resource_id": "task-345313cdd88a41c1a09ef277ccbee289"
+          },
+          "arguments": {
+            "payload": {
+              "one": 1
+            },
+            "reserved_tool_milliseconds": 10000,
+            "reserved_output_bytes": 65536,
+            "host_profile": "debian-local-v1",
+            "launcher_sha256": "6556969d50c19830bbf484cb7472d263b5590defb4b32d1df03db45a395d699b",
+            "policy_revision": "2"
+          },
+          "deadline": "2026-09-24T21:08:14.267310Z"
+        },
+        "request_digest": "4181d1cecad81e37758f8f3bf1200287be6f855bb639eb2a34615e2667893b9a",
+        "grant_ids": [
+          "grant-task-345313cdd88a41c1a09ef277ccbee289"
+        ],
+        "retry_class": "reconciliation_required",
+        "state": "cancelled",
+        "revision": 2,
+        "created_at": "2026-09-24T20:58:16.417242Z",
+        "updated_at": "2026-09-24T20:58:19.748386Z",
+        "usage": {
+          "schema_version": "0.1",
+          "steps": 1,
+          "model_calls": 0,
+          "model_tokens": 0,
+          "tool_milliseconds": 10000,
+          "output_bytes": 65536
+        },
+        "result": null,
+        "failure": null,
+        "reconciliation_evidence": []
+      }
+    ]
+  },
+  {
+    "case": "budget",
+    "parent": {
+      "schema_version": "0.1",
+      "task_id": "task-71869a3b0f764f3f99589598ed993c83",
+      "agent_id": "agent-a",
+      "objective": "Verify the delegated input hash and copy",
+      "runtime_id": "delegation-v1",
+      "verifier_id": "delegation-verifier-v1",
+      "capability_ids": [
+        "grant-task-71869a3b0f764f3f99589598ed993c83"
+      ],
+      "budget_account_id": "budget-task-71869a3b0f764f3f99589598ed993c83",
+      "limits": {
+        "schema_version": "0.1",
+        "max_steps": 2,
+        "max_model_calls": 0,
+        "max_model_tokens": 0,
+        "max_tool_milliseconds": 10000,
+        "max_output_bytes": 163840,
+        "max_concurrent_operations": 2,
+        "deadline": "2026-09-24T21:08:39.832118Z"
+      },
+      "parent_task_id": null,
+      "state": "failed",
+      "revision": 2,
+      "created_at": "2026-09-24T20:58:39.832118Z",
+      "updated_at": "2026-09-24T20:58:46.868085Z",
+      "checkpoint": null,
+      "wait": null,
+      "lease": null,
+      "verification": null,
+      "failure": {
+        "schema_version": "0.1",
+        "code": "peer_rejected",
+        "message": "Delegation could not satisfy its bounded objective",
+        "retryable": false,
+        "details": {}
+      }
+    },
+    "children": [
+      {
+        "schema_version": "0.1",
+        "task_id": "task-0c5d3ae291c34bf383299874fe49431e",
+        "agent_id": "agent-b",
+        "objective": "host.sha256 for task-71869a3b0f764f3f99589598ed993c83 slot 0",
+        "runtime_id": "host-sha256-v1",
+        "verifier_id": "sha256-verifier-v1",
+        "capability_ids": [
+          "grant-task-0c5d3ae291c34bf383299874fe49431e"
+        ],
+        "budget_account_id": "budget-task-0c5d3ae291c34bf383299874fe49431e",
+        "limits": {
+          "schema_version": "0.1",
+          "max_steps": 2,
+          "max_model_calls": 0,
+          "max_model_tokens": 0,
+          "max_tool_milliseconds": 10000,
+          "max_output_bytes": 65536,
+          "max_concurrent_operations": 1,
+          "deadline": "2026-09-24T21:08:39.832118Z"
+        },
+        "parent_task_id": "task-71869a3b0f764f3f99589598ed993c83",
+        "state": "cancelled",
+        "revision": 2,
+        "created_at": "2026-09-24T20:58:41.161752Z",
+        "updated_at": "2026-09-24T20:58:45.455269Z",
+        "checkpoint": null,
+        "wait": null,
+        "lease": null,
+        "verification": null,
+        "failure": null
+      }
+    ],
+    "links": [
+      [
+        0,
+        "task-0c5d3ae291c34bf383299874fe49431e",
+        "task-71869a3b0f764f3f99589598ed993c83.0"
+      ]
+    ],
+    "receipts": [
+      {
+        "schema_version": "0.1",
+        "receipt_id": "receipt-62180df04875465b8e584bc74b2564a9",
+        "request": {
+          "schema_version": "0.1",
+          "operation_id": "execute",
+          "task_id": "task-0c5d3ae291c34bf383299874fe49431e",
+          "subject_id": "agent-b",
+          "name": "host.sha256",
+          "resource": {
+            "schema_version": "0.1",
+            "namespace": "test",
+            "resource_id": "task-0c5d3ae291c34bf383299874fe49431e"
+          },
+          "arguments": {
+            "payload": {
+              "one": 1
+            },
+            "reserved_tool_milliseconds": 10000,
+            "reserved_output_bytes": 65536,
+            "host_profile": "debian-local-v1",
+            "launcher_sha256": "6556969d50c19830bbf484cb7472d263b5590defb4b32d1df03db45a395d699b",
+            "policy_revision": "2"
+          },
+          "deadline": "2026-09-24T21:08:39.832118Z"
+        },
+        "request_digest": "d144bbfca662b93f1c4cd3e10e96d313b81db1eb55e8edf5823906bc84737d9d",
+        "grant_ids": [
+          "grant-task-0c5d3ae291c34bf383299874fe49431e"
+        ],
+        "retry_class": "reconciliation_required",
+        "state": "cancelled",
+        "revision": 2,
+        "created_at": "2026-09-24T20:58:42.087033Z",
+        "updated_at": "2026-09-24T20:58:45.448769Z",
+        "usage": {
+          "schema_version": "0.1",
+          "steps": 1,
+          "model_calls": 0,
+          "model_tokens": 0,
+          "tool_milliseconds": 727,
+          "output_bytes": 65536
+        },
+        "result": null,
+        "failure": null,
+        "reconciliation_evidence": []
+      }
+    ]
+  }
+]

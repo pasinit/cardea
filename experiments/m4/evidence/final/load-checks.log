@@ -1,0 +1,17 @@
+"/home/user/.local/bin/uv" run --locked --project packages/cardea-load pytest packages/cardea-load/tests
+============================= test session starts ==============================
+platform darwin -- Python 3.13.14, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/user/src/cardea/packages/cardea-load
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 21 items
+
+packages/cardea-load/tests/test_agent.py .....                           [ 23%]
+packages/cardea-load/tests/test_delegation.py ...                        [ 38%]
+packages/cardea-load/tests/test_metrics.py .............                 [100%]
+
+============================== 21 passed in 0.15s ==============================
+"/home/user/.local/bin/uv" run --locked --project packages/cardea-load ruff check packages/cardea-load
+All checks passed!
+"/home/user/.local/bin/uv" run --locked --project packages/cardea-load mypy packages/cardea-load/src packages/cardea-load/tests packages/cardea-load/tools
+Success: no issues found in 16 source files

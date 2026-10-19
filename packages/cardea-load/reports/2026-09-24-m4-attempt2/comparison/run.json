@@ -1,0 +1,871 @@
+{
+  "complete": true,
+  "contract": {
+    "api_lock": "468bad84c989850bf910ad42921169f9d9408e11a4fb1959276e5de825485bcf",
+    "environment": {
+      "bwrap": "bubblewrap 0.12.0",
+      "cpus": 2,
+      "limits": {
+        "cpu.max": "root-unlimited",
+        "memory.max": "root-unlimited",
+        "pids.max": "root-unlimited"
+      },
+      "memory": "MemTotal:        1504444 kB",
+      "platform": "Linux-6.12.107+deb13-cloud-amd64-x86_64-with-glibc2.41",
+      "python": "3.13.5",
+      "systemd": "systemd 257 (257.13-1~deb13u1)"
+    },
+    "harness": {
+      "experiments/m1/daemon_probe.py": "73ea5ce7a30ee96a5d14cff7d2f5b2a3bc72f051a87bb10a9a74195e39da2938",
+      "experiments/m1/demo.py": "0e573d0f9eb31d74a1e0659c5bb6eb44508b3cd1f813ee2730002c0616d87ec7",
+      "experiments/m1/harness.py": "739609076f624485d97193f0e2d7eca1f1714a23eab785fd0faea1e871fcaae0",
+      "experiments/m1/oidc_lab.py": "b0a90abb4e8c100b69a6f2154c0fceb45e76ab650592517c87fed5c39c247719",
+      "experiments/m1/provider_lab.py": "d0454572739a07f379f960c982c166b3dbb75f2679175f723617b42122a19354",
+      "experiments/m1/tests/conftest.py": "8258c8e91fd109b09b44e6473e23ae953e566d9cc5860c74de96443f27ae4fff",
+      "experiments/m1/tests/test_oidc.py": "c632bc9518d487a754f046f6c6c2acaaf4e41c6b61f710f914468dddb74d046b",
+      "experiments/m1/tests/test_service.py": "5e97155b4fd7714e4d4eb32c9384b0f9656a8cda9bc543652f186f597927bd0e",
+      "experiments/m4/daemon_probe.py": "bf2c60bc05640891309691a32aa51208fd0e772bd1d0605f0bd2cba5fba9f2a0",
+      "experiments/m4/integration_vm.py": "49424bac878b87bbaeb2e6015b83d2394f9d1ac2ca4efcbba15f89a340c15e0e",
+      "experiments/m4/load_vm.py": "9a7831998e42236dd366af9891ec36b3fb535408bc4347daa3578da30ec878df",
+      "experiments/m4/test_integration.py": "c955a30e4e6c61d44832284b4fc363b7eee0aff044ed9a4c9cdcd2792d3d26d3",
+      "experiments/m4/test_sdk_fit.py": "dbf8bf65efa8d987a669d748426ed5dd541e80bda57ab1fc2f77b2dbd174985a",
+      "experiments/spire/binding.py": "1805e82d852b3f1ad5d625862cdde8b6757919fef393a3a7a0396d34eb7961e4",
+      "experiments/spire/lab.py": "d15f2335668bfc281049c6334d2a61a52b5f45aadad0485c170d43ff6c0fc873",
+      "experiments/spire/probe.py": "a9f2a1e661b417075376b391306ab5120d3dbe2525d484c7a24eb77b9b09144f",
+      "experiments/spire/tests/conftest.py": "24c715bf2664b126783d179802af44342072accfed207b431a6d122a81d29e37",
+      "experiments/spire/tests/test_fit.py": "8ee4a8eb8108ca4c49bb5d51b430a8cb4c149b0f33c2b5bd00a7fed201a979b5",
+      "packages/cardea-load/src/cardea_load/__init__.py": "45a2189c712b7919ac7d24163cef5c593f225455b03b558e26df0238704777dc",
+      "packages/cardea-load/src/cardea_load/agent.py": "6d9a043f27dfac6ecc3f3b4d474fb1bf0ce0a8a8275ddab4de8aebc8e2f70c6c",
+      "packages/cardea-load/src/cardea_load/agent_fixture.py": "0a33bf932816df9c70c62b92edb856caf2dabf64c83845fb0c82bd141723a231",
+      "packages/cardea-load/src/cardea_load/cli.py": "ea5c34635adfdd711b732602ae849c6b4fc5d7d2fe3a43eed62a577ffd71b8bb",
+      "packages/cardea-load/src/cardea_load/delegation.py": "172695e7a5a5aad9b48e23d70d25c04e86f3713378b87299ed18d62a03435e4f",
+      "packages/cardea-load/src/cardea_load/delegation_fixture.py": "683e2637b11e4de162bf3c2b1f7e1b19db55cfacfa026c96446b0af833c9b112",
+      "packages/cardea-load/src/cardea_load/engine.py": "82d39c6c7531fcc457f48e52e43e83909add0b3587cc3a71f8700ebca3249def",
+      "packages/cardea-load/src/cardea_load/fixture.py": "b4ef1ba0dcd059ec4e7fc0ea5fd165ba5bfeac1f2b55ae55e757b34566a860cf",
+      "packages/cardea-load/src/cardea_load/lab.py": "9705c2a0267d7df68d6695e1efb9e691cda361dc915c402f3cdb5565d4426378",
+      "packages/cardea-load/src/cardea_load/metrics.py": "d9252f7ad232542fae642fb5cc2fcdabcd8aa1857b2387b5c84190111c72fa35",
+      "packages/cardea-load/src/cardea_load/report.py": "9fd0386cb8b54dcc1d33725ebda142897e20d4ff7f495095987eba6cf6be739d",
+      "packages/cardea-load/src/cardea_load/runner.py": "071ba95515332795a63d3102a833834081b9b9162134d4ddbccd75fcc48dbb8d"
+    },
+    "load_lock": "9e4fe0bd1f0dfb1f0f6963d4c4419b4771c14308d34f6994831ad68a7d21d0f2",
+    "profile": {
+      "arrival": "closed-loop",
+      "authentication": "spiffe-jwt-svid",
+      "child_concurrency": 2,
+      "children": 2,
+      "concurrency": 2,
+      "model_calls": 0,
+      "name": "m4-delegation-v1",
+      "parent_output_bytes": 163840,
+      "parent_tool_milliseconds": 20000,
+      "protocol": "a2a-1.0-jsonrpc-private-unix-http",
+      "tasks": 4,
+      "worker": "debian-systemd-bubblewrap-hash-copy"
+    }
+  },
+  "kind": "comparison",
+  "points": [
+    {
+      "admission_p95_ms": 648.9681740500373,
+      "bindings": 12,
+      "completion_p95_ms": 30770.168421899732,
+      "completion_rps": 0.058773922373935666,
+      "duration_seconds": 51.04304560300034,
+      "effects": 8,
+      "integrity": "ok",
+      "object_versions": [
+        [
+          "task-0fcef427dc35401b9b084bf732f792ed.output",
+          1
+        ],
+        [
+          "task-0fcef427dc35401b9b084bf732f792ed.verification",
+          1
+        ],
+        [
+          "task-1572b7fc449040748ab47f2d0f80bf5c.output",
+          1
+        ],
+        [
+          "task-1572b7fc449040748ab47f2d0f80bf5c.verification",
+          1
+        ],
+        [
+          "task-4e7834ff84f84ad693f44226b46709d7.output",
+          1
+        ],
+        [
+          "task-4e7834ff84f84ad693f44226b46709d7.verification",
+          1
+        ],
+        [
+          "task-6d52bcf9bf3247b88bf7ea517eaded68.output",
+          1
+        ],
+        [
+          "task-6d52bcf9bf3247b88bf7ea517eaded68.verification",
+          1
+        ],
+        [
+          "task-8aab74c1397449048f5954ef1e50fd7c.output",
+          1
+        ],
+        [
+          "task-8aab74c1397449048f5954ef1e50fd7c.verification",
+          1
+        ],
+        [
+          "task-8e47be19e1794028ac58b3765baf4294.output",
+          1
+        ],
+        [
+          "task-8e47be19e1794028ac58b3765baf4294.verification",
+          1
+        ],
+        [
+          "task-9378a0dbc5bc461d8062d30452e41cd7.output",
+          1
+        ],
+        [
+          "task-9378a0dbc5bc461d8062d30452e41cd7.verification",
+          1
+        ],
+        [
+          "task-c01c2e7624e443a9b38c4ea2d96bde43.output",
+          1
+        ],
+        [
+          "task-c01c2e7624e443a9b38c4ea2d96bde43.verification",
+          1
+        ],
+        [
+          "task-c5900cbe892243198ebcd1450d82ee94.output",
+          1
+        ],
+        [
+          "task-c5900cbe892243198ebcd1450d82ee94.verification",
+          1
+        ],
+        [
+          "task-cb5b45dcee3d4f809fff549df9ec57fb.output",
+          1
+        ],
+        [
+          "task-cb5b45dcee3d4f809fff549df9ec57fb.verification",
+          1
+        ],
+        [
+          "task-d2ebc71b2d984ccfa57ca8e755db3a43.output",
+          1
+        ],
+        [
+          "task-d2ebc71b2d984ccfa57ca8e755db3a43.verification",
+          1
+        ],
+        [
+          "task-dcd7a1283a034a5b842ab305943d05a4.output",
+          1
+        ],
+        [
+          "task-dcd7a1283a034a5b842ab305943d05a4.verification",
+          1
+        ]
+      ],
+      "passed": false,
+      "protocol_roundtrips": {
+        "AgentCard": {
+          "calls": 9,
+          "median_ms": 239.48370700009036,
+          "total_ms": 2341.440080000666
+        },
+        "GetTask": {
+          "calls": 10,
+          "median_ms": 660.8548475001044,
+          "total_ms": 9901.314897999782
+        },
+        "SendMessage": {
+          "calls": 8,
+          "median_ms": 3663.2981109999037,
+          "total_ms": 28803.084875999502
+        }
+      },
+      "repetition": 0,
+      "tasks": [
+        {
+          "admission_ms": 274.617918000331,
+          "code": "acceptance_failed",
+          "error": "ReadTimeout",
+          "index": 0,
+          "passed": false,
+          "task_id": "task-9378a0dbc5bc461d8062d30452e41cd7"
+        },
+        {
+          "admission_ms": 448.56184399986887,
+          "completion_ms": 32551.64950199969,
+          "final": {
+            "artifact": {
+              "content_digest": "2b523adc9593580d49ef07f3705c7e47c370800843d7d2ad9c1b77b4c0bfa8c1",
+              "namespace": "test",
+              "resource_id": "task-8e47be19e1794028ac58b3765baf4294.output",
+              "schema_version": "0.1",
+              "version": 1
+            },
+            "content": {
+              "children": [
+                {
+                  "artifact": {
+                    "content_digest": "dd50982f58072a57ce78460feccec2220b55de4001289154c136f24b61574a1e",
+                    "namespace": "test",
+                    "resource_id": "task-4e7834ff84f84ad693f44226b46709d7.output",
+                    "schema_version": "0.1",
+                    "version": 1
+                  },
+                  "slot": 0,
+                  "state": "succeeded",
+                  "task_id": "task-4e7834ff84f84ad693f44226b46709d7"
+                },
+                {
+                  "artifact": {
+                    "content_digest": "9538ce02d901b76bed748b73c233305b91ada87e993c5ea393372e93079ed7cc",
+                    "namespace": "test",
+                    "resource_id": "task-dcd7a1283a034a5b842ab305943d05a4.output",
+                    "schema_version": "0.1",
+                    "version": 1
+                  },
+                  "slot": 1,
+                  "state": "succeeded",
+                  "task_id": "task-dcd7a1283a034a5b842ab305943d05a4"
+                }
+              ],
+              "usage": {
+                "active_operations": 0,
+                "children": 2,
+                "output_bytes": 138,
+                "tool_milliseconds": 1468
+              },
+              "verified_children": 2
+            },
+            "schema_version": "0.2"
+          },
+          "index": 1,
+          "links": {
+            "children": [
+              {
+                "child_id": "task-4e7834ff84f84ad693f44226b46709d7",
+                "message_id": "task-8e47be19e1794028ac58b3765baf4294.0",
+                "slot": 0
+              },
+              {
+                "child_id": "task-dcd7a1283a034a5b842ab305943d05a4",
+                "message_id": "task-8e47be19e1794028ac58b3765baf4294.1",
+                "slot": 1
+              }
+            ],
+            "schema_version": "0.2",
+            "usage": {
+              "active_operations": 0,
+              "children": 2,
+              "output_bytes": 138,
+              "tool_milliseconds": 1468
+            }
+          },
+          "passed": true,
+          "receipts": [
+            {
+              "created_at": "2026-09-24T21:37:20.776534Z",
+              "failure": null,
+              "grant_ids": [
+                "grant-task-4e7834ff84f84ad693f44226b46709d7"
+              ],
+              "receipt_id": "receipt-63e83d23655746ec8435fa1f84cb4a84",
+              "reconciliation_evidence": [],
+              "request": {
+                "arguments": {
+                  "host_profile": "debian-local-v1",
+                  "launcher_sha256": "6556969d50c19830bbf484cb7472d263b5590defb4b32d1df03db45a395d699b",
+                  "payload": {
+                    "x": 1
+                  },
+                  "policy_revision": "2",
+                  "reserved_output_bytes": 65536,
+                  "reserved_tool_milliseconds": 10000
+                },
+                "deadline": "2026-09-24T21:47:17.987315Z",
+                "name": "host.sha256",
+                "operation_id": "execute",
+                "resource": {
+                  "namespace": "test",
+                  "resource_id": "task-4e7834ff84f84ad693f44226b46709d7",
+                  "schema_version": "0.1"
+                },
+                "schema_version": "0.1",
+                "subject_id": "agent-b",
+                "task_id": "task-4e7834ff84f84ad693f44226b46709d7"
+              },
+              "request_digest": "cbe786189218d2ae4c989916b462b36b15bac2540793f7b268caa967df259f52",
+              "result": {
+                "host": {
+                  "cpu_ns": "377373000",
+                  "exit_status": "0",
+                  "memory_peak": "5885952",
+                  "output": "eyJzaGEyNTYiOiAiNTA0MWJmMWY3MTNkZjIwNDc4NDM1M2U4MmY2YTRhNTM1OTMxY2I2NGYxZjRiNGE1YWVhZmZjYjcyMDkxOGIyMiIsICJieXRlcyI6IDd9Cg==",
+                  "result": "success",
+                  "state": "finished",
+                  "wall_ms": 742
+                },
+                "verified_output": {
+                  "bytes": 7,
+                  "sha256": "5041bf1f713df204784353e82f6a4a535931cb64f1f4b4a5aeaffcb720918b22"
+                }
+              },
+              "retry_class": "reconciliation_required",
+              "revision": 2,
+              "schema_version": "0.1",
+              "state": "succeeded",
+              "updated_at": "2026-09-24T21:37:25.444319Z",
+              "usage": {
+                "model_calls": 0,
+                "model_tokens": 0,
+                "output_bytes": 91,
+                "schema_version": "0.1",
+                "steps": 1,
+                "tool_milliseconds": 742
+              }
+            },
+            {
+              "created_at": "2026-09-24T21:37:32.902482Z",
+              "failure": null,
+              "grant_ids": [
+                "grant-task-dcd7a1283a034a5b842ab305943d05a4"
+              ],
+              "receipt_id": "receipt-4ab7e8cdeb1b4416b8575b8af22cb176",
+              "reconciliation_evidence": [],
+              "request": {
+                "arguments": {
+                  "host_profile": "debian-local-v1",
+                  "launcher_sha256": "6556969d50c19830bbf484cb7472d263b5590defb4b32d1df03db45a395d699b",
+                  "payload": {
+                    "x": 1
+                  },
+                  "policy_revision": "2",
+                  "reserved_output_bytes": 65536,
+                  "reserved_tool_milliseconds": 10000
+                },
+                "deadline": "2026-09-24T21:47:17.987315Z",
+                "name": "host.copy",
+                "operation_id": "execute",
+                "resource": {
+                  "namespace": "test",
+                  "resource_id": "task-dcd7a1283a034a5b842ab305943d05a4",
+                  "schema_version": "0.1"
+                },
+                "schema_version": "0.1",
+                "subject_id": "agent-b",
+                "task_id": "task-dcd7a1283a034a5b842ab305943d05a4"
+              },
+              "request_digest": "73f9d38ac5f7f90721184443b8ef512464de58f7e7ff5fe1674f81508f40a43c",
+              "result": {
+                "host": {
+                  "cpu_ns": "366652000",
+                  "exit_status": "0",
+                  "memory_peak": "4927488",
+                  "output": "eyJjb250ZW50X2Jhc2U2NCI6ICJleUo0SWpveGZRPT0iLCAiYnl0ZXMiOiA3fQo=",
+                  "result": "success",
+                  "state": "finished",
+                  "wall_ms": 726
+                },
+                "verified_output": {
+                  "bytes": 7,
+                  "content_base64": "eyJ4IjoxfQ=="
+                }
+              },
+              "retry_class": "reconciliation_required",
+              "revision": 2,
+              "schema_version": "0.1",
+              "state": "succeeded",
+              "updated_at": "2026-09-24T21:37:38.525695Z",
+              "usage": {
+                "model_calls": 0,
+                "model_tokens": 0,
+                "output_bytes": 47,
+                "schema_version": "0.1",
+                "steps": 1,
+                "tool_milliseconds": 726
+              }
+            }
+          ],
+          "task_id": "task-8e47be19e1794028ac58b3765baf4294"
+        },
+        {
+          "admission_ms": 684.333997000067,
+          "completion_ms": 14736.838701000124,
+          "final": {
+            "artifact": {
+              "content_digest": "d56f9e3d8e46f027fc72a650f3913f8b8f896c3f59c7417538a960837da5350b",
+              "namespace": "test",
+              "resource_id": "task-d2ebc71b2d984ccfa57ca8e755db3a43.output",
+              "schema_version": "0.1",
+              "version": 1
+            },
+            "content": {
+              "children": [
+                {
+                  "artifact": {
+                    "content_digest": "e4c24c7d5ae9246f3b42a0007e01b18d941de0ad73eff7d1bcd9d3ae9690ce29",
+                    "namespace": "test",
+                    "resource_id": "task-1572b7fc449040748ab47f2d0f80bf5c.output",
+                    "schema_version": "0.1",
+                    "version": 1
+                  },
+                  "slot": 0,
+                  "state": "succeeded",
+                  "task_id": "task-1572b7fc449040748ab47f2d0f80bf5c"
+                },
+                {
+                  "artifact": {
+                    "content_digest": "174dcc3bfd3183499f6f4e7846aa4fd88c0d97bd8c8a5099837559f8de304364",
+                    "namespace": "test",
+                    "resource_id": "task-8aab74c1397449048f5954ef1e50fd7c.output",
+                    "schema_version": "0.1",
+                    "version": 1
+                  },
+                  "slot": 1,
+                  "state": "succeeded",
+                  "task_id": "task-8aab74c1397449048f5954ef1e50fd7c"
+                }
+              ],
+              "usage": {
+                "active_operations": 0,
+                "children": 2,
+                "output_bytes": 138,
+                "tool_milliseconds": 1461
+              },
+              "verified_children": 2
+            },
+            "schema_version": "0.2"
+          },
+          "index": 2,
+          "links": {
+            "children": [
+              {
+                "child_id": "task-1572b7fc449040748ab47f2d0f80bf5c",
+                "message_id": "task-d2ebc71b2d984ccfa57ca8e755db3a43.0",
+                "slot": 0
+              },
+              {
+                "child_id": "task-8aab74c1397449048f5954ef1e50fd7c",
+                "message_id": "task-d2ebc71b2d984ccfa57ca8e755db3a43.1",
+                "slot": 1
+              }
+            ],
+            "schema_version": "0.2",
+            "usage": {
+              "active_operations": 0,
+              "children": 2,
+              "output_bytes": 138,
+              "tool_milliseconds": 1461
+            }
+          },
+          "passed": true,
+          "receipts": [
+            {
+              "created_at": "2026-09-24T21:37:43.677382Z",
+              "failure": null,
+              "grant_ids": [
+                "grant-task-1572b7fc449040748ab47f2d0f80bf5c"
+              ],
+              "receipt_id": "receipt-4a67fc777a2947029bc1743664388ddb",
+              "reconciliation_evidence": [],
+              "request": {
+                "arguments": {
+                  "host_profile": "debian-local-v1",
+                  "launcher_sha256": "6556969d50c19830bbf484cb7472d263b5590defb4b32d1df03db45a395d699b",
+                  "payload": {
+                    "x": 2
+                  },
+                  "policy_revision": "2",
+                  "reserved_output_bytes": 65536,
+                  "reserved_tool_milliseconds": 10000
+                },
+                "deadline": "2026-09-24T21:47:38.962931Z",
+                "name": "host.sha256",
+                "operation_id": "execute",
+                "resource": {
+                  "namespace": "test",
+                  "resource_id": "task-1572b7fc449040748ab47f2d0f80bf5c",
+                  "schema_version": "0.1"
+                },
+                "schema_version": "0.1",
+                "subject_id": "agent-b",
+                "task_id": "task-1572b7fc449040748ab47f2d0f80bf5c"
+              },
+              "request_digest": "5f31c83a250d19b96c7ad4833e34f45ef39c31719d7b53da553ceaa607baddaa",
+              "result": {
+                "host": {
+                  "cpu_ns": "400121000",
+                  "exit_status": "0",
+                  "memory_peak": "5812224",
+                  "output": "eyJzaGEyNTYiOiAiNWUyYjAzMGE0YTBmMTU4MmQ3OGMwZmQ5OTI0NTExY2Q2YjFmMmRmOTg3OWU1NzRmNWVhMTQwNmM5NDA1MjQxOCIsICJieXRlcyI6IDd9Cg==",
+                  "result": "success",
+                  "state": "finished",
+                  "wall_ms": 759
+                },
+                "verified_output": {
+                  "bytes": 7,
+                  "sha256": "5e2b030a4a0f1582d78c0fd9924511cd6b1f2df9879e574f5ea1406c94052418"
+                }
+              },
+              "retry_class": "reconciliation_required",
+              "revision": 2,
+              "schema_version": "0.1",
+              "state": "succeeded",
+              "updated_at": "2026-09-24T21:37:49.159885Z",
+              "usage": {
+                "model_calls": 0,
+                "model_tokens": 0,
+                "output_bytes": 91,
+                "schema_version": "0.1",
+                "steps": 1,
+                "tool_milliseconds": 759
+              }
+            },
+            {
+              "created_at": "2026-09-24T21:37:47.557475Z",
+              "failure": null,
+              "grant_ids": [
+                "grant-task-8aab74c1397449048f5954ef1e50fd7c"
+              ],
+              "receipt_id": "receipt-3ea83331bd4f42cfb7025a475353ab34",
+              "reconciliation_evidence": [],
+              "request": {
+                "arguments": {
+                  "host_profile": "debian-local-v1",
+                  "launcher_sha256": "6556969d50c19830bbf484cb7472d263b5590defb4b32d1df03db45a395d699b",
+                  "payload": {
+                    "x": 2
+                  },
+                  "policy_revision": "2",
+                  "reserved_output_bytes": 65536,
+                  "reserved_tool_milliseconds": 10000
+                },
+                "deadline": "2026-09-24T21:47:38.962931Z",
+                "name": "host.copy",
+                "operation_id": "execute",
+                "resource": {
+                  "namespace": "test",
+                  "resource_id": "task-8aab74c1397449048f5954ef1e50fd7c",
+                  "schema_version": "0.1"
+                },
+                "schema_version": "0.1",
+                "subject_id": "agent-b",
+                "task_id": "task-8aab74c1397449048f5954ef1e50fd7c"
+              },
+              "request_digest": "ebfc302023eb6d763960f7070a882dbfc16cef91eff25093d6da5ce78580d636",
+              "result": {
+                "host": {
+                  "cpu_ns": "358426000",
+                  "exit_status": "0",
+                  "memory_peak": "5111808",
+                  "output": "eyJjb250ZW50X2Jhc2U2NCI6ICJleUo0SWpveWZRPT0iLCAiYnl0ZXMiOiA3fQo=",
+                  "result": "success",
+                  "state": "finished",
+                  "wall_ms": 702
+                },
+                "verified_output": {
+                  "bytes": 7,
+                  "content_base64": "eyJ4IjoyfQ=="
+                }
+              },
+              "retry_class": "reconciliation_required",
+              "revision": 2,
+              "schema_version": "0.1",
+              "state": "succeeded",
+              "updated_at": "2026-09-24T21:37:51.946003Z",
+              "usage": {
+                "model_calls": 0,
+                "model_tokens": 0,
+                "output_bytes": 47,
+                "schema_version": "0.1",
+                "steps": 1,
+                "tool_milliseconds": 702
+              }
+            }
+          ],
+          "task_id": "task-d2ebc71b2d984ccfa57ca8e755db3a43"
+        },
+        {
+          "admission_ms": 344.3802560000222,
+          "completion_ms": 13783.112932000222,
+          "final": {
+            "artifact": {
+              "content_digest": "7ba69bb5e19a085faef54010b4e04eaa67f8d7270c5c9d8f6cf2894a90c27f30",
+              "namespace": "test",
+              "resource_id": "task-6d52bcf9bf3247b88bf7ea517eaded68.output",
+              "schema_version": "0.1",
+              "version": 1
+            },
+            "content": {
+              "children": [
+                {
+                  "artifact": {
+                    "content_digest": "75569737fc2aa6183745504bb4b54d3fde9e55bacb01e88c89f7720686d4d074",
+                    "namespace": "test",
+                    "resource_id": "task-0fcef427dc35401b9b084bf732f792ed.output",
+                    "schema_version": "0.1",
+                    "version": 1
+                  },
+                  "slot": 0,
+                  "state": "succeeded",
+                  "task_id": "task-0fcef427dc35401b9b084bf732f792ed"
+                },
+                {
+                  "artifact": {
+                    "content_digest": "600954556628bcf949fd742e2da8731552f37a86f14caa05310978fe8df2d1f0",
+                    "namespace": "test",
+                    "resource_id": "task-c5900cbe892243198ebcd1450d82ee94.output",
+                    "schema_version": "0.1",
+                    "version": 1
+                  },
+                  "slot": 1,
+                  "state": "succeeded",
+                  "task_id": "task-c5900cbe892243198ebcd1450d82ee94"
+                }
+              ],
+              "usage": {
+                "active_operations": 0,
+                "children": 2,
+                "output_bytes": 138,
+                "tool_milliseconds": 1497
+              },
+              "verified_children": 2
+            },
+            "schema_version": "0.2"
+          },
+          "index": 3,
+          "links": {
+            "children": [
+              {
+                "child_id": "task-0fcef427dc35401b9b084bf732f792ed",
+                "message_id": "task-6d52bcf9bf3247b88bf7ea517eaded68.0",
+                "slot": 0
+              },
+              {
+                "child_id": "task-c5900cbe892243198ebcd1450d82ee94",
+                "message_id": "task-6d52bcf9bf3247b88bf7ea517eaded68.1",
+                "slot": 1
+              }
+            ],
+            "schema_version": "0.2",
+            "usage": {
+              "active_operations": 0,
+              "children": 2,
+              "output_bytes": 138,
+              "tool_milliseconds": 1497
+            }
+          },
+          "passed": true,
+          "receipts": [
+            {
+              "created_at": "2026-09-24T21:37:57.318033Z",
+              "failure": null,
+              "grant_ids": [
+                "grant-task-0fcef427dc35401b9b084bf732f792ed"
+              ],
+              "receipt_id": "receipt-83fe246de6fb463e9768a93001ed9905",
+              "reconciliation_evidence": [],
+              "request": {
+                "arguments": {
+                  "host_profile": "debian-local-v1",
+                  "launcher_sha256": "6556969d50c19830bbf484cb7472d263b5590defb4b32d1df03db45a395d699b",
+                  "payload": {
+                    "x": 3
+                  },
+                  "policy_revision": "2",
+                  "reserved_output_bytes": 65536,
+                  "reserved_tool_milliseconds": 10000
+                },
+                "deadline": "2026-09-24T21:47:54.145406Z",
+                "name": "host.sha256",
+                "operation_id": "execute",
+                "resource": {
+                  "namespace": "test",
+                  "resource_id": "task-0fcef427dc35401b9b084bf732f792ed",
+                  "schema_version": "0.1"
+                },
+                "schema_version": "0.1",
+                "subject_id": "agent-b",
+                "task_id": "task-0fcef427dc35401b9b084bf732f792ed"
+              },
+              "request_digest": "6d4c45946be935f1063f45a780ae17289d9e26f3fb9f9397de339bdca2e37aca",
+              "result": {
+                "host": {
+                  "cpu_ns": "393144000",
+                  "exit_status": "0",
+                  "memory_peak": "5873664",
+                  "output": "eyJzaGEyNTYiOiAiNTRhZmQwZDU5MGU2YjI3N2Q5Y2QxY2U0NmU1NDgwZjY4MzY4MmU0M2I2YjQ4MGY3ZDI0OTA2ZDllOTM1ZTQ0YyIsICJieXRlcyI6IDd9Cg==",
+                  "result": "success",
+                  "state": "finished",
+                  "wall_ms": 771
+                },
+                "verified_output": {
+                  "bytes": 7,
+                  "sha256": "54afd0d590e6b277d9cd1ce46e5480f683682e43b6b480f7d24906d9e935e44c"
+                }
+              },
+              "retry_class": "reconciliation_required",
+              "revision": 2,
+              "schema_version": "0.1",
+              "state": "succeeded",
+              "updated_at": "2026-09-24T21:38:02.544393Z",
+              "usage": {
+                "model_calls": 0,
+                "model_tokens": 0,
+                "output_bytes": 91,
+                "schema_version": "0.1",
+                "steps": 1,
+                "tool_milliseconds": 771
+              }
+            },
+            {
+              "created_at": "2026-09-24T21:38:00.536583Z",
+              "failure": null,
+              "grant_ids": [
+                "grant-task-c5900cbe892243198ebcd1450d82ee94"
+              ],
+              "receipt_id": "receipt-45a7af4a32974e6f919ee7c139163f21",
+              "reconciliation_evidence": [],
+              "request": {
+                "arguments": {
+                  "host_profile": "debian-local-v1",
+                  "launcher_sha256": "6556969d50c19830bbf484cb7472d263b5590defb4b32d1df03db45a395d699b",
+                  "payload": {
+                    "x": 3
+                  },
+                  "policy_revision": "2",
+                  "reserved_output_bytes": 65536,
+                  "reserved_tool_milliseconds": 10000
+                },
+                "deadline": "2026-09-24T21:47:54.145406Z",
+                "name": "host.copy",
+                "operation_id": "execute",
+                "resource": {
+                  "namespace": "test",
+                  "resource_id": "task-c5900cbe892243198ebcd1450d82ee94",
+                  "schema_version": "0.1"
+                },
+                "schema_version": "0.1",
+                "subject_id": "agent-b",
+                "task_id": "task-c5900cbe892243198ebcd1450d82ee94"
+              },
+              "request_digest": "0a58fe1c66bc9849708cc0e766a0b93c0bd370a5109bc5736a2c8869e298284a",
+              "result": {
+                "host": {
+                  "cpu_ns": "370653000",
+                  "exit_status": "0",
+                  "memory_peak": "4878336",
+                  "output": "eyJjb250ZW50X2Jhc2U2NCI6ICJleUo0SWpvemZRPT0iLCAiYnl0ZXMiOiA3fQo=",
+                  "result": "success",
+                  "state": "finished",
+                  "wall_ms": 726
+                },
+                "verified_output": {
+                  "bytes": 7,
+                  "content_base64": "eyJ4IjozfQ=="
+                }
+              },
+              "retry_class": "reconciliation_required",
+              "revision": 2,
+              "schema_version": "0.1",
+              "state": "succeeded",
+              "updated_at": "2026-09-24T21:38:04.694371Z",
+              "usage": {
+                "model_calls": 0,
+                "model_tokens": 0,
+                "output_bytes": 47,
+                "schema_version": "0.1",
+                "steps": 1,
+                "tool_milliseconds": 726
+              }
+            }
+          ],
+          "task_id": "task-6d52bcf9bf3247b88bf7ea517eaded68"
+        }
+      ]
+    }
+  ],
+  "schema_version": "m4-load-1",
+  "source": {
+    "apps/api/src/cardea/__init__.py": "810709fbcdfd0c9f83acd1035d2b299bd045b2f15a915fac491562776eb91a50",
+    "apps/api/src/cardea/core/__init__.py": "450db0e5dfae7f62ae60bb5eea3cb8acf625f04c07f2de52486a8fbe3d207cd4",
+    "apps/api/src/cardea/core/actions/__init__.py": "26a22f8f3b0ff54e1a07649fac523347b371b9050e43ebb1e22242670366e874",
+    "apps/api/src/cardea/core/actions/gateway.py": "96e5e1d12831fc43a675f6d215411ff3f6301740f5247f9b42bf249eea68a2c9",
+    "apps/api/src/cardea/core/actions/models.py": "a0faf65bfad219bc7d7f4b0f18776ec26247ad82c63c3de2d36ac354b57bfdf2",
+    "apps/api/src/cardea/core/actions/service.py": "d1e6c1d16174b6796f0fb2b32bf7a6749b65429624a3326a5aba99477aa7f3c8",
+    "apps/api/src/cardea/core/api/__init__.py": "d93b5f927d5548a8ac36fcb08ff9ea4d61844066f86244c9564b8b01c01428b4",
+    "apps/api/src/cardea/core/api/router.py": "f78b0b942850a4ba6b058dd1f33cbcec0fa9dc9a2b2c28c0113a08251a48fff5",
+    "apps/api/src/cardea/core/api/routes/__init__.py": "7fcfe725a0b7bbf9b7fa9066a0d4dc8f5f9a830766b0513ed291ed76509eda11",
+    "apps/api/src/cardea/core/api/routes/command_center.py": "a037b856e3e33b5db965b186929f53974b528327eaa01b5d818daf0059d8791d",
+    "apps/api/src/cardea/core/api/routes/health.py": "3eabe8dec94b38bb7eaaa21f43d3dc607f4cfa4021cec0dee2b9e67628935c75",
+    "apps/api/src/cardea/core/audit/__init__.py": "c349f783bb35f60793e344fca542c3ccdbf575e6d3beed04fc029c0d56151aab",
+    "apps/api/src/cardea/core/audit/models.py": "c32b8b4cce1ef91988a011e8896c164bb55a26b115de104ef1ebb56157d67525",
+    "apps/api/src/cardea/core/audit/store.py": "e17661a745ae659436137d6b0c5da335e3f8113b80a9897da8a780e8b1e62e88",
+    "apps/api/src/cardea/core/domain/__init__.py": "2697adca018c6e8269d407dfa0040932d31198e971220f58422a5a9f28ae7906",
+    "apps/api/src/cardea/core/domain/models.py": "7d0ed4cd9ea862bfb735a0520196d39527efc46a51848bb845d49dae89c3fccb",
+    "apps/api/src/cardea/core/evaluators/__init__.py": "d99c75effc8d6a2638041e7211445065515513379b9bb531052889398ed264bf",
+    "apps/api/src/cardea/core/evaluators/customer_escalation.py": "4da0ea7b686a5c5be420c9ee0aab57fa997e54f07628ddfd46ef9a5b61abf104",
+    "apps/api/src/cardea/core/export_openapi.py": "5689aff3b6ada23d336df3a1aa9d589b7650d0c29cf157f3cf4c98def63db75b",
+    "apps/api/src/cardea/core/fixtures/__init__.py": "c83f109d1097edb009110d7d643439551ff04320fdb92a0030b96fbe1e3de67d",
+    "apps/api/src/cardea/core/fixtures/repository.py": "85a6084476ab651d3e75ada0106ebe87b8aaca9dacc1504b922b821c94974d00",
+    "apps/api/src/cardea/core/main.py": "dac1e48f8e9508a4198b55a58d3897d2dfd6c43d49b22b741026ee959e616ce7",
+    "apps/api/src/cardea/core/policy/__init__.py": "95c0031450b6c468411e1bc745afe9745af42e1127fa419c14de22cf0ab8b7b2",
+    "apps/api/src/cardea/core/policy/engine.py": "7b04d282d78771ec6630dac5913d160c0254616ce2a6ddb05b1c5214de8381c9",
+    "apps/api/src/cardea/core/policy/models.py": "e60665a059738fee3a63502a6cdbbbe9940c043abd46264e0f8813f710e4c82a",
+    "apps/api/src/cardea/core/services/__init__.py": "9a6500d224a010126f3c7dbbab7602e4e3b17c98ab5d03aeba23e0a26cf78412",
+    "apps/api/src/cardea/core/services/command_center.py": "ea571354da864b3b928d82a2eef22bbda4a6b896a2b139b442e4b1d0ece25dfd",
+    "apps/api/src/cardea/hosts/__init__.py": "60f6e9f0dfaf9bdfc85441c3935c851f3e515ab72d62a232980e8f502ba58267",
+    "apps/api/src/cardea/hosts/debian.py": "a25bf2bc926f3686605fcf680454bb27c31ede68ee1308d6b0c3df45543ba939",
+    "apps/api/src/cardea/hosts/launcher.py": "6556969d50c19830bbf484cb7472d263b5590defb4b32d1df03db45a395d699b",
+    "apps/api/src/cardea/kernel/__init__.py": "8650a4493ed6ec15e25aabbd79ef88dc7ce04abffe4bb91441219eafc1249ee8",
+    "apps/api/src/cardea/kernel/cli.py": "29434e6a6927db393d9a91e1db31931badaf39eec37c2aca32aed18194928ae3",
+    "apps/api/src/cardea/kernel/demo.py": "9178cfb3b95afc953921a6cd38efa945058d8c1d4fcfd51276f48853ac3f3da2",
+    "apps/api/src/cardea/kernel/lifecycle.py": "04e9c0352d55ae883020480c8e0c24df06276752eb1e4431411203f1897a1e36",
+    "apps/api/src/cardea/kernel/models.py": "24b5def7e41f4a1ee0454168fef0bfdbdca7615e95833cc5a6f52665514919d0",
+    "apps/api/src/cardea/kernel/schema.py": "da600890e00367b0a9dd9c8eec2085108485d9f4891d373e347371d1b5aa3ac0",
+    "apps/api/src/cardea/kernel/smoke.py": "f33915db3fe13b309163f00b975ec7b42b294763e00cb71b511b82a23f3fa9f1",
+    "apps/api/src/cardea/kernel/store.py": "190eb4283f55d9923f4ce9239a2902d0f1676b16208eba9d813db5272737b559",
+    "apps/api/src/cardea/runtime/__init__.py": "3d12e9cbad44c4b8266d564ecd5a18e06b5d54449fe6505e9dcf62c02ad50dab",
+    "apps/api/src/cardea/runtime/a2a.py": "4d388c9485bf5495f5f700977ca83d64a1b2d48ca6f102a33a7d73920e954bb7",
+    "apps/api/src/cardea/runtime/directory.py": "aa3b2271030726d42f2a5f4c49c4516c738f4102ead779de8bbba31fccb94a38",
+    "apps/api/src/cardea/runtime/incident-tool-schema.json": "301ed195fea9314fec5295955cf29aaafb9858cbbe62bede1b772646863bff06",
+    "apps/api/src/cardea/runtime/incident_tool.py": "0a44f92a712d97801c7b52ff0519297fbd49df11dfbc26b3f553ea1af9ca75b5",
+    "apps/api/src/cardea/runtime/incidents.py": "8605bd17bcadb27438d8ee902aa7d31d7a06c613c2c9f9c008ab42df3242c1fd",
+    "apps/api/src/cardea/runtime/mcp_tools.py": "348dc2a07903b2047582cfb6a7779a65449450712358b89b2352746b8f3c5233",
+    "apps/api/src/cardea/runtime/openrouter.py": "44df7099700d8d7fd956d239469315dd2a995b0d3ca13ad04c607721ca190986",
+    "apps/api/src/cardea/service/__init__.py": "e9396a51f1928658b7309dee03c657ad67685a54c5487cbe59eb25c97cdb639f",
+    "apps/api/src/cardea/service/__main__.py": "f4ac4bbba357c7fa41a89568b025102de737b24ea98cdd183ea7f82447bb609c",
+    "apps/api/src/cardea/service/admin.py": "478e9890c3fd00c2887959750624970bd757e8fa070c2919d370ac0cef0f6abb",
+    "apps/api/src/cardea/service/agent_budget.py": "9ffd79bd45bbc94a7a1671eae8f8c84fb706491b6a1234029e15302350ebdf5e",
+    "apps/api/src/cardea/service/agent_runtime.py": "23cef2c73c84495dd11db8021f675e0ad3537b2a48aafa71817a88da9ddcd992",
+    "apps/api/src/cardea/service/app.py": "a31777081b4507d12e0f0183b3391ecdb9cc18c95c90ea235b1347d67d8b4f3b",
+    "apps/api/src/cardea/service/auth.py": "eacee11ecab752dec0bae3c3ef45f7b31cbffb3a827312bbcf982ea4aa717985",
+    "apps/api/src/cardea/service/client.py": "2b7d973931eae3c85112657a2b471ff2ab47544c53246109ed54ce262e98a93d",
+    "apps/api/src/cardea/service/database.py": "2edf0819381ac3385d8fcf9d42dedcf7d0e3297fbaf647de535d7b6f3dff5b5a",
+    "apps/api/src/cardea/service/delegation.py": "cf18d9d55074b48fb557a98d53714cf501323ab8ab9a29954f999ca37ffc8170",
+    "apps/api/src/cardea/service/delegation_runtime.py": "20ecab42435839f1d34d6bb658d9f8fc0d8770cbb8f7fb152aac66ef39fbda63",
+    "apps/api/src/cardea/service/host_budget.py": "960621dbea5a22c132cabccd1f25f876e7c22af9c0c5b92302d594463e83de98",
+    "apps/api/src/cardea/service/host_operations.py": "0fae04bf016fb9496ccd2647e93a4b897db5ecc3afe54d86ebec49399b131eca",
+    "apps/api/src/cardea/service/host_runtime.py": "0d18d6f9490a4f6395fae952c59551a8d853a9a6a664a152ce926417e436457a",
+    "apps/api/src/cardea/service/kernel.py": "dce9bc85de7165635da6acd8865c1d8628fe721d00d5276c02e54db243307e28",
+    "apps/api/src/cardea/service/login.py": "40b73cd959a837c3b0456fff4c309725946123d74a259a1cb76d70c50377d4d2",
+    "apps/api/src/cardea/service/migrations/env.py": "25f8da3a4e72f3cdda622e4b42889c97cea1059f0d5ae6644f0972258d2b0032",
+    "apps/api/src/cardea/service/migrations/versions/m1_001.py": "87d42a1f9ca46cec4229a07db6878898dab25da0f4b1a44f7cb171c2789ad709",
+    "apps/api/src/cardea/service/migrations/versions/m2_001.py": "7a9a460050183d142915dd65c2857b593a2302b99ad564a0d3370eb9868d96b0",
+    "apps/api/src/cardea/service/migrations/versions/m3_001.py": "77c7daba695ac032120c0a68826497de356036cc3ad5c08cdd2d798adef06d7d",
+    "apps/api/src/cardea/service/migrations/versions/m4_001.py": "21201ec76777da9681c2ef23a0ff144f7df4303f64ef48779ac4b88d4bf10ca6",
+    "apps/api/src/cardea/service/models.py": "bd10be9b9d66d49f85f534bad22f25e9ca14af2905ea79bd1c0305a92c7b23c4",
+    "apps/api/src/cardea/service/policy.py": "924b63f55fb88033171bbf3ac92c12cf7d7c2f55c40839c358fcf11bceaa5cac",
+    "apps/api/src/cardea/service/runtime.py": "da948f5fa9dfd48eae2b0ae6d276f18aeb5df0e8a178a0efcdf8c4b61ceed3bf",
+    "apps/api/src/cardea/service/schema.py": "bb9bfbd859e62c7d896b05196a36f8ac913990e9fd75f55d5a22b2a5f71cda37",
+    "apps/api/src/cardea/service/server.py": "71cc7a2009aa1dc439f913023c1fbd8eed70262aa2d357785c0f54a7864ed6fe"
+  }
+}

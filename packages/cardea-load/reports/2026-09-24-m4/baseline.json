@@ -1,0 +1,84 @@
+{
+  "contract": {
+    "api_lock": "468bad84c989850bf910ad42921169f9d9408e11a4fb1959276e5de825485bcf",
+    "environment": {
+      "bwrap": "bubblewrap 0.12.0",
+      "cpus": 2,
+      "limits": {
+        "cpu.max": "root-unlimited",
+        "memory.max": "root-unlimited",
+        "pids.max": "root-unlimited"
+      },
+      "memory": "MemTotal:        1504444 kB",
+      "platform": "Linux-6.12.107+deb13-cloud-amd64-x86_64-with-glibc2.41",
+      "python": "3.13.5",
+      "systemd": "systemd 257 (257.13-1~deb13u1)"
+    },
+    "harness": {
+      "experiments/m1/daemon_probe.py": "73ea5ce7a30ee96a5d14cff7d2f5b2a3bc72f051a87bb10a9a74195e39da2938",
+      "experiments/m1/demo.py": "0e573d0f9eb31d74a1e0659c5bb6eb44508b3cd1f813ee2730002c0616d87ec7",
+      "experiments/m1/harness.py": "739609076f624485d97193f0e2d7eca1f1714a23eab785fd0faea1e871fcaae0",
+      "experiments/m1/oidc_lab.py": "b0a90abb4e8c100b69a6f2154c0fceb45e76ab650592517c87fed5c39c247719",
+      "experiments/m1/provider_lab.py": "d0454572739a07f379f960c982c166b3dbb75f2679175f723617b42122a19354",
+      "experiments/m1/tests/conftest.py": "8258c8e91fd109b09b44e6473e23ae953e566d9cc5860c74de96443f27ae4fff",
+      "experiments/m1/tests/test_oidc.py": "c632bc9518d487a754f046f6c6c2acaaf4e41c6b61f710f914468dddb74d046b",
+      "experiments/m1/tests/test_service.py": "5e97155b4fd7714e4d4eb32c9384b0f9656a8cda9bc543652f186f597927bd0e",
+      "experiments/m4/daemon_probe.py": "bf2c60bc05640891309691a32aa51208fd0e772bd1d0605f0bd2cba5fba9f2a0",
+      "experiments/m4/integration_vm.py": "49424bac878b87bbaeb2e6015b83d2394f9d1ac2ca4efcbba15f89a340c15e0e",
+      "experiments/m4/load_vm.py": "9a7831998e42236dd366af9891ec36b3fb535408bc4347daa3578da30ec878df",
+      "experiments/m4/test_integration.py": "c955a30e4e6c61d44832284b4fc363b7eee0aff044ed9a4c9cdcd2792d3d26d3",
+      "experiments/m4/test_sdk_fit.py": "dbf8bf65efa8d987a669d748426ed5dd541e80bda57ab1fc2f77b2dbd174985a",
+      "experiments/spire/binding.py": "1805e82d852b3f1ad5d625862cdde8b6757919fef393a3a7a0396d34eb7961e4",
+      "experiments/spire/lab.py": "d15f2335668bfc281049c6334d2a61a52b5f45aadad0485c170d43ff6c0fc873",
+      "experiments/spire/probe.py": "a9f2a1e661b417075376b391306ab5120d3dbe2525d484c7a24eb77b9b09144f",
+      "experiments/spire/tests/conftest.py": "24c715bf2664b126783d179802af44342072accfed207b431a6d122a81d29e37",
+      "experiments/spire/tests/test_fit.py": "8ee4a8eb8108ca4c49bb5d51b430a8cb4c149b0f33c2b5bd00a7fed201a979b5",
+      "packages/cardea-load/src/cardea_load/__init__.py": "45a2189c712b7919ac7d24163cef5c593f225455b03b558e26df0238704777dc",
+      "packages/cardea-load/src/cardea_load/agent.py": "6d9a043f27dfac6ecc3f3b4d474fb1bf0ce0a8a8275ddab4de8aebc8e2f70c6c",
+      "packages/cardea-load/src/cardea_load/agent_fixture.py": "0a33bf932816df9c70c62b92edb856caf2dabf64c83845fb0c82bd141723a231",
+      "packages/cardea-load/src/cardea_load/cli.py": "ea5c34635adfdd711b732602ae849c6b4fc5d7d2fe3a43eed62a577ffd71b8bb",
+      "packages/cardea-load/src/cardea_load/delegation.py": "172695e7a5a5aad9b48e23d70d25c04e86f3713378b87299ed18d62a03435e4f",
+      "packages/cardea-load/src/cardea_load/delegation_fixture.py": "683e2637b11e4de162bf3c2b1f7e1b19db55cfacfa026c96446b0af833c9b112",
+      "packages/cardea-load/src/cardea_load/engine.py": "82d39c6c7531fcc457f48e52e43e83909add0b3587cc3a71f8700ebca3249def",
+      "packages/cardea-load/src/cardea_load/fixture.py": "b4ef1ba0dcd059ec4e7fc0ea5fd165ba5bfeac1f2b55ae55e757b34566a860cf",
+      "packages/cardea-load/src/cardea_load/lab.py": "9705c2a0267d7df68d6695e1efb9e691cda361dc915c402f3cdb5565d4426378",
+      "packages/cardea-load/src/cardea_load/metrics.py": "d9252f7ad232542fae642fb5cc2fcdabcd8aa1857b2387b5c84190111c72fa35",
+      "packages/cardea-load/src/cardea_load/report.py": "9fd0386cb8b54dcc1d33725ebda142897e20d4ff7f495095987eba6cf6be739d",
+      "packages/cardea-load/src/cardea_load/runner.py": "071ba95515332795a63d3102a833834081b9b9162134d4ddbccd75fcc48dbb8d"
+    },
+    "load_lock": "9e4fe0bd1f0dfb1f0f6963d4c4419b4771c14308d34f6994831ad68a7d21d0f2",
+    "profile": {
+      "arrival": "closed-loop",
+      "authentication": "spiffe-jwt-svid",
+      "child_concurrency": 2,
+      "children": 2,
+      "concurrency": 2,
+      "model_calls": 0,
+      "name": "m4-delegation-v1",
+      "parent_output_bytes": 163840,
+      "parent_tool_milliseconds": 20000,
+      "protocol": "a2a-1.0-jsonrpc-private-unix-http",
+      "tasks": 4,
+      "worker": "debian-systemd-bubblewrap-hash-copy"
+    }
+  },
+  "metrics": {
+    "admission_p95_ms": {
+      "max": 3051.183412849673,
+      "median": 1894.1144477998819,
+      "min": 737.0454827500907
+    },
+    "completion_p95_ms": {
+      "max": 29557.892170350053,
+      "median": 28816.4045687751,
+      "min": 28074.916967200148
+    },
+    "completion_rps": {
+      "max": 0.06977486848976536,
+      "median": 0.06974813951669054,
+      "min": 0.0697214105436157
+    }
+  },
+  "reference_sha256": "bdea4369a25db3d67b42c8c04891245d4ca4502765aa5d61c396c3a11103f283",
+  "schema_version": "m4-load-1"
+}

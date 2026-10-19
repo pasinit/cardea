@@ -1,0 +1,119 @@
+{
+  "baseline_sha256": "dec2fca961b04655efa4944469186a2310a896fe082cdb40a333888d310eccaf",
+  "candidate_sha256": "09aba44002654319c5a293e381c4d7dc0da9bd15e16d7cfb2d179568fd7c284c",
+  "changes": [
+    {
+      "completion_rps": {
+        "candidate": 0.9882412443438107,
+        "ratio": 0.9996904087241705,
+        "reference": {
+          "max": 0.9889492845365879,
+          "median": 0.9885472899605273,
+          "min": 0.9871525180190166
+        }
+      },
+      "p95_ms": {
+        "candidate": 43.670729,
+        "ratio": 0.6295235292780423,
+        "reference": {
+          "max": 70.327542,
+          "median": 69.371083,
+          "min": 45.650729
+        }
+      },
+      "passed": true,
+      "rate": 1
+    },
+    {
+      "completion_rps": {
+        "candidate": 4.935843380834181,
+        "ratio": 0.9985840915786185,
+        "reference": {
+          "max": 4.947214599017548,
+          "median": 4.942841992436831,
+          "min": 4.938173865430924
+        }
+      },
+      "p95_ms": {
+        "candidate": 26.026312,
+        "ratio": 1.040606767309426,
+        "reference": {
+          "max": 26.195042,
+          "median": 25.010708,
+          "min": 24.52325
+        }
+      },
+      "passed": true,
+      "rate": 5
+    },
+    {
+      "completion_rps": {
+        "candidate": 9.897868672357907,
+        "ratio": 1.0024878746229928,
+        "reference": {
+          "max": 9.88124191851751,
+          "median": 9.873305127087162,
+          "min": 9.871545441412378
+        }
+      },
+      "p95_ms": {
+        "candidate": 15.705291,
+        "ratio": 1.0033179470674465,
+        "reference": {
+          "max": 16.580083,
+          "median": 15.653354,
+          "min": 15.130312
+        }
+      },
+      "passed": true,
+      "rate": 10
+    },
+    {
+      "completion_rps": {
+        "candidate": 24.665599718193903,
+        "ratio": 1.0241979009262447,
+        "reference": {
+          "max": 24.647009421592095,
+          "median": 24.08284541091843,
+          "min": 23.936930342853152
+        }
+      },
+      "p95_ms": {
+        "candidate": 129.972821,
+        "ratio": 0.9718671103873658,
+        "reference": {
+          "max": 163.502162,
+          "median": 133.735178,
+          "min": 121.202203
+        }
+      },
+      "passed": true,
+      "rate": 25
+    },
+    {
+      "completion_rps": {
+        "candidate": 21.383608061682352,
+        "ratio": 1.0269012921523075,
+        "reference": {
+          "max": 20.885678490420066,
+          "median": 20.823430864386122,
+          "min": 20.70914038456304
+        }
+      },
+      "p95_ms": {
+        "candidate": 205.6964,
+        "ratio": 0.9010753082992009,
+        "reference": {
+          "max": 275.777773,
+          "median": 228.278811,
+          "min": 200.844085
+        }
+      },
+      "passed": true,
+      "rate": 50
+    }
+  ],
+  "correctness_passed": true,
+  "schema_version": "1",
+  "warnings": []
+}

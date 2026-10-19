@@ -1,0 +1,128 @@
+{
+  "checked": "2026-09-24",
+  "scope": "Exact-release PyPI metadata and installed license files; not a complete security audit",
+  "dependencies": [
+    {
+      "name": "a2a-sdk",
+      "version": "1.1.5",
+      "license": "Apache-2.0",
+      "source": "https://pypi.org/pypi/a2a-sdk/1.1.5/json",
+      "uploaded": "2026-09-21T09:52:24.741295Z",
+      "pypi_advisories": []
+    },
+    {
+      "name": "aiosqlite",
+      "version": "0.22.1",
+      "license": [
+        "License :: OSI Approved :: MIT License"
+      ],
+      "source": "https://pypi.org/pypi/aiosqlite/0.22.1/json",
+      "uploaded": "2025-12-23T19:25:42.139290Z",
+      "pypi_advisories": []
+    },
+    {
+      "name": "culsans",
+      "version": "0.11.0",
+      "license": [
+        "License :: OSI Approved :: ISC License (ISCL)"
+      ],
+      "source": "https://pypi.org/pypi/culsans/0.11.0/json",
+      "uploaded": "2025-12-31T23:15:37.189898Z",
+      "pypi_advisories": []
+    },
+    {
+      "name": "aiologic",
+      "version": "0.17.1",
+      "license": [
+        "License :: OSI Approved :: ISC License (ISCL)"
+      ],
+      "source": "https://pypi.org/pypi/aiologic/0.17.1/json",
+      "uploaded": "2026-06-27T20:41:31.877730Z",
+      "pypi_advisories": []
+    },
+    {
+      "name": "google-api-core",
+      "version": "2.38.0",
+      "license": [
+        "License :: OSI Approved :: Apache Software License"
+      ],
+      "source": "https://pypi.org/pypi/google-api-core/2.38.0/json",
+      "uploaded": "2026-09-17T20:29:32.813412Z",
+      "pypi_advisories": []
+    },
+    {
+      "name": "google-auth",
+      "version": "2.58.0",
+      "license": [
+        "License :: OSI Approved :: Apache Software License"
+      ],
+      "source": "https://pypi.org/pypi/google-auth/2.58.0/json",
+      "uploaded": "2026-09-09T20:49:33.951058Z",
+      "pypi_advisories": []
+    },
+    {
+      "name": "googleapis-common-protos",
+      "version": "1.75.3",
+      "license": "Apache-2.0",
+      "source": "https://pypi.org/pypi/googleapis-common-protos/1.75.3/json",
+      "uploaded": "2026-09-03T22:30:45.133145Z",
+      "pypi_advisories": []
+    },
+    {
+      "name": "json-rpc",
+      "version": "1.15.0",
+      "license": [
+        "License :: OSI Approved :: MIT License"
+      ],
+      "source": "https://pypi.org/pypi/json-rpc/1.15.0/json",
+      "uploaded": "2023-06-11T09:45:47.136649Z",
+      "pypi_advisories": []
+    },
+    {
+      "name": "proto-plus",
+      "version": "1.28.4",
+      "license": [
+        "License :: OSI Approved :: Apache Software License"
+      ],
+      "source": "https://pypi.org/pypi/proto-plus/1.28.4/json",
+      "uploaded": "2026-08-25T19:18:12.338728Z",
+      "pypi_advisories": []
+    },
+    {
+      "name": "requests",
+      "version": "2.34.2",
+      "license": [
+        "License :: OSI Approved :: Apache Software License"
+      ],
+      "source": "https://pypi.org/pypi/requests/2.34.2/json",
+      "uploaded": "2026-05-14T19:25:26.443000Z",
+      "pypi_advisories": []
+    },
+    {
+      "name": "urllib3",
+      "version": "2.8.0",
+      "license": "MIT",
+      "source": "https://pypi.org/pypi/urllib3/2.8.0/json",
+      "uploaded": "2026-09-15T19:29:34.577402Z",
+      "pypi_advisories": []
+    },
+    {
+      "name": "charset-normalizer",
+      "version": "3.5.1",
+      "license": "MIT",
+      "source": "https://pypi.org/pypi/charset-normalizer/3.5.1/json",
+      "uploaded": "2026-08-15T08:16:22.964547Z",
+      "pypi_advisories": [],
+      "license_source": "https://github.com/jawah/charset_normalizer/blob/3.5.1/LICENSE",
+      "installed_license_verified": true
+    },
+    {
+      "name": "wrapt",
+      "version": "2.4.1",
+      "license": "BSD-2-Clause",
+      "source": "https://pypi.org/pypi/wrapt/2.4.1/json",
+      "uploaded": "2026-09-10T23:09:36.872446Z",
+      "pypi_advisories": []
+    }
+  ]
+}

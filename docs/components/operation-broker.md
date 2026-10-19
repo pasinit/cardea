@@ -1,0 +1,13 @@
+# Operation Broker
+
+**Reuse decision.** [ADR-001](../decisions/001-m0-contracts.md) preserves v0.1 receipt hashes and selects RFC 8785 only for an explicit future schema/digest version; frozen receipt and JCS vector tests pass. Compose the selected R02 transport, R06 policy, and R07 execution components rather than duplicating them. See [R03](../standards-review-2026-09-22.md#r03--request-digests--m0m1).
+
+**Purpose.** Make every operation discoverable, authorized, bounded, and traceable through one dispatch path.
+
+**Design.** A fixed installed registry declares schemas, required scopes, effects, execution profile, limits, retry class, and verification evidence. Discovery filters entries by authority. Invocation validates the request against the task’s live supervisor/ancestor authority ceiling, reserves budget, and persists intent before dispatch; completion records a receipt and usage. Local operations call trusted handlers; worker operations use the host adapter.
+
+**Boundary and recovery.** Bind stable operation IDs to the full normalized request digest. An identical retry returns its receipt after current access checks; changed arguments conflict. Effects without committed results remain `outcome_unknown` until observable reconciliation. SQLite cannot make external effects exactly-once.
+
+**Acceptance.** Duplicate requests do not repeat committed work; altered retries fail; a crash after an effect never triggers blind replay.
+
+**Status.** Request/receipt models, retry checks, and persistence exist. M1 dispatches a fixed JSON publication operation with live authority, receipt identity and transactional effects. [ADR-013](../decisions/013-installed-host-operations.md) adds the fixed `host.sha256` entry, confined host dispatch, full-cap reservation, verified publication and conservative crash fencing. [ADR-014](../decisions/014-object-scoped-host-inputs.md) adds exact-version stored input with live source read/delegation ceilings. [ADR-015](../decisions/015-m2-accounting-retention-and-acceptance.md) adds `host.copy`, installed descriptors, transactional supervisor allocations, measured settlement and recoverable cleanup. The fixed registry accepts scoped immutable inputs and task-owned outputs. Arbitrary paths/plugins are outside the MVP; ADR-016 adds model/tool intents and accounting for the bounded M3 incident profile; ADR-017 adds bounded child allocations and native A2A task views over the same execution records. [ADR-023](../decisions/023-installed-operation-registry.md) adds an installed operation registry: host-owner descriptors (MCP `Tool` plus Cardea binding) with in-process handlers from installed entry points, a generic operation task, live-registry grant checks and output-schema verification.

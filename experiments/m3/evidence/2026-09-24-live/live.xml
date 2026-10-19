@@ -1,0 +1,1 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="0" skipped="0" tests="1" time="109.411" timestamp="2026-09-24T18:55:58.053491+00:00" hostname="cardea-m2-fit"><testcase classname="test_integration" name="test_restart_and_input_during_downtime" time="91.449" /></testsuite></testsuites>

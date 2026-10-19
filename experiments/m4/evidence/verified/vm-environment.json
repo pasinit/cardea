@@ -1,0 +1,32 @@
+{
+  "image_url": "https://cloud.debian.org/images/cloud/trixie/20260914-2601/debian-13-genericcloud-amd64-20260914-2601.qcow2",
+  "image_sha512": "95e110dfcdbd0ed8a82a75ed9579802f9950cabf51a810dcc6388e81bc778188713878b9f28d583a0ea602fbf48b35996ae9ad37f584166d8fbd6489df248f53",
+  "container_id": "e7446d8b30545e0afb4a56f5193b555a0a1a0ef59f735773c3ef4ffe8934b9e6",
+  "qemu_args": [
+    "-machine",
+    "q35,accel=tcg",
+    "-cpu",
+    "max",
+    "-smp",
+    "2",
+    "-m",
+    "1536",
+    "-display",
+    "none",
+    "-serial",
+    "file:/vm/m4-serial.log",
+    "-monitor",
+    "none",
+    "-drive",
+    "file=/vm/guest.qcow2,if=virtio,format=qcow2",
+    "-drive",
+    "file=/vm/seed.iso,media=cdrom,readonly=on",
+    "-nic",
+    "user,model=virtio-net-pci,hostfwd=tcp::2222-:22"
+  ],
+  "docker_limits": {
+    "NanoCpus": 2000000000,
+    "Memory": 3221225472,
+    "PidsLimit": 128
+  }
+}

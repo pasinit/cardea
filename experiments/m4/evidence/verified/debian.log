@@ -1,0 +1,16 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.5, pytest-9.0.3, pluggy-1.6.0 -- /opt/cardea-venv/bin/python
+rootdir: /opt/cardea-src/experiments/m4
+plugins: anyio-4.13.0
+collecting ... collected 7 items
+
+../../opt/cardea-src/experiments/m4/test_integration.py::test_native_success PASSED [ 14%]
+../../opt/cardea-src/experiments/m4/test_integration.py::test_restart_reconciles_same_children[delegation.child_admitted] PASSED [ 28%]
+../../opt/cardea-src/experiments/m4/test_integration.py::test_restart_reconciles_same_children[delegation.before_verify] PASSED [ 42%]
+../../opt/cardea-src/experiments/m4/test_integration.py::test_revocation_before_peer_admission PASSED [ 57%]
+../../opt/cardea-src/experiments/m4/test_integration.py::test_parent_cancel_stops_workers PASSED [ 71%]
+../../opt/cardea-src/experiments/m4/test_integration.py::test_shared_budget_denies_extra_child PASSED [ 85%]
+../../opt/cardea-src/experiments/m4/test_integration.py::test_failed_child_does_not_create_false_success PASSED [100%]
+
+---------------- generated xml file: /home/cardea-kernel/m4.xml ----------------
+======================== 7 passed in 273.30s (0:04:33) =========================

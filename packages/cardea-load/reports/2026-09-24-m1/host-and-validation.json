@@ -1,0 +1,38 @@
+{
+  "host_os": "macOS-26.6.2-arm64-arm-64bit",
+  "host_architecture": "arm64",
+  "docker_vm_cpus": 10,
+  "docker_vm_memory_bytes": 8217059328,
+  "docker_kernel": "6.12.76-linuxkit",
+  "emulation": "linux/amd64 on macOS arm64",
+  "other_containers_active": 3,
+  "cpu_quota": 2,
+  "memory_limit_bytes": 2147483648,
+  "pid_limit": 512,
+  "base_image_id": "sha256:6ddda4af264cd49ceab6c308254e8d4979e623d58d0a3d82db72f299d9001e88",
+  "vegeta_archive_sha256": {
+    "darwin_arm64": "fc408e242c4f4839e6fe536dbf1130bb02f430134827f6d831bf367a0929a799",
+    "linux_amd64": "e8759ce45c14e18374bdccd3ba6068197bc3a9f9b7e484db3837f701b9d12e61"
+  },
+  "m1_original_sources_unchanged": true,
+  "m1_original_sources_checked": 40,
+  "validation": {
+    "package_pytest": 13,
+    "backend_pytest": 144,
+    "frontend_vitest": 4,
+    "root_lint": "passed",
+    "root_typecheck": "passed",
+    "package_lint": "passed",
+    "package_typecheck": "passed",
+    "wheel_build_install_help_resources": "passed"
+  },
+  "notes": [
+    "Container CPU quota is not exclusive cores. Other host workloads were not stopped.",
+    "Smoke runs use a distinct profile and are excluded from baseline.",
+    "No production or M1 acceptance fixture code was changed.",
+    "While stress ran, baseline/comparison input validation was strengthened to reject empty or extra points. The stress measurement engine and oracle did not change. Both performance campaigns use the same final image.",
+    "A package-image build overlapped part of the soak. Reference and comparison run after the build, sequentially."
+  ],
+  "stress_image_id": "sha256:5de81fe0742897e32059156bebedddaf5d5dbdfa8247e72065a44e3c1dd3e99e",
+  "reference_comparison_image_id": "sha256:8ac0cb9e82fdfab50f05775734b4e2b8f8938a7980cbfb29a26f76957b9d44cb"
+}

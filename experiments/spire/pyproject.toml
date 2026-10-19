@@ -1,0 +1,17 @@
+[project]
+name = "cardea-spire-fit"
+version = "0.1.0"
+description = "Disposable SPIRE bootstrap and Workload API fit experiment"
+requires-python = ">=3.12"
+dependencies = ["spiffe==0.3.1", "pytest==9.0.3"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+junit_family = "legacy"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

@@ -1,0 +1,8 @@
+{
+  "temporary_local_key_removed": true,
+  "temporary_guest_key_removed": true,
+  "earlier_pytest_copies_removed": 2,
+  "fixture_smoke": "PASS: runner-owned key referenced directly; no pytest credential copy; original file unchanged",
+  "owned_test_vm_stopped": true,
+  "project_env_preserved": true
+}

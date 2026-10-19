@@ -1,0 +1,174 @@
+{
+  "captured_at": "2026-09-22T08:51:41.146576+00:00",
+  "scope": "R01-R03 local library and transport fit; no deployed authentication",
+  "environment": {
+    "os": "Darwin",
+    "release": "25.6.0",
+    "machine": "arm64",
+    "python": "3.12.0"
+  },
+  "packages": [
+    {
+      "name": "fastapi",
+      "version": "0.136.3",
+      "license": "MIT",
+      "source": "https://pypi.org/pypi/fastapi/0.136.3/json",
+      "release_uploaded_at": "2026-05-23T18:53:15.192460Z",
+      "pypi_advisories": []
+    },
+    {
+      "name": "pydantic",
+      "version": "2.13.4",
+      "license": "MIT",
+      "source": "https://pypi.org/pypi/pydantic/2.13.4/json",
+      "release_uploaded_at": "2026-05-06T13:43:02.641507Z",
+      "pypi_advisories": []
+    },
+    {
+      "name": "uvicorn",
+      "version": "0.49.0",
+      "license": "BSD-3-Clause",
+      "source": "https://pypi.org/pypi/uvicorn/0.49.0/json",
+      "release_uploaded_at": "2026-06-03T22:01:29.037537Z",
+      "pypi_advisories": []
+    },
+    {
+      "name": "httpx",
+      "version": "0.28.1",
+      "license": "BSD-3-Clause",
+      "source": "https://pypi.org/pypi/httpx/0.28.1/json",
+      "release_uploaded_at": "2024-12-06T15:37:21.509172Z",
+      "pypi_advisories": []
+    },
+    {
+      "name": "spiffe",
+      "version": "0.3.1",
+      "license": "Apache-2.0",
+      "source": "https://pypi.org/pypi/spiffe/0.3.1/json",
+      "release_uploaded_at": "2026-08-08T19:02:30.059636Z",
+      "pypi_advisories": []
+    },
+    {
+      "name": "Authlib",
+      "version": "1.8.0",
+      "license": "BSD-3-Clause",
+      "source": "https://pypi.org/pypi/Authlib/1.8.0/json",
+      "release_uploaded_at": "2026-08-30T12:12:33.162089Z",
+      "pypi_advisories": []
+    },
+    {
+      "name": "PyJWT",
+      "version": "2.13.0",
+      "license": "MIT",
+      "source": "https://pypi.org/pypi/PyJWT/2.13.0/json",
+      "release_uploaded_at": "2026-05-21T19:54:35.362086Z",
+      "pypi_advisories": []
+    },
+    {
+      "name": "cryptography",
+      "version": "50.0.1",
+      "license": "Apache-2.0 OR BSD-3-Clause",
+      "source": "https://pypi.org/pypi/cryptography/50.0.1/json",
+      "release_uploaded_at": "2026-08-25T19:44:03.155112Z",
+      "pypi_advisories": []
+    },
+    {
+      "name": "joserfc",
+      "version": "1.7.5",
+      "license": "BSD-3-Clause",
+      "source": "https://pypi.org/pypi/joserfc/1.7.5/json",
+      "release_uploaded_at": "2026-08-29T13:05:40.718242Z",
+      "pypi_advisories": []
+    },
+    {
+      "name": "grpcio",
+      "version": "1.84.0",
+      "license": "Apache-2.0",
+      "source": "https://pypi.org/pypi/grpcio/1.84.0/json",
+      "release_uploaded_at": "2026-09-14T06:56:48.720332Z",
+      "pypi_advisories": []
+    },
+    {
+      "name": "protobuf",
+      "version": "7.36.2",
+      "license": "3-Clause BSD License",
+      "source": "https://pypi.org/pypi/protobuf/7.36.2/json",
+      "release_uploaded_at": "2026-09-17T20:07:51.542208Z",
+      "pypi_advisories": []
+    },
+    {
+      "name": "rfc8785",
+      "version": "0.1.4",
+      "license": null,
+      "source": "https://pypi.org/pypi/rfc8785/0.1.4/json",
+      "release_uploaded_at": "2024-09-27T16:33:29.683421Z",
+      "pypi_advisories": []
+    },
+    {
+      "name": "types-Authlib",
+      "version": "1.8.0.20260911",
+      "license": "Apache-2.0",
+      "source": "https://pypi.org/pypi/types-Authlib/1.8.0.20260911/json",
+      "release_uploaded_at": "2026-09-11T06:45:25.033975Z",
+      "pypi_advisories": []
+    }
+  ],
+  "repositories": [
+    {
+      "repository": "HewlettPackard/py-spiffe",
+      "archived": false,
+      "pushed_at": "2026-09-14T19:35:01Z",
+      "license": "Apache-2.0",
+      "default_branch": "main"
+    },
+    {
+      "repository": "authlib/authlib",
+      "archived": false,
+      "pushed_at": "2026-08-31T08:08:29Z",
+      "license": "BSD-3-Clause",
+      "default_branch": "main"
+    },
+    {
+      "repository": "trailofbits/rfc8785.py",
+      "archived": false,
+      "pushed_at": "2026-09-16T11:04:51Z",
+      "license": "Apache-2.0",
+      "default_branch": "main"
+    },
+    {
+      "repository": "fastapi/fastapi",
+      "archived": false,
+      "pushed_at": "2026-09-18T21:24:37Z",
+      "license": "MIT",
+      "default_branch": "master"
+    }
+  ],
+  "security_scope": "Public PyPI advisory snapshot only, not a complete vulnerability audit.",
+  "unrun": [
+    "SPIRE deployment and workload attestation",
+    "OIDC login and provider lifecycle",
+    "Supervisor ceiling and grant enforcement",
+    "Debian host enforcement"
+  ],
+  "test_sources_sha256": {
+    "apps/api/tests/kernel/fixtures/v01_receipt.json": "a44faa041c13fe30ca2b5f7c8ae5e4e14594e23a7c82b16a055d72ffb4f448f9",
+    "apps/api/tests/kernel/test_digest_compatibility.py": "3d0a6d01372c43d7c3f08cbefe32de826b45907b13ba8f0498d7427305d59cc3",
+    "apps/api/tests/standards/__init__.py": "022a358652ff408ef08a8409180002477e9596fdbffa4f6887726a797f399b12",
+    "apps/api/tests/standards/socket_app.py": "51ed24186be1b71433bf52d5cef343c79eca1060abb055f7edf21c1f5e4e3294",
+    "apps/api/tests/standards/test_identity_fit.py": "ef3f701f7bf3b846c29ff7c7b76b9344fe40a520cb85f1a4ceaaedc261ef9ae3",
+    "apps/api/tests/standards/test_transport_fit.py": "ad2d05fc0caebc3ced80bbc068b91fd1e9f8a7fd09f96e5acbb31b5b3a7c6a2e"
+  },
+  "verification": {
+    "make test": {
+      "backend_passed": 138,
+      "frontend_passed": 4,
+      "warnings": [
+        "Existing FastAPI/Starlette httpx TestClient deprecation"
+      ]
+    },
+    "make lint": "passed",
+    "make typecheck": "passed; mypy 50 files and TypeScript",
+    "make kernel-demo": "passed; two-process checkpoint resume with verified stored artifact",
+    "standards_fit_cases": 27
+  }
+}

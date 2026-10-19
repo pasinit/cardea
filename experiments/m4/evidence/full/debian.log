@@ -1,0 +1,38 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.5, pytest-9.0.3, pluggy-1.6.0 -- /opt/cardea-venv/bin/python
+rootdir: /opt/cardea-src/experiments/m4
+plugins: anyio-4.13.0
+collecting ... collected 6 items
+
+../../opt/cardea-src/experiments/m4/test_integration.py::test_native_success PASSED [ 16%]
+../../opt/cardea-src/experiments/m4/test_integration.py::test_restart_reconciles_same_children[delegation.child_admitted] FAILED [ 33%]
+
+=================================== FAILURES ===================================
+_______ test_restart_reconciles_same_children[delegation.child_admitted] _______
+
+service = <harness.ServiceLab object at 0x7f443bf99810>
+stage = 'delegation.child_admitted'
+
+    @pytest.mark.parametrize(
+        "stage", ["delegation.child_admitted", "delegation.before_verify"]
+    )
+    def test_restart_reconciles_same_children(service, stage):
+        process = service.start(stage)
+        parent = submit(service)
+        entered(service, process, stage)
+        service.stop(process)
+        service.start()
+        service.wait_state(parent, "succeeded", timeout=150)
+        data = evidence(service, parent, stage)
+        assert len(data["children"]) == 2
+        assert len(data["receipts"]) == 2
+>       assert len({r["task_id"] for r in data["receipts"]}) == 2
+                    ^^^^^^^^^^^^
+E       KeyError: 'task_id'
+
+/opt/cardea-src/experiments/m4/test_integration.py:175: KeyError
+---------------- generated xml file: /home/cardea-kernel/m4.xml ----------------
+=========================== short test summary info ============================
+FAILED ../../opt/cardea-src/experiments/m4/test_integration.py::test_restart_reconciles_same_children[delegation.child_admitted]
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+=================== 1 failed, 1 passed in 110.86s (0:01:50) ====================

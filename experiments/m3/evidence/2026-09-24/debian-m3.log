@@ -1,0 +1,15 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.5, pytest-9.0.3, pluggy-1.6.0 -- /opt/cardea-venv/bin/python
+rootdir: /opt/cardea-src/experiments/m3
+plugins: anyio-4.13.0
+collecting ... collected 6 items
+
+../../opt/cardea-src/experiments/m3/test_integration.py::test_restart_and_input_during_downtime PASSED [ 16%]
+../../opt/cardea-src/experiments/m3/test_integration.py::test_committed_checkpoint_no_duplicate_calls[agent.model.settle_committed] PASSED [ 33%]
+../../opt/cardea-src/experiments/m3/test_integration.py::test_committed_checkpoint_no_duplicate_calls[agent.publish_committed] PASSED [ 50%]
+../../opt/cardea-src/experiments/m3/test_integration.py::test_uncertain_effect_is_not_replayed[agent.model.intent_committed] PASSED [ 66%]
+../../opt/cardea-src/experiments/m3/test_integration.py::test_uncertain_effect_is_not_replayed[agent.tool.started] PASSED [ 83%]
+../../opt/cardea-src/experiments/m3/test_integration.py::test_disclosure_revoked_before_dispatch PASSED [100%]
+
+------------ generated xml file: /home/cardea-kernel/m3-fixture.xml ------------
+======================== 6 passed in 525.46s (0:08:45) =========================

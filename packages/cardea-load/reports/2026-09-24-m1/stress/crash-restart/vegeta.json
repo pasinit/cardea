@@ -1,0 +1,36 @@
+{
+  "bytes_in": {
+    "mean": 1015.88,
+    "total": 253970
+  },
+  "bytes_out": {
+    "mean": 1103.64,
+    "total": 275910
+  },
+  "duration": 24900194511,
+  "earliest": "2026-09-24T00:03:53.760884632Z",
+  "end": "2026-09-24T00:04:18.671577143Z",
+  "errors": [
+    "Post \"http://localhost/v0.2/tasks\": dial unix /tmp/cm1-u8lx_akm/store/kernel.sock: connect: connection refused"
+  ],
+  "latencies": {
+    "50th": 12741872,
+    "90th": 15023135,
+    "95th": 32598125,
+    "99th": 187941292,
+    "max": 500411667,
+    "mean": 17219572,
+    "min": 127917,
+    "total": 4304893242
+  },
+  "latest": "2026-09-24T00:04:18.661079143Z",
+  "rate": 10.040082212593124,
+  "requests": 250,
+  "status_codes": {
+    "0": 32,
+    "202": 218
+  },
+  "success": 0.872,
+  "throughput": 8.75126212985593,
+  "wait": 10498000
+}

@@ -1,0 +1,31 @@
+[Unit]
+Description=Cardea authenticated local kernel
+After=network.target
+ConditionPathExists=/etc/cardea/config.json
+ConditionPathExists=/var/lib/cardea/kernel.sqlite3
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=exec
+User=cardea-kernel
+Group=cardea-kernel
+StateDirectory=cardea
+StateDirectoryMode=0700
+UMask=0077
+ExecStart=/usr/bin/cardea serve --config /etc/cardea/config.json
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+KillMode=control-group
+LimitCORE=0
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/cardea /var/lib/cardea-host
+# The broker invokes one argument-free root helper via sudo. Its worker units,
+# not this broker, enforce NoNewPrivileges and empty capability sets.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

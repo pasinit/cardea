@@ -1,0 +1,1518 @@
+{
+  "captured_at": "2026-09-22T19:57:40.232924+00:00",
+  "scope": "R05 documentation and release/license screening only; no engine executed",
+  "repositories": [
+    {
+      "repository": "agronholm/apscheduler",
+      "source": "https://api.github.com/repos/agronholm/apscheduler",
+      "created_at": "2016-03-27T12:51:50Z",
+      "pushed_at": "2026-09-20T19:07:24Z",
+      "archived": false,
+      "default_branch": "master",
+      "license_metadata": {
+        "key": "mit",
+        "name": "MIT License",
+        "spdx_id": "MIT",
+        "url": "https://api.github.com/licenses/mit",
+        "node_id": "MDc6TGljZW5zZTEz"
+      },
+      "description": "Task scheduling library for Python",
+      "releases_source": "https://api.github.com/repos/agronholm/apscheduler/releases?per_page=5",
+      "recent_releases": [
+        {
+          "tag_name": "3.11.3",
+          "published_at": "2026-06-28T19:39:26Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/agronholm/apscheduler/releases/tag/3.11.3",
+          "target_commitish": "master"
+        },
+        {
+          "tag_name": "3.11.2",
+          "published_at": "2025-12-22T00:39:37Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/agronholm/apscheduler/releases/tag/3.11.2",
+          "target_commitish": "master"
+        },
+        {
+          "tag_name": "3.11.1",
+          "published_at": "2025-10-31T18:55:58Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/agronholm/apscheduler/releases/tag/3.11.1",
+          "target_commitish": "master"
+        },
+        {
+          "tag_name": "4.0.0a6",
+          "published_at": "2025-04-27T08:36:21Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/agronholm/apscheduler/releases/tag/4.0.0a6",
+          "target_commitish": "master"
+        },
+        {
+          "tag_name": "3.11.0",
+          "published_at": "2024-11-24T19:42:04Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/agronholm/apscheduler/releases/tag/3.11.0",
+          "target_commitish": "master"
+        }
+      ],
+      "source_files": [
+        {
+          "path": "LICENSE.txt",
+          "url": "https://raw.githubusercontent.com/agronholm/apscheduler/master/LICENSE.txt",
+          "sha256": "35ed0eb40a2f7c262156ccab94b731a697808fcdc1c69f9491c991af204c2eb6"
+        }
+      ],
+      "designated_latest_release_source": "https://api.github.com/repos/agronholm/apscheduler/releases/latest",
+      "designated_latest_release": {
+        "tag_name": "3.11.3",
+        "published_at": "2026-06-28T19:39:26Z",
+        "prerelease": false,
+        "html_url": "https://github.com/agronholm/apscheduler/releases/tag/3.11.3",
+        "target_commitish": "master"
+      },
+      "release_license_sources": [
+        {
+          "url": "https://raw.githubusercontent.com/agronholm/apscheduler/3.11.3/LICENSE.txt",
+          "sha256": "6163f7987dfb38d6bc320ce2b70b2f02b862bc41126516d552ef1cd43247e758",
+          "path": "LICENSE.txt"
+        }
+      ],
+      "screening_disposition": "scheduling-component-only",
+      "inspected_license_summary": "MIT",
+      "cardea_runtime_fit": "not run"
+    },
+    {
+      "repository": "brian14708/duron",
+      "source": "https://api.github.com/repos/brian14708/duron",
+      "created_at": "2025-09-21T11:46:06Z",
+      "pushed_at": "2026-09-21T20:12:26Z",
+      "archived": false,
+      "default_branch": "main",
+      "license_metadata": {
+        "key": "apache-2.0",
+        "name": "Apache License 2.0",
+        "spdx_id": "Apache-2.0",
+        "url": "https://api.github.com/licenses/apache-2.0",
+        "node_id": "MDc6TGljZW5zZTI="
+      },
+      "description": "\ud83c\udf00 Durable async runtime for Python",
+      "releases_source": "https://api.github.com/repos/brian14708/duron/releases?per_page=5",
+      "recent_releases": [
+        {
+          "tag_name": "v0.0.3",
+          "published_at": "2025-11-02T12:59:39Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/brian14708/duron/releases/tag/v0.0.3",
+          "target_commitish": "main"
+        },
+        {
+          "tag_name": "v0.0.2",
+          "published_at": "2025-10-25T06:49:57Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/brian14708/duron/releases/tag/v0.0.2",
+          "target_commitish": "main"
+        },
+        {
+          "tag_name": "v0.0.1",
+          "published_at": "2025-10-17T17:01:32Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/brian14708/duron/releases/tag/v0.0.1",
+          "target_commitish": "main"
+        }
+      ],
+      "source_files": [
+        {
+          "path": "LICENSE",
+          "url": "https://raw.githubusercontent.com/brian14708/duron/main/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        {
+          "path": "README.md",
+          "url": "https://raw.githubusercontent.com/brian14708/duron/main/README.md",
+          "sha256": "b17cf31078185c00ddf77b6c120a31792adb5182626eb83d7cf5a8e69ddc5f47"
+        }
+      ],
+      "designated_latest_release_source": "https://api.github.com/repos/brian14708/duron/releases/latest",
+      "designated_latest_release": {
+        "tag_name": "v0.0.3",
+        "published_at": "2025-11-02T12:59:39Z",
+        "prerelease": false,
+        "html_url": "https://github.com/brian14708/duron/releases/tag/v0.0.3",
+        "target_commitish": "main"
+      },
+      "release_license_sources": [
+        {
+          "url": "https://raw.githubusercontent.com/brian14708/duron/v0.0.3/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "path": "LICENSE"
+        }
+      ],
+      "screening_disposition": "emerging-watchlist",
+      "inspected_license_summary": "Apache-2.0",
+      "cardea_runtime_fit": "not run"
+    },
+    {
+      "repository": "conductor-oss/conductor",
+      "source": "https://api.github.com/repos/conductor-oss/conductor",
+      "created_at": "2023-12-08T06:06:09Z",
+      "pushed_at": "2026-09-22T17:19:50Z",
+      "archived": false,
+      "default_branch": "main",
+      "license_metadata": {
+        "key": "apache-2.0",
+        "name": "Apache License 2.0",
+        "spdx_id": "Apache-2.0",
+        "url": "https://api.github.com/licenses/apache-2.0",
+        "node_id": "MDc6TGljZW5zZTI="
+      },
+      "description": "Conductor is an event driven agentic workflow engine providing durable and highly resilient execution engine for applications and AI Agents",
+      "releases_source": "https://api.github.com/repos/conductor-oss/conductor/releases?per_page=5",
+      "recent_releases": [
+        {
+          "tag_name": "v3.33.0-rc5",
+          "published_at": "2026-09-18T05:44:33Z",
+          "prerelease": true,
+          "draft": false,
+          "html_url": "https://github.com/conductor-oss/conductor/releases/tag/v3.33.0-rc5",
+          "target_commitish": "main"
+        },
+        {
+          "tag_name": "v3.33.0-rc4",
+          "published_at": "2026-09-15T22:35:58Z",
+          "prerelease": true,
+          "draft": false,
+          "html_url": "https://github.com/conductor-oss/conductor/releases/tag/v3.33.0-rc4",
+          "target_commitish": "main"
+        },
+        {
+          "tag_name": "v3.33.0-rc3",
+          "published_at": "2026-09-11T18:52:16Z",
+          "prerelease": true,
+          "draft": false,
+          "html_url": "https://github.com/conductor-oss/conductor/releases/tag/v3.33.0-rc3",
+          "target_commitish": "main"
+        },
+        {
+          "tag_name": "v3.33.0-rc2",
+          "published_at": "2026-09-10T17:21:14Z",
+          "prerelease": true,
+          "draft": false,
+          "html_url": "https://github.com/conductor-oss/conductor/releases/tag/v3.33.0-rc2",
+          "target_commitish": "main"
+        },
+        {
+          "tag_name": "v3.32.4",
+          "published_at": "2026-09-10T22:09:55Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/conductor-oss/conductor/releases/tag/v3.32.4",
+          "target_commitish": "release/3.32.x"
+        }
+      ],
+      "source_files": [
+        {
+          "path": "LICENSE",
+          "url": "https://raw.githubusercontent.com/conductor-oss/conductor/main/LICENSE",
+          "sha256": "5a09b5eb8064615992192a13ffa6875568225d1e5bef991a48ca9d48ba3c0dc8"
+        },
+        {
+          "path": "README.md",
+          "url": "https://raw.githubusercontent.com/conductor-oss/conductor/main/README.md",
+          "sha256": "66eb52a73fe18605d54bf4759951dc8aebef593180254ab914007c90601e3c99"
+        }
+      ],
+      "designated_latest_release_source": "https://api.github.com/repos/conductor-oss/conductor/releases/latest",
+      "designated_latest_release": {
+        "tag_name": "v3.32.4",
+        "published_at": "2026-09-10T22:09:55Z",
+        "prerelease": false,
+        "html_url": "https://github.com/conductor-oss/conductor/releases/tag/v3.32.4",
+        "target_commitish": "release/3.32.x"
+      },
+      "release_license_sources": [
+        {
+          "url": "https://raw.githubusercontent.com/conductor-oss/conductor/v3.32.4/LICENSE",
+          "sha256": "5a09b5eb8064615992192a13ffa6875568225d1e5bef991a48ca9d48ba3c0dc8",
+          "path": "LICENSE"
+        }
+      ],
+      "screening_disposition": "reserve",
+      "inspected_license_summary": "Apache-2.0",
+      "cardea_runtime_fit": "not run"
+    },
+    {
+      "repository": "dagucloud/dagu",
+      "source": "https://api.github.com/repos/dagu-org/dagu",
+      "created_at": "2022-04-22T13:00:42Z",
+      "pushed_at": "2026-09-22T16:13:19Z",
+      "archived": false,
+      "default_branch": "main",
+      "license_metadata": {
+        "key": "gpl-3.0",
+        "name": "GNU General Public License v3.0",
+        "spdx_id": "GPL-3.0",
+        "url": "https://api.github.com/licenses/gpl-3.0",
+        "node_id": "MDc6TGljZW5zZTk="
+      },
+      "description": "Self-hostable workflow orchestrator for teams whose main work isn't orchestration. Declarative YAML over your scripts, SSH commands, containers, etc; keep workflows separate from business logic. One binary, no database, runs on limited H/W resources. Alternative to Airflow / Cron / Job Scheduler.",
+      "releases_source": "https://api.github.com/repos/dagu-org/dagu/releases?per_page=5",
+      "recent_releases": [
+        {
+          "tag_name": "v2.17.0",
+          "published_at": "2026-09-21T13:31:48Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/dagucloud/dagu/releases/tag/v2.17.0",
+          "target_commitish": "main"
+        },
+        {
+          "tag_name": "v2.16.6",
+          "published_at": "2026-09-14T14:45:57Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/dagucloud/dagu/releases/tag/v2.16.6",
+          "target_commitish": "main"
+        },
+        {
+          "tag_name": "v2.16.5",
+          "published_at": "2026-09-14T09:21:29Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/dagucloud/dagu/releases/tag/v2.16.5",
+          "target_commitish": "main"
+        },
+        {
+          "tag_name": "v2.16.4",
+          "published_at": "2026-09-11T12:21:34Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/dagucloud/dagu/releases/tag/v2.16.4",
+          "target_commitish": "main"
+        },
+        {
+          "tag_name": "v2.16.3",
+          "published_at": "2026-09-09T13:25:39Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/dagucloud/dagu/releases/tag/v2.16.3",
+          "target_commitish": "main"
+        }
+      ],
+      "source_files": [
+        {
+          "path": "LICENSE",
+          "url": "https://raw.githubusercontent.com/dagucloud/dagu/main/LICENSE",
+          "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+        },
+        {
+          "path": "README.md",
+          "url": "https://raw.githubusercontent.com/dagucloud/dagu/main/README.md",
+          "sha256": "b652813bb7a60ffe9bc8ff4638dd92b7d632361536a2c4c83f7301b23a390132"
+        }
+      ],
+      "designated_latest_release_source": "https://api.github.com/repos/dagu-org/dagu/releases/latest",
+      "designated_latest_release": {
+        "tag_name": "v2.17.0",
+        "published_at": "2026-09-21T13:31:48Z",
+        "prerelease": false,
+        "html_url": "https://github.com/dagucloud/dagu/releases/tag/v2.17.0",
+        "target_commitish": "main"
+      },
+      "release_license_sources": [
+        {
+          "url": "https://raw.githubusercontent.com/dagucloud/dagu/v2.17.0/LICENSE",
+          "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+          "path": "LICENSE"
+        }
+      ],
+      "screening_disposition": "reserve-host-automation",
+      "inspected_license_summary": "GPL-3.0",
+      "cardea_runtime_fit": "not run"
+    },
+    {
+      "repository": "dapr/dapr",
+      "source": "https://api.github.com/repos/dapr/dapr",
+      "created_at": "2019-06-19T00:49:06Z",
+      "pushed_at": "2026-09-22T19:17:27Z",
+      "archived": false,
+      "default_branch": "master",
+      "license_metadata": {
+        "key": "apache-2.0",
+        "name": "Apache License 2.0",
+        "spdx_id": "Apache-2.0",
+        "url": "https://api.github.com/licenses/apache-2.0",
+        "node_id": "MDc6TGljZW5zZTI="
+      },
+      "description": "Dapr is a portable runtime for building distributed applications across cloud and edge, combining event-driven architecture with workflow orchestration.",
+      "releases_source": "https://api.github.com/repos/dapr/dapr/releases?per_page=5",
+      "recent_releases": [
+        {
+          "tag_name": "v1.17.14",
+          "published_at": "2026-09-10T17:02:48Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/dapr/dapr/releases/tag/v1.17.14",
+          "target_commitish": "master"
+        },
+        {
+          "tag_name": "v1.16.20",
+          "published_at": "2026-09-10T16:53:28Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/dapr/dapr/releases/tag/v1.16.20",
+          "target_commitish": "master"
+        },
+        {
+          "tag_name": "v1.18.4",
+          "published_at": "2026-09-09T20:23:23Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/dapr/dapr/releases/tag/v1.18.4",
+          "target_commitish": "master"
+        },
+        {
+          "tag_name": "v1.18.4-rc.4",
+          "published_at": "2026-09-08T22:28:59Z",
+          "prerelease": true,
+          "draft": false,
+          "html_url": "https://github.com/dapr/dapr/releases/tag/v1.18.4-rc.4",
+          "target_commitish": "master"
+        },
+        {
+          "tag_name": "v1.18.4-rc.3",
+          "published_at": "2026-09-02T17:50:15Z",
+          "prerelease": true,
+          "draft": false,
+          "html_url": "https://github.com/dapr/dapr/releases/tag/v1.18.4-rc.3",
+          "target_commitish": "master"
+        }
+      ],
+      "source_files": [
+        {
+          "path": "LICENSE",
+          "url": "https://raw.githubusercontent.com/dapr/dapr/master/LICENSE",
+          "sha256": "9523eacf5421b65637420755c00b5175f7804b6a6eb736b86cd10ea6b3937dcf"
+        },
+        {
+          "path": "README.md",
+          "url": "https://raw.githubusercontent.com/dapr/dapr/master/README.md",
+          "sha256": "61f5164d12c3e95b4a1746e0d8215a6c29d55c17ded5d2f418cead2fc1023ef2"
+        }
+      ],
+      "designated_latest_release_source": "https://api.github.com/repos/dapr/dapr/releases/latest",
+      "designated_latest_release": {
+        "tag_name": "v1.18.4",
+        "published_at": "2026-09-09T20:23:23Z",
+        "prerelease": false,
+        "html_url": "https://github.com/dapr/dapr/releases/tag/v1.18.4",
+        "target_commitish": "master"
+      },
+      "release_license_sources": [
+        {
+          "url": "https://raw.githubusercontent.com/dapr/dapr/v1.18.4/LICENSE",
+          "sha256": "9523eacf5421b65637420755c00b5175f7804b6a6eb736b86cd10ea6b3937dcf",
+          "path": "LICENSE"
+        }
+      ],
+      "screening_disposition": "reserve",
+      "inspected_license_summary": "Apache-2.0",
+      "cardea_runtime_fit": "not run"
+    },
+    {
+      "repository": "dbos-inc/dbos-transact-py",
+      "source": "https://api.github.com/repos/dbos-inc/dbos-transact-py",
+      "created_at": "2024-07-19T15:53:44Z",
+      "pushed_at": "2026-09-22T18:50:33Z",
+      "archived": false,
+      "default_branch": "main",
+      "license_metadata": {
+        "key": "mit",
+        "name": "MIT License",
+        "spdx_id": "MIT",
+        "url": "https://api.github.com/licenses/mit",
+        "node_id": "MDc6TGljZW5zZTEz"
+      },
+      "description": "Database-Backed Durable Python Workflows",
+      "releases_source": "https://api.github.com/repos/dbos-inc/dbos-transact-py/releases?per_page=5",
+      "recent_releases": [
+        {
+          "tag_name": "3.0.0",
+          "published_at": "2026-09-16T17:16:51Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/dbos-inc/dbos-transact-py/releases/tag/3.0.0",
+          "target_commitish": "main"
+        },
+        {
+          "tag_name": "2.31.1",
+          "published_at": "2026-09-08T17:01:55Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/dbos-inc/dbos-transact-py/releases/tag/2.31.1",
+          "target_commitish": "main"
+        },
+        {
+          "tag_name": "2.31.0",
+          "published_at": "2026-08-25T15:35:34Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/dbos-inc/dbos-transact-py/releases/tag/2.31.0",
+          "target_commitish": "main"
+        },
+        {
+          "tag_name": "2.30.0",
+          "published_at": "2026-08-18T15:12:01Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/dbos-inc/dbos-transact-py/releases/tag/2.30.0",
+          "target_commitish": "main"
+        },
+        {
+          "tag_name": "2.29.0",
+          "published_at": "2026-07-30T15:00:45Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/dbos-inc/dbos-transact-py/releases/tag/2.29.0",
+          "target_commitish": "main"
+        }
+      ],
+      "source_files": [
+        {
+          "path": "LICENSE",
+          "url": "https://raw.githubusercontent.com/dbos-inc/dbos-transact-py/main/LICENSE",
+          "sha256": "546662b7f6b9fa4770f564fa7d8e63c40595c0643380b1723d6adc55552154d5"
+        },
+        {
+          "path": "README.md",
+          "url": "https://raw.githubusercontent.com/dbos-inc/dbos-transact-py/main/README.md",
+          "sha256": "df60929ba52bb202f5f6bf14c921240beb3d86be3c3694ea3c65d2af5000d8b7"
+        }
+      ],
+      "designated_latest_release_source": "https://api.github.com/repos/dbos-inc/dbos-transact-py/releases/latest",
+      "designated_latest_release": {
+        "tag_name": "3.0.0",
+        "published_at": "2026-09-16T17:16:51Z",
+        "prerelease": false,
+        "html_url": "https://github.com/dbos-inc/dbos-transact-py/releases/tag/3.0.0",
+        "target_commitish": "main"
+      },
+      "release_license_sources": [
+        {
+          "url": "https://raw.githubusercontent.com/dbos-inc/dbos-transact-py/3.0.0/LICENSE",
+          "sha256": "546662b7f6b9fa4770f564fa7d8e63c40595c0643380b1723d6adc55552154d5",
+          "path": "LICENSE"
+        }
+      ],
+      "screening_disposition": "shortlist",
+      "inspected_license_summary": "MIT",
+      "cardea_runtime_fit": "not run"
+    },
+    {
+      "repository": "earendil-works/absurd",
+      "source": "https://api.github.com/repos/earendil-works/absurd",
+      "created_at": "2025-10-20T22:15:50Z",
+      "pushed_at": "2026-08-10T17:23:16Z",
+      "archived": false,
+      "default_branch": "main",
+      "license_metadata": {
+        "key": "apache-2.0",
+        "name": "Apache License 2.0",
+        "spdx_id": "Apache-2.0",
+        "url": "https://api.github.com/licenses/apache-2.0",
+        "node_id": "MDc6TGljZW5zZTI="
+      },
+      "description": "An experiment in durability",
+      "releases_source": "https://api.github.com/repos/earendil-works/absurd/releases?per_page=5",
+      "recent_releases": [
+        {
+          "tag_name": "0.5.0",
+          "published_at": "2026-08-04T13:07:14Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/earendil-works/absurd/releases/tag/0.5.0",
+          "target_commitish": "main"
+        },
+        {
+          "tag_name": "0.4.0",
+          "published_at": "2026-05-27T12:06:25Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/earendil-works/absurd/releases/tag/0.4.0",
+          "target_commitish": "main"
+        },
+        {
+          "tag_name": "0.3.0",
+          "published_at": "2026-04-02T22:10:10Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/earendil-works/absurd/releases/tag/0.3.0",
+          "target_commitish": "main"
+        },
+        {
+          "tag_name": "0.2.0",
+          "published_at": "2026-03-26T19:13:30Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/earendil-works/absurd/releases/tag/0.2.0",
+          "target_commitish": "main"
+        },
+        {
+          "tag_name": "0.1.1",
+          "published_at": "2026-03-24T23:10:00Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/earendil-works/absurd/releases/tag/0.1.1",
+          "target_commitish": "main"
+        }
+      ],
+      "source_files": [
+        {
+          "path": "LICENSE",
+          "url": "https://raw.githubusercontent.com/earendil-works/absurd/main/LICENSE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "path": "README.md",
+          "url": "https://raw.githubusercontent.com/earendil-works/absurd/main/README.md",
+          "sha256": "d96759c2e36faed23601774ac5794fc0e5350917c3a6ae878735630e7dc37ecf"
+        }
+      ],
+      "designated_latest_release_source": "https://api.github.com/repos/earendil-works/absurd/releases/latest",
+      "designated_latest_release": {
+        "tag_name": "0.5.0",
+        "published_at": "2026-08-04T13:07:14Z",
+        "prerelease": false,
+        "html_url": "https://github.com/earendil-works/absurd/releases/tag/0.5.0",
+        "target_commitish": "main"
+      },
+      "release_license_sources": [
+        {
+          "url": "https://raw.githubusercontent.com/earendil-works/absurd/0.5.0/LICENSE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "path": "LICENSE"
+        }
+      ],
+      "screening_disposition": "shortlist-emerging",
+      "inspected_license_summary": "Apache-2.0",
+      "cardea_runtime_fit": "not run"
+    },
+    {
+      "repository": "hatchet-dev/hatchet",
+      "source": "https://api.github.com/repos/hatchet-dev/hatchet",
+      "created_at": "2023-12-15T17:50:29Z",
+      "pushed_at": "2026-09-22T19:46:39Z",
+      "archived": false,
+      "default_branch": "main",
+      "license_metadata": {
+        "key": "mit",
+        "name": "MIT License",
+        "spdx_id": "MIT",
+        "url": "https://api.github.com/licenses/mit",
+        "node_id": "MDc6TGljZW5zZTEz"
+      },
+      "description": "\ud83e\ude93 An orchestration engine for background tasks, AI agents, and durable workflows",
+      "releases_source": "https://api.github.com/repos/hatchet-dev/hatchet/releases?per_page=5",
+      "recent_releases": [
+        {
+          "tag_name": "py/1.41.0",
+          "published_at": "2026-09-22T16:27:56Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/hatchet-dev/hatchet/releases/tag/py/1.41.0",
+          "target_commitish": "bd3b01fcaf8110e84f4638de71a8b790b051e7eb"
+        },
+        {
+          "tag_name": "v0.107.2",
+          "published_at": "2026-09-18T15:26:08Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/hatchet-dev/hatchet/releases/tag/v0.107.2",
+          "target_commitish": "main"
+        },
+        {
+          "tag_name": "py/1.40.3",
+          "published_at": "2026-09-18T16:48:03Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/hatchet-dev/hatchet/releases/tag/py/1.40.3",
+          "target_commitish": "8d46dc4a32d8527a498b9ac8d33a0d4cba54b94e"
+        },
+        {
+          "tag_name": "v0.107.1",
+          "published_at": "2026-09-15T20:29:31Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/hatchet-dev/hatchet/releases/tag/v0.107.1",
+          "target_commitish": "main"
+        },
+        {
+          "tag_name": "v0.107.0",
+          "published_at": "2026-09-15T12:42:41Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/hatchet-dev/hatchet/releases/tag/v0.107.0",
+          "target_commitish": "main"
+        }
+      ],
+      "source_files": [
+        {
+          "path": "LICENSE",
+          "url": "https://raw.githubusercontent.com/hatchet-dev/hatchet/main/LICENSE",
+          "sha256": "7388b34bd1ad4b9db3c72dcb73f434ea27c88e5ca8f02a24d4f970c906d79be3"
+        },
+        {
+          "path": "README.md",
+          "url": "https://raw.githubusercontent.com/hatchet-dev/hatchet/main/README.md",
+          "sha256": "556bd5fb646095bbaf9dfb0c91fbaefa52a9d0fd6739fe82b15b71708c56d8a9"
+        }
+      ],
+      "designated_latest_release_source": "https://api.github.com/repos/hatchet-dev/hatchet/releases/latest",
+      "designated_latest_release": {
+        "tag_name": "v0.107.0",
+        "published_at": "2026-09-15T12:42:41Z",
+        "prerelease": false,
+        "html_url": "https://github.com/hatchet-dev/hatchet/releases/tag/v0.107.0",
+        "target_commitish": "main"
+      },
+      "release_license_sources": [
+        {
+          "url": "https://raw.githubusercontent.com/hatchet-dev/hatchet/v0.107.0/LICENSE",
+          "sha256": "7388b34bd1ad4b9db3c72dcb73f434ea27c88e5ca8f02a24d4f970c906d79be3",
+          "path": "LICENSE"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/hatchet-dev/hatchet/v0.107.2/LICENSE",
+          "sha256": "7388b34bd1ad4b9db3c72dcb73f434ea27c88e5ca8f02a24d4f970c906d79be3",
+          "path": "LICENSE"
+        }
+      ],
+      "screened_engine_release": {
+        "tag_name": "v0.107.2",
+        "published_at": "2026-09-18T15:26:08Z",
+        "prerelease": false,
+        "draft": false,
+        "html_url": "https://github.com/hatchet-dev/hatchet/releases/tag/v0.107.2",
+        "target_commitish": "main"
+      },
+      "screening_disposition": "shortlist",
+      "inspected_license_summary": "MIT",
+      "cardea_runtime_fit": "not run"
+    },
+    {
+      "repository": "inngest/inngest",
+      "source": "https://api.github.com/repos/inngest/inngest",
+      "created_at": "2021-06-07T18:26:33Z",
+      "pushed_at": "2026-09-22T19:28:31Z",
+      "archived": false,
+      "default_branch": "main",
+      "license_metadata": {
+        "key": "other",
+        "name": "Other",
+        "spdx_id": "NOASSERTION",
+        "url": null,
+        "node_id": "MDc6TGljZW5zZTA="
+      },
+      "description": "The leading workflow orchestration platform.  Run stateful step functions and AI workflows on serverless, servers, or the edge.",
+      "releases_source": "https://api.github.com/repos/inngest/inngest/releases?per_page=5",
+      "recent_releases": [
+        {
+          "tag_name": "v1.45.1",
+          "published_at": "2026-09-17T20:51:40Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/inngest/inngest/releases/tag/v1.45.1",
+          "target_commitish": "main"
+        },
+        {
+          "tag_name": "v1.45.0",
+          "published_at": "2026-09-17T18:14:20Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/inngest/inngest/releases/tag/v1.45.0",
+          "target_commitish": "main"
+        },
+        {
+          "tag_name": "v1.44.0",
+          "published_at": "2026-08-26T20:55:33Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/inngest/inngest/releases/tag/v1.44.0",
+          "target_commitish": "main"
+        },
+        {
+          "tag_name": "v1.43.0",
+          "published_at": "2026-08-20T15:03:27Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/inngest/inngest/releases/tag/v1.43.0",
+          "target_commitish": "main"
+        },
+        {
+          "tag_name": "v1.42.0",
+          "published_at": "2026-08-19T16:58:03Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/inngest/inngest/releases/tag/v1.42.0",
+          "target_commitish": "main"
+        }
+      ],
+      "source_files": [
+        {
+          "path": "LICENSE.md",
+          "url": "https://raw.githubusercontent.com/inngest/inngest/main/LICENSE.md",
+          "sha256": "300ec5a863250241755061b8424ac949aeada4c5c2cb567a2642637aa0f2c7e4"
+        },
+        {
+          "path": "README.md",
+          "url": "https://raw.githubusercontent.com/inngest/inngest/main/README.md",
+          "sha256": "b23b0f7a336adba851b9213e64b3fa8a9a52ac6bb71b8a51805b8f3a3c62df5a"
+        }
+      ],
+      "designated_latest_release_source": "https://api.github.com/repos/inngest/inngest/releases/latest",
+      "designated_latest_release": {
+        "tag_name": "v1.45.1",
+        "published_at": "2026-09-17T20:51:40Z",
+        "prerelease": false,
+        "html_url": "https://github.com/inngest/inngest/releases/tag/v1.45.1",
+        "target_commitish": "main"
+      },
+      "release_license_sources": [
+        {
+          "url": "https://raw.githubusercontent.com/inngest/inngest/v1.45.1/LICENSE.md",
+          "sha256": "300ec5a863250241755061b8424ac949aeada4c5c2cb567a2642637aa0f2c7e4",
+          "path": "LICENSE.md"
+        }
+      ],
+      "screening_disposition": "source-available-comparator",
+      "inspected_license_summary": "SSPL server; delayed Apache publication",
+      "cardea_runtime_fit": "not run"
+    },
+    {
+      "repository": "langchain-ai/langgraph",
+      "source": "https://api.github.com/repos/langchain-ai/langgraph",
+      "created_at": "2023-08-09T18:33:12Z",
+      "pushed_at": "2026-09-22T19:48:07Z",
+      "archived": false,
+      "default_branch": "main",
+      "license_metadata": {
+        "key": "mit",
+        "name": "MIT License",
+        "spdx_id": "MIT",
+        "url": "https://api.github.com/licenses/mit",
+        "node_id": "MDc6TGljZW5zZTEz"
+      },
+      "description": "Build resilient agents.",
+      "releases_source": "https://api.github.com/repos/langchain-ai/langgraph/releases?per_page=5",
+      "recent_releases": [
+        {
+          "tag_name": "1.2.12",
+          "published_at": "2026-09-21T14:43:40Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/langchain-ai/langgraph/releases/tag/1.2.12",
+          "target_commitish": "49cce0ca852be4cfb567a1cbe0e511ff325a1682"
+        },
+        {
+          "tag_name": "sdk==0.4.5",
+          "published_at": "2026-09-21T14:43:09Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/langchain-ai/langgraph/releases/tag/sdk%3D%3D0.4.5",
+          "target_commitish": "49cce0ca852be4cfb567a1cbe0e511ff325a1682"
+        },
+        {
+          "tag_name": "sdk==0.4.4",
+          "published_at": "2026-08-27T21:25:36Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/langchain-ai/langgraph/releases/tag/sdk%3D%3D0.4.4",
+          "target_commitish": "d5f4b2aa960940effc8430165ab3604038e817af"
+        },
+        {
+          "tag_name": "sdk==0.4.3",
+          "published_at": "2026-08-19T18:05:32Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/langchain-ai/langgraph/releases/tag/sdk%3D%3D0.4.3",
+          "target_commitish": "837212b9699bc4c3400b97714988344d348598f8"
+        },
+        {
+          "tag_name": "1.2.11",
+          "published_at": "2026-08-11T14:00:50Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/langchain-ai/langgraph/releases/tag/1.2.11",
+          "target_commitish": "644815f9e5bc52ad8f7a5227a456227e9c3e639b"
+        }
+      ],
+      "source_files": [
+        {
+          "path": "LICENSE",
+          "url": "https://raw.githubusercontent.com/langchain-ai/langgraph/main/LICENSE",
+          "sha256": "d9bb52f2e3540d60ff50d8f0f5b6ba649b7fd346948c4c3d086c8afb120763c7"
+        },
+        {
+          "path": "README.md",
+          "url": "https://raw.githubusercontent.com/langchain-ai/langgraph/main/README.md",
+          "sha256": "3a13e257af1216962d53d72414a7f44ac1fc5cea34d994bdff60ea2a3b045933"
+        }
+      ],
+      "designated_latest_release_source": "https://api.github.com/repos/langchain-ai/langgraph/releases/latest",
+      "designated_latest_release": {
+        "tag_name": "1.2.12",
+        "published_at": "2026-09-21T14:43:40Z",
+        "prerelease": false,
+        "html_url": "https://github.com/langchain-ai/langgraph/releases/tag/1.2.12",
+        "target_commitish": "49cce0ca852be4cfb567a1cbe0e511ff325a1682"
+      },
+      "release_license_sources": [
+        {
+          "url": "https://raw.githubusercontent.com/langchain-ai/langgraph/1.2.12/LICENSE",
+          "sha256": "d9bb52f2e3540d60ff50d8f0f5b6ba649b7fd346948c4c3d086c8afb120763c7",
+          "path": "LICENSE"
+        }
+      ],
+      "screening_disposition": "complement-R09",
+      "inspected_license_summary": "MIT library",
+      "cardea_runtime_fit": "not run"
+    },
+    {
+      "repository": "littlehorse-enterprises/littlehorse",
+      "source": "https://api.github.com/repos/littlehorse-enterprises/littlehorse",
+      "created_at": "2023-07-19T17:41:58Z",
+      "pushed_at": "2026-09-22T15:09:14Z",
+      "archived": false,
+      "default_branch": "master",
+      "license_metadata": {
+        "key": "agpl-3.0",
+        "name": "GNU Affero General Public License v3.0",
+        "spdx_id": "AGPL-3.0",
+        "url": "https://api.github.com/licenses/agpl-3.0",
+        "node_id": "MDc6TGljZW5zZTE="
+      },
+      "description": "LittleHorse Server: Business-as-Code Platform for Microservices, Workflows, and Agents",
+      "releases_source": "https://api.github.com/repos/littlehorse-enterprises/littlehorse/releases?per_page=5",
+      "recent_releases": [
+        {
+          "tag_name": "v1.3.0",
+          "published_at": "2026-09-11T22:19:45Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/littlehorse-enterprises/littlehorse/releases/tag/v1.3.0",
+          "target_commitish": "master"
+        },
+        {
+          "tag_name": "v1.3.0-RC3",
+          "published_at": "2026-09-09T20:21:44Z",
+          "prerelease": true,
+          "draft": false,
+          "html_url": "https://github.com/littlehorse-enterprises/littlehorse/releases/tag/v1.3.0-RC3",
+          "target_commitish": "master"
+        },
+        {
+          "tag_name": "v1.3.0-RC2",
+          "published_at": "2026-09-04T20:28:31Z",
+          "prerelease": true,
+          "draft": false,
+          "html_url": "https://github.com/littlehorse-enterprises/littlehorse/releases/tag/v1.3.0-RC2",
+          "target_commitish": "master"
+        },
+        {
+          "tag_name": "v1.2.1",
+          "published_at": "2026-08-11T18:46:14Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/littlehorse-enterprises/littlehorse/releases/tag/v1.2.1",
+          "target_commitish": "master"
+        },
+        {
+          "tag_name": "v1.2.0",
+          "published_at": "2026-07-15T22:23:59Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/littlehorse-enterprises/littlehorse/releases/tag/v1.2.0",
+          "target_commitish": "master"
+        }
+      ],
+      "source_files": [
+        {
+          "path": "LICENSE.txt",
+          "url": "https://raw.githubusercontent.com/littlehorse-enterprises/littlehorse/master/LICENSE.txt",
+          "sha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0"
+        },
+        {
+          "path": "README.md",
+          "url": "https://raw.githubusercontent.com/littlehorse-enterprises/littlehorse/master/README.md",
+          "sha256": "2887d1d824869143b229c0471df6a6e33d40e1968abdeb0007266c3f0d18eeba"
+        }
+      ],
+      "designated_latest_release_source": "https://api.github.com/repos/littlehorse-enterprises/littlehorse/releases/latest",
+      "designated_latest_release": {
+        "tag_name": "v1.3.0",
+        "published_at": "2026-09-11T22:19:45Z",
+        "prerelease": false,
+        "html_url": "https://github.com/littlehorse-enterprises/littlehorse/releases/tag/v1.3.0",
+        "target_commitish": "master"
+      },
+      "release_license_sources": [
+        {
+          "url": "https://raw.githubusercontent.com/littlehorse-enterprises/littlehorse/v1.3.0/LICENSE.txt",
+          "sha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0",
+          "path": "LICENSE.txt"
+        }
+      ],
+      "screening_disposition": "reserve",
+      "inspected_license_summary": "AGPL-3.0",
+      "cardea_runtime_fit": "not run"
+    },
+    {
+      "repository": "obeli-sk/obelisk",
+      "source": "https://api.github.com/repos/obeli-sk/obelisk",
+      "created_at": "2024-04-25T16:21:43Z",
+      "pushed_at": "2026-09-22T14:02:04Z",
+      "archived": false,
+      "default_branch": "main",
+      "license_metadata": {
+        "key": "agpl-3.0",
+        "name": "GNU Affero General Public License v3.0",
+        "spdx_id": "AGPL-3.0",
+        "url": "https://api.github.com/licenses/agpl-3.0",
+        "node_id": "MDc6TGljZW5zZTE="
+      },
+      "description": "Durable & Deterministic Workflow Engine",
+      "source_files": [
+        {
+          "path": "LICENSE-AGPL",
+          "url": "https://raw.githubusercontent.com/obeli-sk/obelisk/main/LICENSE-AGPL",
+          "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef"
+        },
+        {
+          "path": "README.md",
+          "url": "https://raw.githubusercontent.com/obeli-sk/obelisk/main/README.md",
+          "sha256": "7bfb88e9943a7c01934ca961c4ea4ca23e981f5528ed78ec81eb5856af8db611"
+        }
+      ],
+      "designated_latest_release_source": "https://api.github.com/repos/obeli-sk/obelisk/releases/latest",
+      "designated_latest_release": {
+        "tag_name": "v0.41.5",
+        "published_at": "2026-08-31T19:51:03Z",
+        "prerelease": false,
+        "html_url": "https://github.com/obeli-sk/obelisk/releases/tag/v0.41.5",
+        "target_commitish": "eba6df6d85d620947892c6507106a65575793de2"
+      },
+      "release_license_sources": [
+        {
+          "url": "https://raw.githubusercontent.com/obeli-sk/obelisk/v0.41.5/LICENSE-AGPL",
+          "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef",
+          "path": "LICENSE-AGPL"
+        }
+      ],
+      "screening_disposition": "emerging-watchlist",
+      "inspected_license_summary": "AGPL-3.0 with MIT interface exceptions",
+      "cardea_runtime_fit": "not run"
+    },
+    {
+      "repository": "PrefectHQ/prefect",
+      "source": "https://api.github.com/repos/PrefectHQ/prefect",
+      "created_at": "2018-06-29T21:59:26Z",
+      "pushed_at": "2026-09-22T19:33:47Z",
+      "archived": false,
+      "default_branch": "main",
+      "license_metadata": {
+        "key": "apache-2.0",
+        "name": "Apache License 2.0",
+        "spdx_id": "Apache-2.0",
+        "url": "https://api.github.com/licenses/apache-2.0",
+        "node_id": "MDc6TGljZW5zZTI="
+      },
+      "description": "Prefect is a workflow orchestration framework for building resilient data pipelines in Python.",
+      "releases_source": "https://api.github.com/repos/PrefectHQ/prefect/releases?per_page=5",
+      "recent_releases": [
+        {
+          "tag_name": "3.8.7.dev5",
+          "published_at": "2026-09-22T08:19:45Z",
+          "prerelease": true,
+          "draft": false,
+          "html_url": "https://github.com/PrefectHQ/prefect/releases/tag/3.8.7.dev5",
+          "target_commitish": "main"
+        },
+        {
+          "tag_name": "3.8.7.dev4",
+          "published_at": "2026-09-19T08:16:49Z",
+          "prerelease": true,
+          "draft": false,
+          "html_url": "https://github.com/PrefectHQ/prefect/releases/tag/3.8.7.dev4",
+          "target_commitish": "main"
+        },
+        {
+          "tag_name": "3.8.7.dev3",
+          "published_at": "2026-09-18T08:18:58Z",
+          "prerelease": true,
+          "draft": false,
+          "html_url": "https://github.com/PrefectHQ/prefect/releases/tag/3.8.7.dev3",
+          "target_commitish": "main"
+        },
+        {
+          "tag_name": "3.8.7.dev2",
+          "published_at": "2026-09-16T08:19:54Z",
+          "prerelease": true,
+          "draft": false,
+          "html_url": "https://github.com/PrefectHQ/prefect/releases/tag/3.8.7.dev2",
+          "target_commitish": "main"
+        },
+        {
+          "tag_name": "3.8.7.dev1",
+          "published_at": "2026-09-15T08:20:02Z",
+          "prerelease": true,
+          "draft": false,
+          "html_url": "https://github.com/PrefectHQ/prefect/releases/tag/3.8.7.dev1",
+          "target_commitish": "main"
+        }
+      ],
+      "source_files": [
+        {
+          "path": "LICENSE",
+          "url": "https://raw.githubusercontent.com/PrefectHQ/prefect/main/LICENSE",
+          "sha256": "302c6c9fca2c024cdfc4a0b8082fdd2dc52453c0d92e4ca2859f261acdc08774"
+        },
+        {
+          "path": "README.md",
+          "url": "https://raw.githubusercontent.com/PrefectHQ/prefect/main/README.md",
+          "sha256": "755a4de39a3959a2ca1c9c897dedb591217c3c38a11c026abb948333ca9e4077"
+        }
+      ],
+      "designated_latest_release_source": "https://api.github.com/repos/PrefectHQ/prefect/releases/latest",
+      "designated_latest_release": {
+        "tag_name": "3.8.6",
+        "published_at": "2026-09-14T14:18:53Z",
+        "prerelease": false,
+        "html_url": "https://github.com/PrefectHQ/prefect/releases/tag/3.8.6",
+        "target_commitish": "main"
+      },
+      "release_license_sources": [
+        {
+          "url": "https://raw.githubusercontent.com/PrefectHQ/prefect/3.8.6/LICENSE",
+          "sha256": "302c6c9fca2c024cdfc4a0b8082fdd2dc52453c0d92e4ca2859f261acdc08774",
+          "path": "LICENSE"
+        }
+      ],
+      "screening_disposition": "reserve",
+      "inspected_license_summary": "Apache-2.0",
+      "cardea_runtime_fit": "not run"
+    },
+    {
+      "repository": "restatedev/restate",
+      "source": "https://api.github.com/repos/restatedev/restate",
+      "created_at": "2023-01-04T15:03:32Z",
+      "pushed_at": "2026-09-22T17:30:48Z",
+      "archived": false,
+      "default_branch": "main",
+      "license_metadata": {
+        "key": "other",
+        "name": "Other",
+        "spdx_id": "NOASSERTION",
+        "url": null,
+        "node_id": "MDc6TGljZW5zZTA="
+      },
+      "description": "Restate is the platform for building resilient applications that tolerate all infrastructure faults w/o the need for a PhD.",
+      "releases_source": "https://api.github.com/repos/restatedev/restate/releases?per_page=5",
+      "recent_releases": [
+        {
+          "tag_name": "v1.7.12",
+          "published_at": "2026-09-22T17:47:50Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/restatedev/restate/releases/tag/v1.7.12",
+          "target_commitish": "577e032d8910318a1d2293b8ab2d78df6f998555"
+        },
+        {
+          "tag_name": "v1.7.11",
+          "published_at": "2026-09-22T16:02:00Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/restatedev/restate/releases/tag/v1.7.11",
+          "target_commitish": "5e13cb414f098619689f2a6292d594ff7699a382"
+        },
+        {
+          "tag_name": "v1.7.10",
+          "published_at": "2026-09-14T13:25:33Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/restatedev/restate/releases/tag/v1.7.10",
+          "target_commitish": "926ac06387572d4bac5a66b7eb103546f244e7cc"
+        },
+        {
+          "tag_name": "v1.7.10-rc.1",
+          "published_at": "2026-09-11T22:32:07Z",
+          "prerelease": true,
+          "draft": false,
+          "html_url": "https://github.com/restatedev/restate/releases/tag/v1.7.10-rc.1",
+          "target_commitish": "f29e3e247e3e30ac875b1e1f821a01ad3e8c121e"
+        },
+        {
+          "tag_name": "v1.7.9",
+          "published_at": "2026-09-04T21:06:19Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/restatedev/restate/releases/tag/v1.7.9",
+          "target_commitish": "fb0ca137d5fc1c86cda5a7d8ef653c5ab201fe6c"
+        }
+      ],
+      "source_files": [
+        {
+          "path": "LICENSE",
+          "url": "https://raw.githubusercontent.com/restatedev/restate/main/LICENSE",
+          "sha256": "ea4fd504ffe508ce7ece0727a714a4fffc7208ad5a9618ae33f794d713450f02"
+        },
+        {
+          "path": "README.md",
+          "url": "https://raw.githubusercontent.com/restatedev/restate/main/README.md",
+          "sha256": "96b4a6b53bbe1fcab157154f064f1e64829e61363261369a2036154d814c4558"
+        }
+      ],
+      "designated_latest_release_source": "https://api.github.com/repos/restatedev/restate/releases/latest",
+      "designated_latest_release": {
+        "tag_name": "v1.7.12",
+        "published_at": "2026-09-22T17:47:50Z",
+        "prerelease": false,
+        "html_url": "https://github.com/restatedev/restate/releases/tag/v1.7.12",
+        "target_commitish": "577e032d8910318a1d2293b8ab2d78df6f998555"
+      },
+      "release_license_sources": [
+        {
+          "url": "https://raw.githubusercontent.com/restatedev/restate/v1.7.12/LICENSE",
+          "sha256": "ea4fd504ffe508ce7ece0727a714a4fffc7208ad5a9618ae33f794d713450f02",
+          "path": "LICENSE"
+        }
+      ],
+      "screening_disposition": "source-available-comparator",
+      "inspected_license_summary": "BSL-1.1; future Apache conversion",
+      "cardea_runtime_fit": "not run"
+    },
+    {
+      "repository": "temporalio/temporal",
+      "source": "https://api.github.com/repos/temporalio/temporal",
+      "created_at": "2019-10-16T22:15:35Z",
+      "pushed_at": "2026-09-22T12:05:04Z",
+      "archived": false,
+      "default_branch": "main",
+      "license_metadata": {
+        "key": "mit",
+        "name": "MIT License",
+        "spdx_id": "MIT",
+        "url": "https://api.github.com/licenses/mit",
+        "node_id": "MDc6TGljZW5zZTEz"
+      },
+      "description": "Temporal service",
+      "releases_source": "https://api.github.com/repos/temporalio/temporal/releases?per_page=5",
+      "recent_releases": [
+        {
+          "tag_name": "v1.30.7",
+          "published_at": "2026-09-18T00:08:08Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/temporalio/temporal/releases/tag/v1.30.7",
+          "target_commitish": "release/v1.30.x"
+        },
+        {
+          "tag_name": "v1.31.3",
+          "published_at": "2026-09-18T20:31:24Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/temporalio/temporal/releases/tag/v1.31.3",
+          "target_commitish": "release/v1.31.x"
+        },
+        {
+          "tag_name": "v1.32.0",
+          "published_at": "2026-09-11T16:10:29Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/temporalio/temporal/releases/tag/v1.32.0",
+          "target_commitish": "release/v1.32.x"
+        },
+        {
+          "tag_name": "v1.31.2",
+          "published_at": "2026-07-08T17:10:11Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/temporalio/temporal/releases/tag/v1.31.2",
+          "target_commitish": "release/v1.31.x"
+        },
+        {
+          "tag_name": "v1.30.6",
+          "published_at": "2026-07-08T17:10:18Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/temporalio/temporal/releases/tag/v1.30.6",
+          "target_commitish": "release/v1.30.x"
+        }
+      ],
+      "source_files": [
+        {
+          "path": "LICENSE",
+          "url": "https://raw.githubusercontent.com/temporalio/temporal/main/LICENSE",
+          "sha256": "6aab9afd99ceb1dcaf6a0d91386b46baef9bce17ae4006044e0f231e31430b69"
+        },
+        {
+          "path": "README.md",
+          "url": "https://raw.githubusercontent.com/temporalio/temporal/main/README.md",
+          "sha256": "269838d3de5da90d4c2c0b45bf7fc745b384a5a05c0932582e923638e8994189"
+        }
+      ],
+      "designated_latest_release_source": "https://api.github.com/repos/temporalio/temporal/releases/latest",
+      "designated_latest_release": {
+        "tag_name": "v1.32.0",
+        "published_at": "2026-09-11T16:10:29Z",
+        "prerelease": false,
+        "html_url": "https://github.com/temporalio/temporal/releases/tag/v1.32.0",
+        "target_commitish": "release/v1.32.x"
+      },
+      "release_license_sources": [
+        {
+          "url": "https://raw.githubusercontent.com/temporalio/temporal/v1.32.0/LICENSE",
+          "sha256": "6aab9afd99ceb1dcaf6a0d91386b46baef9bce17ae4006044e0f231e31430b69",
+          "path": "LICENSE"
+        }
+      ],
+      "screening_disposition": "shortlist",
+      "inspected_license_summary": "MIT",
+      "cardea_runtime_fit": "not run"
+    },
+    {
+      "repository": "windmill-labs/windmill",
+      "source": "https://api.github.com/repos/windmill-labs/windmill",
+      "created_at": "2022-05-05T02:21:17Z",
+      "pushed_at": "2026-09-22T19:52:37Z",
+      "archived": false,
+      "default_branch": "main",
+      "license_metadata": {
+        "key": "other",
+        "name": "Other",
+        "spdx_id": "NOASSERTION",
+        "url": null,
+        "node_id": "MDc6TGljZW5zZTA="
+      },
+      "description": "Open-source developer platform to power your entire infra and turn scripts into webhooks, workflows and UIs. Fastest workflow engine (13x vs Airflow). Open-source alternative to Retool and Temporal.",
+      "releases_source": "https://api.github.com/repos/windmill-labs/windmill/releases?per_page=5",
+      "recent_releases": [
+        {
+          "tag_name": "v1.817.0",
+          "published_at": "2026-09-22T12:13:48Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/windmill-labs/windmill/releases/tag/v1.817.0",
+          "target_commitish": "25c8bfaab412d440e51be92af61066af025d334b"
+        },
+        {
+          "tag_name": "v1.816.0",
+          "published_at": "2026-09-21T16:55:55Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/windmill-labs/windmill/releases/tag/v1.816.0",
+          "target_commitish": "965e8b0c2363c7ce410efe9f8370c1d642a7b86f"
+        },
+        {
+          "tag_name": "v1.815.0",
+          "published_at": "2026-09-18T13:28:57Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/windmill-labs/windmill/releases/tag/v1.815.0",
+          "target_commitish": "01b38320eaac6a8fe81948298869e7dd1ea52ac7"
+        },
+        {
+          "tag_name": "v1.814.0",
+          "published_at": "2026-09-17T18:11:42Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/windmill-labs/windmill/releases/tag/v1.814.0",
+          "target_commitish": "d440ebb52055ab9e53b3c297b155cebe3e86bfe7"
+        },
+        {
+          "tag_name": "v1.813.0",
+          "published_at": "2026-09-16T10:12:57Z",
+          "prerelease": false,
+          "draft": false,
+          "html_url": "https://github.com/windmill-labs/windmill/releases/tag/v1.813.0",
+          "target_commitish": "c3e11bd2235670a62a7c121aed489417294e0b3b"
+        }
+      ],
+      "source_files": [
+        {
+          "path": "LICENSE",
+          "url": "https://raw.githubusercontent.com/windmill-labs/windmill/main/LICENSE",
+          "sha256": "f8c08feee3f832d3dba0d1fed270fab9fd2528d79e1bc00e8af866b3a1023942"
+        },
+        {
+          "path": "README.md",
+          "url": "https://raw.githubusercontent.com/windmill-labs/windmill/main/README.md",
+          "sha256": "9fc7e3abd4457514a37a6bf174976a8e694fe15e3c63e0200f66b789af26045d"
+        }
+      ],
+      "designated_latest_release_source": "https://api.github.com/repos/windmill-labs/windmill/releases/latest",
+      "designated_latest_release": {
+        "tag_name": "v1.817.0",
+        "published_at": "2026-09-22T12:13:48Z",
+        "prerelease": false,
+        "html_url": "https://github.com/windmill-labs/windmill/releases/tag/v1.817.0",
+        "target_commitish": "25c8bfaab412d440e51be92af61066af025d334b"
+      },
+      "release_license_sources": [
+        {
+          "url": "https://raw.githubusercontent.com/windmill-labs/windmill/v1.817.0/LICENSE",
+          "sha256": "f8c08feee3f832d3dba0d1fed270fab9fd2528d79e1bc00e8af866b3a1023942",
+          "path": "LICENSE"
+        }
+      ],
+      "screening_disposition": "reserve-packaging-gate",
+      "inspected_license_summary": "AGPL source with Apache/proprietary exceptions; mixed-license Community binaries",
+      "cardea_runtime_fit": "not run"
+    },
+    {
+      "repository": "Yyeger/Continuum",
+      "source": "https://api.github.com/repos/Yyeger/Continuum",
+      "created_at": "2026-05-02T15:45:23Z",
+      "pushed_at": "2026-08-26T18:48:50Z",
+      "archived": false,
+      "default_branch": "main",
+      "license_metadata": {
+        "key": "other",
+        "name": "Other",
+        "spdx_id": "NOASSERTION",
+        "url": null,
+        "node_id": "MDc6TGljZW5zZTA="
+      },
+      "description": "OTP-native durable execution engine for Elixir.",
+      "source_files": [
+        {
+          "path": "LICENSE",
+          "url": "https://raw.githubusercontent.com/Yyeger/Continuum/main/LICENSE",
+          "sha256": "90bc2289c088f83149162c4f6fb778481e39ef3c7b5fc3e99e7a4b899bee70b2"
+        },
+        {
+          "path": "README.md",
+          "url": "https://raw.githubusercontent.com/Yyeger/Continuum/main/README.md",
+          "sha256": "deb274ca27ea3b33064a9ec867ce6ef93e028009a4c95923b0248e0395ca368e"
+        }
+      ],
+      "designated_latest_release_source": "https://api.github.com/repos/Yyeger/Continuum/releases/latest",
+      "designated_latest_release": {
+        "tag_name": "v0.8.1",
+        "published_at": "2026-08-23T16:38:36Z",
+        "prerelease": false,
+        "html_url": "https://github.com/Yyeger/Continuum/releases/tag/v0.8.1",
+        "target_commitish": "main"
+      },
+      "release_license_sources": [
+        {
+          "url": "https://raw.githubusercontent.com/Yyeger/Continuum/v0.8.1/LICENSE",
+          "sha256": "90bc2289c088f83149162c4f6fb778481e39ef3c7b5fc3e99e7a4b899bee70b2",
+          "path": "LICENSE"
+        }
+      ],
+      "screening_disposition": "emerging-watchlist",
+      "inspected_license_summary": "Apache-2.0 notice",
+      "cardea_runtime_fit": "not run"
+    }
+  ],
+  "python_packages": [
+    {
+      "name": "dbos",
+      "version": "3.0.0",
+      "requires_python": ">=3.10",
+      "license": "MIT",
+      "source": "https://pypi.org/pypi/dbos/json",
+      "published_at": "2026-09-16T17:14:21.880570Z",
+      "pypi_advisories": []
+    },
+    {
+      "name": "temporalio",
+      "version": "1.33.0",
+      "requires_python": ">=3.10",
+      "license": "MIT",
+      "source": "https://pypi.org/pypi/temporalio/json",
+      "published_at": "2026-09-15T00:52:51.430815Z",
+      "pypi_advisories": []
+    },
+    {
+      "name": "hatchet-sdk",
+      "version": "1.41.0",
+      "requires_python": "<4,>=3.10",
+      "license": "MIT",
+      "source": "https://pypi.org/pypi/hatchet-sdk/json",
+      "published_at": "2026-09-22T16:27:51.498776Z",
+      "pypi_advisories": []
+    },
+    {
+      "name": "absurd-sdk",
+      "version": "0.5.0",
+      "requires_python": ">=3.9",
+      "license": "Apache-2.0",
+      "source": "https://pypi.org/pypi/absurd-sdk/json",
+      "published_at": "2026-08-04T13:06:39.406379Z",
+      "pypi_advisories": []
+    },
+    {
+      "name": "duron",
+      "version": "0.0.3",
+      "requires_python": ">=3.10",
+      "license": "Apache-2.0",
+      "source": "https://pypi.org/pypi/duron/json",
+      "published_at": "2025-11-02T12:59:50.869782Z",
+      "pypi_advisories": []
+    },
+    {
+      "name": "dapr-ext-workflow",
+      "version": "1.18.3",
+      "requires_python": ">=3.10",
+      "license": "Apache-2.0",
+      "source": "https://pypi.org/pypi/dapr-ext-workflow/json",
+      "published_at": "2026-07-15T14:35:12.666408Z",
+      "pypi_advisories": []
+    },
+    {
+      "name": "littlehorse-client",
+      "version": "1.3.0",
+      "requires_python": "<3.14,>=3.10",
+      "license": "Apache 2.0",
+      "source": "https://pypi.org/pypi/littlehorse-client/json",
+      "published_at": "2026-09-11T22:12:16.839673Z",
+      "pypi_advisories": []
+    }
+  ],
+  "method": {
+    "phase": "documentation and release/license screening",
+    "candidate_count": 17,
+    "runtime_tests": "not run",
+    "version_rule": "GitHub designated latest stable, with Hatchet 0.107.2 observed stable patch also screened; SDKs separately recorded",
+    "security_scope": "Package metadata advisory snapshot only; no transitive audit",
+    "source_rule": "Primary upstream docs, README and license files; default-branch contents are not release conformance evidence",
+    "queries": [
+      "open source durable execution workflow engine 2026",
+      "durable execution Python workflow engine Absurd",
+      "workflow engine Restate Hatchet Duron Obelisk Continuum primary sources"
+    ]
+  },
+  "fit_cases": {
+    "F01": "not run",
+    "F02": "not run",
+    "F03": "not run",
+    "F04": "not run",
+    "F05": "not run",
+    "F06": "not run",
+    "F07": "not run",
+    "F08": "not run",
+    "F09": "not run",
+    "F10": "not run",
+    "F11": "not run",
+    "F12": "not run"
+  },
+  "document": "002-workflow-engine-comparison.md"
+}

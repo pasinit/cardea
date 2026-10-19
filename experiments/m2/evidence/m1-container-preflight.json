@@ -1,0 +1,1 @@
+{"eligible_for_fit": false, "errors": ["systemd as PID 1 required", "writable cgroup hierarchy required for the admin fit fixture", "systemd tools and bubblewrap required"], "enforcement_verified": false}

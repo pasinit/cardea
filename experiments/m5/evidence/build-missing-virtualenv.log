@@ -1,0 +1,57 @@
+dpkg-buildpackage: info: source package cardea-kernel
+dpkg-buildpackage: info: source version 0.1.0-1
+dpkg-buildpackage: info: source distribution unstable
+dpkg-buildpackage: info: source changed by Cardea maintainers <maintainers@cardea.invalid>
+ dpkg-source --before-build .
+dpkg-buildpackage: info: host architecture amd64
+ debian/rules clean
+dh clean --with python-virtualenv
+   dh_clean
+ debian/rules binary
+dh binary --with python-virtualenv
+   dh_update_autotools_config
+   dh_autoreconf
+   create-stamp debian/debhelper-build-stamp
+   dh_prep
+   dh_install
+   debian/rules execute_after_dh_install
+make[1]: Entering directory '/opt/cardea-package'
+install -D -m 0755 src/cardea/hosts/launcher.py debian/cardea-kernel/usr/libexec/cardea-host
+make[1]: Leaving directory '/opt/cardea-package'
+   dh_installdocs
+   dh_installchangelogs
+   debian/rules override_dh_virtualenv
+make[1]: Entering directory '/opt/cardea-package'
+dh_virtualenv --python /usr/bin/python3 --skip-install --extra-pip-arg=--no-deps --extra-pip-arg=--only-binary=:all: --extra-pip-arg=--no-compile
+Traceback (most recent call last):
+  File "/usr/bin/dh_virtualenv", line 111, in <module>
+    sys.exit(main() or 0)
+             ~~~~^^
+  File "/usr/bin/dh_virtualenv", line 88, in main
+    deploy.create_virtualenv()
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/usr/lib/python3/dist-packages/dh_virtualenv/deployment.py", line 164, in create_virtualenv
+    subprocess.check_call(virtualenv)
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "/usr/lib/python3.13/subprocess.py", line 414, in check_call
+    retcode = call(*popenargs, **kwargs)
+  File "/usr/lib/python3.13/subprocess.py", line 395, in call
+    with Popen(*popenargs, **kwargs) as p:
+         ~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.13/subprocess.py", line 1039, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                        pass_fds, cwd, env,
+                        ^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+                        gid, gids, uid, umask,
+                        ^^^^^^^^^^^^^^^^^^^^^^
+                        start_new_session, process_group)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.13/subprocess.py", line 1972, in _execute_child
+    raise child_exception_type(errno_num, err_msg, err_filename)
+FileNotFoundError: [Errno 2] No such file or directory: 'virtualenv'
+make[1]: *** [debian/rules:7: override_dh_virtualenv] Error 1
+make[1]: Leaving directory '/opt/cardea-package'
+make: *** [debian/rules:4: binary] Error 2
+dpkg-buildpackage: error: debian/rules binary subprocess returned exit status 2

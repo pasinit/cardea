@@ -1,0 +1,65 @@
+{
+  "casbin": {
+    "html_url": "https://github.com/apache/casbin-pycasbin",
+    "archived": false,
+    "pushed_at": "2026-09-23T06:16:46Z",
+    "updated_at": "2026-09-23T06:16:49Z",
+    "license": {
+      "key": "apache-2.0",
+      "name": "Apache License 2.0",
+      "spdx_id": "Apache-2.0",
+      "url": "https://api.github.com/licenses/apache-2.0",
+      "node_id": "MDc6TGljZW5zZTI="
+    },
+    "release_uploads": [
+      {
+        "filename": "casbin-1.43.0-py3-none-any.whl",
+        "uploaded_at": "2025-05-10T06:57:16.890984Z",
+        "sha256": "63a3d1228870250e859ccd94133fe478821093f71dd37f05e0baa0c6fea26623"
+      },
+      {
+        "filename": "casbin-1.43.0.tar.gz",
+        "uploaded_at": "2025-05-10T06:57:18.902288Z",
+        "sha256": "d2e90ce8e72f912877851e94d37999f32c558c6ba7aba0437d483275262e86e0"
+      }
+    ]
+  },
+  "alembic": {
+    "html_url": "https://github.com/sqlalchemy/alembic",
+    "archived": false,
+    "pushed_at": "2026-09-18T17:57:22Z",
+    "updated_at": "2026-09-23T00:52:37Z",
+    "license": {
+      "key": "mit",
+      "name": "MIT License",
+      "spdx_id": "MIT",
+      "url": "https://api.github.com/licenses/mit",
+      "node_id": "MDc6TGljZW5zZTEz"
+    },
+    "release_uploads": [
+      {
+        "filename": "alembic-1.20.0-py3-none-any.whl",
+        "uploaded_at": "2026-09-11T19:09:12.880981Z",
+        "sha256": "77eb101048d95f982c0353e9233404889dcd7a6fc244c107836c0e2fc9cf7d9d"
+      },
+      {
+        "filename": "alembic-1.20.0.tar.gz",
+        "uploaded_at": "2026-09-11T19:09:11.126570Z",
+        "sha256": "db505480647bc60386c5369402f4a57a506b7539c9e9ef5e270d45cbbe4939bf"
+      }
+    ]
+  },
+  "keycloak": {
+    "html_url": "https://github.com/keycloak/keycloak",
+    "archived": false,
+    "pushed_at": "2026-09-23T08:45:36Z",
+    "updated_at": "2026-09-23T08:45:41Z",
+    "license": {
+      "key": "apache-2.0",
+      "name": "Apache License 2.0",
+      "spdx_id": "Apache-2.0",
+      "url": "https://api.github.com/licenses/apache-2.0",
+      "node_id": "MDc6TGljZW5zZTI="
+    }
+  }
+}

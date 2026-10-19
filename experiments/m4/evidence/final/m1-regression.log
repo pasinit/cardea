@@ -1,0 +1,3 @@
+"/home/user/.local/bin/uv" run --locked --project apps/api pytest -q -c experiments/m1/pytest.ini experiments/m1/tests
+..............................................                           [100%]
+46 passed in 246.34s (0:04:06)

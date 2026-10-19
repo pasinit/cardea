@@ -1,0 +1,10 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.5, pytest-9.0.3, pluggy-1.6.0 -- /opt/cardea-venv/bin/python
+rootdir: /opt/cardea-src/experiments/m3
+plugins: anyio-4.13.0
+collecting ... collected 6 items / 5 deselected / 1 selected
+
+../../opt/cardea-src/experiments/m3/test_integration.py::test_restart_and_input_during_downtime PASSED [100%]
+
+------------- generated xml file: /home/cardea-kernel/m3-live.xml --------------
+================= 1 passed, 5 deselected in 109.40s (0:01:49) ==================

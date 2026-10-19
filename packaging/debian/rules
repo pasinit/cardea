@@ -1,0 +1,29 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@ --with python-virtualenv
+
+override_dh_virtualenv:
+	dh_virtualenv --builtin-venv --python /usr/bin/python3 --skip-install --extra-pip-arg=--no-deps --extra-pip-arg=--only-binary=:all: --extra-pip-arg=--no-compile
+
+override_dh_auto_build:
+
+override_dh_auto_test:
+
+override_dh_installsystemd:
+	dh_installsystemd --no-start --no-enable
+
+override_dh_strip:
+	# Preserve the vendored binary wheels; do not create a separate debug package.
+
+override_dh_strip_nondeterminism:
+	dh_strip_nondeterminism -X/opt/venvs/
+
+override_dh_builddeb:
+	dh_builddeb -- -Zgzip -z6
+
+execute_after_dh_install:
+	install -D -m 0755 src/cardea/hosts/launcher.py debian/cardea-kernel/usr/libexec/cardea-host
+
+execute_after_dh_virtualenv:
+	debian/cardea-kernel/opt/venvs/cardea-kernel/bin/python debian/inventory.py > debian/cardea-kernel/usr/share/doc/cardea-kernel/dependency-inventory.json

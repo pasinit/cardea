@@ -1,0 +1,73 @@
+{
+  "events": 61,
+  "foreign_key_violations": 0,
+  "integrity": "ok",
+  "tasks": [
+    {
+      "created_at": "2026-09-24T00:03:41.416460+00:00",
+      "failure": null,
+      "outputs": 1,
+      "receipt_id": "receipt-5b29c2b300b54e34b4d9f6231083b9aa",
+      "receipt_sha256": "322b077018d4e56e5de18aaeebf923e0f61477467fa88bc6501b3b0f24fe51c5",
+      "request_id": "warmup-0",
+      "state": "succeeded",
+      "supervisor": "supervisor",
+      "task_id": "task-50d12ffea8ac41a9b0b0a5d27fff038e",
+      "updated_at": "2026-09-24T00:03:42.276900+00:00",
+      "verification": true
+    },
+    {
+      "created_at": "2026-09-24T00:03:41.443636+00:00",
+      "failure": null,
+      "outputs": 1,
+      "receipt_id": "receipt-8f2fb706cb7647c28073c36d37e9ac16",
+      "receipt_sha256": "a16f0f52a24d2595b54e15e3afa7a3a26505282c922ca12cf48fe611b1bc98e2",
+      "request_id": "warmup-1",
+      "state": "succeeded",
+      "supervisor": "supervisor",
+      "task_id": "task-be06ce163536486e95efebebd30980a0",
+      "updated_at": "2026-09-24T00:03:42.165920+00:00",
+      "verification": true
+    },
+    {
+      "created_at": "2026-09-24T00:03:41.459559+00:00",
+      "failure": null,
+      "outputs": 1,
+      "receipt_id": "receipt-8b516c274d37411bb4aad88fa459c032",
+      "receipt_sha256": "cb975e3f8b533e8aaddf81a4ca62c3486b866af3de5fb1ec1b8e2b8eb710e2f9",
+      "request_id": "warmup-2",
+      "state": "succeeded",
+      "supervisor": "supervisor",
+      "task_id": "task-8d1b097dd7164a34891af45fba07dc17",
+      "updated_at": "2026-09-24T00:03:42.205243+00:00",
+      "verification": true
+    },
+    {
+      "created_at": "2026-09-24T00:03:41.475972+00:00",
+      "failure": null,
+      "outputs": 1,
+      "receipt_id": "receipt-f5cb241b027a4b2884a44bc13047e6ef",
+      "receipt_sha256": "e2148ce8b983d961f37eabd43ef773d1d0db3c9de3f2e00d5cd8fc3a5ac7862e",
+      "request_id": "warmup-3",
+      "state": "succeeded",
+      "supervisor": "supervisor",
+      "task_id": "task-eaf0ebf914644723b75a7ee68e65cc1b",
+      "updated_at": "2026-09-24T00:03:42.245181+00:00",
+      "verification": true
+    },
+    {
+      "created_at": "2026-09-24T00:03:42.592470+00:00",
+      "failure": null,
+      "outputs": 1,
+      "receipt_id": "receipt-f61d568fd09046cabbae2ce1be3252c1",
+      "receipt_sha256": "20655447d25e09efca3bf71d01f57cdb3365fc4cfd7793ba0265434f44d26b94",
+      "request_id": "retry-shared",
+      "state": "succeeded",
+      "supervisor": "supervisor",
+      "task_id": "task-73227a2192c944489c7efb4b397690de",
+      "updated_at": "2026-09-24T00:03:42.768509+00:00",
+      "verification": true
+    }
+  ],
+  "violations": []
+}

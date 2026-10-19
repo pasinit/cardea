@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling==1.29.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cardea-load"
+version = "0.1.0"
+description = "Independent authenticated Cardea load campaigns, baselines and reports"
+requires-python = ">=3.12"
+dependencies = ["httpx==0.28.1", "psutil==7.2.2", "rfc8785==0.1.4"]
+
+[project.scripts]
+cardea-load = "cardea_load.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8.2", "ruff>=0.6", "mypy>=1.10", "types-psutil>=7.0"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+[tool.mypy]
+python_version = "3.12"
+strict = true
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--tb=short"
+
+[tool.hatch.build.targets.wheel.force-include]
+"uv.lock" = "cardea_load/data/uv.lock"
+"profiles/m1-v1.json" = "cardea_load/data/m1-v1.json"
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "tools", "profiles", "pyproject.toml", "uv.lock", "README.md", "Dockerfile", "build-image.sh"]

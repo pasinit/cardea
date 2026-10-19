@@ -1,0 +1,6 @@
+cd apps/api && "/home/user/.local/bin/uv" run ruff check .
+All checks passed!
+
+> cardea-web@0.1.0 lint
+> eslint .
+

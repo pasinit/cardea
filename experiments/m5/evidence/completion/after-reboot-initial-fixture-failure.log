@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/opt/m5-fixture/operational_acceptance.py", line 367, in <module>
+    run(parser.parse_args().phase)
+    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/m5-fixture/operational_acceptance.py", line 164, in run
+    assert receipt["state"] == "outcome_unknown"
+           ~~~~~~~^^^^^^^^^
+KeyError: 'state'

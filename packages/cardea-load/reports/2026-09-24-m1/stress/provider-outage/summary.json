@@ -1,0 +1,38 @@
+{
+  "accepted": 82,
+  "accepted_p95_ms": 25.051364599999996,
+  "achieved_request_rps": 5.040029914440337,
+  "capacity_rejected": 0,
+  "completion_p50_ms": 60.1135,
+  "completion_p95_ms": 82.19915,
+  "completion_rps": 3.250202649789021,
+  "distinct_credentials_used": 2,
+  "drain_seconds": 0.12621054099145113,
+  "expected_denial": 43,
+  "failures": {},
+  "fault_unavailable": 0,
+  "feeder_errors": [],
+  "http_seconds": 25.10298555400368,
+  "http_success_rps": 3.3047382999815493,
+  "intervention": {
+    "ready": true
+  },
+  "malformed_successes": 0,
+  "name": "provider-outage",
+  "p95_ms": 24.36351,
+  "p99_ms": 33.535749,
+  "passed": true,
+  "peak_fds": 44,
+  "peak_rss_bytes": 178532352,
+  "peak_wal_bytes": 4218912,
+  "rate": 5,
+  "requests": 125,
+  "requests_per_configured_second": 5.0,
+  "seconds": 25,
+  "states": {
+    "succeeded": 82
+  },
+  "total_seconds": 25.22919609499513,
+  "unexpected_error": 0,
+  "violations": []
+}

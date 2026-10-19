@@ -1,0 +1,259 @@
+{
+  "prior_receipts_digest": "0ea7d2d9b1627ea79ca75f8665b768567f22c4b97047e1c6cca02532b0de6a21",
+  "prior_task": "task-10309d203254497c834d9a195746eaa1",
+  "upgrade_preserved_receipts": true,
+  "wait_task": "task-35821f3f361f426dab9cc7b07e13ed35",
+  "wait_receipt": {
+    "schema_version": "0.2",
+    "digest_format": "legacy-v0.1",
+    "receipt": {
+      "schema_version": "0.1",
+      "receipt_id": "receipt-8f2ba040cd8e4f6badb457b57570cf39",
+      "request": {
+        "schema_version": "0.1",
+        "operation_id": "publish",
+        "task_id": "task-35821f3f361f426dab9cc7b07e13ed35",
+        "subject_id": "agent-a",
+        "name": "objects.write",
+        "resource": {
+          "schema_version": "0.1",
+          "namespace": "test",
+          "resource_id": "task-35821f3f361f426dab9cc7b07e13ed35.output"
+        },
+        "arguments": {
+          "expected_version": 0,
+          "content": {
+            "m5": "wait"
+          }
+        },
+        "deadline": "2026-09-25T04:29:56.860090Z"
+      },
+      "request_digest": "8df96e11520a4ec059c16f7382a49415e1d706ca4fee894996fec4ee6bfc5c1a",
+      "grant_ids": [
+        "grant-task-35821f3f361f426dab9cc7b07e13ed35"
+      ],
+      "retry_class": "idempotent",
+      "state": "succeeded",
+      "revision": 2,
+      "created_at": "2026-09-25T03:29:57.175543Z",
+      "updated_at": "2026-09-25T03:29:57.191101Z",
+      "usage": {
+        "schema_version": "0.1",
+        "steps": 0,
+        "model_calls": 0,
+        "model_tokens": 0,
+        "tool_milliseconds": 0,
+        "output_bytes": 0
+      },
+      "result": {
+        "artifact": {
+          "schema_version": "0.1",
+          "namespace": "test",
+          "resource_id": "task-35821f3f361f426dab9cc7b07e13ed35.output",
+          "version": 1,
+          "content_digest": "00dc0765db76b1158e98182d472b7c4bbf25dc935a828a7db1ea5101f7f31be4"
+        }
+      },
+      "failure": null,
+      "reconciliation_evidence": []
+    }
+  },
+  "host_task": "task-6777f8f4aa3d4c1d93bb80bb083773f9",
+  "boot_before": "9e7322b3-50ba-4b5e-b896-aedb60174cb7",
+  "boot_after": "aa3d52ed-9980-435f-92f8-ab0d2e6086e4",
+  "interrupted_receipt": {
+    "schema_version": "0.2",
+    "digest_format": "legacy-v0.1",
+    "receipt": {
+      "schema_version": "0.1",
+      "receipt_id": "receipt-9328489fa0b44069b4e004616aa3cf28",
+      "request": {
+        "schema_version": "0.1",
+        "operation_id": "execute",
+        "task_id": "task-6777f8f4aa3d4c1d93bb80bb083773f9",
+        "subject_id": "agent-a",
+        "name": "host.sha256",
+        "resource": {
+          "schema_version": "0.1",
+          "namespace": "test",
+          "resource_id": "task-6777f8f4aa3d4c1d93bb80bb083773f9"
+        },
+        "arguments": {
+          "payload": {
+            "m5": "interrupt"
+          },
+          "reserved_tool_milliseconds": 10000,
+          "reserved_output_bytes": 65536,
+          "host_profile": "debian-local-v1",
+          "launcher_sha256": "6556969d50c19830bbf484cb7472d263b5590defb4b32d1df03db45a395d699b",
+          "policy_revision": "3"
+        },
+        "deadline": "2026-09-25T04:29:57.927839Z"
+      },
+      "request_digest": "978321141267c43b97f227268b6ea1b21074840170d24d7a8fed491d2712c3fd",
+      "grant_ids": [
+        "grant-task-6777f8f4aa3d4c1d93bb80bb083773f9"
+      ],
+      "retry_class": "reconciliation_required",
+      "state": "outcome_unknown",
+      "revision": 2,
+      "created_at": "2026-09-25T03:29:59.302898Z",
+      "updated_at": "2026-09-25T03:31:39.821273Z",
+      "usage": {
+        "schema_version": "0.1",
+        "steps": 0,
+        "model_calls": 0,
+        "model_tokens": 0,
+        "tool_milliseconds": 0,
+        "output_bytes": 0
+      },
+      "result": null,
+      "failure": {
+        "schema_version": "0.1",
+        "code": "worker_lost",
+        "message": "Worker lease expired.",
+        "retryable": false,
+        "details": {}
+      },
+      "reconciliation_evidence": []
+    }
+  },
+  "wait_resumed_after_machine_reboot": true,
+  "online_diagnostics": {
+    "format": "cardea-diagnostics-v1",
+    "versions": {
+      "dbos": "3.0.0",
+      "alembic": "1.20.0",
+      "a2a-sdk": "1.1.5",
+      "mcp": "2.2.0"
+    },
+    "profiles": {
+      "host_configured": true,
+      "model_configured": false
+    },
+    "checks": {
+      "schema": "ok",
+      "database": "readable",
+      "service": "running",
+      "host": "verified"
+    },
+    "task_counts": {
+      "queued": 0,
+      "running": 0,
+      "waiting": 0,
+      "suspended": 0,
+      "succeeded": 5,
+      "failed": 1,
+      "cancelled": 0
+    },
+    "new_namespace_prefix": null,
+    "ready": true
+  },
+  "snapshot_receipts_digest": "a03b9e6f21d17815b9ed90ab35446d151fe0e465785c2c9627257e5afc18cf8a",
+  "snapshot_verified": {
+    "schema": "m5_001",
+    "tasks": 6,
+    "objects": 10,
+    "integrity": "ok"
+  },
+  "post_snapshot_task": "task-06784c18f333422c91b5732642fa204e",
+  "recovery": {
+    "new_namespace_prefix": "r7fb4a3b429b14466ac15aa6cb9da2621.",
+    "source_sha256": "d7dcc58109c564f3a63ba4e54a4ed5163c52584a22e2dae5c3ace371c96a8a71"
+  },
+  "restore_verified": {
+    "schema": "m5_001",
+    "tasks": 6,
+    "objects": 10,
+    "integrity": "ok"
+  },
+  "offline_diagnostics": {
+    "format": "cardea-diagnostics-v1",
+    "versions": {
+      "dbos": "3.0.0",
+      "alembic": "1.20.0",
+      "a2a-sdk": "1.1.5",
+      "mcp": "2.2.0"
+    },
+    "profiles": {
+      "host_configured": true,
+      "model_configured": false
+    },
+    "checks": {
+      "schema": "ok",
+      "database": "readable",
+      "service": "stopped",
+      "host": "verified"
+    },
+    "task_counts": {
+      "queued": 0,
+      "running": 0,
+      "waiting": 0,
+      "suspended": 0,
+      "succeeded": 5,
+      "failed": 1,
+      "cancelled": 0
+    },
+    "new_namespace_prefix": "r7fb4a3b429b14466ac15aa6cb9da2621.",
+    "ready": false
+  },
+  "fresh_delegation": {
+    "schema_version": "0.2",
+    "artifact": {
+      "schema_version": "0.1",
+      "namespace": "r7fb4a3b429b14466ac15aa6cb9da2621.acceptance",
+      "resource_id": "task-2bd6af0dc394416299a4cf6dfd0cff83.output",
+      "version": 1,
+      "content_digest": "d1cba579402bd54c4a21d5fe8bc936d88b2381e887546827f92a169c152f47cf"
+    },
+    "content": {
+      "children": [
+        {
+          "artifact": {
+            "content_digest": "05ff8d6d12069f091557241eec48eb77a10a1f56bb9e9bcd5ce360a28f5f9a59",
+            "namespace": "r7fb4a3b429b14466ac15aa6cb9da2621.acceptance",
+            "resource_id": "task-4df2907f5cc94ac7a93143a5de5fd169.output",
+            "schema_version": "0.1",
+            "version": 1
+          },
+          "slot": 0,
+          "state": "succeeded",
+          "task_id": "task-4df2907f5cc94ac7a93143a5de5fd169"
+        },
+        {
+          "artifact": {
+            "content_digest": "8a2c72c03eaec7cc2eb7ae354f7f265ebe39f6d0c69cbe0650b5f5b15b789f3a",
+            "namespace": "r7fb4a3b429b14466ac15aa6cb9da2621.acceptance",
+            "resource_id": "task-a6b26a9b04bf4b8d984d975196e45ac0.output",
+            "schema_version": "0.1",
+            "version": 1
+          },
+          "slot": 1,
+          "state": "succeeded",
+          "task_id": "task-a6b26a9b04bf4b8d984d975196e45ac0"
+        }
+      ],
+      "usage": {
+        "active_operations": 0,
+        "children": 2,
+        "output_bytes": 144,
+        "tool_milliseconds": 1527
+      },
+      "verified_children": 2
+    }
+  },
+  "restored_old_scope_denied": true,
+  "fresh_scope_verified": true,
+  "retention": {
+    "apply": true,
+    "eligible": 4,
+    "retained": 2,
+    "backups": [
+      "before-migration-ddefc31161854d98a84eb8629a2f687a.sqlite3",
+      "before-migration-ac3d242647774b85be53e0b65d58570d.sqlite3",
+      "before-migration-229e805714fc406bbda7b598f4ec6d32.sqlite3",
+      "before-migration-dce668261d734b1bbe01f8ad00ec9b8b.sqlite3"
+    ]
+  },
+  "installed_corruption_and_restore_faults": true
+}

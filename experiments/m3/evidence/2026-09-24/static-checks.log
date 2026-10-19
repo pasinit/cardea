@@ -1,0 +1,32 @@
+cd apps/api && "/home/user/.local/bin/uv" run ruff check .
+All checks passed!
+
+> cardea-web@0.1.0 lint
+> eslint .
+
+cd apps/api && "/home/user/.local/bin/uv" run mypy src tests
+Success: no issues found in 88 source files
+
+> cardea-web@0.1.0 typecheck
+> tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json
+
+"/home/user/.local/bin/uv" run --locked --project packages/cardea-load pytest packages/cardea-load/tests
+============================= test session starts ==============================
+platform darwin -- Python 3.13.14, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/user/src/cardea/packages/cardea-load
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 18 items
+
+packages/cardea-load/tests/test_agent.py .....                           [ 27%]
+packages/cardea-load/tests/test_metrics.py .............                 [100%]
+
+============================== 18 passed in 0.04s ==============================
+"/home/user/.local/bin/uv" run --locked --project packages/cardea-load ruff check packages/cardea-load
+All checks passed!
+"/home/user/.local/bin/uv" run --locked --project packages/cardea-load mypy packages/cardea-load/src packages/cardea-load/tests packages/cardea-load/tools
+Success: no issues found in 13 source files
+"/home/user/.local/bin/uv" run --locked --project apps/api ruff check --config apps/api/pyproject.toml experiments/m3
+All checks passed!
+"/home/user/.local/bin/uv" run --locked --project apps/api mypy --follow-imports=silent --ignore-missing-imports --check-untyped-defs experiments/m3
+Success: no issues found in 4 source files

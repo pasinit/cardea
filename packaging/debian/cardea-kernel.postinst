@@ -1,0 +1,35 @@
+#!/bin/sh
+set -eu
+if [ "$1" = configure ]; then
+    for account in cardea-kernel cardea-worker; do
+        if ! getent passwd "$account" >/dev/null; then
+            adduser --system --group --no-create-home --home /nonexistent "$account"
+        fi
+        test "$(id -u "$account")" != 0
+    done
+    test "$(id -u cardea-kernel)" != "$(id -u cardea-worker)"
+    install -d -o root -g cardea-kernel -m 0750 /etc/cardea
+    install -d -o cardea-kernel -g cardea-kernel -m 0700 /var/lib/cardea
+    install -d -o root -g root -m 0700 /var/lib/cardea-host
+    python3 -I - <<'PY'
+import json, os, pwd
+from pathlib import Path
+p = Path('/etc/cardea-host.json')
+expected = {'kernel_uid': pwd.getpwnam('cardea-kernel').pw_uid}
+if p.exists() or p.is_symlink():
+    info = p.lstat()
+    import stat
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+        raise SystemExit('Unsafe existing host helper configuration')
+    if json.loads(p.read_text()) != expected:
+        raise SystemExit('Existing host helper identity differs; operator reconciliation required')
+else:
+    fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    with os.fdopen(fd, 'w') as stream:
+        json.dump(expected, stream)
+        stream.write('\n')
+PY
+    chmod 0440 /etc/sudoers.d/cardea-host
+    visudo -cf /etc/sudoers.d/cardea-host
+fi
+#DEBHELPER#

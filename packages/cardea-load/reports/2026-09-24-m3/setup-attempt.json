@@ -1,0 +1,7 @@
+{
+  "stage": "environment inventory before task submission",
+  "admitted_tasks": 0,
+  "error": "systemd executable not on Debian PATH",
+  "resolution": "query systemctl --version; rerun in fresh output directory",
+  "measured_campaign": "separate verified reference and comparison"
+}

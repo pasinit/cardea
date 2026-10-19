@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="156.064" timestamp="2026-09-24T18:51:04.865856+00:00" hostname="cardea-m2-fit"><testcase classname="test_integration" name="test_restart_and_input_during_downtime" time="134.951"><failure message="AssertionError: ('running', '')">service = &lt;test_integration.AgentLab object at 0x7ffad4620440&gt;
+
+    def test_restart_and_input_during_downtime(service):
+        process = service.start()
+        task = submit(service)
+&gt;       service.wait_state(task, "waiting", timeout=90)
+
+/opt/cardea-src/experiments/m3/test_integration.py:180: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/opt/cardea-src/experiments/m1/harness.py:102: in wait_state
+    wait_for(reached, timeout)
+/opt/cardea-src/experiments/m1/harness.py:30: in wait_for
+    return check()
+           ^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def reached() -&gt; None:
+        state = self.client.inspect(task_id).task.state.value
+&gt;       assert state == expected, (state, self.logs())
+               ^^^^^^^^^^^^^^^^^
+E       AssertionError: ('running', '')
+
+/opt/cardea-src/experiments/m1/harness.py:101: AssertionError</failure></testcase></testsuite></testsuites>
