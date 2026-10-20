@@ -25,13 +25,12 @@ import re
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import asdict
 from typing import Any
 
 from pydantic import JsonValue
 
 from cardea.hosts.debian import WorkerHost
-from cardea.runtime.agent_session import SessionRequest, SessionResult
+from cardea.runtime.harness import HarnessRequest, HarnessResult
 from cardea.service.database import Fault
 from cardea.service.operations import (
     ConfinedExecutor,
@@ -326,32 +325,49 @@ class ConfinedAgentSession:
     def reap(self, job_key: str) -> None:
         self.workers.reap(self.job(job_key))
 
-    async def run(self, request: SessionRequest) -> SessionResult:
+    async def run(self, request: HarnessRequest) -> HarnessResult:
         try:
             self.check()
             output = await self.workers.run(
                 self.job(request.job_key or request.mcp_token),
-                {"model": self.model, "request": asdict(request)},
+                {
+                    "model": request.model or self.model,
+                    "request": request.model_dump(
+                        mode="json", exclude={"model"}, exclude_none=True
+                    ),
+                },
                 profile=self.profile,
                 worker=self.worker,
                 deadline=time.time() + max(1.0, request.timeout_seconds),
             )
         except Fault as refused:
-            return SessionResult(text="", is_error=True, stop_reason=refused.code)
+            return HarnessResult.failed(refused.code)
         except ExecutorBusy:
-            return SessionResult(text="", is_error=True, stop_reason="executor_busy")
+            return HarnessResult.failed("executor_busy")
         except OperationRejected:
-            return SessionResult(text="", is_error=True, stop_reason="worker_not_started")
+            return HarnessResult.failed("worker_not_started")
         except WorkerFailed as failed:
-            return SessionResult(text="", is_error=True, stop_reason=failed.code)
+            return HarnessResult.failed(failed.code)
         try:
-            return SessionResult(
-                text=str(output.get("text", "")),
-                is_error=bool(output.get("is_error", True)),
-                cost_usd=float(output["cost_usd"]) if output.get("cost_usd") is not None else None,
-                turns=int(output.get("turns", 0)),
-                stop_reason=str(output.get("stop_reason", ""))[:128],
-                usage=dict(output.get("usage") or {}),
-            )
-        except (TypeError, ValueError):
-            return SessionResult(text="", is_error=True, stop_reason="worker_output_invalid")
+            fields = {
+                key: output[key]
+                for key in (
+                    "text",
+                    "success",
+                    "is_error",
+                    "turns",
+                    "cost_usd",
+                    "failure_reason",
+                    "stop_reason",
+                    "usage",
+                )
+                if output.get(key) is not None
+            }
+            fields.setdefault("text", "")
+            if "success" not in fields:
+                fields.setdefault("is_error", True)
+            if isinstance(fields.get("stop_reason"), str):
+                fields["stop_reason"] = fields["stop_reason"][:128]
+            return HarnessResult.model_validate(fields)
+        except (AttributeError, TypeError, ValueError):
+            return HarnessResult.failed("worker_output_invalid")

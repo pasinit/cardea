@@ -12,10 +12,10 @@ import asyncio
 import json
 import os
 import sys
-from dataclasses import asdict
 from pathlib import Path
 
-from cardea.runtime.agent_session import ClaudeAgentSession, SessionRequest
+from cardea.runtime.agent_session import ClaudeAgentSession
+from cardea.runtime.harness import HarnessRequest
 
 MAX_INPUT = 131072
 
@@ -31,8 +31,8 @@ def main() -> int:
     else:
         print("unknown credential kind", file=sys.stderr)
         return 2
-    result = asyncio.run(session.run(SessionRequest(**document["request"])))
-    print(json.dumps({"output": asdict(result)}))
+    result = asyncio.run(session.run(HarnessRequest.model_validate(document["request"])))
+    print(json.dumps({"output": result.model_dump(mode="json")}))
     return 0
 
 

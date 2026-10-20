@@ -31,7 +31,7 @@ from cardea.kernel.models import (
     VerificationRecord,
 )
 from cardea.kernel.store import KernelTransaction
-from cardea.runtime.agent_session import SessionRequest, SessionResult
+from cardea.runtime.harness import HarnessRequest, HarnessResult
 from cardea.service import invocation
 from cardea.service.confined import ConfinedAgentSession, WorkerFailed
 from cardea.service.database import Fault, borrow
@@ -96,6 +96,11 @@ def context_block(name: str, outcome: Outcome) -> str:
     data = json.dumps(outcome.output, sort_keys=True, ensure_ascii=False)
     data = data.replace("<", "\\u003c").replace(">", "\\u003e")
     return f'<context operation="{name}" status="ok">{data}</context>'
+
+
+def _reason(result: HarnessResult) -> str:
+    """Why an attempt did not complete: its failure reason, else the harness's stop detail."""
+    return result.failure_reason or result.stop_reason
 
 
 def attempt_lease_seconds(request: AgentRunRequest) -> float:
@@ -354,10 +359,10 @@ class AgentRunRuntime:
 
     def _attempt(
         self, task_id: str, request: AgentRunRequest, lease: DispatchLease, attempt: int
-    ) -> SessionResult:
+    ) -> HarnessResult:
         session = self.kernel.session
         if session is None:
-            return SessionResult(text="", is_error=True, stop_reason="agent_disabled")
+            return HarnessResult.failed("agent_disabled")
         with self.kernel.database.engine.begin() as conn, borrow(conn) as tx:
             journal = self._journal(tx, task_id)
         tools = []
@@ -377,7 +382,7 @@ class AgentRunRuntime:
             (lease.expires_at - now()).total_seconds() - LEASE_MARGIN,
         )
         with ToolEndpoint(tools, call) as endpoint:
-            session_request = SessionRequest(
+            session_request = HarnessRequest(
                 system_prompt=self._system_prompt(request),
                 prompt=self._prompt(request, attempt, journal, context),
                 mcp_url=endpoint.url,
@@ -390,7 +395,7 @@ class AgentRunRuntime:
             )
             return asyncio.run(self._supervise(task_id, session_request))
 
-    async def _supervise(self, task_id: str, request: SessionRequest) -> SessionResult:
+    async def _supervise(self, task_id: str, request: HarnessRequest) -> HarnessResult:
         session = self.kernel.session
         assert session is not None
         running = asyncio.ensure_future(session.run(request))
@@ -401,12 +406,12 @@ class AgentRunRuntime:
                 if done:
                     return running.result()
                 if time.monotonic() >= deadline:
-                    return SessionResult(text="", is_error=True, stop_reason="attempt_timeout")
+                    return HarnessResult.failed("attempt_timeout")
                 if self._cancel_requested(task_id):
-                    return SessionResult(text="", is_error=True, stop_reason="cancel_requested")
+                    return HarnessResult.failed("cancel_requested")
         except Exception as error:
             log.exception("agent session failed", extra={"task_id": task_id})
-            return SessionResult(text="", is_error=True, stop_reason=type(error).__name__)
+            return HarnessResult.failed(type(error).__name__)
         finally:
             if not running.done():
                 running.cancel()
@@ -599,7 +604,7 @@ class AgentRunRuntime:
         request: AgentRunRequest,
         lease: DispatchLease,
         attempt: int,
-        result: SessionResult,
+        result: HarnessResult,
     ) -> str:
         with self.kernel.database.engine.begin() as conn, borrow(conn) as tx:
             task = tx.get_task(task_id)
@@ -616,7 +621,7 @@ class AgentRunRuntime:
             ):
                 # An effect may have happened: the run waits for its lease and is fenced.
                 return "uncertain"
-            if result.stop_reason == "cancel_requested":
+            if result.failure_reason == "cancel_requested":
                 tx.change_task(
                     task_id,
                     TaskState.CANCELLED,
@@ -641,9 +646,7 @@ class AgentRunRuntime:
                     tx, task, request, lease, attempt, result, self._calls(tx, task_id)
                 )
             if unmet and not result.is_error:
-                result = SessionResult(
-                    text=result.text, is_error=True, stop_reason="expectation_unmet"
-                )
+                result = HarnessResult.failed("expectation_unmet", text=result.text)
             if attempt < request.max_attempts and now() < task.limits.deadline:
                 at = now()
                 tx.change_task(
@@ -656,7 +659,7 @@ class AgentRunRuntime:
                         checkpoint_id=f"checkpoint-{task_id}-{attempt}-end",
                         task_id=task_id,
                         saved_at=at,
-                        state={"attempt": attempt, "last_stop": result.stop_reason[:64]},
+                        state={"attempt": attempt, "last_stop": _reason(result)[:64]},
                     ),
                 )
                 return "retry"
@@ -668,9 +671,9 @@ class AgentRunRuntime:
                 at=now(),
                 failure=KernelFailure(
                     code="expectation_unmet"
-                    if result.stop_reason == "expectation_unmet"
+                    if result.failure_reason == "expectation_unmet"
                     else "session_failed",
-                    message=f"Agent session did not finish: {result.stop_reason[:120]}",
+                    message=f"Agent session did not finish: {_reason(result)[:120]}",
                 ),
             )
             return "failed"
@@ -697,7 +700,7 @@ class AgentRunRuntime:
         request: AgentRunRequest,
         lease: DispatchLease,
         attempt: int,
-        result: SessionResult,
+        result: HarnessResult,
         calls: list[OperationReceipt],
     ) -> str:
         summary = [
