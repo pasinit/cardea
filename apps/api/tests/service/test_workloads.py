@@ -200,6 +200,25 @@ def test_template_is_checked_against_the_live_ceiling(kernel: Kernel, clock: Clo
     assert response.status_code == 403, response.text
 
 
+def test_trigger_templates_obey_the_configured_task_request_cap(
+    kernel: Kernel, clock: Clock
+) -> None:
+    long = routine_spec(template=template(instructions="Follow the house style. " * 1300))
+    client = TestClient(create_app(kernel, max_request_bytes=131072))
+    refused = put(client, long)
+    assert refused.status_code == 413 and refused.json()["code"] == "request_too_large"
+    with pytest.raises(Fault) as provisioned:
+        provision(kernel.database, document(triggers=(long,)), kernel.operations)
+    assert provisioned.value.code == "request_too_large"
+    # The host owner raises the cap: supervisor and host-owned triggers both install and admit.
+    kernel.max_task_request_bytes = 65536
+    assert put(client, long).status_code == 200
+    host = long.model_copy(update={"trigger_id": "host-long"})
+    provision(kernel.database, document(triggers=(host,)), kernel.operations, 65536)
+    clock.now = datetime(2026, 10, 1, 7, 30, 30, tzinfo=UTC)
+    assert Scheduler(kernel, clock).tick() == {"host-long": "admitted", "loft-search": "admitted"}
+
+
 def test_provisioning_keeps_supervisor_triggers_and_owners_are_exclusive(
     kernel: Kernel, clock: Clock
 ) -> None:
@@ -228,25 +247,6 @@ def test_supervisor_removes_only_its_own_triggers(kernel: Kernel, clock: Clock) 
     provision(kernel.database, document(triggers=(host,)), kernel.operations)
     refused = client.delete("/v0.2/triggers/host-owned", headers=HEADERS)
     assert refused.status_code == 409
-
-
-def test_trigger_templates_obey_the_configured_task_request_cap(
-    kernel: Kernel, clock: Clock
-) -> None:
-    long = routine_spec(template=template(instructions="Follow the house style. " * 1300))
-    client = TestClient(create_app(kernel, max_request_bytes=131072))
-    refused = put(client, long)
-    assert refused.status_code == 413 and refused.json()["code"] == "request_too_large"
-    with pytest.raises(Fault) as provisioned:
-        provision(kernel.database, document(triggers=(long,)), kernel.operations)
-    assert provisioned.value.code == "request_too_large"
-    # The host owner raises the cap: supervisor and host-owned triggers both install and admit.
-    kernel.max_task_request_bytes = 65536
-    assert put(client, long).status_code == 200
-    host = long.model_copy(update={"trigger_id": "host-long"})
-    provision(kernel.database, document(triggers=(host,)), kernel.operations, 65536)
-    clock.now = datetime(2026, 10, 1, 7, 30, 30, tzinfo=UTC)
-    assert Scheduler(kernel, clock).tick() == {"host-long": "admitted", "loft-search": "admitted"}
 
 
 # Expectations
