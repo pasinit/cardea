@@ -220,8 +220,31 @@ class Crash(BaseException):
     pass
 
 
+class LeaseClock:
+    """The runtime's clock: real time plus an offset the test advances.
+
+    A crashing round runs under a long lease, so a slow machine can never expire it
+    mid-round; the test then moves past the lease instead of sleeping until it expires.
+    """
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.offset = timedelta()
+        monkeypatch.setattr(agent_runtime, "LEASE_SECONDS", 60)
+        monkeypatch.setattr(agent_runtime, "now", lambda: now() + self.offset)
+
+    def expire_lease(self) -> None:
+        self.offset += timedelta(seconds=61)
+
+
+@pytest.fixture
+def clock(monkeypatch: pytest.MonkeyPatch) -> LeaseClock:
+    return LeaseClock(monkeypatch)
+
+
 @pytest.mark.parametrize("stage", ["agent.model.settle_committed", "agent.publish_committed"])
-def test_committed_progress_resumes_without_model_replay(kernel: Kernel, stage: str) -> None:
+def test_committed_progress_resumes_without_model_replay(
+    kernel: Kernel, clock: LeaseClock, stage: str
+) -> None:
     task = submit(kernel)
 
     def fault(current: str) -> None:
@@ -232,6 +255,7 @@ def test_committed_progress_resumes_without_model_replay(kernel: Kernel, stage: 
     with pytest.raises(Crash):
         execute(kernel, task)
     kernel.fault = lambda _: None
+    clock.expire_lease()
     assert execute(kernel, task) == "waiting"
     assert cast(Model, kernel.model).calls == 1
     assert cast(Host, kernel.host).starts == 1
@@ -240,7 +264,7 @@ def test_committed_progress_resumes_without_model_replay(kernel: Kernel, stage: 
 @pytest.mark.parametrize(
     "stage", ["agent.model.intent_committed", "agent.tool.intent_committed", "agent.tool.started"]
 )
-def test_unknown_intent_never_replayed(kernel: Kernel, stage: str) -> None:
+def test_unknown_intent_never_replayed(kernel: Kernel, clock: LeaseClock, stage: str) -> None:
     task = submit(kernel)
 
     def fault(current: str) -> None:
@@ -252,6 +276,7 @@ def test_unknown_intent_never_replayed(kernel: Kernel, stage: str) -> None:
         execute(kernel, task)
     calls, starts = cast(Model, kernel.model).calls, cast(Host, kernel.host).starts
     kernel.fault = lambda _: None
+    clock.expire_lease()
     assert execute(kernel, task) == "failed"
     assert cast(Model, kernel.model).calls == calls and cast(Host, kernel.host).starts == starts
     with kernel.database.engine.begin() as conn:
