@@ -21,6 +21,13 @@
 - **Certificate rotation needs a restart.** The private CA's key must be kept offline.
 - **Memory is unmeasured.** Cardea, SPIRE and a Claude session together on 2 GB is the target; measure with real routine runs before relying on it, and use a 4 GB VM otherwise.
 - **Confined workers are documented but not yet run here.** The kit's section 4 enables ADR-028 workers for the session and browser profiles. It covers bubblewrap, the helper from the same commit with its sudoers rule, `cardea-worker`, `/etc/cardea-host-workers.json` with per-profile concurrency, a Squid egress proxy and a kernel unit drop-in. It still needs Debian acceptance.
+- **The egress proxy is a complete `squid.conf`, never a `conf.d` snippet.** On the real host, a snippet in `/etc/squid/conf.d/` enforced nothing: Debian's default `squid.conf` allows every destination for loopback clients before it reads `conf.d`, and it listens on a wildcard port 3128. Unlisted hosts returned 200 through the proxy. The kit now replaces the default file with a standalone configuration that has:
+  - only the profile ports, on explicit loopback addresses;
+  - one allow rule per profile, for that profile's port and hosts;
+  - denials of loopback and link-local destinations;
+  - a final `deny all`.
+
+  `test_deploy_examples.py` asserts that the file has no `include`, no localhost allow, no wildcard port and that its last rule is `deny all`.
 
 ## Verification
 

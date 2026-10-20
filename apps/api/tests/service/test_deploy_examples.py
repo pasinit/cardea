@@ -87,7 +87,34 @@ def test_proxy_enforces_the_same_hosts_as_each_profile() -> None:
         assert f"http_port {network['proxy']} name={name}" in squid
         listed = re.search(rf"^acl {name}_hosts dstdomain (.+)$", squid, re.MULTILINE)
         assert listed is not None and listed.group(1).split() == network["hosts"]
-    assert squid.rstrip().endswith("http_access deny all\ncache deny all")
+
+
+def test_proxy_config_is_standalone_and_denies_by_default() -> None:
+    """The kit replaces Debian's squid.conf, whose localhost allow and wildcard port would
+    otherwise relay every destination for loopback clients."""
+    lines = [
+        line.strip()
+        for line in (KIT / "cardea" / "squid-workers.conf").read_text().splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    assert not [line for line in lines if line.split()[0] == "include"]
+    assert not [line for line in lines if "localhost" in line and "allow" in line]
+    ports = [line for line in lines if line.startswith("http_port")]
+    assert ports
+    for line in ports:
+        match = re.fullmatch(r"http_port (127\.\d+\.\d+\.\d+):(\d+) name=([a-z][a-z0-9-]*)", line)
+        assert match is not None, line  # explicit loopback address, never a wildcard
+        assert match.group(1) != "127.0.0.1", line  # the tool endpoints' address
+    for line in lines:
+        assert not line.startswith(("https_port", "icp_port 3130", "snmp_port")), line
+    access = [line for line in lines if line.startswith("http_access")]
+    allows = [line for line in access if line.startswith("http_access allow")]
+    for line in allows:
+        assert re.fullmatch(r"http_access allow ([a-z][a-z0-9-]*)_port \1_hosts", line), line
+    first_allow = access.index(allows[0])
+    for rule in ("deny to_localhost", "deny to_linklocal", "deny CONNECT !tls_port"):
+        assert access.index(f"http_access {rule}") < first_allow
+    assert access[-1] == "http_access deny all"
 
 
 def test_kernel_drop_in_allows_the_sudo_helper() -> None:

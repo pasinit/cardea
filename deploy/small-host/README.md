@@ -93,7 +93,7 @@ Edit `provision.telos.json` first: one `telos-<user>` namespace per Telos user, 
 
 Without this section, sessions and installed operations run inside the kernel's own service cgroup with no egress limit. ADR-028 confines each one in a systemd transient unit plus bubblewrap. Debian enforcement is still to be verified (ADR-028).
 
-1. Packages and user: `apt install bubblewrap squid`, then create a locked `cardea-worker` system user. The helper refuses a setuid `bwrap` and checks the exact systemd and bubblewrap package versions.
+1. Packages and user: `apt install bubblewrap squid`, then `systemctl stop squid` at once. Debian's default configuration relays anything for loopback clients until step 4 replaces it. Create a locked `cardea-worker` system user. The helper refuses a setuid `bwrap` and checks the exact systemd and bubblewrap package versions.
 2. The root helper, **from the same commit as `/opt/cardea`**. The kernel compares the helper's SHA-256 with its own copy and refuses to start on a mismatch:
 
 ```sh
@@ -109,7 +109,26 @@ chmod 0440 /etc/sudoers.d/cardea-host && visudo -cf /etc/sudoers.d/cardea-host
    - The `browser` profile runs browser operations. Set its `hosts` to the sites they need.
    - `concurrency` bounds how many workers of a profile run at once. JIT profiles default to 1.
    - Worker paths depend on the operations package. A browser needs its browser build bound read-only under `/opt/`.
-4. The egress proxy for networked profiles: install `cardea/squid-workers.conf` as `/etc/squid/conf.d/cardea-workers.conf` and restart squid. Keep its host lists identical to the profiles' `hosts`. The proxy is what enforces them, and units can reach only the proxy's address.
+4. The egress proxy for networked profiles. `cardea/squid-workers.conf` is a **complete** `squid.conf`. It replaces Debian's default, and is not a `conf.d` snippet. The default allows every destination for loopback clients (`http_access allow localhost`) before it reads `conf.d`, and it also listens on a wildcard port 3128, so an allow-list placed in `conf.d` is bypassed. Keep the file's host lists identical to the profiles' `hosts`. The proxy is what enforces them, and units can reach only the proxy's address.
+
+```sh
+cp -a /etc/squid/squid.conf /etc/squid/squid.conf.debian-default
+install -o root -g root -m 0644 cardea/squid-workers.conf /etc/squid/squid.conf
+squid -k parse -f /etc/squid/squid.conf
+systemctl restart squid
+```
+
+   Check that only the profile ports listen and that only listed hosts pass, each through its own profile's port:
+
+```sh
+ss -ltnp | grep squid    # only 127.0.10.1:3128 and 127.0.10.2:3128
+P=http://127.0.10.1:3128 # the browser profile's proxy
+curl -s -o /dev/null -w '%{http_code}\n' -x $P https://www.example.org/  # 200 (listed)
+curl -s -o /dev/null -w '%{http_code}\n' -x $P http://example.com/       # 403 (unlisted)
+curl -s -o /dev/null -w '%{http_connect}\n' -x $P https://example.com/   # 403 (unlisted)
+curl -s -o /dev/null -w '%{http_connect}\n' -x $P https://api.anthropic.com/  # 403 (another profile's host)
+curl -s -x http://127.0.0.1:3128 https://www.example.org/ || echo refused  # refused: no default port
+```
 5. Let the kernel use the helper: install the drop-in `cardea/cardea-kernel.service.d/host-execution.conf` as `/etc/systemd/system/cardea-kernel.service.d/host-execution.conf`. It drops `NoNewPrivileges` (sudo needs it) and makes `/var/lib/cardea-host` writable inside the unit's read-only file system.
 6. Switch `/etc/cardea/config.json` to `cardea/config.confined.json`: `host_execution: true` and a confined `agent_session` that holds no credential itself. Then run `systemctl daemon-reload && systemctl restart cardea-kernel`.
 
