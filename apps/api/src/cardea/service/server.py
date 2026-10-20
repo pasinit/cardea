@@ -19,6 +19,7 @@ from starlette.types import ASGIApp
 from cardea.hosts.debian import DebianHost
 from cardea.runtime.agent_session import ClaudeAgentSession
 from cardea.runtime.harness import Harness
+from cardea.runtime.opencode import OpenCodeHarness, Price
 from cardea.service import harnesses as registry
 from cardea.service.app import create_app
 from cardea.service.auth import Authentication, IdentityProvider
@@ -173,7 +174,28 @@ def start_harnesses(config: ServiceConfig, workers: Workers | None) -> registry.
             return ClaudeAgentSession(model=entry.default_model, api_key=secret)
         return ClaudeAgentSession(model=entry.default_model, oauth_token=secret)
 
-    return registry.build(registry.load(config.harnesses_file), {"claude-agent-sdk": claude})
+    def opencode(entry: registry.HarnessEntry) -> Harness:
+        assert entry.provider is not None and entry.package.binary is not None
+        assert entry.default_model is not None
+        return OpenCodeHarness(
+            binary=entry.package.binary,
+            base_url=str(entry.provider.base_url),
+            headers=entry.provider.headers,
+            default_model=entry.default_model,
+            prices={
+                model: Price(m.price.input_usd_per_mtok, m.price.output_usd_per_mtok)
+                for model, m in entry.models.items()
+                if m.price is not None
+            },
+            api_key=private_file(entry.credential.file).decode().strip()
+            if entry.credential
+            else None,
+        )
+
+    return registry.build(
+        registry.load(config.harnesses_file),
+        {"claude-agent-sdk": claude, "opencode": opencode},
+    )
 
 
 def serve(
