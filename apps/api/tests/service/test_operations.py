@@ -233,6 +233,25 @@ def test_load_reads_private_descriptors_and_refuses_unsafe_or_duplicate(tmp_path
     assert unsafe.value.code == "unsafe_file"
 
 
+def test_descriptors_cannot_declare_outputs_a_receipt_cannot_record(tmp_path: Path) -> None:
+    """A receipt records at most a 64 KiB document; larger declared outputs are refused."""
+    assert OperationDescriptor.model_validate(descriptor(max_output_bytes=65536))
+    write_private(tmp_path / "mail.json", descriptor(max_output_bytes=131072))
+    with pytest.raises(Fault) as refused:
+        Registry.load(tmp_path, resolve=False)
+    assert refused.value.code == "operation_invalid"
+    assert "max_output_bytes 131072 exceeds 65536" in refused.value.message
+    assert "mail.json" in refused.value.message
+
+
+def test_outputs_beyond_the_receipt_document_fail_cleanly() -> None:
+    registry = Registry((OperationDescriptor.model_validate(descriptor()),))
+    # The declared cap counts RFC 8785 bytes; the receipt counts its own ASCII-escaped
+    # document, which is larger for non-ASCII text. Neither may exceed what is recorded.
+    assert registry.check_output("mail.send", {"message_id": "a" * 65_000}) is not None
+    assert registry.check_output("mail.send", {"message_id": "é" * 32_000}) is None
+
+
 def test_load_requires_installed_entry_point_handlers(tmp_path: Path) -> None:
     write_private(tmp_path / "mail.json", descriptor())
     with pytest.raises(Fault) as missing:

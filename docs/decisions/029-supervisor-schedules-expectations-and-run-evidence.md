@@ -31,6 +31,23 @@
 
    `GET /v0.2/triggers` already lists slot history with task IDs.
 
+## Bounded run evidence (added 2026-10-20)
+
+Every API response is capped at 256 KiB. A realistic agent run broke that: `GET /run` and `GET /agent-receipts` embedded every call's full arguments and result, so tens of calls returned `413 response_too_large`. The rules are now:
+
+- **Receipts are bounded.** A receipt's arguments and result are each a kernel document of at most 64 KiB (the v0.1 contract).
+  - Admission now refuses arguments that would exceed it, with `413 arguments_too_large`.
+  - Settlement treats an output that cannot be recorded as `verification_failed` (reason `invalid_output`), whatever the descriptor's `max_output_bytes` says.
+  - Before, both raised inside the call: an agent saw an MCP protocol error, and the call stayed `running`, which fenced the run.
+  - Descriptors may not declare `max_output_bytes` above 65,536 (refused at load, ADR-023), so no installed operation can produce an output its receipt cannot hold.
+  - One receipt therefore always fits a response: `GET /v0.2/tasks/{id}/operations/{operation_id}` returns it whole.
+- **The run view summarizes calls and pages them.** Each call carries its receipt ID, timestamps, failure code and details, `deduplicated`, `reconciled`, and for arguments and result: size, SHA-256 of the canonical (RFC 8785) JSON, and a preview of its first `run_preview_bytes`. That is host configuration, 0–16384, default 2048. The full `arguments` and `result` stay inline only when they fit that preview size.
+  - Calls are listed in the order made, one page at a time. A page holds as many calls as fit the budget, up to `limit`. `calls_next` is the cursor for `?after=`, and `calls_total` counts all calls.
+  - The run's output and verification documents get a 64 KiB budget. An agent run's output keeps its text, trimmed if needed, and drops its `calls` list; anything else over the budget is null. `output_truncated` and `verification_truncated` say so.
+- **`GET /agent-receipts` pages by size** (`?after=&limit=`, `next`), with whole receipts in operation-ID order.
+- **`GET /output`** returns the document inline when it fits. Otherwise it returns `content: null` with `content_omitted`, `content_bytes` and `content_sha256`, and `GET /v0.2/tasks/{id}/output/content?offset=` serves the stored bytes as base64 chunks of 128 KiB.
+- **Every page is built against a 240 KiB budget** under the 256 KiB cap. A page always includes at least one item; one call summary or receipt is far below the budget. `test_large_runs_stay_under_the_response_cap_and_page_everything` checks this: 60 calls with about 64 KiB of arguments and result each, plus an over-large result and a 300 KB reply. Every response stays under the cap, and paging returns every call and receipt plus the whole output.
+
 ## Candidates considered
 
 - **Process definition languages** (Open Workflow Specification, BPMN via Flowable; ADR-021): unnecessary for a single-step recurring agent run with declared effects, and they would add a second owner of execution. Revisit for multi-step company processes.

@@ -5,8 +5,20 @@
         "additionalProperties": false,
         "description": "`GET /v0.2/tasks/{task_id}/agent-receipts`: full receipts of an agent's calls.",
         "properties": {
+          "next": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pass as `after` for the next page; null on the last.",
+            "title": "Next"
+          },
           "receipts": {
-            "description": "Each call's receipt: request with arguments and scope key, state, result or failure, and reconciliation evidence.",
+            "description": "One page of receipts, ordered by operation_id and bounded by size: request with arguments and scope key, state, result or failure, and reconciliation evidence.",
             "items": {
               "$ref": "#/components/schemas/OperationReceipt"
             },
@@ -21,7 +33,8 @@
           }
         },
         "required": [
-          "receipts"
+          "receipts",
+          "next"
         ],
         "title": "AgentReceipts",
         "type": "object"
@@ -634,6 +647,56 @@
           "usage"
         ],
         "title": "ChildrenView",
+        "type": "object"
+      },
+      "ContentChunk": {
+        "additionalProperties": false,
+        "description": "One base64 chunk of a stored document's canonical bytes; follow next_offset.",
+        "properties": {
+          "data_base64": {
+            "title": "Data Base64",
+            "type": "string"
+          },
+          "next_offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Offset of the next chunk; null at the end.",
+            "title": "Next Offset"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "sha256": {
+            "description": "SHA-256 of all the bytes, to check the reassembly.",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "total_bytes": {
+            "title": "Total Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total_bytes",
+          "sha256",
+          "offset",
+          "next_offset",
+          "data_base64"
+        ],
+        "title": "ContentChunk",
         "type": "object"
       },
       "ContextCall": {
@@ -1825,6 +1888,26 @@
         "title": "OperationTaskRequest",
         "type": "object"
       },
+      "OperationView": {
+        "additionalProperties": false,
+        "description": "`GET /v0.2/tasks/{task_id}/operations/{operation_id}`: one call's full receipt.\n\nA receipt always fits a response: its arguments and its result are each at most 64 KiB.",
+        "properties": {
+          "receipt": {
+            "$ref": "#/components/schemas/OperationReceipt"
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "receipt"
+        ],
+        "title": "OperationView",
+        "type": "object"
+      },
       "ReconcileResult": {
         "additionalProperties": false,
         "description": "`POST .../operations/{operation_id}/reconcile`: the operation's state afterwards.",
@@ -1998,7 +2081,30 @@
         "properties": {
           "arguments": {
             "$ref": "#/components/schemas/JsonValue",
-            "description": "The arguments the call was made with."
+            "description": "The call's arguments, inline only when they fit the preview size (`run_preview_bytes`, default 2 KiB); otherwise null. See arguments_preview."
+          },
+          "arguments_bytes": {
+            "description": "Size of the canonical (RFC 8785) arguments.",
+            "title": "Arguments Bytes",
+            "type": "integer"
+          },
+          "arguments_preview": {
+            "description": "The first `run_preview_bytes` of the canonical arguments JSON.",
+            "title": "Arguments Preview",
+            "type": "string"
+          },
+          "arguments_sha256": {
+            "title": "Arguments Sha256",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "deduplicated": {
+            "description": "Answered from an earlier effect in the same idempotency scope.",
+            "title": "Deduplicated",
+            "type": "boolean"
           },
           "failure": {
             "anyOf": [
@@ -2038,6 +2144,10 @@
             "title": "Operation Id",
             "type": "string"
           },
+          "receipt_id": {
+            "title": "Receipt Id",
+            "type": "string"
+          },
           "reconciled": {
             "description": "The outcome was settled by reconciliation.",
             "title": "Reconciled",
@@ -2055,8 +2165,43 @@
                 "type": "null"
               }
             ],
-            "description": "{\"output\": <the operation's own output>} and, for a call answered from an earlier effect in the same idempotency scope, \"deduplicated\": true.",
+            "description": "{\"output\": <the operation's own output>} and, for a deduplicated call, \"deduplicated\": true. Inline only when the output fits the preview size; otherwise null: fetch the receipt from GET /v0.2/tasks/{id}/operations/{operation_id}.",
             "title": "Result"
+          },
+          "result_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Size of the canonical output; null for a call without a result.",
+            "title": "Result Bytes"
+          },
+          "result_preview": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The first `run_preview_bytes` of the canonical output JSON.",
+            "title": "Result Preview"
+          },
+          "result_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Sha256"
           },
           "state": {
             "description": "accepted, running, succeeded, failed, cancelled or outcome_unknown.",
@@ -2072,12 +2217,21 @@
           "operation_id",
           "operation",
           "state",
-          "arguments",
-          "result",
+          "receipt_id",
+          "created_at",
+          "updated_at",
           "failure",
           "failure_details",
           "reconciled",
-          "updated_at"
+          "deduplicated",
+          "arguments",
+          "arguments_bytes",
+          "arguments_sha256",
+          "arguments_preview",
+          "result",
+          "result_bytes",
+          "result_sha256",
+          "result_preview"
         ],
         "title": "RunCall",
         "type": "object"
@@ -2091,7 +2245,21 @@
           },
           "content": {
             "$ref": "#/components/schemas/JsonValue",
-            "description": "The output document; its shape is the profile's."
+            "description": "The output document; its shape is the profile's. Null when it would exceed the response cap: read it from GET /v0.2/tasks/{id}/output/content."
+          },
+          "content_bytes": {
+            "description": "Size of the stored document.",
+            "title": "Content Bytes",
+            "type": "integer"
+          },
+          "content_omitted": {
+            "default": false,
+            "title": "Content Omitted",
+            "type": "boolean"
+          },
+          "content_sha256": {
+            "title": "Content Sha256",
+            "type": "string"
           },
           "schema_version": {
             "const": "0.2",
@@ -2102,7 +2270,9 @@
         },
         "required": [
           "artifact",
-          "content"
+          "content",
+          "content_bytes",
+          "content_sha256"
         ],
         "title": "RunOutput",
         "type": "object"
@@ -2153,12 +2323,29 @@
             "title": "Attempt"
           },
           "calls": {
-            "description": "Every receipted call, in the order made.",
+            "description": "Receipted calls in the order made: one page, bounded by size. Pass calls_next as `after` for the next page.",
             "items": {
               "$ref": "#/components/schemas/RunCall"
             },
             "title": "Calls",
             "type": "array"
+          },
+          "calls_next": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cursor of the next page; null on the last.",
+            "title": "Calls Next"
+          },
+          "calls_total": {
+            "description": "Number of calls of the run, across all pages.",
+            "title": "Calls Total",
+            "type": "integer"
           },
           "created_at": {
             "title": "Created At",
@@ -2191,6 +2378,11 @@
             ],
             "description": "The published output: an agent run's document, or another profile's own output. Null until published.",
             "title": "Output"
+          },
+          "output_truncated": {
+            "description": "The output exceeded the run view's 64 KiB document budget: an agent run's text is trimmed and its calls list dropped, any other output is null. GET /v0.2/tasks/{id}/output has it whole.",
+            "title": "Output Truncated",
+            "type": "boolean"
           },
           "schema_version": {
             "const": "0.2",
@@ -2227,6 +2419,11 @@
             ],
             "description": "An agent run's evidence, or another profile's. Null until verified.",
             "title": "Verification"
+          },
+          "verification_truncated": {
+            "description": "The verification exceeded the document budget and is null here.",
+            "title": "Verification Truncated",
+            "type": "boolean"
           }
         },
         "required": [
@@ -2238,7 +2435,11 @@
           "attempt",
           "output",
           "verification",
-          "calls"
+          "output_truncated",
+          "verification_truncated",
+          "calls",
+          "calls_total",
+          "calls_next"
         ],
         "title": "RunView",
         "type": "object"
@@ -4814,7 +5015,7 @@
     },
     "/v0.2/tasks/{task_id}/agent-receipts": {
       "get": {
-        "description": "Receipts of an agent's model and tool calls.\n\nAn agent run (ADR-027) receipts each context and tool call as an operation ``ctx-NN`` /\n``call-NNNN``. Tasks of the removed M3 incident profile (ADR-016, ADR-032) keep their\nhistorical receipts, listed from that profile's table.",
+        "description": "Receipts of an agent's calls, one size-bounded page at a time.\n\nAn agent run (ADR-027) receipts each context and tool call as an operation ``ctx-NN`` /\n``call-NNNN``. Tasks of the removed M3 incident profile (ADR-016, ADR-032) keep their\nhistorical receipts, listed from that profile's table.",
         "operationId": "agent_receipts_v0_2_tasks__task_id__agent_receipts_get",
         "parameters": [
           {
@@ -4825,6 +5026,29 @@
               "pattern": "^task-[0-9a-f]{32}$",
               "title": "Task Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 128,
+              "title": "After",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 500,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
             }
           },
           {
@@ -5510,6 +5734,182 @@
         "summary": "Events"
       }
     },
+    "/v0.2/tasks/{task_id}/operations/{operation_id}": {
+      "get": {
+        "description": "One operation's full receipt, with its whole arguments and result.",
+        "operationId": "operation_v0_2_tasks__task_id__operations__operation_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "pattern": "^task-[0-9a-f]{32}$",
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "Operation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-cardea-auth",
+            "required": false,
+            "schema": {
+              "default": "spiffe",
+              "title": "X-Cardea-Auth",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Method Not Allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Operation"
+      }
+    },
     "/v0.2/tasks/{task_id}/operations/{operation_id}/reconcile": {
       "post": {
         "operationId": "reconcile_v0_2_tasks__task_id__operations__operation_id__reconcile_post",
@@ -5848,6 +6248,183 @@
           }
         ],
         "summary": "Output"
+      }
+    },
+    "/v0.2/tasks/{task_id}/output/content": {
+      "get": {
+        "description": "The stored output document's bytes, in base64 chunks.",
+        "operationId": "output_content_v0_2_tasks__task_id__output_content_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "pattern": "^task-[0-9a-f]{32}$",
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-cardea-auth",
+            "required": false,
+            "schema": {
+              "default": "spiffe",
+              "title": "X-Cardea-Auth",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContentChunk"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Method Not Allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Output Content"
       }
     },
     "/v0.2/tasks/{task_id}/receipt": {
@@ -6192,7 +6769,7 @@
     },
     "/v0.2/tasks/{task_id}/run": {
       "get": {
-        "description": "What a run did: state, output, every call with its receipt state, and evidence.",
+        "description": "What a run did: state, output, its calls (one size-bounded page) and evidence.",
         "operationId": "run_view_v0_2_tasks__task_id__run_get",
         "parameters": [
           {
@@ -6203,6 +6780,29 @@
               "pattern": "^task-[0-9a-f]{32}$",
               "title": "Task Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 128,
+              "title": "After",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 1000,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
             }
           },
           {

@@ -20,7 +20,7 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 from pydantic import Field, JsonValue, TypeAdapter, ValidationError, model_validator
 
-from cardea.kernel.models import OperationName
+from cardea.kernel.models import MAX_DOCUMENT_BYTES, OperationName, canonical_json
 from cardea.service.database import Fault, private_file
 from cardea.service.models import Record, Right
 
@@ -28,7 +28,8 @@ ENTRY_POINT_GROUP = "cardea.operations"
 KERNEL_RIGHTS: frozenset[str] = frozenset(get_args(Right))
 # Prefixes owned by kernel rights and fixed installed profiles.
 RESERVED_PREFIXES = ("objects.", "tasks.", "events.", "host.", "models.", "tools.", "inputs.")
-MAX_OUTPUT_BYTES = 262144
+# Room in a receipt's 64 KiB result document for the output and its wrapper keys.
+MAX_RECORDED_OUTPUT_BYTES = MAX_DOCUMENT_BYTES - 64
 _NAME = TypeAdapter(OperationName)
 
 
@@ -103,7 +104,8 @@ class Binding(Record):
     # None runs the handler in the service process (ADR-023).
     executor: ConfinedExecutor | None = None
     timeout_seconds: Annotated[int, Field(strict=True, ge=1, le=600)] = 30
-    max_output_bytes: Annotated[int, Field(strict=True, ge=1, le=MAX_OUTPUT_BYTES)] = 65536
+    # At most what a receipt can record (MAX_DOCUMENT_BYTES); checked below with a clear error.
+    max_output_bytes: Annotated[int, Field(strict=True, ge=1)] = 65536
     requires: tuple[Right, ...] = ()
     # Argument values that identify one external effect (ADR-026). Within one idempotency
     # context, a second invocation with the same values returns the first receipt's result.
@@ -117,6 +119,12 @@ class Binding(Record):
             raise ValueError("Read operations have no effect scope or reconciler")
         if (self.handler is None) == (self.executor is None):
             raise ValueError("Declare an in-process handler or a confined executor, not both")
+        if self.max_output_bytes > MAX_DOCUMENT_BYTES:
+            # A larger output could never be recorded in its receipt (ADR-023, ADR-029).
+            raise ValueError(
+                f"max_output_bytes {self.max_output_bytes} exceeds {MAX_DOCUMENT_BYTES}, the "
+                "largest output a receipt can record (64 KiB kernel document)"
+            )
         return self
 
 
@@ -201,8 +209,9 @@ class Registry:
             try:
                 descriptors.append(OperationDescriptor.model_validate_json(private_file(path)))
             except ValidationError as error:
+                reason = str(error.errors()[0].get("msg", ""))[:300]
                 raise Fault(
-                    "operation_invalid", f"Invalid operation descriptor {path.name}", 500
+                    "operation_invalid", f"Invalid operation descriptor {path.name}: {reason}", 500
                 ) from error
         if not resolve:
             return cls(descriptors)
@@ -279,6 +288,10 @@ class Registry:
         except (TypeError, ValueError):
             return None
         if len(content) > descriptor.cardea.max_output_bytes:
+            return None
+        # The receipt records {"output": ..., "deduplicated": ...} as a kernel document, so
+        # the effective cap is that document's 64 KiB, whatever the descriptor declares.
+        if len(canonical_json(json.loads(content))) > MAX_RECORDED_OUTPUT_BYTES:
             return None
         if not Draft202012Validator(descriptor.output_schema).is_valid(output):
             return None

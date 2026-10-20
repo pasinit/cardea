@@ -13,6 +13,7 @@ import sqlalchemy as sa
 from pydantic import JsonValue
 
 from cardea.kernel.models import (
+    MAX_DOCUMENT_BYTES,
     KernelFailure,
     OperationRequest,
     OperationState,
@@ -20,6 +21,7 @@ from cardea.kernel.models import (
     ResourceUsage,
     RetryClass,
     Task,
+    canonical_json,
 )
 from cardea.kernel.store import KernelTransaction
 from cardea.service.confined import ExecutorBusy, WorkerFailed, WorkerNotStarted
@@ -156,6 +158,21 @@ def admit(
             raise Fault(
                 "effect_in_doubt", "An earlier invocation of this effect is unresolved", 409
             )
+    recorded: dict[str, JsonValue] = {
+        "arguments": arguments,
+        "operation_version": descriptor.cardea.version,
+        "descriptor_sha256": descriptor.digest,
+        "scope_key": key,
+        "policy_revision": conn.exec_driver_sql(
+            "SELECT value FROM service_meta WHERE name='policy_revision'"
+        ).scalar_one(),
+        **({"executor": executor} if executor is not None else {}),
+        # Recorded so a reconciler sees the context the handler saw.
+        **({"context": provenance} if provenance else {}),
+    }
+    if len(canonical_json(recorded)) > MAX_DOCUMENT_BYTES:
+        # A receipt document holds at most 64 KiB; refuse before any intent exists.
+        raise Fault("arguments_too_large", "Arguments exceed the receipt's 64 KiB limit", 413)
     receipt = tx.admit_operation(
         OperationRequest(
             operation_id=operation_id,
@@ -163,18 +180,7 @@ def admit(
             subject_id=task.agent_id,
             name=name,
             resource=ResourceRef(namespace=namespace, resource_id=task.task_id),
-            arguments={
-                "arguments": arguments,
-                "operation_version": descriptor.cardea.version,
-                "descriptor_sha256": descriptor.digest,
-                "scope_key": key,
-                "policy_revision": conn.exec_driver_sql(
-                    "SELECT value FROM service_meta WHERE name='policy_revision'"
-                ).scalar_one(),
-                **({"executor": executor} if executor is not None else {}),
-                # Recorded so a reconciler sees the context the handler saw.
-                **({"context": provenance} if provenance else {}),
-            },
+            arguments=recorded,
             deadline=deadline,
         ),
         grant_ids=task.capability_ids,
@@ -261,7 +267,8 @@ def settle(
             failure = Failure(
                 "verification_failed",
                 "invalid_output",
-                "result does not match the operation's output schema or size limit",
+                "result does not match the operation's output schema or size limit "
+                "(at most 64 KiB is recorded)",
             )
         else:
             content = checked

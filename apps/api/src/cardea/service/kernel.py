@@ -244,9 +244,11 @@ class Kernel:
         workers: Workers | None = None,
         max_task_request_bytes: int = DEFAULT_MAX_TASK_REQUEST_BYTES,
         harnesses: Harnesses | None = None,
+        run_preview_bytes: int = 2048,
     ) -> None:
         self.database, self.auth, self.fault = database, auth, fault
         self.max_task_request_bytes = max_task_request_bytes
+        self.run_preview_bytes = run_preview_bytes
         self.host = host
         self.operations = operations or Registry(handlers={})
         # Installed agent harnesses (ADR-033). A lone `session` is the ADR-027 configuration,

@@ -37,6 +37,11 @@ Checked 2026-10-15 against the pinned dependencies in `apps/api/pyproject.toml`.
 5. **Execution.** One intent per task (`operation_id="execute"`), committed under a dispatch lease before the handler runs, as on the host path.
    - The handler is called with validated arguments and a context (task, receipt ID, deadline), bounded by `timeout_seconds`.
    - Success requires output that validates against `output_schema` and fits `max_output_bytes`. The output and the verification evidence are published in the settling transaction.
+   - **Effective size caps (added 2026-10-20).** A receipt stores the call's arguments and its result as kernel documents of at most 64 KiB each (`MAX_DOCUMENT_BYTES`, v0.1 contract).
+     - A descriptor may not declare `max_output_bytes` above 65,536. Loading one fails with `operation_invalid`, and the error names the descriptor and the limit.
+     - At settlement, an output whose recorded document would exceed the limit is `verification_failed` with reason `invalid_output`. This can happen because the receipt escapes non-ASCII text and wraps the output.
+     - At admission, arguments whose recorded document would exceed it are refused with `arguments_too_large` (413).
+     - Before these checks existed, both cases raised inside the call, and an agent-run call could be left `running`. See [ADR-029](029-supervisor-schedules-expectations-and-run-evidence.md#bounded-run-evidence-added-2026-10-20).
    - A handler may raise `OperationRejected` to state that no effect happened. That settles as FAILED.
    - Any other exception or a timeout:
      - `effect` operations become `outcome_unknown` and, once the lease is fenced, the task fails with `reconciliation_required`;

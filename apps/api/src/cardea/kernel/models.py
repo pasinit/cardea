@@ -45,8 +45,12 @@ def canonical_json(value: object) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
 
 
+# Receipt arguments, results and other kernel documents (v0.1 contract).
+MAX_DOCUMENT_BYTES = 65536
+
+
 def _bounded_document(value: dict[str, JsonValue]) -> dict[str, JsonValue]:
-    if len(canonical_json(value)) > 65536:
+    if len(canonical_json(value)) > MAX_DOCUMENT_BYTES:
         raise ValueError("JSON documents must not exceed 65536 encoded bytes")
     return value
 

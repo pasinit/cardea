@@ -345,6 +345,9 @@ class ServiceConfig(Record):
     network: NetworkListener | None = None
     # Request-body cap for every listener. Responses stay capped at 256 KiB.
     max_request_bytes: Annotated[int, Field(strict=True, ge=4096, le=1048576)] = 32768
+    # Bytes of each call's arguments and result the run view shows inline (as a preview, and
+    # in full when they fit); larger values are paged from their own routes (ADR-029).
+    run_preview_bytes: Annotated[int, Field(strict=True, ge=0, le=16384)] = 2048
     # Canonical size cap of one task request, checked at admission and trigger installation.
     max_task_request_bytes: Annotated[
         int, Field(strict=True, ge=4096, le=MAX_TASK_REQUEST_BYTES)

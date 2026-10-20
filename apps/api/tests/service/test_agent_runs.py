@@ -834,7 +834,8 @@ def test_revoked_context_authority_stops_the_run(kernel: Kernel, session: FakeSe
             "malformed",
             "verification_failed",
             "invalid_output",
-            "result does not match the operation's output schema or size limit",
+            "result does not match the operation's output schema or size limit "
+            "(at most 64 KiB is recorded)",
         ),
         ("refuse", "operation_rejected", "rejected", "this listing source is not allowed"),
     ],
@@ -926,3 +927,134 @@ def test_claude_session_has_no_builtin_tools_or_host_settings(
     assert options["mcp_servers"]["cardea"]["headers"] == {"Authorization": "Bearer t"}
     with pytest.raises(ValueError):
         ClaudeAgentSession(model=None)
+
+
+# Bounded run evidence (ADR-029)
+
+CAP = 262144
+BIG = 65_000  # near the largest output a receipt can record (64 KiB document)
+
+
+def test_large_runs_stay_under_the_response_cap_and_page_everything(
+    kernel: Kernel, tools: Tools, session: FakeSession
+) -> None:
+    """60 calls with ~64 KiB results and arguments, an over-large result and a 300 KB reply."""
+    import base64
+    import hashlib
+
+    import rfc8785
+
+    async def page_text(
+        arguments: dict[str, JsonValue], context: OperationContext
+    ) -> dict[str, JsonValue]:
+        size = 70_000 if arguments.get("to") == "too-big" else BIG
+        return {"page": "p" * size}
+
+    kernel.operations = Registry(
+        (
+            descriptor("mail.send", "effect", idempotency_scope=["/to"]),
+            descriptor("listings.search", "read"),
+        ),
+        {"test.mail.send": tools.send, "test.listings.search": page_text},
+    )
+
+    async def researches(client: ClientSession, request: SessionRequest) -> SessionResult:
+        for i in range(60):
+            # Large arguments too, so each receipt is close to its largest possible size.
+            read = await call(client, "listings-search", body=f"{i:02d}" + "q" * 64_000)
+            assert not read.is_error, read.content
+        too_big = await call(client, "listings-search", to="too-big")
+        assert too_big.is_error and "invalid_output" in str(too_big.content)
+        return SessionResult(text="r" * 300_000, is_error=False)
+
+    session.scripts = [researches]
+    task_id = submit(kernel, max_tool_calls=100)
+    assert AgentRunRuntime(kernel).execute(task_id) == "succeeded"
+    client = TestClient(create_app(kernel))
+    headers = {"Authorization": "Bearer supervisor"}
+
+    def get(path: str, **params: Any) -> dict[str, Any]:
+        response = client.get(path, headers=headers, params=params)
+        assert response.status_code == 200, response.text[:300]
+        assert len(response.content) < CAP
+        body: dict[str, Any] = response.json()
+        return body
+
+    # The run view: bounded call summaries, paged; the reply trimmed with a flag.
+    view = get(f"/v0.2/tasks/{task_id}/run")
+    assert view["calls_total"] == 61
+    assert view["output_truncated"] is True and len(view["output"]["text"]) <= 65536
+    assert view["output"]["attempts"] == 1 and "calls" not in view["output"]
+    calls: list[dict[str, Any]] = view["calls"]
+    while view["calls_next"]:
+        view = get(f"/v0.2/tasks/{task_id}/run", after=view["calls_next"])
+        calls += view["calls"]
+    assert [c["operation_id"] for c in calls] == [f"call-{i:04d}" for i in range(1, 62)]
+    first = calls[0]
+    expected = rfc8785.dumps({"page": "p" * BIG})
+    assert first["result"] is None and first["result_bytes"] == len(expected)
+    assert first["result_sha256"] == hashlib.sha256(expected).hexdigest()
+    assert first["result_preview"] == expected[:2048].decode()
+    assert first["arguments"] is None and first["arguments_preview"].startswith('{"body":"00q')
+    assert calls[-1]["failure_details"]["reason"] == "invalid_output"
+
+    # Receipts, paged by size: every receipt, whole.
+    receipts: list[dict[str, Any]] = []
+    page = get(f"/v0.2/tasks/{task_id}/agent-receipts")
+    pages = 1
+    while True:
+        receipts += page["receipts"]
+        if page["next"] is None:
+            break
+        page = get(f"/v0.2/tasks/{task_id}/agent-receipts", after=page["next"])
+        pages += 1
+    assert len(receipts) == 61 and pages > 1
+    assert receipts[0]["result"]["output"] == {"page": "p" * BIG}
+
+    # One call's full receipt always fits.
+    single = get(f"/v0.2/tasks/{task_id}/operations/call-0001")
+    assert single["receipt"]["result"]["output"] == {"page": "p" * BIG}
+
+    # The whole output document: omitted inline, served in chunks.
+    output = get(f"/v0.2/tasks/{task_id}/output")
+    assert output["content"] is None and output["content_omitted"] is True
+    stored = b""
+    chunk = get(f"/v0.2/tasks/{task_id}/output/content")
+    while True:
+        stored += base64.b64decode(chunk["data_base64"])
+        if chunk["next_offset"] is None:
+            break
+        chunk = get(f"/v0.2/tasks/{task_id}/output/content", offset=chunk["next_offset"])
+    assert len(stored) == output["content_bytes"]
+    assert hashlib.sha256(stored).hexdigest() == chunk["sha256"] == output["content_sha256"]
+    assert json.loads(stored)["text"] == "r" * 300_000
+
+
+def test_small_runs_keep_values_inline(kernel: Kernel, session: FakeSession) -> None:
+    session.scripts = [routine]
+    task_id = submit(kernel)
+    assert AgentRunRuntime(kernel).execute(task_id) == "succeeded"
+    with TestClient(create_app(kernel)) as client:
+        view = client.get(
+            f"/v0.2/tasks/{task_id}/run", headers={"Authorization": "Bearer supervisor"}
+        ).json()
+        output = client.get(
+            f"/v0.2/tasks/{task_id}/output", headers={"Authorization": "Bearer supervisor"}
+        ).json()
+    assert view["calls_next"] is None and view["output_truncated"] is False
+    search, send = view["calls"]
+    assert search["result"] == {"output": {"listings": 3}} and search["arguments"] == {}
+    assert send["arguments"] == {"to": "user@example.invalid", "body": "3 new listings"}
+    assert output["content"]["text"] == "Sent the recap." and output["content_omitted"] is False
+
+
+def test_oversized_tool_arguments_are_refused(kernel: Kernel, session: FakeSession) -> None:
+    async def floods(client: ClientSession, request: SessionRequest) -> SessionResult:
+        refused = await call(client, "listings-search", body="b" * 70_000)
+        assert refused.is_error and "arguments_too_large" in str(refused.content)
+        return SessionResult(text="Could not search.", is_error=False)
+
+    session.scripts = [floods]
+    task_id = submit(kernel)
+    assert AgentRunRuntime(kernel).execute(task_id) == "succeeded"
+    assert calls(kernel, task_id) == []
