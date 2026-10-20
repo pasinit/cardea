@@ -59,9 +59,14 @@ OperationID = Annotated[str, Path(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
 Namespace = Annotated[str, Query(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")]
 
 
+DEFAULT_MAX_REQUEST_BYTES = 32768
+MAX_RESPONSE_BYTES = 262144
+
+
 class Bounds:
-    def __init__(self, app: ASGIApp) -> None:
+    def __init__(self, app: ASGIApp, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTES) -> None:
         self.app = app
+        self.max_request_bytes = max_request_bytes
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -84,12 +89,12 @@ class Bounds:
             if message["type"] == "http.disconnect":
                 return
             body.extend(message.get("body", b""))
-            if len(body) > 32768:
+            if len(body) > self.max_request_bytes:
                 await JSONResponse(
                     {
                         "schema_version": "0.2",
                         "code": "request_too_large",
-                        "message": "Request exceeds 32768 bytes",
+                        "message": f"Request exceeds {self.max_request_bytes} bytes",
                     },
                     status_code=413,
                 )(scope, receive, send)
@@ -114,7 +119,7 @@ class Bounds:
             messages.append(message)
 
         await self.app(scope, bounded_receive, bounded_send)
-        if response_size > 262144:
+        if response_size > MAX_RESPONSE_BYTES:
             await JSONResponse(
                 {
                     "schema_version": "0.2",
@@ -128,7 +133,8 @@ class Bounds:
                 await send(message)
 
 
-def create_app(kernel: Kernel) -> FastAPI:
+def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTES) -> FastAPI:
+    """The v0.2 API; ``max_request_bytes`` is the host owner's request-body cap."""
     app = FastAPI(
         title="Cardea kernel",
         version="0.2",
@@ -140,7 +146,7 @@ def create_app(kernel: Kernel) -> FastAPI:
             for status in (400, 401, 403, 404, 405, 409, 413, 415, 422, 429, 500, 503)
         },
     )
-    app.add_middleware(Bounds)
+    app.add_middleware(Bounds, max_request_bytes=max_request_bytes)
 
     bearer = HTTPBearer(auto_error=False)
 
@@ -223,8 +229,8 @@ def create_app(kernel: Kernel) -> FastAPI:
             "agent_execution": kernel.model is not None,
             "delegation_execution": kernel.host is not None,
             "new_namespace_prefix": prefix,
-            "max_request_bytes": 32768,
-            "max_response_bytes": 262144,
+            "max_request_bytes": max_request_bytes,
+            "max_response_bytes": MAX_RESPONSE_BYTES,
         }
 
     @app.get("/v0.2/operations")

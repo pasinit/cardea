@@ -280,7 +280,7 @@ def serve(
                     context = tls_context(config.network)
                     network = bind_network(config.network.host, config.network.port)
                     listeners.append((network, context))
-                serve_listeners(create_app(kernel), listeners)
+                serve_listeners(create_app(kernel, config.max_request_bytes), listeners)
                 exit_code = 0
             finally:
                 for sock, _ in listeners:

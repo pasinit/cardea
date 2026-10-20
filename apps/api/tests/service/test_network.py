@@ -218,7 +218,9 @@ class Running:
     url: str
 
 
-def start(kernel: Kernel, network: NetworkListener) -> Iterator[Running]:
+def start(
+    kernel: Kernel, network: NetworkListener, max_request_bytes: int = 32768
+) -> Iterator[Running]:
     # /tmp keeps the macOS sockaddr_un path below its length limit.
     with tempfile.TemporaryDirectory(prefix="cardea-net-", dir="/tmp") as directory:
         path = Path(directory) / "kernel.sock"
@@ -230,7 +232,11 @@ def start(kernel: Kernel, network: NetworkListener) -> Iterator[Running]:
         stop = threading.Event()
         thread = threading.Thread(
             target=serve_listeners,
-            args=(create_app(kernel), [(unix, None), (tcp, tls_context(network))], stop),
+            args=(
+                create_app(kernel, max_request_bytes),
+                [(unix, None), (tcp, tls_context(network))],
+                stop,
+            ),
             daemon=True,
         )
         thread.start()
@@ -366,6 +372,44 @@ def test_oversized_request_is_rejected_as_on_the_socket(running: Running, pki: P
     assert [r.status_code for r in responses] == [413, 413]
     assert responses[0].json() == responses[1].json()
     assert responses[1].json()["code"] == "request_too_large"
+
+
+def test_request_cap_is_host_configuration() -> None:
+    base = {
+        "data_dir": "/var/lib/cardea",
+        "spiffe_socket": "unix:///run/spire/agent.sock",
+        "trust_domain": "cardea.internal",
+        "runtime_spiffe_id": "spiffe://cardea.internal/runtime/kernel",
+    }
+    assert ServiceConfig.model_validate(base).max_request_bytes == 32768
+    assert ServiceConfig.model_validate({**base, "max_request_bytes": 131072}).max_request_bytes
+    for value in (4095, 1048577, "65536"):
+        with pytest.raises(ValidationError):
+            ServiceConfig.model_validate({**base, "max_request_bytes": value})
+
+
+def test_configured_request_cap_applies_to_every_listener(kernel: Kernel, pki: Pki) -> None:
+    headers = {"Authorization": "Bearer supervisor", "Content-Type": "application/json"}
+    for running in start(kernel, listener_config(pki), max_request_bytes=65536):
+        with (
+            httpx.Client(
+                transport=httpx.HTTPTransport(uds=str(running.socket_path)),
+                base_url="http://cardea",
+                trust_env=False,
+            ) as local,
+            httpx.Client(base_url=running.url, verify=tls13(pki), trust_env=False) as remote,
+        ):
+            for http in (local, remote):
+                system = http.get("/v0.2/system", headers=headers).json()
+                assert system["max_request_bytes"] == 65536
+                assert system["max_response_bytes"] == 262144
+                # Above the default cap but within the configured one: reaches validation.
+                within = b'{"x":"' + b"a" * 40000 + b'"}'
+                assert http.post("/v0.2/tasks", content=within, headers=headers).status_code == 422
+                above = b'{"x":"' + b"a" * 70000 + b'"}'
+                refused = http.post("/v0.2/tasks", content=above, headers=headers)
+                assert refused.status_code == 413
+                assert refused.json()["message"] == "Request exceeds 65536 bytes"
 
 
 def test_kernel_client_works_against_https_url(running: Running, pki: Pki) -> None:
