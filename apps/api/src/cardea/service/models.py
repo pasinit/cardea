@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
-from typing import Annotated, Literal, Self
+from typing import Annotated, ClassVar, Literal, Self
 from zoneinfo import ZoneInfo
 
 import rfc8785
@@ -59,6 +59,9 @@ class Wire(Record):
 
 
 class TaskRequest(Wire):
+    # Canonical (RFC 8785) size bound of one request.
+    max_encoded_bytes: ClassVar[int] = 16384
+
     request_id: Identifier
     agent_id: Identifier
     namespace: Identifier
@@ -75,7 +78,7 @@ class TaskRequest(Wire):
             encoded = rfc8785.dumps(self.model_dump(mode="json"))
         except (ValueError, TypeError) as error:
             raise ValueError("Payload is outside the supported RFC 8785 domain") from error
-        if len(encoded) > 16384 or len(set(self.grants)) != len(self.grants):
+        if len(encoded) > self.max_encoded_bytes or len(set(self.grants)) != len(self.grants):
             raise ValueError("Request is too large or repeats a grant")
         if not {"objects.read", "objects.write"} <= set(self.grants):
             raise ValueError("The installed deterministic runtime requires object read and write")
@@ -226,6 +229,9 @@ class ContextCall(Record):
 class AgentRunRequest(TaskRequest):
     """One bounded agent session whose only tools are installed operations (ADR-027)."""
 
+    # Room for the full 64 KiB of instructions declared below plus the other fields.
+    max_encoded_bytes: ClassVar[int] = 131072
+
     instructions: Annotated[str, Field(strict=True, min_length=1, max_length=65536)]
     operations: Annotated[tuple[OperationName, ...], Field(min_length=1, max_length=32)]
     payload: Annotated[dict[str, JsonValue], Field(max_length=0)] = Field(default_factory=dict)
@@ -363,6 +369,8 @@ class ServiceConfig(Record):
     rpc_timeout: Annotated[float, Field(gt=0, le=10)] = 2.0
     # Off unless configured; the private Unix socket is always served (ADR-025).
     network: NetworkListener | None = None
+    # Request-body cap for every listener. Responses stay capped at 256 KiB.
+    max_request_bytes: Annotated[int, Field(strict=True, ge=4096, le=1048576)] = 32768
 
 
 class Principal(Record):

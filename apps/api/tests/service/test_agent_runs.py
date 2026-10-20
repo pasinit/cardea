@@ -30,6 +30,7 @@ from cardea.service.models import (
     Permission,
     Principal,
     Provisioning,
+    TaskRequest,
     now,
 )
 from cardea.service.operation_runtime import OperationRuntime
@@ -252,6 +253,23 @@ def test_admission_needs_model_and_operation_grants(kernel: Kernel) -> None:
         run_request(grants=[*RIGHTS, "mail.send", "listings.search"])
     with pytest.raises(ValidationError):
         run_request(grants=[*RIGHTS, "models.invoke", "mail.send"])
+
+
+def test_agent_runs_accept_long_instructions_other_requests_stay_small() -> None:
+    long = "Follow the house style. " * 1300  # about 31 KB
+    assert len(run_request(instructions=long).instructions) > 30000
+    with pytest.raises(ValidationError):
+        run_request(instructions="x" * 65537)
+    with pytest.raises(ValidationError):
+        TaskRequest.model_validate(
+            {
+                "request_id": "small",
+                "agent_id": "agent",
+                "namespace": "test",
+                "objective": "o",
+                "payload": {"text": "x" * 20000},
+            }
+        )
 
 
 def test_admission_requires_a_session_runtime(kernel: Kernel) -> None:
