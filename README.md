@@ -94,8 +94,6 @@ It needs no identity provider, VM or model key, so identity checks are off in th
   - a confined web-research run;
   - the same run on Claude, GLM via OpenRouter and a local model.
 - **[Design](design.md) and [kernel contract](docs/kernel-contract.md).** The architecture, the trust model and the host boundary.
-- **[Decision records](docs/decisions/README.md).** Every component choice, with the alternatives and evidence. Cardea reuses open standards wherever they fit: SPIFFE/SPIRE and OIDC for identity, DBOS for durable execution, MCP for tools, A2A for delegation, systemd and bubblewrap for confinement.
-- **Running it for real.** The [M1 quickstart](docs/m1-quickstart.md) (authenticated setup), the [Debian package](packaging/README.md) and the [operations guide](docs/operations.md).
 
 ## How it's built
 
