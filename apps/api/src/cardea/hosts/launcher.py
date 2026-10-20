@@ -23,7 +23,10 @@ from typing import Any
 PROFILE = "debian-local-v1"
 # Debian 13's 6.12 LTS kernel, generic or cloud flavour. Point releases only bring fixes; the
 # enforcement checks below (cgroup controllers, seccomp, bwrap) still run on every request.
+# A host owner may replace it with `kernel_release_pattern` in HOST_CONFIG.
 KERNEL_RELEASE = r"6\.12\.\d{1,4}\+deb13(-cloud)?-amd64"
+# Root-owned host-owner configuration: the kernel's uid and optional overrides.
+HOST_CONFIG = Path("/etc/cardea-host.json")
 ROOT = Path("/var/lib/cardea-host")
 # Host-owner worker profiles and installed worker commands (ADR-028). Root-owned; a caller
 # names a profile and a worker, never a command line, mount, limit or network rule.
@@ -367,14 +370,35 @@ def run(args: list[str], *, check: bool = True) -> subprocess.CompletedProcess[s
     )
 
 
-def supported_kernel(release: str) -> bool:
-    return re.fullmatch(KERNEL_RELEASE, release) is not None
+def host_config() -> dict[str, Any]:
+    info = HOST_CONFIG.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+        raise ValueError("unsafe_configuration")
+    config = json.loads(HOST_CONFIG.read_text())
+    if not isinstance(config, dict) or not {"kernel_uid"} <= set(config) <= {
+        "kernel_uid",
+        "kernel_release_pattern",
+    }:
+        raise ValueError("invalid_configuration")
+    pattern = config.get("kernel_release_pattern", KERNEL_RELEASE)
+    if not isinstance(pattern, str) or not 0 < len(pattern) <= 256:
+        raise ValueError("invalid_configuration")
+    try:
+        re.compile(pattern)
+    except re.error:
+        raise ValueError("invalid_configuration") from None
+    return config
+
+
+def supported_kernel(release: str, pattern: str = KERNEL_RELEASE) -> bool:
+    return re.fullmatch(pattern, release) is not None
 
 
 def preflight() -> dict[str, Any]:
     if platform.system() != "Linux" or Path("/proc/1/comm").read_text().strip() != "systemd":
         raise ValueError("unsupported_host")
-    if platform.machine() != "x86_64" or not supported_kernel(platform.release()):
+    pattern = host_config().get("kernel_release_pattern", KERNEL_RELEASE)
+    if platform.machine() != "x86_64" or not supported_kernel(platform.release(), pattern):
         raise ValueError("unsupported_kernel")
     if 'VERSION_ID="13"' not in Path("/etc/os-release").read_text():
         raise ValueError("unsupported_host")
@@ -706,11 +730,7 @@ def main() -> None:
     if os.geteuid() != 0 or len(sys.argv) != 1:
         raise ValueError("root_fixed_command_required")
     # sudo authenticates the kernel OS account; agents/workers have no sudo rule.
-    config = Path("/etc/cardea-host.json")
-    info = config.lstat()
-    if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
-        raise ValueError("unsafe_configuration")
-    allowed = json.loads(config.read_text())["kernel_uid"]
+    allowed = host_config()["kernel_uid"]
     if int(os.environ.get("SUDO_UID", "-1")) != allowed:
         raise ValueError("caller_denied")
     ROOT.mkdir(mode=0o711, exist_ok=True)

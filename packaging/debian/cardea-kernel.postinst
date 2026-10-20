@@ -21,7 +21,8 @@ if p.exists() or p.is_symlink():
     import stat
     if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
         raise SystemExit('Unsafe existing host helper configuration')
-    if json.loads(p.read_text()) != expected:
+    # Host-owner overrides (e.g. kernel_release_pattern) may sit beside the identity.
+    if json.loads(p.read_text()).get('kernel_uid') != expected['kernel_uid']:
         raise SystemExit('Existing host helper identity differs; operator reconciliation required')
 else:
     fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
