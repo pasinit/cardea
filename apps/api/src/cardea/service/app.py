@@ -431,6 +431,8 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
                     "arguments": r.request.arguments.get("arguments"),
                     "result": r.result,
                     "failure": r.failure.code if r.failure else None,
+                    # {"reason", "summary"} for a failed call (invocation.REASONS).
+                    "failure_details": r.failure.details if r.failure else None,
                     "reconciled": bool(r.reconciliation_evidence),
                     "updated_at": r.updated_at.isoformat(),
                 }

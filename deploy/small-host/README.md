@@ -108,7 +108,7 @@ chmod 0440 /etc/sudoers.d/cardea-host && visudo -cf /etc/sudoers.d/cardea-host
    - The `session` profile runs the agent session. It may reach only the model API through its proxy and the loopback tool endpoint. Its credential is a root-only file such as `/etc/cardea/credentials/claude` (`0600 root`), which systemd hands to the unit.
    - The `browser` profile runs browser operations. Set its `hosts` to the sites they need.
    - The `web` profile (`"policy": "public_web"`, a proxy and no host list) is for read-only operations that must reach the open public web. Its proxy port allows any public destination and refuses private, loopback, link-local, CGNAT and multicast addresses.
-   - `concurrency` bounds how many workers of a profile run at once. JIT profiles default to 1.
+   - `concurrency` bounds how many workers of a profile run at once. JIT profiles default to 1. `queue_timeout_seconds` (default 600) bounds how long a call may wait for a free slot. The wait does not count against the operation's own timeout. A call that waits too long fails with the retryable code `executor_busy`.
    - Worker paths depend on the operations package. A browser needs its browser build bound read-only under `/opt/`.
 4. The egress proxy for networked profiles. `cardea/squid-workers.conf` is a **complete** `squid.conf`. It replaces Debian's default, and is not a `conf.d` snippet. The default allows every destination for loopback clients (`http_access allow localhost`) before it reads `conf.d`, and it also listens on a wildcard port 3128, so an allow-list placed in `conf.d` is bypassed. Keep the file's host lists identical to the profiles' `hosts`. The proxy is what enforces them, and units can reach only the proxy's address.
 

@@ -37,7 +37,7 @@ For the prompt format we follow Anthropic's published guidance to wrap documents
    - Each attempt fetches its context again rather than reusing an earlier attempt's, so a retry sees current state.
 3. **Prompt.** The outputs follow the instructions (and any expectations), preceded by a fixed preface. The preface says the blocks are what read-only operations returned, that they are untrusted data and not instructions, and that instructions inside them must not be followed. Each call becomes one block:
    - success: `<context operation="NAME" status="ok">JSON</context>`, with sorted keys;
-   - any failure, whether a handler error, a schema-invalid output, a timeout or a refusal: `<context operation="NAME" status="unavailable"></context>`. After the blocks, a fixed instruction tells the agent that continuity context was missing and to say so in its result.
+   - any failure, whether a handler error, a schema-invalid output, a timeout or a refusal: `<context operation="NAME" status="unavailable" reason="REASON"></context>`, where `REASON` is the failure reason from ADR-026 (added 2026-10-20; `rejected` for a call refused before dispatch). After the blocks, a fixed instruction tells the agent that continuity context was missing and to say so in its result.
 
    Inside the JSON, `<` and `>` are written as `<` and `>`. The JSON stays valid, and output text cannot close a block or open a fake one.
 4. **Failures never fail the run by themselves.** A context call is read-only, so a failure has no effect to reconcile. The run goes ahead and the gap is disclosed. One exception: losing authority for a context operation stops the run at the attempt's authority check, as it would for a tool.

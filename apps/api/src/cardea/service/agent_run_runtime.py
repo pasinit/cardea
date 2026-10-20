@@ -72,6 +72,8 @@ class Outcome:
     detail: str = ""
     output: Any = None
     deduplicated: bool = False
+    # One of invocation.REASONS for a failed call; empty on success or a pre-dispatch refusal.
+    reason: str = ""
 
 
 def _text(value: object) -> str:
@@ -89,7 +91,8 @@ def _error(code: str, detail: str = "") -> types.CallToolResult:
 def context_block(name: str, outcome: Outcome) -> str:
     """One labelled prompt block; markup in the output cannot close the block early."""
     if outcome.code:
-        return f'<context operation="{name}" status="unavailable"></context>'
+        reason = outcome.reason or "rejected"
+        return f'<context operation="{name}" status="unavailable" reason="{reason}"></context>'
     data = json.dumps(outcome.output, sort_keys=True, ensure_ascii=False)
     data = data.replace("<", "\\u003c").replace(">", "\\u003e")
     return f'<context operation="{name}" status="ok">{data}</context>'
@@ -502,35 +505,40 @@ class AgentRunRuntime:
                     slot_time=request.slot_time.isoformat() if request.slot_time else None,
                 )
                 timeout = invocation.timeout_for(
-                    registry, name, task.lease.expires_at, SETTLE_MARGIN
+                    registry,
+                    name,
+                    task.lease.expires_at,
+                    SETTLE_MARGIN,
+                    self.kernel.queue_allowance(name),
                 )
         except Fault as refused:
             return Outcome(refused.code, refused.message)
         if admitted.deduplicated is not None:
             return Outcome(output=admitted.deduplicated, deduplicated=True)
         started = time.monotonic()
-        error = ""
+        error: invocation.Failure | None = None
         output: object = None
         try:
             if timeout <= 0:
                 raise OperationRejected("no time left in this attempt")
             output = await asyncio.wait_for(handler(dict(arguments), admitted.context), timeout)
         except OperationRejected as rejected:
-            error = "operation_rejected"
+            # Nothing happened: the handler refused, the helper refused or no slot freed up.
+            error = invocation.classify(rejected, timeout)
             output = str(rejected)
         except WorkerFailed as failed:
             # A confined worker started and gave no result (ADR-028).
             log.warning("confined worker failed: %s", failed.code, extra={"task_id": task_id})
+            error = invocation.classify(failed, timeout)
             if descriptor.cardea.effect == "effect":
-                self._mark_uncertain(task_id, lease_id, operation_id)
-                return Outcome("outcome_unknown", UNCERTAIN)
-            error = failed.code
-        except Exception:
+                self._mark_uncertain(task_id, lease_id, operation_id, error)
+                return Outcome("outcome_unknown", UNCERTAIN, reason=error.reason)
+        except Exception as raised:
             log.exception("installed operation failed", extra={"task_id": task_id})
+            error = invocation.classify(raised, timeout)
             if descriptor.cardea.effect == "effect":
-                self._mark_uncertain(task_id, lease_id, operation_id)
-                return Outcome("outcome_unknown", UNCERTAIN)
-            error = "operation_failed"
+                self._mark_uncertain(task_id, lease_id, operation_id, error)
+                return Outcome("outcome_unknown", UNCERTAIN, reason=error.reason)
         elapsed = max(0, int((time.monotonic() - started) * 1000))
         with self.kernel.database.engine.begin() as conn, borrow(conn) as tx:
             task = tx.get_task(task_id)
@@ -544,8 +552,8 @@ class AgentRunRuntime:
             try:
                 self.guard(conn, task)
             except Fault as denied:
-                error = error or denied.code
-            code, content = invocation.settle(
+                error = error or invocation.Failure(denied.code, "denied", denied.message)
+            failure, content = invocation.settle(
                 conn,
                 tx,
                 registry,
@@ -553,14 +561,22 @@ class AgentRunRuntime:
                 lease_id=lease_id,
                 operation_id=operation_id,
                 output=None if error else output,
-                error=error,
+                error=error or "",
                 elapsed_ms=elapsed,
             )
-        if code:
-            return Outcome(code, _text(output) if code == "operation_rejected" else "")
+        if failure is not None:
+            # The operation's own refusal is meant for the agent; keep its full text.
+            detail = _text(output) if failure.reason == "rejected" else failure.describe()
+            return Outcome(failure.code, detail, reason=failure.reason)
         return Outcome(output=json.loads(content))
 
-    def _mark_uncertain(self, task_id: str, lease_id: str, operation_id: str) -> None:
+    def _mark_uncertain(
+        self,
+        task_id: str,
+        lease_id: str,
+        operation_id: str,
+        failure: invocation.Failure | None = None,
+    ) -> None:
         with self.kernel.database.engine.begin() as conn, borrow(conn) as tx:
             task = tx.get_task(task_id)
             if (
@@ -569,7 +585,9 @@ class AgentRunRuntime:
                 or now() >= task.lease.expires_at
             ):
                 return
-            invocation.uncertain(conn, tx, task, lease_id=lease_id, operation_id=operation_id)
+            invocation.uncertain(
+                conn, tx, task, lease_id=lease_id, operation_id=operation_id, failure=failure
+            )
 
     # Completion
 

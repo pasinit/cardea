@@ -21,6 +21,7 @@ import binascii
 import hashlib
 import json
 import logging
+import re
 import threading
 import time
 from collections.abc import Callable
@@ -41,21 +42,37 @@ from cardea.service.operations import (
 
 log = logging.getLogger(__name__)
 POLL_SECONDS = 0.25
+# Queue wait for a profile slot when the helper reports none (older helpers).
+DEFAULT_QUEUE_TIMEOUT_SECONDS = 600
 # systemd unit results that identify an enforced limit.
 LIMIT_RESULTS = {"oom-kill": "worker_memory_limit", "timeout": "worker_timeout"}
 Watch = Callable[[], str | None]
 
 
 class WorkerFailed(Exception):
-    """The worker started, or may have started, and produced no result."""
+    """The worker started, or may have started, and produced no result.
 
-    def __init__(self, code: str) -> None:
+    ``reason`` and ``summary`` are bounded, sanitized descriptions for receipts and agents.
+    """
+
+    def __init__(self, code: str, reason: str = "worker_exit", summary: str = "") -> None:
         super().__init__(code)
-        self.code = code
+        self.code, self.reason, self.summary = code, reason, summary or code
+
+
+class WorkerNotStarted(OperationRejected):
+    """The helper refused the job, or it was stopped before it started: nothing ran."""
+
+
+class ExecutorBusy(OperationRejected):
+    """No slot of the worker profile freed up within its queue timeout: nothing ran."""
 
 
 class WorkerStopped(WorkerFailed):
     """Cardea stopped a running worker because of cancellation or a lost lease."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code, "worker_exit", f"stopped by Cardea: {code}")
 
 
 def job_id(kind: str, key: str) -> str:
@@ -63,18 +80,43 @@ def job_id(kind: str, key: str) -> str:
     return hashlib.sha256(f"cardea-{kind}:{key}".encode()).hexdigest()[:32]
 
 
+def _word(value: object) -> str:
+    """A systemd property value reduced to a short safe token."""
+    return re.sub(r"[^A-Za-z0-9_.-]", "", str(value))[:32] or "unknown"
+
+
 def _result(status: dict[str, Any]) -> dict[str, Any]:
     result = status.get("result")
     if result in LIMIT_RESULTS:
-        raise WorkerFailed(LIMIT_RESULTS[str(result)])
+        code = LIMIT_RESULTS[str(result)]
+        raise WorkerFailed(
+            code,
+            "timeout" if code == "worker_timeout" else "worker_exit",
+            f"stopped by its profile limit (systemd result {_word(result)})",
+        )
     if result != "success" or str(status.get("exit_status")) != "0":
-        raise WorkerFailed("worker_failed")
+        raise WorkerFailed(
+            "worker_failed",
+            "worker_exit",
+            f"exit status {_word(status.get('exit_status'))}, systemd result {_word(result)}",
+        )
     try:
         document = json.loads(base64.b64decode(str(status.get("output", "")), validate=True))
     except (ValueError, binascii.Error):
-        raise WorkerFailed("worker_output_invalid") from None
+        raise WorkerFailed(
+            "worker_output_invalid", "invalid_output", "output is not JSON"
+        ) from None
     if isinstance(document, dict) and set(document) == {"rejected"}:
         raise OperationRejected(str(document["rejected"])[:256])
+    if isinstance(document, dict) and set(document) == {"error"}:
+        # The worker caught an exception and described it (operation_worker): no stderr.
+        error = document["error"] if isinstance(document["error"], dict) else {}
+        kind = error.get("type")
+        kind = kind if isinstance(kind, str) and re.fullmatch(r"[A-Za-z_][\w.]{0,63}", kind) else ""
+        http = error.get("status")
+        if type(http) is int and 100 <= http <= 599:
+            raise WorkerFailed("worker_error", "upstream_http_error", f"{kind} (HTTP {http})")
+        raise WorkerFailed("worker_error", "error", kind or "handler error")
     if (
         isinstance(document, dict)
         and set(document) == {"output"}
@@ -129,11 +171,21 @@ class Workers:
         """Wait for a free slot without blocking the loop; nothing has started yet."""
         while not slot.acquire(blocking=False):
             if time.time() >= deadline:
-                raise OperationRejected("worker_busy: no free slot in this worker profile")
+                raise ExecutorBusy("no free slot in this worker profile; nothing ran, retry later")
             reason = await asyncio.to_thread(watch) if watch is not None else None
             if reason:
-                raise OperationRejected(f"worker_not_started: {reason}")
+                raise WorkerNotStarted(f"stopped before it started: {reason}")
             await asyncio.sleep(POLL_SECONDS)
+
+    def queue_timeout(self, profile: str) -> float:
+        value = self.installed().get("profiles", {}).get(profile, {}).get("queue_timeout_seconds")
+        return (
+            float(value) if isinstance(value, int) and value > 0 else DEFAULT_QUEUE_TIMEOUT_SECONDS
+        )
+
+    def queue_allowance(self, profile: str) -> float:
+        """How long a call may wait for a slot of this profile; 0 when it never waits."""
+        return self.queue_timeout(profile) if self._slot(profile) is not None else 0.0
 
     def reap(self, job: str) -> None:
         """Stop the whole unit, then retire and delete its staging. Safe to repeat."""
@@ -156,15 +208,25 @@ class Workers:
         worker: str,
         deadline: float,
         watch: Watch | None = None,
+        timeout_seconds: float | None = None,
     ) -> dict[str, Any]:
+        """Wait for a profile slot (bounded by the profile's queue timeout), then run.
+
+        ``deadline`` is the absolute limit; ``timeout_seconds`` bounds execution only and
+        starts once the worker has a slot, so queueing never eats an operation's time.
+        """
         slot = self._slot(profile)
-        if slot is None:
-            return await self._run(job, payload, profile, worker, deadline, watch)
-        await self._acquire(slot, deadline, watch)
+        if slot is not None:
+            await self._acquire(
+                slot, min(deadline, time.time() + self.queue_timeout(profile)), watch
+            )
         try:
+            if timeout_seconds is not None:
+                deadline = min(deadline, time.time() + timeout_seconds)
             return await self._run(job, payload, profile, worker, deadline, watch)
         finally:
-            slot.release()
+            if slot is not None:
+                slot.release()
 
     async def _run(
         self,
@@ -182,16 +244,18 @@ class Workers:
             )
         except Fault as error:
             if error.code == "host_rejected":
-                raise OperationRejected(f"worker_not_started: {error.message}") from None
+                raise WorkerNotStarted(f"helper refused the job: {error.message}") from None
             # The helper may have passed its fence before failing: treat as started.
             await asyncio.to_thread(self.reap, job)
-            raise WorkerFailed("worker_start_unknown") from None
+            raise WorkerFailed("worker_start_unknown", summary="helper start failed") from None
         try:
             while True:
                 try:
                     status = await asyncio.to_thread(self.host.status, job)
                 except Fault:
-                    raise WorkerFailed("worker_status_unknown") from None
+                    raise WorkerFailed(
+                        "worker_status_unknown", summary="worker status unavailable"
+                    ) from None
                 if status.get("state") == "finished":
                     break
                 reason = await asyncio.to_thread(watch) if watch is not None else None
@@ -233,7 +297,8 @@ def confined_handler(
             payload,
             profile=executor.profile,
             worker=executor.worker,
-            deadline=min(time.time() + timeout_seconds, context.deadline.timestamp()),
+            deadline=context.deadline.timestamp(),
+            timeout_seconds=timeout_seconds,
             watch=lambda: watch(context.task_id, context.lease_id),
         )
 
@@ -273,6 +338,8 @@ class ConfinedAgentSession:
             )
         except Fault as refused:
             return SessionResult(text="", is_error=True, stop_reason=refused.code)
+        except ExecutorBusy:
+            return SessionResult(text="", is_error=True, stop_reason="executor_busy")
         except OperationRejected:
             return SessionResult(text="", is_error=True, stop_reason="worker_not_started")
         except WorkerFailed as failed:
