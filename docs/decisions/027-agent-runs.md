@@ -1,7 +1,7 @@
 # ADR-027: Agent Runs with Cardea-Owned Tools
 
 - **Date / owner / milestones:** 2026-10-15; runtime and broker maintainers; ADR-022 gaps #4 and #5 (C3).
-- **Status:** selected and implemented for portable execution. A live Claude session and Debian confinement of the session process are not yet run. Confinement is ADR-022 gap #6.
+- **Status:** selected and implemented for portable execution. A live Claude session and Debian confinement of the session process are not yet run. Confinement is ADR-022 gap #6. Decision items 1 and 6 (the single session adapter) are superseded in part by [ADR-033](033-pluggable-agent-harnesses.md): `ClaudeAgentSession` is now one of several harnesses.
 - **Requirement:** an agent session runs as one bounded step of a Cardea task.
   - Every tool it can use is an installed operation served by Cardea, so each call has a durable intent, a live authority check, a receipt and an idempotency scope.
   - A session that outlives its attempt cannot act.
