@@ -109,7 +109,9 @@ LIMITS = {
 # Optional: how many workers of one profile the kernel runs at once. JIT profiles (browsers)
 # default to one, so parallel tool calls cannot start several large processes together.
 CONCURRENCY = (1, 64)
-NETWORK = {"none", "model_api_only", "allow_list"}
+# `public_web`: any public destination through the proxy, which must refuse non-public
+# addresses (private, loopback, link-local, CGNAT, multicast, reserved); there is no host list.
+NETWORK = {"none", "model_api_only", "allow_list", "public_web"}
 HOSTNAME = r"(\*\.)?[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+"
 # Read-only binds may expose installed software and public trust roots, never service state.
 READ_ONLY_PREFIXES = ("/usr/", "/opt/", "/etc/ssl/", "/etc/fonts/")
@@ -156,6 +158,11 @@ def validate_profile(entry: object) -> dict[str, Any]:
     if network["policy"] == "none":
         if set(network) != {"policy"}:
             raise ValueError("invalid_network")
+        return entry
+    if network["policy"] == "public_web":
+        if set(network) != {"policy", "proxy"}:
+            raise ValueError("invalid_network")
+        _proxy(network["proxy"])
         return entry
     hosts = network.get("hosts")
     if (

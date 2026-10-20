@@ -10,7 +10,9 @@
       "network": {
         "policy": "model_api_only",
         "proxy": "127.0.10.2:3128",
-        "hosts": ["api.anthropic.com"]
+        "hosts": [
+          "api.anthropic.com"
+        ]
       },
       "jit": true,
       "concurrency": 1,
@@ -26,7 +28,23 @@
       "network": {
         "policy": "allow_list",
         "proxy": "127.0.10.1:3128",
-        "hosts": ["www.example.org"]
+        "hosts": [
+          "www.example.org"
+        ]
+      },
+      "jit": true,
+      "concurrency": 1
+    },
+    "web": {
+      "memory_mb": 640,
+      "cpu_percent": 100,
+      "tasks": 256,
+      "wall_seconds": 120,
+      "scratch_mb": 256,
+      "output_kb": 256,
+      "network": {
+        "policy": "public_web",
+        "proxy": "127.0.10.3:3128"
       },
       "jit": true,
       "concurrency": 1
@@ -34,19 +52,42 @@
   },
   "workers": {
     "agent": {
-      "argv": ["/opt/cardea/apps/api/.venv/bin/python", "-I", "-m", "cardea.hosts.session_worker"],
-      "profiles": ["session"],
-      "read_only": ["/opt/cardea"],
-      "env": {"CARDEA_CREDENTIAL_KIND": "oauth_token"}
+      "argv": [
+        "/opt/cardea/apps/api/.venv/bin/python",
+        "-I",
+        "-m",
+        "cardea.hosts.session_worker"
+      ],
+      "profiles": [
+        "session"
+      ],
+      "read_only": [
+        "/opt/cardea"
+      ],
+      "env": {
+        "CARDEA_CREDENTIAL_KIND": "oauth_token"
+      }
     },
     "browser-open": {
       "argv": [
-        "/opt/cardea/apps/api/.venv/bin/python", "-I", "-m", "cardea.hosts.operation_worker",
+        "/opt/cardea/apps/api/.venv/bin/python",
+        "-I",
+        "-m",
+        "cardea.hosts.operation_worker",
         "browser.open"
       ],
-      "profiles": ["browser"],
-      "read_only": ["/opt/cardea", "/opt/ms-playwright", "/etc/fonts/"],
-      "env": {"PLAYWRIGHT_BROWSERS_PATH": "/opt/ms-playwright"}
+      "profiles": [
+        "browser",
+        "web"
+      ],
+      "read_only": [
+        "/opt/cardea",
+        "/opt/ms-playwright",
+        "/etc/fonts/"
+      ],
+      "env": {
+        "PLAYWRIGHT_BROWSERS_PATH": "/opt/ms-playwright"
+      }
     }
   }
 }
