@@ -7,7 +7,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from uuid import uuid4
 
-from cardea.service import admin, maintenance
+from cardea.service import admin, harnesses, maintenance
 from cardea.service.client import ClientError, KernelClient
 from cardea.service.database import Database, Fault, private_file
 from cardea.service.kernel import provision
@@ -118,6 +118,7 @@ def main() -> None:
                     Provisioning.model_validate_json(private_file(args.path)),
                     Registry.load(config.operations_dir, resolve=False),
                     config.max_task_request_bytes,
+                    harnesses.catalog(config),
                 )
             finally:
                 database.close()

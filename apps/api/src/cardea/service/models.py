@@ -27,9 +27,19 @@ Right = Literal[
     "tasks.schedule",
 ]
 
-# A kernel right, or the name of an installed operation (ADR-023). Installed names are
-# checked against the live registry at provisioning, admission and dispatch.
-Grant = Right | OperationName
+# An installed agent harness (ADR-033) and a provider model id it may run.
+HarnessID = Annotated[str, Field(strict=True, pattern=r"^[a-z][a-z0-9-]{0,31}$")]
+ModelID = Annotated[
+    str,
+    Field(strict=True, min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/@+-]*$"),
+]
+# Right `harness.use` on one harness, written `harness:<id>` (ADR-033).
+HarnessGrant = Annotated[str, Field(strict=True, pattern=r"^harness:[a-z][a-z0-9-]{0,31}$")]
+
+# A kernel right, the name of an installed operation (ADR-023), or a harness grant.
+# Installed names are checked against the live registry at provisioning, admission and
+# dispatch; harness grants against the installed harnesses.
+Grant = Right | OperationName | HarnessGrant
 
 RIGHTS: tuple[Right, ...] = (
     "objects.read",
@@ -229,6 +239,9 @@ class AgentRunRequest(TaskRequest):
     expect: Annotated[tuple[Expectation, ...], Field(max_length=16)] = ()
     # Read-only operations invoked before each attempt's session; outputs go into the prompt.
     context: Annotated[tuple[ContextCall, ...], Field(max_length=4)] = ()
+    # The harness and model to run (ADR-033); defaults come from the host's registry.
+    harness: HarnessID | None = None
+    model: ModelID | None = None
 
     @model_validator(mode="after")
     def run_grants(self) -> Self:
@@ -325,6 +338,8 @@ class ServiceConfig(Record):
     # Private directory of installed operation descriptors (ADR-023).
     operations_dir: Path | None = None
     agent_session: AgentSessionConfig | None = None
+    # Root-owned registry of installed agent harnesses (ADR-033); replaces `agent_session`.
+    harnesses_file: Path | None = None
     rpc_timeout: Annotated[float, Field(gt=0, le=10)] = 2.0
     # Off unless configured; the private Unix socket is always served (ADR-025).
     network: NetworkListener | None = None
@@ -334,6 +349,12 @@ class ServiceConfig(Record):
     max_task_request_bytes: Annotated[
         int, Field(strict=True, ge=4096, le=MAX_TASK_REQUEST_BYTES)
     ] = DEFAULT_MAX_TASK_REQUEST_BYTES
+
+    @model_validator(mode="after")
+    def one_harness_source(self) -> Self:
+        if self.agent_session is not None and self.harnesses_file is not None:
+            raise ValueError("Configure agent_session or harnesses_file, not both")
+        return self
 
 
 class Principal(Record):

@@ -31,7 +31,7 @@ from cardea.kernel.models import (
     VerificationRecord,
 )
 from cardea.kernel.store import KernelTransaction
-from cardea.runtime.harness import HarnessRequest, HarnessResult
+from cardea.runtime.harness import Harness, HarnessRequest, HarnessResult
 from cardea.service import invocation
 from cardea.service.confined import ConfinedAgentSession, WorkerFailed
 from cardea.service.database import Fault, borrow
@@ -125,6 +125,12 @@ class AgentRunRuntime:
             policy.ceiling(task.task_id, name)
             for required in self.kernel.operations.get(name).cardea.requires:
                 policy.ceiling(task.task_id, required)
+        # The selected harness must still be installed, allowed and granted (ADR-033).
+        harness, _ = self.kernel.selection(request)
+        assert self.kernel.harnesses is not None
+        harness_grant = self.kernel.harnesses.required_grant(harness)
+        if harness_grant is not None:
+            policy.ceiling(task.task_id, harness_grant)
         if runtime != binding["runtime_id"] or runtime != self.kernel.runtime_id:
             raise Fault("runtime_binding", "Runtime does not match task")
         if task.state in TERMINAL or now() >= task.limits.deadline:
@@ -266,10 +272,13 @@ class AgentRunRuntime:
     def _reap(self, task_id: str, task: Task) -> None:
         """Stop confined workers an interrupted attempt may have left running (ADR-028)."""
         self.kernel.reap_workers(task_id)
-        session = self.kernel.session
         recorded = task.checkpoint.state.get("attempt") if task.checkpoint else None
-        if isinstance(session, ConfinedAgentSession) and isinstance(recorded, int):
-            session.reap(f"{task_id}:{recorded}")
+        if not isinstance(recorded, int) or self.kernel.harnesses is None:
+            return
+        for harness in self.kernel.harnesses.all():
+            # Job ids derive from the attempt alone; stopping an absent job is a no-op.
+            if isinstance(harness, ConfinedAgentSession):
+                harness.reap(f"{task_id}:{recorded}")
 
     # One session
 
@@ -360,9 +369,10 @@ class AgentRunRuntime:
     def _attempt(
         self, task_id: str, request: AgentRunRequest, lease: DispatchLease, attempt: int
     ) -> HarnessResult:
-        session = self.kernel.session
-        if session is None:
+        if self.kernel.harnesses is None:
             return HarnessResult.failed("agent_disabled")
+        harness_id, model = self.kernel.selection(request)
+        harness = self.kernel.harnesses.get(harness_id)
         with self.kernel.database.engine.begin() as conn, borrow(conn) as tx:
             journal = self._journal(tx, task_id)
         tools = []
@@ -390,15 +400,17 @@ class AgentRunRuntime:
                 tool_names=tuple(tool.name for tool in tools),
                 max_turns=request.max_turns,
                 max_cost_usd=request.max_cost_usd,
+                max_tool_calls=request.max_tool_calls,
                 timeout_seconds=timeout,
+                model=model or None,
                 job_key=f"{task_id}:{attempt}",
             )
-            return asyncio.run(self._supervise(task_id, session_request))
+            return asyncio.run(self._supervise(task_id, harness, session_request))
 
-    async def _supervise(self, task_id: str, request: HarnessRequest) -> HarnessResult:
-        session = self.kernel.session
-        assert session is not None
-        running = asyncio.ensure_future(session.run(request))
+    async def _supervise(
+        self, task_id: str, harness: Harness, request: HarnessRequest
+    ) -> HarnessResult:
+        running = asyncio.ensure_future(harness.run(request))
         deadline = time.monotonic() + max(0.0, request.timeout_seconds)
         try:
             while True:
@@ -703,6 +715,7 @@ class AgentRunRuntime:
         result: HarnessResult,
         calls: list[OperationReceipt],
     ) -> str:
+        harness, model = self.kernel.selection(request)
         summary = [
             {
                 "operation_id": c.request.operation_id,
@@ -720,6 +733,9 @@ class AgentRunRuntime:
                     "attempts": attempt,
                     "turns": result.turns,
                     "cost_usd": result.cost_usd,
+                    "harness": harness,
+                    "model": model or None,
+                    "usage": result.usage,
                     "calls": summary,
                 }
             ),

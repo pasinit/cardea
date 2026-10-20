@@ -190,7 +190,19 @@ class AgentRunOutput(Record):
     text: str = Field(description="The session's final reply.")
     attempts: int = Field(description="Session attempts used.")
     turns: int = Field(description="Model turns of the successful attempt.")
-    cost_usd: float | None = Field(description="Cost the session reported, if any.")
+    cost_usd: float | None = Field(
+        description="Cost of the successful attempt: reported by the harness, or metered by "
+        "Cardea from tokens and the registry price (ADR-033)."
+    )
+    harness: str | None = Field(
+        default=None, description="Harness that ran the session (ADR-033); absent before it."
+    )
+    model: str | None = Field(
+        default=None, description="Model id selected for the session; null for the default."
+    )
+    usage: dict[str, JsonValue] = Field(
+        default_factory=dict, description="Token usage and cost detail the harness reported."
+    )
     calls: list[RunOutputCall] = Field(description="Every context and tool call, in order.")
 
 

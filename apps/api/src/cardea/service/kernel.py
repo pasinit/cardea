@@ -17,6 +17,7 @@ from cardea.service import host_budget
 from cardea.service.auth import IdentityProvider, Proof
 from cardea.service.confined import ConfinedAgentSession, Workers, confined_handler, job_id
 from cardea.service.database import Database, Fault, borrow
+from cardea.service.harnesses import Catalog, Harnesses, check_harness_grants
 from cardea.service.models import (
     DEFAULT_MAX_TASK_REQUEST_BYTES,
     AgentRunRequest,
@@ -97,12 +98,19 @@ def provision(
     document: Provisioning,
     operations: Registry | None = None,
     max_task_request_bytes: int = DEFAULT_MAX_TASK_REQUEST_BYTES,
+    harnesses: Catalog | None = None,
 ) -> None:
-    """Host-owner administration, intentionally separate from authenticated agent routes."""
+    """Host-owner administration, intentionally separate from authenticated agent routes.
+
+    `harnesses` is the installed harness catalog, when the caller has loaded one; harness
+    grants are then checked against it (ADR-033).
+    """
     database.check_version()
     installed = operations or Registry()
     for rule in (*document.permissions, *document.platform):
-        if rule.operation not in KERNEL_RIGHTS and rule.operation not in installed:
+        if rule.operation.startswith("harness:"):
+            check_harness_grants(harnesses, (rule.operation,), required=False)
+        elif rule.operation not in KERNEL_RIGHTS and rule.operation not in installed:
             raise Fault(
                 "operation_not_installed", "Policy names an operation that is not installed"
             )
@@ -183,7 +191,9 @@ def provision(
                         budget.concurrent_operations,
                     ),
                 )
-            install_triggers(conn, document.triggers, installed, now(), max_task_request_bytes)
+            install_triggers(
+                conn, document.triggers, installed, now(), max_task_request_bytes, harnesses
+            )
             revision = (
                 int(
                     conn.exec_driver_sql(
@@ -233,12 +243,17 @@ class Kernel:
         session: AgentSession | None = None,
         workers: Workers | None = None,
         max_task_request_bytes: int = DEFAULT_MAX_TASK_REQUEST_BYTES,
+        harnesses: Harnesses | None = None,
     ) -> None:
         self.database, self.auth, self.fault = database, auth, fault
         self.max_task_request_bytes = max_task_request_bytes
         self.host = host
         self.operations = operations or Registry(handlers={})
-        self.session = session
+        # Installed agent harnesses (ADR-033). A lone `session` is the ADR-027 configuration,
+        # served as the implicit `claude-sdk` entry so there is one code path.
+        if harnesses is None and session is not None:
+            harnesses = Harnesses.single(session)
+        self.harnesses = harnesses
         # Confined operation workers under host-owner profiles (ADR-028).
         self.workers = workers
         # Concurrent agent sessions; each holds a model session and its tool endpoint.
@@ -253,7 +268,7 @@ class Kernel:
             (
                 "session_required_for_recovery",
                 "Configure the agent session to recover unfinished agent runs",
-                lambda p: p.requires_session and session is None,
+                lambda p: p.requires_session and harnesses is None,
             ),
         )
         with database.engine.begin() as conn:
@@ -334,6 +349,7 @@ class Kernel:
                 now(),
                 managed_by="supervisor",
                 max_task_request_bytes=self.max_task_request_bytes,
+                harnesses=self.harnesses,
             )
         return {"trigger_id": spec.trigger_id, "change": kind}
 
@@ -448,10 +464,36 @@ class Kernel:
         for (receipt_id,) in rows:
             self.workers.reap(job_id("operation", str(receipt_id)))
 
+    @property
+    def session(self) -> AgentSession | None:
+        """The default harness; None when agent runs are not configured."""
+        return self.harnesses.get(self.harnesses.default) if self.harnesses else None
+
+    @session.setter
+    def session(self, harness: AgentSession | None) -> None:
+        # A lone session is the ADR-027 configuration: the implicit `claude-sdk` entry.
+        self.harnesses = Harnesses.single(harness) if harness is not None else None
+
+    def selection(self, request: AgentRunRequest) -> tuple[str, str]:
+        """The `(harness, model)` an agent run uses now, checked against the registry and
+        the run's grants (ADR-033)."""
+        if self.harnesses is None:
+            raise Fault("agent_disabled", "Agent runs require a configured agent session", 503)
+        harness, model = self.harnesses.resolve(request.namespace, request.harness, request.model)
+        self.harnesses.check_grant(harness, request.grants)
+        return harness, model
+
+    def harness_for(self, request: AgentRunRequest) -> AgentSession:
+        harnesses = self.harnesses
+        harness, _ = self.selection(request)
+        assert harnesses is not None
+        return harnesses.get(harness)
+
     def _precheck(self, request: TaskRequest, delegation: tuple[str, int] | None) -> Profile:
         profile = for_request(request)
         check_size(request, self.max_task_request_bytes)
         self.operations.check_grants(request.grants)
+        check_harness_grants(self.harnesses, request.grants)
         if isinstance(request, OperationTaskRequest):
             descriptor = self.operations.get(request.operation)
             if not set(descriptor.cardea.requires) <= set(request.grants):
@@ -470,8 +512,9 @@ class Kernel:
                 check_context(self.operations, call.operation)
                 self.operations.validate_arguments(call.operation, call.arguments)
                 self.executor_record(call.operation)
-            if isinstance(self.session, ConfinedAgentSession):
-                self.session.check()
+            harness = self.harness_for(request)
+            if isinstance(harness, ConfinedAgentSession):
+                harness.check()
         if profile.requires_host and self.host is None:
             raise Fault(
                 "unsupported_host", f"{profile.runtime_id} requires the installed host", 503
