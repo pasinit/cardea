@@ -32,9 +32,11 @@ from cardea.service.models import (
     Provisioning,
     now,
 )
+from cardea.service.operation_runtime import OperationRuntime
 from cardea.service.operations import (
     OperationContext,
     OperationDescriptor,
+    Reconciliation,
     Registry,
 )
 
@@ -388,10 +390,62 @@ def test_uncertain_effect_fences_the_run(
         assert tx.get_operation(task_id, "call-0001").state is OperationState.OUTCOME_UNKNOWN
 
 
+def test_reconciler_sees_the_original_call_context(
+    kernel: Kernel, tools: Tools, session: FakeSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[OperationContext] = []
+
+    async def reconcile(
+        arguments: dict[str, JsonValue], context: OperationContext
+    ) -> Reconciliation:
+        seen.append(context)
+        return Reconciliation(applied=True, output={"message_id": "<found@test>"})
+
+    kernel.operations = Registry(
+        (
+            descriptor(
+                "mail.send", "effect", idempotency_scope=["/to"], reconciler="test.reconcile"
+            ),
+            descriptor("listings.search", "read"),
+        ),
+        {
+            "test.mail.send": tools.send,
+            "test.listings.search": tools.search,
+            "test.reconcile": reconcile,
+        },
+    )
+    monkeypatch.setattr(agent_run_runtime, "attempt_lease_seconds", lambda request: 4.0)
+    tools.crash = True
+
+    async def sends(client: ClientSession, request: SessionRequest) -> SessionResult:
+        result = await call(client, "mail-send", to="user@example.invalid", body="recap")
+        assert "outcome_unknown" in cast(types.TextContent, result.content[0]).text
+        return SessionResult(text="Tried to send.", is_error=False)
+
+    session.scripts = [sends]
+    slot = {
+        "idempotency_context": "daily.20261020T073000Z",
+        "slot_time": "2026-10-20T08:30:00+01:00",
+    }
+    task_id = submit(kernel, **slot)
+    assert AgentRunRuntime(kernel).execute(task_id) == "failed"
+    assert calls(kernel, task_id)[0].state is OperationState.OUTCOME_UNKNOWN
+    assert OperationRuntime(kernel).reconcile(task_id, "call-0001") == "succeeded"
+    (original,) = tools.contexts
+    (reconciling,) = seen
+    for field in ("agent_id", "idempotency_context", "slot_time", "effect_key", "task_id"):
+        assert getattr(reconciling, field) == getattr(original, field), field
+    assert reconciling.agent_id == "agent"
+    assert reconciling.slot_time == "2026-10-20T08:30:00+01:00"
+
+
 def test_crash_after_effect_resumes_without_resending(
     kernel: Kernel, tools: Tools, session: FakeSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(agent_run_runtime, "attempt_lease_seconds", lambda request: 4.0)
+    # With the default 30 s margin a 4 s lease leaves the session no time at all, so the
+    # retry passed only when it finished within one poll; give it the lease's 3 s.
+    monkeypatch.setattr(agent_run_runtime, "LEASE_MARGIN", 1.0)
 
     class Crash(Exception):
         pass
