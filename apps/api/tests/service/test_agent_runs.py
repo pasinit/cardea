@@ -437,6 +437,7 @@ def test_uncertain_effect_fences_the_run(
     kernel: Kernel, tools: Tools, session: FakeSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(agent_run_runtime, "attempt_lease_seconds", lambda request: 4.0)
+    monkeypatch.setattr(agent_run_runtime, "LEASE_MARGIN", 1.0)
     tools.crash = True
 
     async def sends(client: ClientSession, request: SessionRequest) -> SessionResult:
@@ -478,6 +479,7 @@ def test_reconciler_sees_the_original_call_context(
         },
     )
     monkeypatch.setattr(agent_run_runtime, "attempt_lease_seconds", lambda request: 4.0)
+    monkeypatch.setattr(agent_run_runtime, "LEASE_MARGIN", 1.0)
     tools.crash = True
 
     async def sends(client: ClientSession, request: SessionRequest) -> SessionResult:
@@ -537,6 +539,7 @@ def test_interrupted_effect_intent_is_never_replayed(
 ) -> None:
     """The process dies after committing an effect's intent, before its handler returns."""
     monkeypatch.setattr(agent_run_runtime, "attempt_lease_seconds", lambda request: 4.0)
+    monkeypatch.setattr(agent_run_runtime, "LEASE_MARGIN", 1.0)
 
     def dies(stage: str) -> None:
         if stage == "agent_run.call_admitted":
@@ -877,6 +880,7 @@ def test_uncertain_effect_records_why(
     kernel: Kernel, tools: Tools, session: FakeSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(agent_run_runtime, "attempt_lease_seconds", lambda request: 4.0)
+    monkeypatch.setattr(agent_run_runtime, "LEASE_MARGIN", 1.0)
     tools.crash = True
 
     async def sends(client: ClientSession, request: SessionRequest) -> SessionResult:
