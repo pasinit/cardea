@@ -107,6 +107,7 @@ chmod 0440 /etc/sudoers.d/cardea-host && visudo -cf /etc/sudoers.d/cardea-host
 3. Profiles and workers: edit `cardea/cardea-host-workers.json` and install it as `/etc/cardea-host-workers.json` (owned by root, mode `0644`).
    - The `session` profile runs the agent session. It may reach only the model API through its proxy and the loopback tool endpoint. Its credential is a root-only file such as `/etc/cardea/credentials/claude` (`0600 root`), which systemd hands to the unit.
    - The `browser` profile runs browser operations. Set its `hosts` to the sites they need.
+   - The `web` profile (`"policy": "public_web"`, a proxy and no host list) is for read-only operations that must reach the open public web. Its proxy port allows any public destination and refuses private, loopback, link-local, CGNAT and multicast addresses.
    - `concurrency` bounds how many workers of a profile run at once. JIT profiles default to 1.
    - Worker paths depend on the operations package. A browser needs its browser build bound read-only under `/opt/`.
 4. The egress proxy for networked profiles. `cardea/squid-workers.conf` is a **complete** `squid.conf`. It replaces Debian's default, and is not a `conf.d` snippet. The default allows every destination for loopback clients (`http_access allow localhost`) before it reads `conf.d`, and it also listens on a wildcard port 3128, so an allow-list placed in `conf.d` is bypassed. Keep the file's host lists identical to the profiles' `hosts`. The proxy is what enforces them, and units can reach only the proxy's address.
@@ -128,6 +129,12 @@ curl -s -o /dev/null -w '%{http_code}\n' -x $P http://example.com/       # 403 (
 curl -s -o /dev/null -w '%{http_connect}\n' -x $P https://example.com/   # 403 (unlisted)
 curl -s -o /dev/null -w '%{http_connect}\n' -x $P https://api.anthropic.com/  # 403 (another profile's host)
 curl -s -x http://127.0.0.1:3128 https://www.example.org/ || echo refused  # refused: no default port
+W=http://127.0.10.3:3128 # the public_web profile's proxy
+curl -s -o /dev/null -w '%{http_connect}\n' -x $W https://example.com/            # 200 (public)
+curl -s -o /dev/null -w '%{http_code}\n' -x $W http://169.254.169.254/           # 403 (link-local)
+curl -s -o /dev/null -w '%{http_code}\n' -x $W http://10.0.0.1/                  # 403 (private)
+curl -s -o /dev/null -w '%{http_code}\n' -x $W http://localhost:8443/            # 403 (loopback name)
+curl -s -o /dev/null -w '%{http_connect}\n' -x $W https://example.com:8443/       # 403 (non-443 CONNECT)
 ```
 5. Let the kernel use the helper: install the drop-in `cardea/cardea-kernel.service.d/host-execution.conf` as `/etc/systemd/system/cardea-kernel.service.d/host-execution.conf`. It drops `NoNewPrivileges` (sudo needs it) and makes `/var/lib/cardea-host` writable inside the unit's read-only file system.
 6. Switch `/etc/cardea/config.json` to `cardea/config.confined.json`: `host_execution: true` and a confined `agent_session` that holds no credential itself. Then run `systemctl daemon-reload && systemctl restart cardea-kernel`.

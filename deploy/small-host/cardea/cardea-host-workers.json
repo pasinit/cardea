@@ -30,6 +30,17 @@
       },
       "jit": true,
       "concurrency": 1
+    },
+    "web": {
+      "memory_mb": 640,
+      "cpu_percent": 100,
+      "tasks": 256,
+      "wall_seconds": 120,
+      "scratch_mb": 256,
+      "output_kb": 256,
+      "network": {"policy": "public_web", "proxy": "127.0.10.3:3128"},
+      "jit": true,
+      "concurrency": 1
     }
   },
   "workers": {
@@ -44,7 +55,7 @@
         "/opt/cardea/apps/api/.venv/bin/python", "-I", "-m", "cardea.hosts.operation_worker",
         "browser.open"
       ],
-      "profiles": ["browser"],
+      "profiles": ["browser", "web"],
       "read_only": ["/opt/cardea", "/opt/ms-playwright", "/etc/fonts/"],
       "env": {"PLAYWRIGHT_BROWSERS_PATH": "/opt/ms-playwright"}
     }

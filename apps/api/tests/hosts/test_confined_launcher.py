@@ -143,6 +143,26 @@ def test_allow_list_profile_limits_and_network_reach_systemd_and_bubblewrap(
     assert json.loads((helper / job / "input/data").read_bytes()) == {"arguments": {}}
 
 
+def test_public_web_profile_reaches_only_its_proxy(
+    configured: list[list[str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    web = {**BROWSER, "network": {"policy": "public_web", "proxy": "127.0.10.3:3128"}}
+    launcher.validate_profile(web)
+    config: dict[str, Any] = json.loads(json.dumps(CONFIG))
+    config["profiles"]["web"] = web
+    config["workers"]["fetch"]["profiles"] = ["web"]
+    monkeypatch.setattr(launcher, "worker_config", lambda: config)
+    assert launcher.handle(start("e" * 32, "web", "fetch")) == {"started": True}
+    (command,) = configured
+    props = properties(command)
+    # The same systemd IP filter as allow_list: the proxy decides which public hosts.
+    assert props["IPAddressDeny"] == "any" and props["IPAddressAllow"] == "127.0.10.3/32"
+    assert "PrivateNetwork" not in props
+    assert environment(command)["HTTPS_PROXY"] == "http://127.0.10.3:3128"
+    reported = launcher.handle({"action": "profiles"})["profiles"]["web"]
+    assert reported["network"] == {"policy": "public_web", "proxy": "127.0.10.3:3128"}
+
+
 def test_session_profile_gets_one_credential_and_the_tool_endpoint(
     configured: list[list[str]],
 ) -> None:
@@ -228,6 +248,14 @@ def test_requests_cannot_carry_command_lines_or_limits(
         ("profiles", "browser", {"credential": "/var/lib/cardea/secret"}),
         ("profiles", "browser", {"unknown": 1}),
         ("profiles", "browser", {"concurrency": 0}),
+        (
+            "profiles",
+            "browser",
+            {"network": {"policy": "public_web", "proxy": "127.0.10.3:3128", "hosts": ["a.b"]}},
+        ),
+        ("profiles", "browser", {"network": {"policy": "public_web"}}),
+        ("profiles", "browser", {"network": {"policy": "public_web", "proxy": "127.0.0.1:3128"}}),
+        ("profiles", "browser", {"network": {"policy": "public_web", "proxy": "10.0.0.1:3128"}}),
         ("profiles", "browser", {"concurrency": 65}),
         ("profiles", "browser", {"concurrency": "2"}),
         ("profiles", "browser", {"concurrency": True}),
