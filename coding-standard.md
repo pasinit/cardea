@@ -27,7 +27,7 @@ Layout:
 - `apps/api/tests`: portable contract tests, recovery integration tests, and clearly marked Debian host tests.
 - `packages`: actual shared/generated contracts; do not publish imagined endpoints as implemented APIs.
 
-Do not import business-specific evaluators into the kernel. The pre-rescope escalation demo is archived on the `archive/legacy-escalation-demo` branch; port pieces deliberately as applications, never as an alternate authority path.
+Do not import business-specific evaluators into the kernel. The pre-rescope escalation demo was removed on 2026-10-10; build any such feature deliberately as an application, never as an alternate authority path.
 
 ## Kernel Boundaries
 

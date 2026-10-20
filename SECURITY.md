@@ -34,7 +34,5 @@ or provider credentials, and bounded CPU, memory, processes, output and wall tim
   `outcome_unknown` and require reconciliation; they are never silently retried.
 - `make try` (`experiments/try/`), which uses an unenforced development identity and is
   not shipped in the Debian package.
-- The legacy escalation demo on the `archive/legacy-escalation-demo` branch, which
-  uses simulated state and has no authentication.
 
 See [design.md](design.md#trust-and-failure-model) for the full trust and failure model.

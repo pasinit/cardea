@@ -102,7 +102,7 @@ The audit log is append-only to applications; the MVP makes no tamper-proof guar
 
 Build a hosted agent OS, not a new hardware kernel or Linux distribution. Defer clustered scheduling, hostile multi-tenant hosting, arbitrary package installation, a general plugin marketplace, broad enterprise connectors, and desktop replacement.
 
-The pre-rescope escalation UI, evaluators and fixture API are archived on the `archive/legacy-escalation-demo` branch; they are not evidence that the kernel exists.
+The pre-rescope escalation UI, evaluators and fixture API were removed on 2026-10-10 and are not part of this repository; they were never evidence that the kernel exists.
 
 ## Technical References
 

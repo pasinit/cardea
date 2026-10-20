@@ -1,6 +1,6 @@
 # Cardea Agent Instructions
 
-Updated 2026-09-25. The current project is a hosted, agent-first operating layer. The pre-rescope customer-escalation demo is archived on the `archive/legacy-escalation-demo` branch.
+Updated 2026-09-25. The current project is a hosted, agent-first operating layer. The pre-rescope customer-escalation demo was removed on 2026-10-10.
 
 ## Mission
 

@@ -8,4 +8,4 @@
 
 **Boundary and recovery.** Credentials travel in headers, never task JSON. Stable submission IDs and control IDs support safe retries after lost responses. The service enforces current scope for every read and control action; UI/client code cannot grant extra authority. Local host-owner provisioning is separate administration.
 
-**Acceptance/status.** Implemented Python/CLI clients with real socket/provider acceptance. No supervisor UI is required for M1; the React escalation dashboard is legacy. See [quickstart](../m1-quickstart.md).
+**Acceptance/status.** Implemented Python/CLI clients with real socket/provider acceptance. No supervisor UI is required for M1; the legacy React escalation dashboard was removed on 2026-10-10. See [quickstart](../m1-quickstart.md).
