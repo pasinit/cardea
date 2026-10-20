@@ -1,4 +1,6 @@
-"""Agent session adapters: one bounded session whose only tools are Cardea's (ADR-027).
+"""The Claude Agent SDK harness: one bounded session whose only tools are Cardea's.
+
+ADR-027 introduced it as the first session adapter; ADR-033 makes it one harness of many.
 
 The kernel treats a session as an opaque unit. Every tool it can use is served by the
 per-attempt Cardea MCP endpoint; the adapter's job is to make sure nothing else is.
@@ -6,9 +8,10 @@ per-attempt Cardea MCP endpoint; the adapter's job is to make sure nothing else 
 
 import os
 import tempfile
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
+
+from cardea.runtime.harness import Harness, HarnessRequest, HarnessResult
 
 # Inherited variables a session may keep; all others are blanked (secrets included).
 INHERITED = frozenset({"PATH", "LANG", "LC_ALL", "TZ", "SSL_CERT_FILE", "SSL_CERT_DIR"})
@@ -16,33 +19,33 @@ INHERITED = frozenset({"PATH", "LANG", "LC_ALL", "TZ", "SSL_CERT_FILE", "SSL_CER
 SERVER_NAME = "cardea"
 
 
-@dataclass(frozen=True)
-class SessionRequest:
-    system_prompt: str
-    prompt: str
-    mcp_url: str
-    mcp_token: str
-    tool_names: tuple[str, ...]
-    max_turns: int
-    max_cost_usd: float
-    timeout_seconds: float
-    # Stable identity of this attempt (task and attempt number); a confined session's
-    # worker job derives from it so recovery can stop it (ADR-028).
-    job_key: str = ""
+# The first harness predates the harness contract; its names remain as aliases.
+SessionRequest = HarnessRequest
+AgentSession = Harness
 
 
-@dataclass(frozen=True)
-class SessionResult:
-    text: str
-    is_error: bool
-    cost_usd: float | None = None
-    turns: int = 0
-    stop_reason: str = ""
-    usage: dict[str, Any] = field(default_factory=dict)
+class SessionResult(HarnessResult):
+    """A `HarnessResult` built from the first adapter's fields (`is_error`, `stop_reason`)."""
 
-
-class AgentSession(Protocol):
-    async def run(self, request: SessionRequest) -> SessionResult: ...
+    def __init__(
+        self,
+        *,
+        text: str,
+        is_error: bool,
+        cost_usd: float | None = None,
+        turns: int = 0,
+        stop_reason: str = "",
+        usage: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(
+            text=text,
+            success=not is_error,
+            failure_reason=(stop_reason or "error") if is_error else None,
+            cost_usd=cost_usd,
+            turns=turns,
+            stop_reason=stop_reason,
+            usage=usage or {},
+        )
 
 
 class ClaudeAgentSession:
@@ -61,7 +64,7 @@ class ClaudeAgentSession:
         self.api_key = api_key
         self.oauth_token = oauth_token
 
-    def options(self, request: SessionRequest, workdir: Path) -> dict[str, Any]:
+    def options(self, request: HarnessRequest, workdir: Path) -> dict[str, Any]:
         return {
             "system_prompt": request.system_prompt,
             # No built-in tools at all: shell, files, web, scheduling and subagents are off.
@@ -80,7 +83,7 @@ class ClaudeAgentSession:
             "permission_mode": "bypassPermissions",
             "max_turns": request.max_turns,
             "max_budget_usd": request.max_cost_usd,
-            "model": self.model,
+            "model": request.model or self.model,
             "cwd": str(workdir),
             # The SDK starts the CLI with the service's whole environment and layers this
             # mapping on top, so every inherited variable outside a small allow-list is
@@ -96,7 +99,7 @@ class ClaudeAgentSession:
             },
         }
 
-    async def run(self, request: SessionRequest) -> SessionResult:
+    async def run(self, request: HarnessRequest) -> HarnessResult:
         from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 
         with tempfile.TemporaryDirectory(prefix="cardea-session-") as directory:
@@ -107,12 +110,14 @@ class ClaudeAgentSession:
                 if isinstance(message, ResultMessage):
                     result = message
         if result is None:
-            return SessionResult(text="", is_error=True, stop_reason="no_result")
-        return SessionResult(
+            return HarnessResult.failed("no_result")
+        stop = str(result.stop_reason or result.subtype)
+        return HarnessResult(
             text=result.result or "",
-            is_error=result.is_error,
+            success=not result.is_error,
+            failure_reason=(stop or "error") if result.is_error else None,
             cost_usd=result.total_cost_usd,
             turns=result.num_turns,
-            stop_reason=str(result.stop_reason or result.subtype),
+            stop_reason=stop,
             usage=dict(result.usage or {}),
         )
