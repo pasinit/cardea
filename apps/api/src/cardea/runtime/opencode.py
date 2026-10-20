@@ -40,7 +40,22 @@ PROVIDER = "cardea-provider"
 AGENT = "cardea"
 KEY_VARIABLE = "CARDEA_PROVIDER_KEY"
 TOKEN_VARIABLE = "CARDEA_MCP_TOKEN"
-INHERITED = ("PATH", "LANG", "LC_ALL", "TZ", "SSL_CERT_FILE", "SSL_CERT_DIR")
+# Locale, certificates and, inside a confined worker, the profile's egress proxy (ADR-028
+# sets these; NO_PROXY keeps the loopback tool endpoint direct).
+INHERITED = (
+    "PATH",
+    "LANG",
+    "LC_ALL",
+    "TZ",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "https_proxy",
+    "http_proxy",
+    "NO_PROXY",
+    "no_proxy",
+)
 DISABLED = (
     "AUTOUPDATE",
     "MODELS_FETCH",
@@ -268,7 +283,8 @@ class OpenCodeHarness:
             "Accept": "application/json, text/event-stream",
         }
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            # The endpoint is loopback: never through a proxy.
+            async with httpx.AsyncClient(timeout=5.0, trust_env=False) as client:
                 response = await client.post(request.mcp_url, json=body, headers=headers)
         except httpx.HTTPError:
             return False

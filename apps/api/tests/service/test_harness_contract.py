@@ -104,4 +104,4 @@ def test_session_worker_speaks_the_contract(
     assert HarnessResult.model_validate(output) == HarnessResult(
         text="done", success=True, turns=1, cost_usd=0.01
     )
-    assert seen == [("m", request())]
+    assert seen == [("m", request(model="m"))]

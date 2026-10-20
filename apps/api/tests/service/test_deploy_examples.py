@@ -14,6 +14,7 @@ import pytest
 from cryptography import x509
 
 from cardea.hosts import launcher
+from cardea.service.harnesses import HarnessFile
 from cardea.service.models import Provisioning, ServiceConfig
 
 KIT = Path(__file__).resolve().parents[4] / "deploy" / "small-host"
@@ -75,6 +76,33 @@ def test_confined_config_names_an_installed_session_profile() -> None:
     assert session.confined_profile in workers["workers"][session.confined_worker]["profiles"]
     profile = workers["profiles"][session.confined_profile]
     assert profile["network"]["policy"] == "model_api_only" and "credential" in profile
+
+
+def test_harness_registry_example_runs_every_harness_confined() -> None:
+    """ADR-033: each harness runs under a worker that lists its profile; the profile reaches
+    only its provider's host, holds the credential, and the worker runs the entry's kind."""
+    parsed = service_config("config.harnesses.json")
+    assert parsed.host_execution and parsed.agent_session is None
+    assert parsed.harnesses_file == Path("/etc/cardea-host-harnesses.json")
+    registry = HarnessFile.model_validate_json(
+        (KIT / "cardea" / "cardea-host-harnesses.json").read_text()
+    )
+    workers = json.loads((KIT / "cardea" / "cardea-host-workers.json").read_text())
+    assert {h.kind for h in registry.harnesses} == {"claude-agent-sdk", "opencode"}
+    for entry in registry.harnesses:
+        assert entry.confined is not None and entry.credential is None, entry.id
+        worker = workers["workers"][entry.confined.worker]
+        assert entry.confined.profile in worker["profiles"]
+        assert worker["argv"][-2:] == ["-m", "cardea.hosts.session_worker"]
+        assert worker.get("env", {}).get("CARDEA_HARNESS_KIND", "claude-agent-sdk") == entry.kind
+        profile = workers["profiles"][entry.confined.profile]
+        assert profile["network"]["policy"] == "model_api_only" and "credential" in profile
+        assert profile["jit"] is True  # Node (Claude Code) and Bun (OpenCode) need a JIT
+        if entry.provider is not None:
+            assert entry.provider.base_url.host in profile["network"]["hosts"]
+            binary = worker["env"]["CARDEA_OPENCODE_BINARY"]
+            assert entry.package.binary == Path(binary)
+            assert any(binary.startswith(path + "/") for path in worker["read_only"])
 
 
 def test_proxy_enforces_the_same_hosts_as_each_profile() -> None:

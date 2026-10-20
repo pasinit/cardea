@@ -1,0 +1,18 @@
+{
+  "data_dir": "/var/lib/cardea",
+  "spiffe_socket": "unix:///run/spire/agent.sock",
+  "trust_domain": "cardea.internal",
+  "audience": "cardea-kernel",
+  "runtime_spiffe_id": "spiffe://cardea.internal/runtime/kernel",
+  "operations_dir": "/etc/cardea/operations",
+  "host_execution": true,
+  "network": {
+    "host": "CARDEA_PRIVATE_IP",
+    "port": 8443,
+    "certificate_file": "/etc/cardea/tls/server.crt",
+    "key_file": "/etc/cardea/tls/server.key"
+  },
+  "max_request_bytes": 131072,
+  "max_task_request_bytes": 65536,
+  "harnesses_file": "/etc/cardea-host-harnesses.json"
+}

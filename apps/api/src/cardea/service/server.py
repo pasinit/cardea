@@ -177,16 +177,37 @@ def start_harnesses(config: ServiceConfig, workers: Workers | None) -> registry.
     def opencode(entry: registry.HarnessEntry) -> Harness:
         assert entry.provider is not None and entry.package.binary is not None
         assert entry.default_model is not None
+        prices = {
+            model: Price(m.price.input_usd_per_mtok, m.price.output_usd_per_mtok)
+            for model, m in entry.models.items()
+            if m.price is not None
+        }
+        if entry.confined is not None:
+            if workers is None:
+                raise Fault("unsupported_host", "Confined harnesses require the confined host", 503)
+            # The worker runs its own pinned binary and holds the credential; it receives
+            # only these non-secret settings and checks the pin against its binary.
+            return ConfinedAgentSession(
+                workers,
+                entry.confined.profile,
+                entry.confined.worker,
+                entry.default_model,
+                settings={
+                    "kind": "opencode",
+                    "base_url": str(entry.provider.base_url),
+                    "headers": entry.provider.headers,
+                    "default_model": entry.default_model,
+                    "prices": {m: [p.input, p.output] for m, p in prices.items()},
+                    "sha256": entry.package.sha256,
+                },
+                requires_tool_listing=True,
+            )
         return OpenCodeHarness(
             binary=entry.package.binary,
             base_url=str(entry.provider.base_url),
             headers=entry.provider.headers,
             default_model=entry.default_model,
-            prices={
-                model: Price(m.price.input_usd_per_mtok, m.price.output_usd_per_mtok)
-                for model, m in entry.models.items()
-                if m.price is not None
-            },
+            prices=prices,
             api_key=private_file(entry.credential.file).decode().strip()
             if entry.credential
             else None,
