@@ -319,6 +319,57 @@ def test_preflight_accepts_debian_13_6_12_kernels(release: str, supported: bool)
     assert launcher.supported_kernel(release) is supported
 
 
+def root_owned(monkeypatch: pytest.MonkeyPatch, path: Path) -> None:
+    real = Path.lstat
+
+    def lstat(self: Path) -> os.stat_result:
+        info = real(self)
+        if self == path:
+            return os.stat_result((info.st_mode & ~0o022, *info[1:4], 0, *info[5:]))
+        return info
+
+    monkeypatch.setattr(Path, "lstat", lstat)
+
+
+@pytest.mark.parametrize(
+    ("config", "valid"),
+    [
+        ({"kernel_uid": 990}, True),
+        ({"kernel_uid": 990, "kernel_release_pattern": r"6\.12\.\d+\+deb13-rt-amd64"}, True),
+        ({"kernel_uid": 990, "kernel_release_pattern": "("}, False),
+        ({"kernel_uid": 990, "kernel_release_pattern": ""}, False),
+        ({"kernel_uid": 990, "kernel_release_pattern": ["6.12.111+deb13-amd64"]}, False),
+        ({"kernel_uid": 990, "other": 1}, False),
+        ({"kernel_release_pattern": ".*"}, False),
+    ],
+)
+def test_host_owner_may_set_the_kernel_release_pattern(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, config: dict[str, Any], valid: bool
+) -> None:
+    path = tmp_path / "cardea-host.json"
+    path.write_text(json.dumps(config))
+    monkeypatch.setattr(launcher, "HOST_CONFIG", path)
+    root_owned(monkeypatch, path)
+    if not valid:
+        with pytest.raises(ValueError, match="invalid_configuration"):
+            launcher.host_config()
+        return
+    pattern = launcher.host_config().get("kernel_release_pattern", launcher.KERNEL_RELEASE)
+    assert launcher.supported_kernel("6.12.111+deb13-rt-amd64", pattern) is (
+        "kernel_release_pattern" in config
+    )
+
+
+def test_host_configuration_must_be_root_owned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "cardea-host.json"
+    path.write_text(json.dumps({"kernel_uid": 990}))
+    monkeypatch.setattr(launcher, "HOST_CONFIG", path)
+    with pytest.raises(ValueError, match="unsafe_configuration"):
+        launcher.host_config()
+
+
 def test_fixed_m2_profile_is_unchanged(configured: list[list[str]], helper: Path) -> None:
     launcher.handle(
         {
