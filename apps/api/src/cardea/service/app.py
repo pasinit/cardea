@@ -34,6 +34,20 @@ from cardea.service.models import (
 )
 from cardea.service.policy import Policy
 from cardea.service.profiles import for_runtime
+from cardea.service.responses import (
+    AgentReceipts,
+    ChildrenView,
+    HostBudgetView,
+    OperationCatalog,
+    ReconcileResult,
+    RunOutput,
+    RunView,
+    SystemView,
+    TaskReceipt,
+    TriggerList,
+    TriggerRemoved,
+    TriggerScheduled,
+)
 
 log = logging.getLogger(__name__)
 
@@ -59,6 +73,22 @@ Namespace = Annotated[str, Query(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
 DEFAULT_MAX_REQUEST_BYTES = 32768
 MAX_RESPONSE_BYTES = 262144
+
+
+ERROR_DESCRIPTIONS = {
+    400: "Bad Request",
+    401: "Unauthorized",
+    403: "Forbidden",
+    404: "Not Found",
+    405: "Method Not Allowed",
+    409: "Conflict",
+    413: "Content Too Large",
+    415: "Unsupported Media Type",
+    422: "Unprocessable Content",
+    429: "Too Many Requests",
+    500: "Internal Server Error",
+    503: "Service Unavailable",
+}
 
 
 class Bounds:
@@ -139,9 +169,11 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
         openapi_url=None,
         docs_url=None,
         redoc_url=None,
+        # Fixed descriptions: the defaults come from http.HTTPStatus, whose phrases vary by
+        # Python version, and the committed API document must not.
         responses={
-            status: {"model": ErrorBody}
-            for status in (400, 401, 403, 404, 405, 409, 413, 415, 422, 429, 500, 503)
+            status: {"model": ErrorBody, "description": description}
+            for status, description in ERROR_DESCRIPTIONS.items()
         },
     )
     app.add_middleware(Bounds, max_request_bytes=max_request_bytes)
@@ -215,7 +247,7 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
             status_code=500,
         )
 
-    @app.get("/v0.2/system")
+    @app.get("/v0.2/system", response_model=SystemView)
     def describe(proof: Credential) -> dict[str, Any]:
         with kernel.database.read() as conn:
             proof.resolve(conn)
@@ -232,7 +264,7 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
             "max_response_bytes": MAX_RESPONSE_BYTES,
         }
 
-    @app.get("/v0.2/operations")
+    @app.get("/v0.2/operations", response_model=OperationCatalog)
     def operations(proof: Credential, namespace: Namespace) -> dict[str, Any]:
         with kernel.database.read() as conn:
             principal = proof.resolve(conn)
@@ -309,7 +341,7 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
             "registered": registered,
         }
 
-    @app.get("/v0.2/host-budget")
+    @app.get("/v0.2/host-budget", response_model=HostBudgetView)
     def budget(proof: Credential, namespace: Namespace) -> dict[str, Any]:
         with kernel.database.read() as conn:
             principal = proof.resolve(conn)
@@ -347,17 +379,17 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
             )
         return {"schema_version": "0.2", "limits": dict(limits) if limits else None, **dict(usage)}
 
-    @app.put("/v0.2/triggers/{trigger_id}")
+    @app.put("/v0.2/triggers/{trigger_id}", response_model=TriggerScheduled)
     def schedule(trigger_id: TriggerPath, spec: TriggerSpec, proof: Credential) -> dict[str, Any]:
         if spec.trigger_id != trigger_id:
             raise Fault("trigger_mismatch", "Path and body trigger IDs differ", 422)
         return {"schema_version": "0.2", **kernel.schedule(proof, spec)}
 
-    @app.delete("/v0.2/triggers/{trigger_id}")
+    @app.delete("/v0.2/triggers/{trigger_id}", response_model=TriggerRemoved)
     def unschedule(trigger_id: TriggerPath, proof: Credential) -> dict[str, Any]:
         return {"schema_version": "0.2", **kernel.unschedule(proof, trigger_id)}
 
-    @app.get("/v0.2/tasks/{task_id}/run")
+    @app.get("/v0.2/tasks/{task_id}/run", response_model=RunView)
     def run_view(task_id: TaskID, proof: Credential) -> dict[str, Any]:
         """What a run did: state, output, every call with its receipt state, and evidence."""
         with kernel.database.read() as conn, borrow(conn) as tx:
@@ -397,7 +429,7 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
             "schema_version": "0.2",
             "task_id": task_id,
             "state": task.state.value,
-            "failure": task.failure.model_dump(mode="json") if task.failure else None,
+            "failure": task.failure,
             "created_at": task.created_at.isoformat(),
             "updated_at": task.updated_at.isoformat(),
             "attempt": task.checkpoint.state.get("attempt") if task.checkpoint else None,
@@ -406,7 +438,7 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
             "calls": calls,
         }
 
-    @app.get("/v0.2/triggers")
+    @app.get("/v0.2/triggers", response_model=TriggerList)
     def triggers(
         proof: Credential,
         after: Annotated[str, Query(max_length=128)] = "",
@@ -492,7 +524,7 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
     def submit_delegation(request: DelegationTaskRequest, proof: Credential) -> TaskView:
         return kernel.submit(proof, request)
 
-    @app.get("/v0.2/tasks/{task_id}/children")
+    @app.get("/v0.2/tasks/{task_id}/children", response_model=ChildrenView)
     def children(task_id: TaskID, proof: Credential) -> dict[str, Any]:
         from cardea.service.delegation import parent_usage
 
@@ -511,7 +543,9 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
                 "usage": parent_usage(conn, task_id),
             }
 
-    @app.post("/v0.2/tasks/{task_id}/operations/{operation_id}/reconcile")
+    @app.post(
+        "/v0.2/tasks/{task_id}/operations/{operation_id}/reconcile", response_model=ReconcileResult
+    )
     def reconcile(task_id: TaskID, operation_id: OperationID, proof: Credential) -> dict[str, Any]:
         from cardea.service.operation_runtime import OperationRuntime
 
@@ -522,7 +556,7 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
         state = OperationRuntime(kernel).reconcile(task_id, operation_id)
         return {"schema_version": "0.2", "state": state}
 
-    @app.get("/v0.2/tasks/{task_id}/agent-receipts")
+    @app.get("/v0.2/tasks/{task_id}/agent-receipts", response_model=AgentReceipts)
     def agent_receipts(task_id: TaskID, proof: Credential) -> dict[str, Any]:
         """Receipts of an agent's model and tool calls.
 
@@ -546,7 +580,7 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
                 receipts = [tx.get_operation(task_id, r[0]) for r in rows]
             return {
                 "schema_version": "0.2",
-                "receipts": [r.model_dump(mode="json") for r in receipts],
+                "receipts": receipts,
             }
 
     @app.get("/v0.2/tasks/{task_id}", response_model=TaskView)
@@ -572,7 +606,7 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
             Policy(conn).access(proof.resolve(conn), task_id, "events.read")
             return list(tx.read_events(task_id=task_id, after_cursor=after, limit=limit))
 
-    @app.get("/v0.2/tasks/{task_id}/output")
+    @app.get("/v0.2/tasks/{task_id}/output", response_model=RunOutput)
     def output(task_id: TaskID, proof: Credential) -> dict[str, Any]:
         with kernel.database.read() as conn, borrow(conn) as tx:
             binding = Policy(conn).access(proof.resolve(conn), task_id, "objects.read")
@@ -581,11 +615,11 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
             )
             return {
                 "schema_version": "0.2",
-                "artifact": version.model_dump(mode="json"),
+                "artifact": version,
                 "content": json.loads(tx.read_object(version)),
             }
 
-    @app.get("/v0.2/tasks/{task_id}/receipt")
+    @app.get("/v0.2/tasks/{task_id}/receipt", response_model=TaskReceipt)
     def receipt(task_id: TaskID, proof: Credential) -> dict[str, Any]:
         with kernel.database.read() as conn, borrow(conn) as tx:
             Policy(conn).access(proof.resolve(conn), task_id, "tasks.inspect")
@@ -594,7 +628,7 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
                 "digest_format": "legacy-v0.1",
                 "receipt": tx.get_operation(
                     task_id, receipt_operation(conn, tx.get_task(task_id).runtime_id, task_id)
-                ).model_dump(mode="json"),
+                ),
             }
 
     from cardea.runtime.a2a import routes
