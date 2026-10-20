@@ -216,6 +216,13 @@ class Expectation(Record):
         return f"{bound} successful call(s) of {self.operation.replace('.', '-')}"
 
 
+class ContextCall(Record):
+    """A read-only operation whose output an agent run receives before its session."""
+
+    operation: OperationName
+    arguments: dict[str, JsonValue] = Field(default_factory=dict)
+
+
 class AgentRunRequest(TaskRequest):
     """One bounded agent session whose only tools are installed operations (ADR-027)."""
 
@@ -237,6 +244,8 @@ class AgentRunRequest(TaskRequest):
     max_cost_usd: Annotated[float, Field(strict=True, gt=0, le=50)] = 2.0
     # The run succeeds only when every expectation holds over its successful calls.
     expect: Annotated[tuple[Expectation, ...], Field(max_length=16)] = ()
+    # Read-only operations invoked before each attempt's session; outputs go into the prompt.
+    context: Annotated[tuple[ContextCall, ...], Field(max_length=4)] = ()
 
     @model_validator(mode="after")
     def run_grants(self) -> Self:
@@ -246,6 +255,8 @@ class AgentRunRequest(TaskRequest):
             raise ValueError("Expectations must name exposed operations")
         if not {"models.invoke", *self.operations} <= set(self.grants):
             raise ValueError("Agent runs need model invocation and every exposed operation")
+        if not {c.operation for c in self.context} <= set(self.grants):
+            raise ValueError("Context operations must be granted")
         return self
 
 

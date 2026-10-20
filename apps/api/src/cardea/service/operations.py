@@ -272,3 +272,9 @@ class Registry:
         if not Draft202012Validator(descriptor.output_schema).is_valid(output):
             return None
         return content
+
+
+def check_context(registry: Registry, name: str) -> None:
+    """A context operation (ADR-031) must be installed and declare no external effect."""
+    if registry.get(name).cardea.effect != "read":
+        raise Fault("context_not_read_only", "Context operations must be read-only", 422)

@@ -42,6 +42,15 @@
             "title": "Attempt Timeout Seconds",
             "type": "integer"
           },
+          "context": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ContextCall"
+            },
+            "maxItems": 4,
+            "title": "Context",
+            "type": "array"
+          },
           "expect": {
             "default": [],
             "items": {
@@ -495,6 +504,30 @@
           "payload"
         ],
         "title": "ChildWork",
+        "type": "object"
+      },
+      "ContextCall": {
+        "additionalProperties": false,
+        "description": "A read-only operation whose output an agent run receives before its session.",
+        "properties": {
+          "arguments": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Arguments",
+            "type": "object"
+          },
+          "operation": {
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+            "title": "Operation",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "title": "ContextCall",
         "type": "object"
       },
       "DelegationTaskRequest": {
