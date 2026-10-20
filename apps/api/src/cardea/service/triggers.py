@@ -22,6 +22,7 @@ from pydantic import ValidationError
 from cardea.kernel.lifecycle import ContractError
 from cardea.kernel.store import StoreError
 from cardea.service.database import Fault, borrow
+from cardea.service.harnesses import Catalog, check_harness_grants, check_selection
 from cardea.service.models import (
     DEFAULT_MAX_TASK_REQUEST_BYTES,
     AgentRunRequest,
@@ -81,6 +82,7 @@ def install(
     operations: Registry,
     at: datetime,
     max_task_request_bytes: int = DEFAULT_MAX_TASK_REQUEST_BYTES,
+    harnesses: Catalog | None = None,
 ) -> None:
     """Replace the host-owned trigger set inside the provisioning transaction.
 
@@ -98,6 +100,7 @@ def install(
             at,
             managed_by="host",
             max_task_request_bytes=max_task_request_bytes,
+            harnesses=harnesses,
         )
     for row in conn.exec_driver_sql(
         "SELECT trigger_id FROM triggers WHERE removed=0 AND managed_by='host'"
@@ -114,6 +117,7 @@ def upsert(
     *,
     managed_by: str,
     max_task_request_bytes: int = DEFAULT_MAX_TASK_REQUEST_BYTES,
+    harnesses: Catalog | None = None,
 ) -> str:
     """Install or update one trigger; returns the history kind recorded (or "unchanged")."""
     if not conn.exec_driver_sql(
@@ -123,6 +127,8 @@ def upsert(
     request = spec.request(f"{spec.trigger_id}.{slot_key(at)}")
     check_size(request, max_task_request_bytes)
     operations.check_grants(request.grants)
+    check_harness_grants(harnesses, request.grants, required=False)
+    check_selection(harnesses, request)
     if isinstance(request, AgentRunRequest):
         for call in request.context:
             check_context(operations, call.operation)

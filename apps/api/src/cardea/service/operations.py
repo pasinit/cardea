@@ -263,7 +263,8 @@ class Registry:
 
     def check_grants(self, grants: Iterable[str]) -> None:
         for grant in grants:
-            if grant not in KERNEL_RIGHTS:
+            # Harness grants (ADR-033) are checked against the installed harnesses.
+            if grant not in KERNEL_RIGHTS and not grant.startswith("harness:"):
                 self.get(grant)
 
     def validate_arguments(self, name: str, arguments: Mapping[str, JsonValue]) -> None:

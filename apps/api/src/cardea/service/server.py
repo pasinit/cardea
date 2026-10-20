@@ -17,7 +17,9 @@ from dbos import DBOS
 from starlette.types import ASGIApp
 
 from cardea.hosts.debian import DebianHost
-from cardea.runtime.agent_session import AgentSession, ClaudeAgentSession
+from cardea.runtime.agent_session import ClaudeAgentSession
+from cardea.runtime.harness import Harness
+from cardea.service import harnesses as registry
 from cardea.service.app import create_app
 from cardea.service.auth import Authentication, IdentityProvider
 from cardea.service.confined import ConfinedAgentSession, Workers
@@ -129,6 +131,51 @@ def serve_listeners(
     asyncio.run(run())
 
 
+def start_harnesses(config: ServiceConfig, workers: Workers | None) -> registry.Harnesses | None:
+    """Build the installed agent harnesses (ADR-033), or None when agent runs are off."""
+    if config.agent_session is not None:
+        chosen = config.agent_session
+        if chosen.confined_profile:
+            if workers is None:
+                raise Fault("unsupported_host", "Confined sessions require the confined host", 503)
+            assert chosen.confined_worker is not None
+            return registry.Harnesses.single(
+                ConfinedAgentSession(
+                    workers, chosen.confined_profile, chosen.confined_worker, chosen.model
+                ),
+                chosen.model,
+            )
+        return registry.Harnesses.single(
+            ClaudeAgentSession(
+                model=chosen.model,
+                api_key=private_file(chosen.api_key_file).decode().strip()
+                if chosen.api_key_file
+                else None,
+                oauth_token=private_file(chosen.oauth_token_file).decode().strip()
+                if chosen.oauth_token_file
+                else None,
+            ),
+            chosen.model,
+        )
+    if config.harnesses_file is None:
+        return None
+
+    def claude(entry: registry.HarnessEntry) -> Harness:
+        if entry.confined is not None:
+            if workers is None:
+                raise Fault("unsupported_host", "Confined harnesses require the confined host", 503)
+            return ConfinedAgentSession(
+                workers, entry.confined.profile, entry.confined.worker, entry.default_model
+            )
+        assert entry.credential is not None
+        secret = private_file(entry.credential.file).decode().strip()
+        if entry.credential.kind == "api_key":
+            return ClaudeAgentSession(model=entry.default_model, api_key=secret)
+        return ClaudeAgentSession(model=entry.default_model, oauth_token=secret)
+
+    return registry.build(registry.load(config.harnesses_file), {"claude-agent-sdk": claude})
+
+
 def serve(
     config: ServiceConfig,
     fault: Callable[[str], None] = lambda stage: None,
@@ -179,40 +226,21 @@ def serve(
             operations = Registry.load(config.operations_dir)
             # Confined workers share the M2 helper; profiles are root-owned (ADR-028).
             workers = Workers(host) if host else None
-            session: AgentSession | None = None
-            if config.agent_session and config.agent_session.confined_profile:
-                chosen = config.agent_session
-                if workers is None:
-                    raise Fault(
-                        "unsupported_host", "Confined sessions require the confined host", 503
-                    )
-                assert chosen.confined_worker is not None and chosen.confined_profile
-                session = ConfinedAgentSession(
-                    workers, chosen.confined_profile, chosen.confined_worker, chosen.model
-                )
-            elif config.agent_session:
-                chosen = config.agent_session
-                session = ClaudeAgentSession(
-                    model=chosen.model,
-                    api_key=private_file(chosen.api_key_file).decode().strip()
-                    if chosen.api_key_file
-                    else None,
-                    oauth_token=private_file(chosen.oauth_token_file).decode().strip()
-                    if chosen.oauth_token_file
-                    else None,
-                )
+            harnesses = start_harnesses(config, workers)
             kernel = Kernel(
                 database,
                 auth,
                 fault,
                 host=host,
                 operations=operations,
-                session=session,
+                harnesses=harnesses,
                 workers=workers,
                 max_task_request_bytes=config.max_task_request_bytes,
             )
             if config.agent_session:
                 kernel.session_limit = config.agent_session.concurrent_sessions
+            elif harnesses is not None:
+                kernel.session_limit = harnesses.concurrent_sessions
             runtime = Runtime(kernel)
             runtime_launched = True
             runtime.launch()

@@ -52,8 +52,32 @@
                 "type": "null"
               }
             ],
-            "description": "Cost the session reported, if any.",
+            "description": "Cost of the successful attempt: reported by the harness, or metered by Cardea from tokens and the registry price (ADR-033).",
             "title": "Cost Usd"
+          },
+          "harness": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Harness that ran the session (ADR-033); absent before it.",
+            "title": "Harness"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Model id selected for the session; null for the default.",
+            "title": "Model"
           },
           "text": {
             "description": "The session's final reply.",
@@ -64,6 +88,14 @@
             "description": "Model turns of the successful attempt.",
             "title": "Turns",
             "type": "integer"
+          },
+          "usage": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "description": "Token usage and cost detail the harness reported.",
+            "title": "Usage",
+            "type": "object"
           }
         },
         "required": [
@@ -134,6 +166,10 @@
                   "maxLength": 128,
                   "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
                   "type": "string"
+                },
+                {
+                  "pattern": "^harness:[a-z][a-z0-9-]{0,31}$",
+                  "type": "string"
                 }
               ]
             },
@@ -141,6 +177,18 @@
             "minItems": 1,
             "title": "Grants",
             "type": "array"
+          },
+          "harness": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z][a-z0-9-]{0,31}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Harness"
           },
           "idempotency_context": {
             "anyOf": [
@@ -187,6 +235,20 @@
             "minimum": 1.0,
             "title": "Max Turns",
             "type": "integer"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@+-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
           },
           "namespace": {
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
@@ -1662,6 +1724,10 @@
                   "maxLength": 128,
                   "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
                   "type": "string"
+                },
+                {
+                  "pattern": "^harness:[a-z][a-z0-9-]{0,31}$",
+                  "type": "string"
                 }
               ]
             },
@@ -2506,6 +2572,10 @@
                   "maxLength": 128,
                   "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
                   "type": "string"
+                },
+                {
+                  "pattern": "^harness:[a-z][a-z0-9-]{0,31}$",
+                  "type": "string"
                 }
               ]
             },
@@ -2628,6 +2698,10 @@
                 {
                   "maxLength": 128,
                   "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+                  "type": "string"
+                },
+                {
+                  "pattern": "^harness:[a-z][a-z0-9-]{0,31}$",
                   "type": "string"
                 }
               ]
