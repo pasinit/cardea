@@ -24,11 +24,12 @@ For the prompt format we follow Anthropic's published guidance to wrap documents
 
 ## Decision
 
-1. **Request.** `AgentRunRequest.context` is a list of `{"operation": str, "arguments": object}`, with at most 4 entries and an empty default.
+1. **Request.** `AgentRunRequest.context` is a list of `{"operation": str, "arguments": object}`, with at most 4 entries and an empty default. It is an ordinary request field, so a client chooses its context per run or per trigger template; nothing in the kernel names a particular client or operation.
+   - `arguments` is optional and defaults to `{}`. An explicit `{}` is the same thing. No other keys are accepted.
    - Each operation must be installed and declare `effect: "read"`. A different effect is refused with `context_not_read_only`, both at admission and at trigger install.
-   - Each operation must appear in `grants`. The run's live ceiling is checked for it, and for the operations it `requires`, exactly as for an exposed tool: at admission, at each attempt start and before each call.
+   - Granting is enough. Each context operation must appear in `grants`; it need not, and normally does not, appear in `operations` (the tools exposed to the session). Listing it in both is allowed and simply also exposes it as a tool. Context operations count toward the request's limit of 48 grants.
+   - The run's live ceiling is checked for each context operation, and for the operations it `requires`, exactly as for an exposed tool: at admission, at each attempt start and before each call.
    - Arguments are validated against the operation's input schema at admission.
-   - A context operation does not have to be exposed as a tool.
 2. **Invocation.** Before each attempt's session, Cardea invokes the context operations in order through the shared invocation core, under that attempt's lease.
    - They are receipted with operation ids `ctx-01`, `ctx-02`, … Numbering continues across attempts, so a second attempt with two context operations records `ctx-03` and `ctx-04`.
    - The handler gets the same `OperationContext` as a tool call, including `agent_id`, `idempotency_context` and `slot_time`.

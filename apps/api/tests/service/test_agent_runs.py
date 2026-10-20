@@ -563,6 +563,28 @@ def test_context_calls_are_receipted_and_given_as_untrusted_blocks(
     assert listed == ["ctx-01", "ctx-02", "call-0001", "call-0002"]
 
 
+def test_context_arguments_default_to_empty_and_need_only_a_grant(
+    kernel: Kernel, tools: Tools, session: FakeSession
+) -> None:
+    omitted = run_request(context=[{"operation": "listings.search"}])
+    explicit = run_request(context=[{"operation": "listings.search", "arguments": {}}])
+    assert omitted.context == explicit.context and omitted.digest("s") == explicit.digest("s")
+
+    async def sends(client: ClientSession, request: SessionRequest) -> SessionResult:
+        listed = await client.list_tools()
+        assert [tool.name for tool in listed.tools] == ["mail-send"]
+        assert 'operation="listings.search" status="ok"' in request.prompt
+        await call(client, "mail-send", to="user@example.invalid", body="3 new listings")
+        return SessionResult(text="Sent.", is_error=False)
+
+    session.scripts = [sends]
+    # Granted for context only: not in "operations", so not a tool of the session.
+    task_id = submit(kernel, operations=["mail.send"], context=[{"operation": "listings.search"}])
+    assert AgentRunRuntime(kernel).execute(task_id) == "succeeded"
+    with pytest.raises(ValidationError):
+        run_request(context=[{"operation": "listings.search", "extra": 1}])
+
+
 def test_runs_without_context_have_no_context_blocks(kernel: Kernel, session: FakeSession) -> None:
     session.scripts = [routine]
     assert AgentRunRuntime(kernel).execute(submit(kernel)) == "succeeded"
