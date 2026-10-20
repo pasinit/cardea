@@ -20,7 +20,7 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 from pydantic import Field, JsonValue, TypeAdapter, ValidationError, model_validator
 
-from cardea.kernel.models import OperationName
+from cardea.kernel.models import MAX_DOCUMENT_BYTES, OperationName, canonical_json
 from cardea.service.database import Fault, private_file
 from cardea.service.models import Record, Right
 
@@ -29,6 +29,8 @@ KERNEL_RIGHTS: frozenset[str] = frozenset(get_args(Right))
 # Prefixes owned by kernel rights and fixed installed profiles.
 RESERVED_PREFIXES = ("objects.", "tasks.", "events.", "host.", "models.", "tools.", "inputs.")
 MAX_OUTPUT_BYTES = 262144
+# Room in a receipt's 64 KiB result document for the output and its wrapper keys.
+MAX_RECORDED_OUTPUT_BYTES = MAX_DOCUMENT_BYTES - 64
 _NAME = TypeAdapter(OperationName)
 
 
@@ -279,6 +281,10 @@ class Registry:
         except (TypeError, ValueError):
             return None
         if len(content) > descriptor.cardea.max_output_bytes:
+            return None
+        # The receipt records {"output": ..., "deduplicated": ...} as a kernel document, so
+        # the effective cap is that document's 64 KiB, whatever the descriptor declares.
+        if len(canonical_json(json.loads(content))) > MAX_RECORDED_OUTPUT_BYTES:
             return None
         if not Draft202012Validator(descriptor.output_schema).is_valid(output):
             return None

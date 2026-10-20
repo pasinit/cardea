@@ -2,6 +2,7 @@
 
 import json
 import logging
+from hashlib import sha256
 from typing import Annotated, Any
 
 import sqlalchemy as sa
@@ -15,7 +16,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from cardea.kernel.lifecycle import ContractError
 from cardea.kernel.models import KernelEvent, ResourceRef
 from cardea.kernel.store import StoreError
-from cardea.service import host_budget, host_operations
+from cardea.service import host_budget, host_operations, pages
 from cardea.service.auth import Proof
 from cardea.service.database import Fault, borrow
 from cardea.service.kernel import Kernel
@@ -32,13 +33,16 @@ from cardea.service.models import (
     TaskView,
     TriggerSpec,
 )
+from cardea.service.pages import MAX_RESPONSE_BYTES
 from cardea.service.policy import Policy
 from cardea.service.profiles import for_runtime
 from cardea.service.responses import (
     AgentReceipts,
     ChildrenView,
+    ContentChunk,
     HostBudgetView,
     OperationCatalog,
+    OperationView,
     ReconcileResult,
     RunOutput,
     RunView,
@@ -72,7 +76,6 @@ Namespace = Annotated[str, Query(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
 
 DEFAULT_MAX_REQUEST_BYTES = 32768
-MAX_RESPONSE_BYTES = 262144
 
 
 ERROR_DESCRIPTIONS = {
@@ -390,42 +393,34 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
         return {"schema_version": "0.2", **kernel.unschedule(proof, trigger_id)}
 
     @app.get("/v0.2/tasks/{task_id}/run", response_model=RunView)
-    def run_view(task_id: TaskID, proof: Credential) -> dict[str, Any]:
-        """What a run did: state, output, every call with its receipt state, and evidence."""
+    def run_view(
+        task_id: TaskID,
+        proof: Credential,
+        after: Annotated[str, Query(max_length=128)] = "",
+        limit: Annotated[int, Query(ge=1, le=1000)] = 1000,
+    ) -> dict[str, Any]:
+        """What a run did: state, output, its calls (one size-bounded page) and evidence."""
         with kernel.database.read() as conn, borrow(conn) as tx:
             principal = proof.resolve(conn)
             Policy(conn).access(principal, task_id, "tasks.inspect")
             task = tx.get_task(task_id)
             namespace = Policy(conn).binding(task_id)["namespace"]
             documents: dict[str, Any] = {}
+            truncated: dict[str, bool] = {}
             for suffix in ("output", "verification"):
                 try:
                     stored = tx.latest_object(
                         ResourceRef(namespace=namespace, resource_id=f"{task_id}.{suffix}")
                     )
-                    documents[suffix] = json.loads(tx.read_object(stored))
+                    document: object = json.loads(tx.read_object(stored))
                 except StoreError:
-                    documents[suffix] = None
-            calls = [
-                {
-                    "operation_id": r.request.operation_id,
-                    "operation": r.request.name,
-                    "state": r.state.value,
-                    "arguments": r.request.arguments.get("arguments"),
-                    "result": r.result,
-                    "failure": r.failure.code if r.failure else None,
-                    # {"reason", "summary"} for a failed call (invocation.REASONS).
-                    "failure_details": r.failure.details if r.failure else None,
-                    "reconciled": bool(r.reconciliation_evidence),
-                    "updated_at": r.updated_at.isoformat(),
-                }
-                # In the order they were made: an agent run's context calls come first.
-                for r in sorted(
-                    tx.list_operations(task_id),
-                    key=lambda r: (r.created_at, r.request.operation_id),
-                )
-            ]
-        return {
+                    document = None
+                documents[suffix], truncated[suffix] = pages.bounded_document(document)
+            # In the order they were made: an agent run's context calls come first.
+            receipts = sorted(
+                tx.list_operations(task_id), key=lambda r: (r.created_at, r.request.operation_id)
+            )
+        envelope = {
             "schema_version": "0.2",
             "task_id": task_id,
             "state": task.state.value,
@@ -434,9 +429,20 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
             "updated_at": task.updated_at.isoformat(),
             "attempt": task.checkpoint.state.get("attempt") if task.checkpoint else None,
             "output": documents["output"],
+            "output_truncated": truncated["output"],
             "verification": documents["verification"],
-            "calls": calls,
+            "verification_truncated": truncated["verification"],
+            "calls_total": len(receipts),
+            "calls_next": "",
         }
+        calls, cursor = pages.page(
+            pages.after(receipts, lambda r: r.request.operation_id, after),
+            lambda r: r.request.operation_id,
+            lambda r: pages.call_summary(r, kernel.run_preview_bytes),
+            envelope,
+            limit,
+        )
+        return {**envelope, "calls": calls, "calls_next": cursor}
 
     @app.get("/v0.2/triggers", response_model=TriggerList)
     def triggers(
@@ -557,8 +563,13 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
         return {"schema_version": "0.2", "state": state}
 
     @app.get("/v0.2/tasks/{task_id}/agent-receipts", response_model=AgentReceipts)
-    def agent_receipts(task_id: TaskID, proof: Credential) -> dict[str, Any]:
-        """Receipts of an agent's model and tool calls.
+    def agent_receipts(
+        task_id: TaskID,
+        proof: Credential,
+        after: Annotated[str, Query(max_length=128)] = "",
+        limit: Annotated[int, Query(ge=1, le=500)] = 500,
+    ) -> dict[str, Any]:
+        """Receipts of an agent's calls, one size-bounded page at a time.
 
         An agent run (ADR-027) receipts each context and tool call as an operation ``ctx-NN`` /
         ``call-NNNN``. Tasks of the removed M3 incident profile (ADR-016, ADR-032) keep their
@@ -578,10 +589,22 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
                     (task_id,),
                 ).all()
                 receipts = [tx.get_operation(task_id, r[0]) for r in rows]
-            return {
-                "schema_version": "0.2",
-                "receipts": receipts,
-            }
+        envelope = {"schema_version": "0.2", "next": ""}
+        listed, cursor = pages.page(
+            pages.after(receipts, lambda r: r.request.operation_id, after),
+            lambda r: r.request.operation_id,
+            lambda r: r,
+            envelope,
+            limit,
+        )
+        return {"schema_version": "0.2", "receipts": listed, "next": cursor}
+
+    @app.get("/v0.2/tasks/{task_id}/operations/{operation_id}", response_model=OperationView)
+    def operation(task_id: TaskID, operation_id: OperationID, proof: Credential) -> dict[str, Any]:
+        """One operation's full receipt, with its whole arguments and result."""
+        with kernel.database.read() as conn, borrow(conn) as tx:
+            Policy(conn).access(proof.resolve(conn), task_id, "tasks.inspect")
+            return {"schema_version": "0.2", "receipt": tx.get_operation(task_id, operation_id)}
 
     @app.get("/v0.2/tasks/{task_id}", response_model=TaskView)
     def inspect(task_id: TaskID, proof: Credential) -> TaskView:
@@ -613,11 +636,32 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
             version = tx.latest_object(
                 ResourceRef(namespace=binding["namespace"], resource_id=f"{task_id}.output")
             )
-            return {
-                "schema_version": "0.2",
-                "artifact": version,
-                "content": json.loads(tx.read_object(version)),
-            }
+            stored = tx.read_object(version)
+        content = json.loads(stored)
+        body = {
+            "schema_version": "0.2",
+            "artifact": version,
+            "content": content,
+            "content_omitted": False,
+            "content_bytes": len(stored),
+            "content_sha256": sha256(stored).hexdigest(),
+        }
+        if pages.encoded_size(body) > pages.PAGE_BUDGET:
+            body |= {"content": None, "content_omitted": True}
+        return body
+
+    @app.get("/v0.2/tasks/{task_id}/output/content", response_model=ContentChunk)
+    def output_content(
+        task_id: TaskID, proof: Credential, offset: Annotated[int, Query(ge=0)] = 0
+    ) -> dict[str, Any]:
+        """The stored output document's bytes, in base64 chunks."""
+        with kernel.database.read() as conn, borrow(conn) as tx:
+            binding = Policy(conn).access(proof.resolve(conn), task_id, "objects.read")
+            version = tx.latest_object(
+                ResourceRef(namespace=binding["namespace"], resource_id=f"{task_id}.output")
+            )
+            stored = tx.read_object(version)
+        return pages.chunk(stored, offset)
 
     @app.get("/v0.2/tasks/{task_id}/receipt", response_model=TaskReceipt)
     def receipt(task_id: TaskID, proof: Credential) -> dict[str, Any]:

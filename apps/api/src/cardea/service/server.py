@@ -236,6 +236,7 @@ def serve(
                 harnesses=harnesses,
                 workers=workers,
                 max_task_request_bytes=config.max_task_request_bytes,
+                run_preview_bytes=config.run_preview_bytes,
             )
             if config.agent_session:
                 kernel.session_limit = config.agent_session.concurrent_sessions

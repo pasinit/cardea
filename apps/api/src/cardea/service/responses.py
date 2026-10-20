@@ -163,18 +163,39 @@ class RunCall(Record):
     state: str = Field(
         description="accepted, running, succeeded, failed, cancelled or outcome_unknown."
     )
-    arguments: JsonValue = Field(description="The arguments the call was made with.")
-    result: dict[str, JsonValue] | None = Field(
-        description='{"output": <the operation\'s own output>} and, for a call answered from '
-        'an earlier effect in the same idempotency scope, "deduplicated": true.'
-    )
+    receipt_id: str
+    created_at: str
+    updated_at: str
     failure: str | None = Field(description="Failure code of a failed call.")
     failure_details: FailureDetails | dict[str, JsonValue] | None = Field(
         union_mode="left_to_right",
         description="Why the call failed; receipts written before ADR-026's reasons have {}.",
     )
     reconciled: bool = Field(description="The outcome was settled by reconciliation.")
-    updated_at: str
+    deduplicated: bool = Field(
+        description="Answered from an earlier effect in the same idempotency scope."
+    )
+    arguments: JsonValue = Field(
+        description="The call's arguments, inline only when they fit the preview size "
+        "(`run_preview_bytes`, default 2 KiB); otherwise null. See arguments_preview."
+    )
+    arguments_bytes: int = Field(description="Size of the canonical (RFC 8785) arguments.")
+    arguments_sha256: str
+    arguments_preview: str = Field(
+        description="The first `run_preview_bytes` of the canonical arguments JSON."
+    )
+    result: dict[str, JsonValue] | None = Field(
+        description='{"output": <the operation\'s own output>} and, for a deduplicated call, '
+        '"deduplicated": true. Inline only when the output fits the preview size; otherwise '
+        "null: fetch the receipt from GET /v0.2/tasks/{id}/operations/{operation_id}."
+    )
+    result_bytes: int | None = Field(
+        description="Size of the canonical output; null for a call without a result."
+    )
+    result_sha256: str | None
+    result_preview: str | None = Field(
+        description="The first `run_preview_bytes` of the canonical output JSON."
+    )
 
 
 class RunOutputCall(Record):
@@ -235,7 +256,20 @@ class RunView(Wire):
         union_mode="left_to_right",
         description="An agent run's evidence, or another profile's. Null until verified.",
     )
-    calls: list[RunCall] = Field(description="Every receipted call, in the order made.")
+    output_truncated: bool = Field(
+        description="The output exceeded the run view's 64 KiB document budget: an agent "
+        "run's text is trimmed and its calls list dropped, any other output is null. "
+        "GET /v0.2/tasks/{id}/output has it whole."
+    )
+    verification_truncated: bool = Field(
+        description="The verification exceeded the document budget and is null here."
+    )
+    calls: list[RunCall] = Field(
+        description="Receipted calls in the order made: one page, bounded by size. "
+        "Pass calls_next as `after` for the next page."
+    )
+    calls_total: int = Field(description="Number of calls of the run, across all pages.")
+    calls_next: str | None = Field(description="Cursor of the next page; null on the last.")
 
 
 class ChildLink(Record):
@@ -268,16 +302,43 @@ class AgentReceipts(Wire):
     """`GET /v0.2/tasks/{task_id}/agent-receipts`: full receipts of an agent's calls."""
 
     receipts: list[OperationReceipt] = Field(
-        description="Each call's receipt: request with arguments and scope key, state, "
-        "result or failure, and reconciliation evidence."
+        description="One page of receipts, ordered by operation_id and bounded by size: "
+        "request with arguments and scope key, state, result or failure, and reconciliation "
+        "evidence."
     )
+    next: str | None = Field(description="Pass as `after` for the next page; null on the last.")
+
+
+class OperationView(Wire):
+    """`GET /v0.2/tasks/{task_id}/operations/{operation_id}`: one call's full receipt.
+
+    A receipt always fits a response: its arguments and its result are each at most 64 KiB.
+    """
+
+    receipt: OperationReceipt
+
+
+class ContentChunk(Wire):
+    """One base64 chunk of a stored document's canonical bytes; follow next_offset."""
+
+    total_bytes: int
+    sha256: str = Field(description="SHA-256 of all the bytes, to check the reassembly.")
+    offset: int
+    next_offset: int | None = Field(description="Offset of the next chunk; null at the end.")
+    data_base64: str
 
 
 class RunOutput(Wire):
     """`GET /v0.2/tasks/{task_id}/output`: the task's latest published output."""
 
     artifact: ObjectVersion
-    content: JsonValue = Field(description="The output document; its shape is the profile's.")
+    content: JsonValue = Field(
+        description="The output document; its shape is the profile's. Null when it would "
+        "exceed the response cap: read it from GET /v0.2/tasks/{id}/output/content."
+    )
+    content_omitted: bool = False
+    content_bytes: int = Field(description="Size of the stored document.")
+    content_sha256: str
 
 
 class TaskReceipt(Wire):
