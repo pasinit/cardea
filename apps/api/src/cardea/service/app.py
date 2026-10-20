@@ -15,15 +15,13 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from cardea.kernel.lifecycle import ContractError
 from cardea.kernel.models import KernelEvent, ResourceRef
 from cardea.kernel.store import StoreError
-from cardea.service import agent_budget, host_budget, host_operations
+from cardea.service import host_budget, host_operations
 from cardea.service.auth import Proof
 from cardea.service.database import Fault, borrow
 from cardea.service.kernel import Kernel
 from cardea.service.models import (
     RIGHTS,
-    AgentInput,
     AgentRunRequest,
-    AgentTaskRequest,
     DelegationTaskRequest,
     ErrorBody,
     HostObjectTaskRequest,
@@ -226,7 +224,7 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
             "schema_version": "0.2",
             "runtime": "canonical-json-v1",
             "host_execution": kernel.host is not None,
-            "agent_execution": kernel.model is not None,
+            "agent_execution": kernel.session is not None,
             "delegation_execution": kernel.host is not None,
             "new_namespace_prefix": prefix,
             "max_request_bytes": max_request_bytes,
@@ -240,31 +238,16 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
             principal = proof.resolve(conn)
             policy = Policy(conn)
             allowed = []
-            agent_rights = ("models.invoke", "models.disclose", "tools.incidents", "inputs.append")
             for operation in (
                 *RIGHTS,
                 *(("tasks.delegate",) if kernel.host else ()),
                 *(host_operations.OPERATIONS if kernel.host else ()),
-                *(agent_rights if kernel.model else ()),
+                # Agent runs (ADR-027) need model invocation plus their exposed operations.
+                *(("models.invoke",) if kernel.session else ()),
             ):
                 try:
                     policy.require(principal, namespace, operation)
                     policy.require("platform", namespace, operation)
-                    if operation in agent_rights:
-                        for required in (
-                            *agent_rights,
-                            "objects.read",
-                            "objects.write",
-                            "tasks.submit",
-                            "events.read",
-                        ):
-                            policy.require(principal, namespace, required)
-                            policy.require(principal, namespace, required, "delegate")
-                            policy.require("platform", namespace, required)
-                        agent_budget.available(
-                            conn, principal, namespace, agent_budget.INPUT_RESERVE + 2048
-                        )
-                        host_budget.available(conn, principal, namespace, reserve=True)
                     if operation in host_operations.OPERATIONS:
                         policy.require(principal, namespace, operation, "delegate")
                         for required in ("objects.read", "objects.write", "tasks.submit"):
@@ -363,38 +346,6 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
                 .one()
             )
         return {"schema_version": "0.2", "limits": dict(limits) if limits else None, **dict(usage)}
-
-    @app.get("/v0.2/model-budget")
-    def model_budget(proof: Credential, namespace: Namespace) -> dict[str, Any]:
-        with kernel.database.read() as conn:
-            principal = proof.resolve(conn)
-            policy = Policy(conn)
-            policy.require(principal, namespace, "tasks.inspect")
-            policy.require("platform", namespace, "tasks.inspect")
-            limit = (
-                conn.exec_driver_sql(
-                    "SELECT calls,tokens FROM model_budget_limits "
-                    "WHERE principal_id=? AND namespace=?",
-                    (principal, namespace),
-                )
-                .mappings()
-                .first()
-            )
-            usage = (
-                conn.exec_driver_sql(
-                    "SELECT COALESCE(SUM(calls),0) AS allocated_calls,"
-                    "COALESCE(SUM(tokens),0) AS allocated_tokens FROM agent_effects "
-                    "WHERE principal_id=? AND namespace=?",
-                    (principal, namespace),
-                )
-                .mappings()
-                .one()
-            )
-            return {
-                "schema_version": "0.2",
-                "limits": dict(limit) if limit else None,
-                **dict(usage),
-            }
 
     @app.put("/v0.2/triggers/{trigger_id}")
     def schedule(trigger_id: TriggerPath, spec: TriggerSpec, proof: Credential) -> dict[str, Any]:
@@ -560,14 +511,6 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
                 "usage": parent_usage(conn, task_id),
             }
 
-    @app.post("/v0.2/agent-tasks", response_model=TaskView, status_code=202)
-    def submit_agent(request: AgentTaskRequest, proof: Credential) -> TaskView:
-        return kernel.submit(proof, request)
-
-    @app.post("/v0.2/tasks/{task_id}/inputs", response_model=TaskView)
-    def append_input(task_id: TaskID, request: AgentInput, proof: Credential) -> TaskView:
-        return kernel.append_input(proof, task_id, request)
-
     @app.post("/v0.2/tasks/{task_id}/operations/{operation_id}/reconcile")
     def reconcile(task_id: TaskID, operation_id: OperationID, proof: Credential) -> dict[str, Any]:
         from cardea.service.operation_runtime import OperationRuntime
@@ -583,8 +526,9 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
     def agent_receipts(task_id: TaskID, proof: Credential) -> dict[str, Any]:
         """Receipts of an agent's model and tool calls.
 
-        An agent run (ADR-027) receipts each tool call as an operation ``call-NNNN``; an M3
-        agent task (ADR-016) lists the operations recorded in its own budget table.
+        An agent run (ADR-027) receipts each context and tool call as an operation ``ctx-NN`` /
+        ``call-NNNN``. Tasks of the removed M3 incident profile (ADR-016, ADR-032) keep their
+        historical receipts, listed from that profile's table.
         """
         with kernel.database.read() as conn, borrow(conn) as tx:
             Policy(conn).access(proof.resolve(conn), task_id, "tasks.inspect")

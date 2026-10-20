@@ -44,7 +44,7 @@ api-dev: check-uv
 
 web-dev:
 
-test: api-test load-test m4-test try-test
+test: api-test load-test m4-test try-test incident-demo-test
 
 TRY := PYTHONPATH=apps/api/src:experiments/try "$(UV)" run --locked --project $(API_DIR)
 
@@ -58,6 +58,17 @@ try-check: check-uv
 	"$(UV)" run --locked --project $(API_DIR) ruff check --config apps/api/pyproject.toml experiments/try
 	"$(UV)" run --locked --project $(API_DIR) ruff format --check --config apps/api/pyproject.toml experiments/try
 	MYPYPATH=apps/api/src:experiments/try "$(UV)" run --locked --project $(API_DIR) mypy --strict --explicit-package-bases experiments/try
+
+DEMO := PYTHONPATH=apps/api/src:experiments/incident-demo "$(UV)" run --locked --project $(API_DIR)
+
+.PHONY: incident-demo-test incident-demo-check
+incident-demo-test: check-uv
+	$(DEMO) pytest -q -p no:cacheprovider experiments/incident-demo
+
+incident-demo-check: check-uv
+	"$(UV)" run --locked --project $(API_DIR) ruff check --config apps/api/pyproject.toml experiments/incident-demo
+	"$(UV)" run --locked --project $(API_DIR) ruff format --check --config apps/api/pyproject.toml experiments/incident-demo
+	MYPYPATH=apps/api/src:experiments/incident-demo "$(UV)" run --locked --project $(API_DIR) mypy --strict --explicit-package-bases experiments/incident-demo
 
 api-test: check-uv
 	cd $(API_DIR) && "$(UV)" run pytest

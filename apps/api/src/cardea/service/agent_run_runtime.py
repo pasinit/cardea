@@ -515,6 +515,8 @@ class AgentRunRuntime:
             return Outcome(refused.code, refused.message)
         if admitted.deduplicated is not None:
             return Outcome(output=admitted.deduplicated, deduplicated=True)
+        # The intent is committed and nothing has run yet (fault injection for recovery tests).
+        self.kernel.fault("agent_run.call_admitted")
         started = time.monotonic()
         error: invocation.Failure | None = None
         output: object = None

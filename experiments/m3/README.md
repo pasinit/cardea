@@ -1,5 +1,7 @@
 # M3 — OpenRouter agent and native MCP
 
+> **Historical.** The incident agent-task profile described here was removed by [ADR-032](../../docs/decisions/032-remove-incident-agent-tasks.md) on 2026-10-20. Agent runs ([ADR-027](../../docs/decisions/027-agent-runs.md)) with installed operations are the one way to run an agent; the incident example now lives in [`experiments/incident-demo`](../incident-demo/README.md). The code and commands below run only at a commit before that change.
+
 Status: complete for the bounded incident profile. Portable tests, six deterministic-provider Debian scenarios, the live `z-ai/glm-4.7` restart/new-input scenario and matched load comparison pass. See the [acceptance report](M3-REPORT.md) and [ADR-016](../../docs/decisions/016-m3-openrouter-and-native-mcp.md).
 
 ## What this profile does

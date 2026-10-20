@@ -25,7 +25,7 @@ TOKEN_SECONDS = 300
 def check(config: ServiceConfig) -> None:
     if not config.trust_domain.endswith(".invalid"):
         raise Fault("unsafe_development", "Use a reserved *.invalid trust domain", 500)
-    if config.host_execution or config.agent_runtime or config.oidc:
+    if config.host_execution or config.oidc:
         raise Fault("unsafe_development", "Development identity cannot enable host/agent/OIDC", 500)
     if os.geteuid() == 0:
         raise Fault("unsafe_development", "Development identity cannot run as root", 500)

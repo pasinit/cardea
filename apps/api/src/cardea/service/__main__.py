@@ -13,8 +13,7 @@ from cardea.service.database import Database, Fault, private_file
 from cardea.service.kernel import provision
 from cardea.service.login import OIDCLogin, session_credentials, store_session
 from cardea.service.models import (
-    AgentInput,
-    AgentTaskRequest,
+    AgentRunRequest,
     DelegationTaskRequest,
     HostObjectTaskRequest,
     HostTaskRequest,
@@ -59,11 +58,9 @@ def main() -> None:
         "submit",
         "submit-host",
         "submit-host-object",
-        "submit-agent",
+        "submit-agent-run",
         "submit-delegation",
         "children",
-        "append-input",
-        "ingest-agent-directory",
         "agent-receipts",
         "inspect",
         "resume",
@@ -85,8 +82,6 @@ def main() -> None:
         command.add_argument("--spiffe-id")
         command.add_argument("--audience", default="cardea-kernel")
         command.add_argument("value", help="request JSON file for submit; task ID otherwise")
-        if name in {"append-input", "ingest-agent-directory"}:
-            command.add_argument("--task-id", required=True)
         if name in {"cancel", "resume"}:
             command.add_argument("--request-id", default=None)
         if name == "events":
@@ -196,17 +191,9 @@ def main() -> None:
             result = client.submit_delegation(
                 DelegationTaskRequest.model_validate_json(Path(args.value).read_bytes())
             ).model_dump(mode="json")
-        elif args.command == "submit-agent":
-            result = client.submit_agent(
-                AgentTaskRequest.model_validate_json(Path(args.value).read_bytes())
-            ).model_dump(mode="json")
-        elif args.command == "ingest-agent-directory":
-            from cardea.runtime.directory import deliver
-
-            result = deliver(client, args.task_id, Path(args.value)).model_dump(mode="json")
-        elif args.command == "append-input":
-            result = client.append_input(
-                args.task_id, AgentInput.model_validate_json(Path(args.value).read_bytes())
+        elif args.command == "submit-agent-run":
+            result = client.submit_agent_run(
+                AgentRunRequest.model_validate_json(Path(args.value).read_bytes())
             ).model_dump(mode="json")
         elif args.command == "submit-host-object":
             result = client.submit_host_object(

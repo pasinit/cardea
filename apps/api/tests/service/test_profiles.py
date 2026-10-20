@@ -4,10 +4,9 @@ from typing import Any
 
 import pytest
 
-from cardea.runtime.incidents import IncidentBatch
 from cardea.service.database import Fault
 from cardea.service.models import (
-    AgentTaskRequest,
+    AgentRunRequest,
     ChildWork,
     DelegationTaskRequest,
     HostObjectTaskRequest,
@@ -63,11 +62,11 @@ def test_request_maps_to_the_pre_registry_runtime(
     assert profile.limits(request_) == limits
 
 
-def test_agent_and_delegation_limits_follow_the_request() -> None:
-    agent = AgentTaskRequest.model_construct(**BASE, max_output_tokens=100, inputs=IncidentBatch)
+def test_agent_run_and_delegation_limits_follow_the_request() -> None:
+    agent = AgentRunRequest.model_construct(**BASE, max_tool_calls=7)
     profile = for_request(agent)
-    assert profile.runtime_id == "incident-agent-v1" and profile.requires_model
-    assert profile.limits(agent)["max_model_tokens"] > 200
+    assert profile.runtime_id == "agent-run-v1" and profile.requires_session
+    assert profile.limits(agent)["max_steps"] == 7
     delegation = DelegationTaskRequest.model_construct(
         **BASE,
         children=(ChildWork.model_construct(), ChildWork.model_construct()),
@@ -88,7 +87,6 @@ def test_cancellation_and_recovery_flags() -> None:
     assert set(runtime_ids(lambda p: p.requires_host)) == {
         "host-sha256-v1",
         "host-copy-v1",
-        "incident-agent-v1",
         "delegation-v1",
     }
     assert runtime_ids(lambda p: p.host_inputs) == ("host-sha256-v1", "host-copy-v1")
@@ -97,3 +95,6 @@ def test_cancellation_and_recovery_flags() -> None:
 def test_unknown_runtime_is_an_explicit_fault() -> None:
     with pytest.raises(Fault, match="not installed"):
         for_runtime("shell-v1")
+    # The M3 incident agent-task profile was removed (ADR-032).
+    with pytest.raises(Fault, match="not installed"):
+        for_runtime("incident-agent-v1")

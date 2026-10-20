@@ -6,7 +6,6 @@ import argparse
 import json
 from pathlib import Path
 
-from cardea_load.agent import agent_compare, run_agent, write_agent_baseline
 from cardea_load.delegation import delegation_baseline, delegation_compare, run_delegation
 from cardea_load.metrics import baseline, compare, save
 from cardea_load.report import render
@@ -27,18 +26,6 @@ def main() -> None:
             command.add_argument("--run", type=Path, required=True)
             if name == "delegation-compare":
                 command.add_argument("--baseline", type=Path, required=True)
-    agent = commands.add_parser("agent-run")
-    agent.add_argument("--kind", choices=("reference", "comparison"), required=True)
-    agent.add_argument("--repo", type=Path, required=True)
-    agent.add_argument("--api-python", type=Path, required=True)
-    agent.add_argument("--output", type=Path, required=True)
-    agent_reference = commands.add_parser("agent-baseline")
-    agent_reference.add_argument("--run", type=Path, required=True)
-    agent_reference.add_argument("--output", type=Path, required=True)
-    agent_comparison = commands.add_parser("agent-compare")
-    agent_comparison.add_argument("--baseline", type=Path, required=True)
-    agent_comparison.add_argument("--run", type=Path, required=True)
-    agent_comparison.add_argument("--output", type=Path, required=True)
     execute = commands.add_parser("run")
     execute.add_argument("--kind", choices=("reference", "comparison", "stress"), required=True)
     execute.add_argument("--profile", type=Path, required=True)
@@ -65,17 +52,6 @@ def main() -> None:
         save(args.output, delegation_baseline(json.loads(args.run.read_text())))
     elif args.command == "delegation-compare":
         result = delegation_compare(
-            json.loads(args.baseline.read_text()), json.loads(args.run.read_text())
-        )
-        save(args.output, result)
-        if not result["correctness_passed"]:
-            raise SystemExit(2)
-    elif args.command == "agent-run":
-        run_agent(args.repo.resolve(), args.api_python.absolute(), args.output.resolve(), args.kind)
-    elif args.command == "agent-baseline":
-        write_agent_baseline(args.run, args.output)
-    elif args.command == "agent-compare":
-        result = agent_compare(
             json.loads(args.baseline.read_text()), json.loads(args.run.read_text())
         )
         save(args.output, result)

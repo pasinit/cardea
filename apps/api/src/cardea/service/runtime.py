@@ -27,14 +27,12 @@ from cardea.kernel.models import (
 )
 from cardea.kernel.store import KernelTransaction
 from cardea.service.agent_run_runtime import AgentRunRuntime
-from cardea.service.agent_runtime import AgentRuntime
 from cardea.service.database import Fault, borrow
 from cardea.service.delegation_runtime import DelegationRuntime
 from cardea.service.host_runtime import HostRuntime
 from cardea.service.kernel import (
     AGENT_RUN_QUEUE,
     AGENT_RUN_WORKFLOW,
-    AGENT_WORKFLOW,
     DELEGATION_QUEUE,
     DELEGATION_WORKFLOW,
     HOST_WORKFLOW,
@@ -113,24 +111,6 @@ class Runtime:
         def execute_host(task_id: str, wait: bool, deadline: float) -> str:
             return host_effect(task_id)
 
-        @DBOS.step(name="cardea.m3.agent.round", retries_allowed=False)
-        def agent_round(task_id: str) -> str:
-            return asyncio.run(AgentRuntime(kernel).round(task_id))
-
-        @DBOS.step(name="cardea.m3.agent.wake", retries_allowed=False)
-        def agent_wake(task_id: str) -> str:
-            return AgentRuntime(kernel).wake(task_id)
-
-        @DBOS.workflow(name=AGENT_WORKFLOW)
-        def execute_agent(task_id: str, wait: bool, deadline: float) -> str:
-            state = agent_round(task_id)
-            while state == "waiting":
-                DBOS.recv(topic="control", timeout_seconds=max(0.0, deadline - time.time()))
-                state = agent_wake(task_id)
-                if state == "queued":
-                    state = agent_round(task_id)
-            return state
-
         @DBOS.step(name="cardea.m4.delegation.tick", retries_allowed=False)
         def delegation_tick(task_id: str) -> str:
             return asyncio.run(DelegationRuntime(kernel).tick(task_id))
@@ -174,7 +154,6 @@ class Runtime:
         self.execute_agent_run = execute_agent_run
         self.execute_operation = execute_operation
         self.execute_delegation = execute_delegation
-        self.execute_agent = execute_agent
         self.execute_host = execute_host
         self.execute = execute
 

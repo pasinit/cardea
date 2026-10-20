@@ -175,7 +175,7 @@ def diagnostics(config: ServiceConfig) -> dict[str, Any]:
         "versions": {name: version(name) for name in ("dbos", "alembic", "a2a-sdk", "mcp")},
         "profiles": {
             "host_configured": config.host_execution,
-            "model_configured": config.agent_runtime is not None,
+            "agent_session_configured": config.agent_session is not None,
         },
         "checks": {},
     }

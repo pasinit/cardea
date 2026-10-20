@@ -360,6 +360,7 @@ def test_agent_receipts_list_the_run_calls(kernel: Kernel, session: FakeSession)
         headers = {"Authorization": "Bearer supervisor"}
         receipts = client.get(f"/v0.2/tasks/{task_id}/agent-receipts", headers=headers).json()
         output = client.get(f"/v0.2/tasks/{task_id}/output", headers=headers).json()
+        latest = client.get(f"/v0.2/tasks/{task_id}/receipt", headers=headers).json()
         outsider = client.get(
             f"/v0.2/tasks/{task_id}/agent-receipts", headers={"Authorization": "Bearer outsider"}
         )
@@ -372,6 +373,8 @@ def test_agent_receipts_list_the_run_calls(kernel: Kernel, session: FakeSession)
     assert send["retry_class"] == "reconciliation_required"
     assert send["request"]["arguments"]["scope_key"] is not None
     assert outsider.status_code == 404
+    # An agent run's task receipt is its latest operation (formerly the M3 receipt test).
+    assert latest["receipt"]["request"]["operation_id"] == "call-0002"
 
 
 def test_endpoint_requires_the_attempt_token(kernel: Kernel, session: FakeSession) -> None:
@@ -527,6 +530,73 @@ def test_crash_after_effect_resumes_without_resending(
     kernel.fault = lambda stage: None
     assert AgentRunRuntime(kernel).execute(task_id) == "succeeded"
     assert len(tools.sent) == 1
+
+
+def test_interrupted_effect_intent_is_never_replayed(
+    kernel: Kernel, tools: Tools, session: FakeSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The process dies after committing an effect's intent, before its handler returns."""
+    monkeypatch.setattr(agent_run_runtime, "attempt_lease_seconds", lambda request: 4.0)
+
+    def dies(stage: str) -> None:
+        if stage == "agent_run.call_admitted":
+            raise RuntimeError("process lost after the intent commit")
+
+    async def sends(client: ClientSession, request: SessionRequest) -> SessionResult:
+        await call(client, "mail-send", to="user@example.invalid", body="recap")
+        return SessionResult(text="Tried to send.", is_error=False)
+
+    session.scripts = [sends]
+    task_id = submit(kernel)
+    kernel.fault = dies
+    assert AgentRunRuntime(kernel).execute(task_id) == "failed"
+    kernel.fault = lambda stage: None
+    assert tools.sent == []
+    with kernel.database.engine.begin() as conn, borrow(conn) as tx:
+        assert cast(Any, tx.get_task(task_id).failure).code == "reconciliation_required"
+        assert tx.get_operation(task_id, "call-0001").state is OperationState.OUTCOME_UNKNOWN
+
+    # Another task in the same scope must not repeat the effect while it is in doubt.
+    async def resends(client: ClientSession, request: SessionRequest) -> SessionResult:
+        again = await call(client, "mail-send", to="user@example.invalid", body="recap")
+        assert again.is_error and "effect_in_doubt" in str(again.content)
+        return SessionResult(text="Left it to reconciliation.", is_error=False)
+
+    session.scripts = [sends, resends]
+    scoped = {"idempotency_context": "daily.20261020T073000Z"}
+    first = submit(kernel, request_id="scoped-a", **scoped)
+    kernel.fault = dies
+    assert AgentRunRuntime(kernel).execute(first) == "failed"
+    kernel.fault = lambda stage: None
+    second = submit(kernel, request_id="scoped-b", **scoped)
+    assert AgentRunRuntime(kernel).execute(second) == "succeeded"
+    assert tools.sent == []
+
+
+def test_interrupted_read_intent_fails_and_the_run_retries(
+    kernel: Kernel, tools: Tools, session: FakeSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(agent_run_runtime, "attempt_lease_seconds", lambda request: 4.0)
+    monkeypatch.setattr(agent_run_runtime, "LEASE_MARGIN", 1.0)
+    dead = [True]
+
+    def dies_once(stage: str) -> None:
+        if stage == "agent_run.call_admitted" and dead:
+            dead.pop()
+            raise RuntimeError("process lost after the intent commit")
+
+    async def searches(client: ClientSession, request: SessionRequest) -> SessionResult:
+        await call(client, "listings-search")
+        return SessionResult(text="", is_error=True, stop_reason="error_max_turns")
+
+    session.scripts = [searches, routine]
+    task_id = submit(kernel)
+    kernel.fault = dies_once
+    assert AgentRunRuntime(kernel).execute(task_id) == "succeeded"
+    states = [(r.request.operation_id, r.state) for r in calls(kernel, task_id)]
+    # The read stays settled as failed (no effect to reconcile); attempt 2 finished the job.
+    assert states[0] == ("call-0001", OperationState.FAILED)
+    assert [s for _, s in states[1:]] == [OperationState.SUCCEEDED] * 2
 
 
 def test_orphaned_session_cannot_act(kernel: Kernel, tools: Tools, session: FakeSession) -> None:

@@ -10,7 +10,6 @@ import rfc8785
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from cardea.kernel.models import Identifier, ObjectVersion, OperationName, Task, Timestamp
-from cardea.runtime.incidents import IncidentBatch
 from cardea.service.schedule import validate_schedule
 
 Right = Literal[
@@ -24,9 +23,6 @@ Right = Literal[
     "host.sha256",
     "host.copy",
     "models.invoke",
-    "models.disclose",
-    "tools.incidents",
-    "inputs.append",
     "tasks.delegate",
     "tasks.schedule",
 ]
@@ -158,32 +154,6 @@ class DelegationTaskRequest(TaskRequest):
         return self
 
 
-class AgentTaskRequest(TaskRequest):
-    inputs: IncidentBatch
-    payload: Annotated[dict[str, JsonValue], Field(max_length=0)] = Field(default_factory=dict)
-    grants: Annotated[tuple[Right, ...], Field(min_length=1, max_length=13)]
-    parent_task_id: None = None
-    wait_for_event: Literal[True] = True
-    timeout_seconds: Annotated[int, Field(strict=True, ge=120, le=3600)] = 600
-    max_output_tokens: Annotated[int, Field(strict=True, ge=256, le=4096)] = 2048
-
-    @model_validator(mode="after")
-    def agent_grants(self) -> Self:
-        if len(self.inputs.records) >= 20:
-            raise ValueError("Initial batch must leave room for one added record")
-        if not {
-            "models.invoke",
-            "models.disclose",
-            "tools.incidents",
-            "inputs.append",
-            "events.read",
-        } <= set(self.grants):
-            raise ValueError(
-                "Agent runtime requires explicit model, disclosure, tool and input grants"
-            )
-        return self
-
-
 class OperationTaskRequest(TaskRequest):
     """One invocation of an installed operation; arguments are checked at admission."""
 
@@ -273,23 +243,6 @@ class AgentRunRequest(TaskRequest):
         return self
 
 
-class AgentInput(Wire):
-    request_id: Identifier
-    inputs: IncidentBatch
-
-
-class ModelRuntimeConfig(Record):
-    model: Annotated[str, Field(strict=True, min_length=1, max_length=256)]
-    api_key_file: Path | None = None
-    api_key_env: Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")] | None = None
-
-    @model_validator(mode="after")
-    def credential_source(self) -> Self:
-        if (self.api_key_file is None) == (self.api_key_env is None):
-            raise ValueError("Select exactly one private key file or environment variable")
-        return self
-
-
 class TaskView(Wire):
     task: Task
     supervisor_id: Identifier
@@ -368,7 +321,6 @@ class ServiceConfig(Record):
     audience: str = "cardea-kernel"
     runtime_spiffe_id: str
     oidc: OIDCConfig | None = None
-    agent_runtime: ModelRuntimeConfig | None = None
     host_execution: Annotated[bool, Field(strict=True)] = False
     # Private directory of installed operation descriptors (ADR-023).
     operations_dir: Path | None = None
@@ -428,25 +380,15 @@ class HostBudget(Record):
     concurrent_operations: Annotated[int, Field(strict=True, ge=1, le=100)] = 4
 
 
-class ModelBudget(Record):
-    principal_id: Identifier
-    namespace: Identifier
-    calls: Annotated[int, Field(strict=True, ge=0, le=1000000)]
-    tokens: Annotated[int, Field(strict=True, ge=0, le=10**12)]
-
-
 # The slot request ID `<trigger_id>.<YYYYMMDDTHHMMSSZ>` must still be an Identifier (ADR-024).
 TriggerID = Annotated[str, Field(strict=True, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,110}$")]
-TemplateKind = Literal[
-    "task", "host", "host-object", "operation", "delegation", "agent", "agent-run"
-]
+TemplateKind = Literal["task", "host", "host-object", "operation", "delegation", "agent-run"]
 TEMPLATES: dict[str, type[TaskRequest]] = {
     "task": TaskRequest,
     "host": HostTaskRequest,
     "host-object": HostObjectTaskRequest,
     "operation": OperationTaskRequest,
     "delegation": DelegationTaskRequest,
-    "agent": AgentTaskRequest,
     "agent-run": AgentRunRequest,
 }
 
@@ -508,6 +450,5 @@ class Provisioning(Record):
     object_permissions: Annotated[tuple[ObjectPermission, ...], Field(max_length=10000)] = ()
     object_platform: Annotated[tuple[ObjectPermission, ...], Field(max_length=10000)] = ()
     host_budgets: Annotated[tuple[HostBudget, ...], Field(max_length=1000)] = ()
-    model_budgets: Annotated[tuple[ModelBudget, ...], Field(max_length=1000)] = ()
     # The complete trigger set; a trigger absent from a later document is removed (ADR-024).
     triggers: Annotated[tuple[TriggerSpec, ...], Field(max_length=1000)] = ()

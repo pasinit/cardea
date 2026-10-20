@@ -37,18 +37,7 @@ WORKER = (
     "d=open('/input/data','rb').read();"
     "print(json.dumps({'sha256':hashlib.sha256(d).hexdigest(),'bytes':len(d)}))"
 )
-INCIDENT_WORKER = """
-import json,sys,time
-assert time.time() < float(sys.argv[1])
-batch = json.load(open('/input/data'))
-records = sorted(batch['records'], key=lambda r:r['id'])
-summary = '# Incident summary\\n\\n' + '\\n'.join(
-    '- ['+r['id']+'] '+json.dumps(r['title'],ensure_ascii=True)+' ('+r['severity']+')'
-    for r in records) + '\\n'
-print(json.dumps({'index':records,'summary':summary}))
-"""
 WORKERS = {
-    "tools.incidents": INCIDENT_WORKER,
     OPERATION: WORKER,
     "host.copy": (
         "import base64,json,sys,time;assert time.time()<float(sys.argv[1]);"

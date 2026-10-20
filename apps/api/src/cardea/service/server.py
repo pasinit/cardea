@@ -18,8 +18,6 @@ from starlette.types import ASGIApp
 
 from cardea.hosts.debian import DebianHost
 from cardea.runtime.agent_session import AgentSession, ClaudeAgentSession
-from cardea.runtime.openrouter import OpenRouterModel
-from cardea.service.agent_runtime import AgentRuntime
 from cardea.service.app import create_app
 from cardea.service.auth import Authentication, IdentityProvider
 from cardea.service.confined import ConfinedAgentSession, Workers
@@ -178,18 +176,6 @@ def serve(
             host = DebianHost() if config.host_execution else None
             if host:
                 host.probe()
-            model = None
-            if config.agent_runtime:
-                model = OpenRouterModel(
-                    private_file(config.agent_runtime.api_key_file).decode().strip()
-                    if config.agent_runtime.api_key_file
-                    else os.environ.get(config.agent_runtime.api_key_env or "", ""),
-                    config.agent_runtime.model,
-                )
-                if host is None:
-                    raise Fault(
-                        "unsupported_host", "Agent execution requires the confined host", 503
-                    )
             operations = Registry.load(config.operations_dir)
             # Confined workers share the M2 helper; profiles are root-owned (ADR-028).
             workers = Workers(host) if host else None
@@ -220,7 +206,6 @@ def serve(
                 auth,
                 fault,
                 host=host,
-                model=model,
                 operations=operations,
                 session=session,
                 workers=workers,
@@ -239,7 +224,6 @@ def serve(
                         # Pending rows stay visible and retry after transient cleanup failure.
                         try:
                             HostRuntime(kernel).cleanup()
-                            AgentRuntime(kernel).cleanup()
                         except Exception:
                             log.exception("periodic host cleanup failed")
                         timer.wait(5)

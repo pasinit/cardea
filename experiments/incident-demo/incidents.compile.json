@@ -1,0 +1,131 @@
+{
+  "tool": {
+    "name": "incidents.compile",
+    "description": "Build a sorted index and a Markdown summary of the supplied fictional incident records.",
+    "inputSchema": {
+      "type": "object",
+      "$defs": {
+        "Incident": {
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "pattern": "^[A-Z][A-Z0-9-]{0,31}$",
+              "title": "Id",
+              "type": "string"
+            },
+            "title": {
+              "maxLength": 160,
+              "minLength": 1,
+              "title": "Title",
+              "type": "string"
+            },
+            "severity": {
+              "enum": [
+                "low",
+                "medium",
+                "high"
+              ],
+              "title": "Severity",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "title",
+            "severity"
+          ],
+          "title": "Incident",
+          "type": "object"
+        },
+        "IncidentBatch": {
+          "additionalProperties": false,
+          "properties": {
+            "records": {
+              "items": {
+                "$ref": "#/$defs/Incident"
+              },
+              "maxItems": 20,
+              "minItems": 1,
+              "title": "Records",
+              "type": "array"
+            }
+          },
+          "required": [
+            "records"
+          ],
+          "title": "IncidentBatch",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "batch": {
+          "$ref": "#/$defs/IncidentBatch"
+        }
+      },
+      "required": [
+        "batch"
+      ]
+    },
+    "outputSchema": {
+      "type": "object",
+      "$defs": {
+        "Incident": {
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "pattern": "^[A-Z][A-Z0-9-]{0,31}$",
+              "title": "Id",
+              "type": "string"
+            },
+            "title": {
+              "maxLength": 160,
+              "minLength": 1,
+              "title": "Title",
+              "type": "string"
+            },
+            "severity": {
+              "enum": [
+                "low",
+                "medium",
+                "high"
+              ],
+              "title": "Severity",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "title",
+            "severity"
+          ],
+          "title": "Incident",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "index": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Incident"
+          },
+          "maxItems": 20
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 8192
+        }
+      },
+      "required": [
+        "index",
+        "summary"
+      ]
+    }
+  },
+  "cardea": {
+    "version": 1,
+    "effect": "read",
+    "handler": "incident-demo.compile",
+    "timeout_seconds": 10
+  }
+}

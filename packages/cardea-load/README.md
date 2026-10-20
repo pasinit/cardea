@@ -66,24 +66,9 @@ Only disposable provider/kernel state is used. The harness is trusted test admin
 
 The current results are amd64 Debian under emulation on Apple Silicon, with other host workloads present. They are not native Debian capacity or host-isolation evidence. OIDC load, overnight soak, storage exhaustion/slow-I/O, descendant delegation load, remote clients, arbitrary tools and model execution are unrun. M1 acceptance and M2 confinement remain distinct.
 
-## M3 agent/tool comparison
+## M3 agent/tool comparison (removed)
 
-The [executed M3 campaign report](reports/2026-09-24-m3/REPORT.md) records 12 completed tasks and a matched reference/comparison. `agent-run`, `agent-baseline` and `agent-compare` implement the separate `m3-incidents-v1` contract selected in [ADR-016](../../docs/decisions/016-m3-openrouter-and-native-mcp.md). Run only on an owned prepared Debian acceptance host with current Cardea sources/helper, SPIRE binaries and the API interpreter. The load package still runs separately and starts its fixture through that explicit interpreter.
-
-```sh
-cardea-load agent-run --kind reference --repo /opt/cardea-src \
-  --api-python /opt/cardea-venv/bin/python --output /private/campaign/reference
-cardea-load agent-baseline --run /private/campaign/reference/run.json \
-  --output /private/campaign/baseline.json
-cardea-load agent-run --kind comparison --repo /opt/cardea-src \
-  --api-python /opt/cardea-venv/bin/python --output /private/campaign/comparison
-cardea-load agent-compare --baseline /private/campaign/baseline.json \
-  --run /private/campaign/comparison/run.json --output /private/campaign/comparison.json
-```
-
-The [owned-VM runner](../../experiments/m3/load_vm.py) installs the package's locked dependencies separately and performs those steps in order. Two reference repetitions and one comparison each use a fresh store, four tasks, two closed-loop clients and the same allocations. Every task completes two model/MCP/worker rounds and an additive input delivery. The real OpenRouter SDK uses a deterministic HTTP fixture; no live model credentials or provider billing are involved. This is a bounded end-to-end repeatability baseline, not a saturation test or native Debian capacity estimate. Admission p95, completion p95 and completion throughput are separate measurements; throughput includes post-completion artifact/receipt inspection before each client's next task. Authentication, MCP and confinement costs are included but not individually isolated.
-
-The oracle checks every acknowledged task, exact incident preservation, two output/evidence versions, four successful receipts, two model calls, idempotent redelivery and SQLite integrity. Host/profile/harness/lock mismatches are incomparable. Correctness failures fail the run; latency increases above 25% or throughput drops above 20% are provisional warnings. Two short reference repetitions do not establish a statistical performance guarantee. Historical M1 references remain unchanged and cannot be compared with this different contract.
+The [executed M3 campaign report](reports/2026-09-24-m3/REPORT.md) records the `m3-incidents-v1` contract (ADR-016). Its `agent-run`, `agent-baseline` and `agent-compare` commands were removed with the incident agent-task profile ([ADR-032](../../docs/decisions/032-remove-incident-agent-tasks.md)); the report remains as historical evidence and can be reproduced only at a commit before that removal.
 
 ## M4 native A2A delegation profile
 
