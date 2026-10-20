@@ -22,7 +22,13 @@ from pydantic import ValidationError
 from cardea.kernel.lifecycle import ContractError
 from cardea.kernel.store import StoreError
 from cardea.service.database import Fault, borrow
-from cardea.service.models import TriggerSpec, now
+from cardea.service.models import (
+    DEFAULT_MAX_TASK_REQUEST_BYTES,
+    TaskRequest,
+    TriggerSpec,
+    now,
+    request_size,
+)
 from cardea.service.operations import Registry
 from cardea.service.schedule import Decision, decide, slot_key
 
@@ -62,8 +68,18 @@ def _event(
     )
 
 
+def check_size(request: TaskRequest, limit: int) -> None:
+    """The host owner's task-request size cap (`max_task_request_bytes`)."""
+    if request_size(request) > limit:
+        raise Fault("request_too_large", f"Task request exceeds {limit} bytes", 413)
+
+
 def install(
-    conn: sa.Connection, specs: Sequence[TriggerSpec], operations: Registry, at: datetime
+    conn: sa.Connection,
+    specs: Sequence[TriggerSpec],
+    operations: Registry,
+    at: datetime,
+    max_task_request_bytes: int = DEFAULT_MAX_TASK_REQUEST_BYTES,
 ) -> None:
     """Replace the host-owned trigger set inside the provisioning transaction.
 
@@ -74,7 +90,14 @@ def install(
         if spec.trigger_id in seen:
             raise Fault("trigger_duplicate", "Trigger IDs must be unique")
         seen.add(spec.trigger_id)
-        upsert(conn, spec, operations, at, managed_by="host")
+        upsert(
+            conn,
+            spec,
+            operations,
+            at,
+            managed_by="host",
+            max_task_request_bytes=max_task_request_bytes,
+        )
     for row in conn.exec_driver_sql(
         "SELECT trigger_id FROM triggers WHERE removed=0 AND managed_by='host'"
     ).all():
@@ -89,6 +112,7 @@ def upsert(
     at: datetime,
     *,
     managed_by: str,
+    max_task_request_bytes: int = DEFAULT_MAX_TASK_REQUEST_BYTES,
 ) -> str:
     """Install or update one trigger; returns the history kind recorded (or "unchanged")."""
     if not conn.exec_driver_sql(
@@ -96,6 +120,7 @@ def upsert(
     ).first():
         raise Fault("unknown_principal", "Trigger supervisor is not provisioned")
     request = spec.request(f"{spec.trigger_id}.{slot_key(at)}")
+    check_size(request, max_task_request_bytes)
     operations.check_grants(request.grants)
     old = (
         conn.exec_driver_sql("SELECT * FROM triggers WHERE trigger_id=?", (spec.trigger_id,))

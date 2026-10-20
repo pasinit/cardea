@@ -224,6 +224,7 @@ def serve(
                 operations=operations,
                 session=session,
                 workers=workers,
+                max_task_request_bytes=config.max_task_request_bytes,
             )
             if config.agent_session:
                 kernel.session_limit = config.agent_session.concurrent_sessions

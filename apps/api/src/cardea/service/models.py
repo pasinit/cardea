@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
-from typing import Annotated, ClassVar, Literal, Self
+from typing import Annotated, Literal, Self
 from zoneinfo import ZoneInfo
 
 import rfc8785
@@ -58,10 +58,18 @@ class Wire(Record):
     schema_version: Literal["0.2"] = "0.2"
 
 
-class TaskRequest(Wire):
-    # Canonical (RFC 8785) size bound of one request.
-    max_encoded_bytes: ClassVar[int] = 16384
+# Canonical (RFC 8785) size of one task request: the host default and the largest value a
+# host owner may configure (`max_task_request_bytes`). Admission and trigger installation
+# enforce the configured value; models enforce only the absolute ceiling.
+DEFAULT_MAX_TASK_REQUEST_BYTES = 16384
+MAX_TASK_REQUEST_BYTES = 1048576
 
+
+def request_size(request: "TaskRequest") -> int:
+    return len(rfc8785.dumps(request.model_dump(mode="json")))
+
+
+class TaskRequest(Wire):
     request_id: Identifier
     agent_id: Identifier
     namespace: Identifier
@@ -78,8 +86,10 @@ class TaskRequest(Wire):
             encoded = rfc8785.dumps(self.model_dump(mode="json"))
         except (ValueError, TypeError) as error:
             raise ValueError("Payload is outside the supported RFC 8785 domain") from error
-        if len(encoded) > self.max_encoded_bytes or len(set(self.grants)) != len(self.grants):
-            raise ValueError("Request is too large or repeats a grant")
+        if len(encoded) > MAX_TASK_REQUEST_BYTES:
+            raise ValueError("Request is too large")
+        if len(set(self.grants)) != len(self.grants):
+            raise ValueError("Request repeats a grant")
         if not {"objects.read", "objects.write"} <= set(self.grants):
             raise ValueError("The installed deterministic runtime requires object read and write")
         return self
@@ -222,9 +232,6 @@ class Expectation(Record):
 class AgentRunRequest(TaskRequest):
     """One bounded agent session whose only tools are installed operations (ADR-027)."""
 
-    # Room for the full 64 KiB of instructions declared below plus the other fields.
-    max_encoded_bytes: ClassVar[int] = 131072
-
     instructions: Annotated[str, Field(strict=True, min_length=1, max_length=65536)]
     operations: Annotated[tuple[OperationName, ...], Field(min_length=1, max_length=32)]
     payload: Annotated[dict[str, JsonValue], Field(max_length=0)] = Field(default_factory=dict)
@@ -360,6 +367,10 @@ class ServiceConfig(Record):
     network: NetworkListener | None = None
     # Request-body cap for every listener. Responses stay capped at 256 KiB.
     max_request_bytes: Annotated[int, Field(strict=True, ge=4096, le=1048576)] = 32768
+    # Canonical size cap of one task request, checked at admission and trigger installation.
+    max_task_request_bytes: Annotated[
+        int, Field(strict=True, ge=4096, le=MAX_TASK_REQUEST_BYTES)
+    ] = DEFAULT_MAX_TASK_REQUEST_BYTES
 
 
 class Principal(Record):

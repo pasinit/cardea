@@ -230,6 +230,7 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
             "delegation_execution": kernel.host is not None,
             "new_namespace_prefix": prefix,
             "max_request_bytes": max_request_bytes,
+            "max_task_request_bytes": kernel.max_task_request_bytes,
             "max_response_bytes": MAX_RESPONSE_BYTES,
         }
 
