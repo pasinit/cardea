@@ -42,7 +42,7 @@ from cardea.service.models import (
     now,
 )
 from cardea.service.operation_runtime import OperationRuntime
-from cardea.service.operations import OperationDescriptor, Registry
+from cardea.service.operations import OperationDescriptor, OperationRejected, Registry
 
 INSTALLED = {
     "profiles": {
@@ -580,3 +580,105 @@ def test_session_configuration_keeps_credentials_out_of_the_service() -> None:
         )
     with pytest.raises(ValidationError):
         AgentSessionConfig(confined_profile="session")
+
+
+# Per-profile concurrency
+
+
+class SlowHost(WorkerHost):
+    """Each job reports "running" for a few polls; records how many run at once."""
+
+    def __init__(self, concurrency: int | None) -> None:
+        super().__init__()
+        self.installed["profiles"]["browser"]["concurrency"] = concurrency
+        self.polls: dict[str, int] = {}
+        self.active = 0
+        self.peak = 0
+
+    def start_confined(
+        self, job: str, content: bytes, deadline: float, profile: str, worker: str
+    ) -> None:
+        super().start_confined(job, content, deadline, profile, worker)
+        self.active += 1
+        self.peak = max(self.peak, self.active)
+
+    def status(self, job: str) -> dict[str, Any]:
+        self.polls[job] = self.polls.get(job, 0) + 1
+        return self.outcome if self.polls[job] > 3 else {"state": "running"}
+
+    def stop(self, job: str) -> dict[str, Any]:
+        self.active -= 1
+        return super().stop(job)
+
+
+async def fetch_pages(workers: Workers, count: int, deadline: float) -> list[Any]:
+    results: list[Any] = await asyncio.gather(
+        *(
+            workers.run(f"{i:032x}", {}, profile="browser", worker="fetch", deadline=deadline)
+            for i in range(count)
+        ),
+        return_exceptions=True,
+    )
+    return results
+
+
+@pytest.mark.parametrize(("concurrency", "peak"), [(1, 1), (2, 2), (None, 3)])
+def test_profile_concurrency_bounds_parallel_workers(
+    monkeypatch: pytest.MonkeyPatch, concurrency: int | None, peak: int
+) -> None:
+    monkeypatch.setattr(confined, "POLL_SECONDS", 0.01)
+    host = SlowHost(concurrency)
+    results = asyncio.run(fetch_pages(Workers(host), 3, time.time() + 10))
+    assert results == [{"text": "page text"}] * 3
+    assert host.peak == peak and len(host.starts) == 3
+
+
+def test_profile_slots_are_shared_across_event_loops(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Agent attempts run in separate threads, each with its own loop."""
+    import threading
+
+    monkeypatch.setattr(confined, "POLL_SECONDS", 0.01)
+    host = SlowHost(1)
+    workers = Workers(host)
+    threads = [
+        threading.Thread(target=lambda: asyncio.run(fetch_pages(workers, 2, time.time() + 10)))
+        for _ in range(2)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert host.peak == 1 and len(host.starts) == 4
+
+
+def test_busy_profile_refuses_before_starting(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(confined, "POLL_SECONDS", 0.01)
+    host = SlowHost(1)
+    workers = Workers(host)
+    slot = workers._slot("browser")
+    assert slot is not None and slot.acquire(blocking=False)
+    (busy,) = asyncio.run(fetch_pages(workers, 1, time.time() + 0.05))
+    assert isinstance(busy, OperationRejected) and "worker_busy" in str(busy)
+    assert host.starts == [] and host.stops == []
+    slot.release()
+    assert asyncio.run(fetch_pages(workers, 1, time.time() + 10)) == [{"text": "page text"}]
+
+
+def test_waiting_call_stops_when_its_task_is_cancelled(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(confined, "POLL_SECONDS", 0.01)
+    host = SlowHost(1)
+    workers = Workers(host)
+    slot = workers._slot("browser")
+    assert slot is not None and slot.acquire(blocking=False)
+    waiting = workers.run(
+        "a" * 32,
+        {},
+        profile="browser",
+        worker="fetch",
+        deadline=time.time() + 10,
+        watch=lambda: "cancel_requested",
+    )
+    with pytest.raises(OperationRejected, match="cancel_requested"):
+        asyncio.run(waiting)
+    assert host.starts == []
+    slot.release()

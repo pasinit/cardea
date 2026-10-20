@@ -21,6 +21,9 @@ from pathlib import Path
 from typing import Any
 
 PROFILE = "debian-local-v1"
+# Debian 13's 6.12 LTS kernel, generic or cloud flavour. Point releases only bring fixes; the
+# enforcement checks below (cgroup controllers, seccomp, bwrap) still run on every request.
+KERNEL_RELEASE = r"6\.12\.\d{1,4}\+deb13(-cloud)?-amd64"
 ROOT = Path("/var/lib/cardea-host")
 # Host-owner worker profiles and installed worker commands (ADR-028). Root-owned; a caller
 # names a profile and a worker, never a command line, mount, limit or network rule.
@@ -100,6 +103,9 @@ LIMITS = {
     "scratch_mb": (1, 8192),
     "output_kb": (1, MAX_OUTPUT // 1024),
 }
+# Optional: how many workers of one profile the kernel runs at once. JIT profiles (browsers)
+# default to one, so parallel tool calls cannot start several large processes together.
+CONCURRENCY = (1, 64)
 NETWORK = {"none", "model_api_only", "allow_list"}
 HOSTNAME = r"(\*\.)?[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+"
 # Read-only binds may expose installed software and public trust roots, never service state.
@@ -123,13 +129,17 @@ def _proxy(value: object) -> tuple[str, int]:
 def validate_profile(entry: object) -> dict[str, Any]:
     if not isinstance(entry, dict):
         raise ValueError("invalid_profile")
-    if not {*LIMITS, "network"} <= set(entry) <= {*LIMITS, "network", "jit", "credential"}:
+    optional = {"jit", "credential", "concurrency"}
+    if not {*LIMITS, "network"} <= set(entry) <= {*LIMITS, "network", *optional}:
         raise ValueError("invalid_profile")
     for key, (low, high) in LIMITS.items():
         value = entry[key]
         if type(value) is not int or not low <= value <= high:
             raise ValueError("invalid_profile")
     if type(entry.get("jit", False)) is not bool:
+        raise ValueError("invalid_profile")
+    concurrency = entry.get("concurrency", 1)
+    if type(concurrency) is not int or not CONCURRENCY[0] <= concurrency <= CONCURRENCY[1]:
         raise ValueError("invalid_profile")
     credential = entry.get("credential")
     if credential is not None and (
@@ -230,6 +240,8 @@ def installed_profiles() -> dict[str, Any]:
                 **{key: entry[key] for key in LIMITS},
                 "network": entry["network"],
                 "jit": entry.get("jit", False),
+                # None: no per-profile limit beyond the kernel's own queues.
+                "concurrency": entry.get("concurrency", 1 if entry.get("jit") else None),
                 "credential": entry.get("credential") is not None,
                 "sha256": digest(entry),
             }
@@ -355,10 +367,14 @@ def run(args: list[str], *, check: bool = True) -> subprocess.CompletedProcess[s
     )
 
 
+def supported_kernel(release: str) -> bool:
+    return re.fullmatch(KERNEL_RELEASE, release) is not None
+
+
 def preflight() -> dict[str, Any]:
     if platform.system() != "Linux" or Path("/proc/1/comm").read_text().strip() != "systemd":
         raise ValueError("unsupported_host")
-    if platform.machine() != "x86_64" or platform.release() != "6.12.107+deb13-cloud-amd64":
+    if platform.machine() != "x86_64" or not supported_kernel(platform.release()):
         raise ValueError("unsupported_kernel")
     if 'VERSION_ID="13"' not in Path("/etc/os-release").read_text():
         raise ValueError("unsupported_host")

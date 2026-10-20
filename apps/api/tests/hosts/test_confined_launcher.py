@@ -227,6 +227,10 @@ def test_requests_cannot_carry_command_lines_or_limits(
         ),
         ("profiles", "browser", {"credential": "/var/lib/cardea/secret"}),
         ("profiles", "browser", {"unknown": 1}),
+        ("profiles", "browser", {"concurrency": 0}),
+        ("profiles", "browser", {"concurrency": 65}),
+        ("profiles", "browser", {"concurrency": "2"}),
+        ("profiles", "browser", {"concurrency": True}),
         ("workers", "fetch", {"argv": ["python3"]}),
         ("workers", "fetch", {"argv": ["/home/user/run"]}),
         ("workers", "fetch", {"read_only": ["/var/lib/cardea"]}),
@@ -282,6 +286,37 @@ def test_profiles_action_reports_limits_but_never_credential_paths(
     assert session["sha256"] == launcher.digest(SESSION)
     with pytest.raises(launcher.Rejected):
         launcher.handle({"action": "profiles", "job": "a" * 32})
+
+
+def test_profiles_report_concurrency_with_one_by_default_for_jit(
+    helper: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = json.loads(json.dumps(CONFIG))
+    config["profiles"]["session"]["concurrency"] = 2
+    for entry in config["profiles"].values():
+        launcher.validate_profile(entry)
+    monkeypatch.setattr(launcher, "worker_config", lambda: config)
+    profiles = launcher.handle({"action": "profiles"})["profiles"]
+    assert profiles["browser"]["concurrency"] == 1  # jit, unset
+    assert profiles["session"]["concurrency"] == 2  # jit, set by the host owner
+    assert profiles["small"]["concurrency"] is None  # no jit, unset
+
+
+@pytest.mark.parametrize(
+    ("release", "supported"),
+    [
+        ("6.12.107+deb13-cloud-amd64", True),
+        ("6.12.111+deb13-amd64", True),
+        ("6.12.48+deb13-amd64", True),
+        ("6.12.111+deb13-arm64", False),
+        ("6.13.1+deb13-amd64", False),
+        ("6.1.0-40-cloud-amd64", False),
+        ("6.12.111+deb13-rt-amd64", False),
+        ("6.12.111+deb13-amd64 ", False),
+    ],
+)
+def test_preflight_accepts_debian_13_6_12_kernels(release: str, supported: bool) -> None:
+    assert launcher.supported_kernel(release) is supported
 
 
 def test_fixed_m2_profile_is_unchanged(configured: list[list[str]], helper: Path) -> None:

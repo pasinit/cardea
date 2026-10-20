@@ -14,7 +14,7 @@ Copy that directory to a Debian 13 amd64 builder. Install `debhelper`, `dh-virtu
 
 ## Install and enroll
 
-The supported execution profile is deliberately narrow: Debian 13 amd64, kernel `6.12.107+deb13-cloud-amd64`, systemd `257.13-1~deb13u1`, bubblewrap `0.12.0-1~deb13u1`, cgroup v2 CPU/memory/pids controllers and the non-setuid bubblewrap launcher. Updated versions require another host fit; installation alone does not certify enforcement.
+The supported execution profile is deliberately narrow: Debian 13 amd64, a Debian 13 6.12 LTS kernel (`6.12.N+deb13-amd64` or `-cloud-amd64`; acceptance ran on `6.12.107+deb13-cloud-amd64`), systemd `257.13-1~deb13u1`, bubblewrap `0.12.0-1~deb13u1`, cgroup v2 CPU/memory/pids controllers and the non-setuid bubblewrap launcher. Updated versions require another host fit; installation alone does not certify enforcement.
 
 1. As host owner, install with `apt install ./cardea-kernel_0.1.0-2_amd64.deb`. It creates separate `cardea-kernel` and `cardea-worker` system accounts, a private store and the fixed helper. It neither enables nor starts the service.
 2. Enroll the machine with your existing SPIRE deployment. Its Workload API socket must be reachable by `cardea-kernel`; register the runtime identity against that account. Enroll supervisors through the existing SPIFFE/OIDC contracts. No test provider or authority document ships in this package.

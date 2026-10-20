@@ -71,7 +71,13 @@ Residual: domain fronting. A client can `CONNECT` an allowed CDN hostname and th
 5. **Entry points inside the sandbox.**
    - `cardea.hosts.operation_worker <entry-point>` runs an installed `cardea.operations` handler from a read-only venv.
    - `cardea.hosts.session_worker` runs `ClaudeAgentSession` with the bound credential (`CARDEA_CREDENTIAL_KIND` = `api_key` or `oauth_token`).
-6. **Confined sessions.** `agent_session` accepts `confined_profile` and `confined_worker` in place of a credential file. The session worker job is derived from the task and attempt, so attempt recovery stops it. The session request crosses the helper boundary, but no credential does. Admission refuses agent runs when the session profile is missing.
+6. **Per-profile concurrency** (added 2026-10-20). A profile may set `concurrency` (1–64). The `profiles` action reports the effective value: the explicit setting; otherwise 1 for `jit` profiles; otherwise `null`, meaning no limit beyond the kernel's queues. The executor holds one slot per running worker of a profile.
+   - Slots are thread-safe semaphores shared by every attempt's event loop.
+   - A call waits for a slot until its deadline, then gets `OperationRejected` (`worker_busy`). Nothing has started at that point, so even an effect fails cleanly rather than becoming `outcome_unknown`. A cancel request or lease loss during the wait also refuses the call before it starts.
+   - Without this, one agent session's parallel tool calls could start several browsers at once on a small host.
+   - Do not run sessions and their tools under the same limited profile: a session holding the only slot would starve its own tool calls until their deadline. Give the session profile its own `concurrency` instead.
+7. **Supported kernels** (relaxed 2026-10-20). The helper probe accepted only `6.12.107+deb13-cloud-amd64`, the M2 acceptance kernel. It now accepts any Debian 13 6.12 LTS amd64 kernel, generic or cloud (`6.12.N+deb13(-cloud)?-amd64`), because a provider's default image ships the generic flavour and point releases bring only fixes. The systemd and bubblewrap version pins, cgroup controllers, seccomp and non-setuid bubblewrap checks are unchanged and still run on every request. This change alters the helper's hash, so hosts must reinstall the helper from the same commit.
+8. **Confined sessions.** `agent_session` accepts `confined_profile` and `confined_worker` in place of a credential file. The session worker job is derived from the task and attempt, so attempt recovery stops it. The session request crosses the helper boundary, but no credential does. Admission refuses agent runs when the session profile is missing.
 
 ## Integration
 
@@ -124,7 +130,8 @@ Debian-only: `tests/hosts/test_confined_debian.py`, skipped unless `CARDEA_CONFI
 
 - **Loopback exposure.** `model_api_only` allows every TCP port on `127.0.0.1`, so a session can reach other loopback listeners. Other attempts' tool endpoints need their random bearer token, but unrelated host services bound to `127.0.0.1` are reachable. Narrowing to the endpoint port needs nftables `socket cgroupv2` rules (revisit).
 - **Cleanup tracking.** If cleanup of a finished job fails, its spool entry stays until a later reap. There is no periodic sweep for confined jobs yet, and the 256-entry spool cap is shared with M2 jobs.
-- **Profile changes need a restart.** The kernel caches the installed-profile listing at first use.
+- **Profile changes need a restart.** The kernel caches the installed-profile listing at first use. The same applies to concurrency limits.
+- **No aggregate memory cap.** Concurrency bounds how many workers of each profile run at once, but there is no shared memory ceiling across profiles. A systemd slice for worker units would provide one, but the helper's cleanup checks assume units live in `system.slice`, so the slice is deferred.
 - **No budget accounting.** Confined operations are not charged to M2 host budgets; ADR-023 operations have none yet.
 
 ## Revisit
