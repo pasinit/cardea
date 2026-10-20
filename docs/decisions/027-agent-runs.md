@@ -36,7 +36,7 @@ Checked 2026-10-15.
    - a deduplicated call returns the earlier result, marked as already done;
    - an uncertain effect is reported to the agent as `outcome_unknown`, with an instruction not to retry.
 4. **Retry journal.** A later attempt's prompt lists the earlier calls with their arguments and final states, taken from the receipts.
-5. **Completion.** A run succeeds only when the session reports success, it has non-empty text, and every call is settled. Its output records the text, attempts, turns, cost and calls; the evidence records that all calls are settled. Destination checks specific to a workload come with workload definitions (ADR-022 C5).
+5. **Completion.** A run succeeds only when the session reports success, it has non-empty text, and every call is settled. Its output records the text, attempts, turns, cost and calls; the evidence records that all calls are settled. `GET /v0.2/tasks/{id}/agent-receipts` returns the full receipt of every call. Destination checks specific to a workload come with workload definitions (ADR-022 C5).
 6. **Session adapter.** `ClaudeAgentSession` runs with:
    - no built-in tools;
    - only `mcp__cardea__*` tools allowed;

@@ -3929,6 +3929,7 @@
     },
     "/v0.2/tasks/{task_id}/agent-receipts": {
       "get": {
+        "description": "Receipts of an agent's model and tool calls.\n\nAn agent run (ADR-027) receipts each tool call as an operation ``call-NNNN``; an M3\nagent task (ADR-016) lists the operations recorded in its own budget table.",
         "operationId": "agent_receipts_v0_2_tasks__task_id__agent_receipts_get",
         "parameters": [
           {

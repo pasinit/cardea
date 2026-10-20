@@ -568,15 +568,28 @@ def create_app(kernel: Kernel) -> FastAPI:
 
     @app.get("/v0.2/tasks/{task_id}/agent-receipts")
     def agent_receipts(task_id: TaskID, proof: Credential) -> dict[str, Any]:
+        """Receipts of an agent's model and tool calls.
+
+        An agent run (ADR-027) receipts each tool call as an operation ``call-NNNN``; an M3
+        agent task (ADR-016) lists the operations recorded in its own budget table.
+        """
         with kernel.database.read() as conn, borrow(conn) as tx:
             Policy(conn).access(proof.resolve(conn), task_id, "tasks.inspect")
-            rows = conn.exec_driver_sql(
-                "SELECT operation_id FROM agent_effects WHERE task_id=? ORDER BY operation_id",
-                (task_id,),
-            ).all()
+            if tx.get_task(task_id).runtime_id == "agent-run-v1":
+                receipts = [
+                    r
+                    for r in tx.list_operations(task_id)
+                    if r.request.operation_id.startswith(("ctx-", "call-"))
+                ]
+            else:
+                rows = conn.exec_driver_sql(
+                    "SELECT operation_id FROM agent_effects WHERE task_id=? ORDER BY operation_id",
+                    (task_id,),
+                ).all()
+                receipts = [tx.get_operation(task_id, r[0]) for r in rows]
             return {
                 "schema_version": "0.2",
-                "receipts": [tx.get_operation(task_id, r[0]).model_dump(mode="json") for r in rows],
+                "receipts": [r.model_dump(mode="json") for r in receipts],
             }
 
     @app.get("/v0.2/tasks/{task_id}", response_model=TaskView)
