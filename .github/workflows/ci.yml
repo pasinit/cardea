@@ -28,3 +28,4 @@ jobs:
       - run: make m4-test
       - run: make m2-host-check m3-check m4-check m5-check try-check
       - run: make try-test
+      - run: make incident-demo-check incident-demo-test

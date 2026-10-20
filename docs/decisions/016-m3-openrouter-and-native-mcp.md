@@ -1,6 +1,6 @@
 # ADR-016 — M3 OpenRouter broker and native MCP
 
-Date: 2026-09-24. Owner: runtime integration. Status: selected, implemented and verified for the bounded M3 profile. Portable, deterministic Debian, live GLM-4.7 and matched load acceptance pass; see the [M3 report](../../experiments/m3/M3-REPORT.md).
+Date: 2026-09-24. Owner: runtime integration. Status: **superseded by [ADR-032](032-remove-incident-agent-tasks.md) (2026-10-20)** for the agent-task path; the profile, broker and fixed MCP tool were removed in favour of agent runs (ADR-027). Historical record: selected, implemented and verified for the bounded M3 profile. Portable, deterministic Debian, live GLM-4.7 and matched load acceptance pass; see the [M3 report](../../experiments/m3/M3-REPORT.md).
 
 ## Requirements
 

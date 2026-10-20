@@ -2,7 +2,7 @@
 
 This evidence covers the current implementation only. R04/R05 in the [review register](standards-review-2026-09-22.md) govern future storage/scheduler choices; the demo does not establish that a bespoke runtime is preferable.
 
-This is a trusted, model-free storage demonstration. It is not the authenticated daemon, a real reasoning agent, or a Debian sandbox.
+This is a trusted, model-free storage demonstration. It is not the authenticated daemon, a real reasoning agent, or a Debian sandbox. Its fictional incident records are plain demo data for the kernel store; they are unrelated to the removed incident agent-task API ([ADR-032](decisions/032-remove-incident-agent-tasks.md)). For an agent working on the same example through the authenticated kernel, see the [incident demo](../experiments/incident-demo/README.md): an agent run ([ADR-027](decisions/027-agent-runs.md)) whose only tool is an installed operation, including crash and resume from the receipt journal.
 
 ## One-Command Check
 

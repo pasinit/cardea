@@ -19,7 +19,7 @@ Each record states the requirement, the open-source candidates considered, fit e
 | [013](013-installed-host-operations.md) | Installed host operations |
 | [014](014-object-scoped-host-inputs.md) | Object-scoped host inputs |
 | [015](015-m2-accounting-retention-and-acceptance.md) | M2 accounting, retention and acceptance |
-| [016](016-m3-openrouter-and-native-mcp.md) | M3 OpenRouter broker and native MCP |
+| [016](016-m3-openrouter-and-native-mcp.md) | M3 OpenRouter broker and native MCP (agent-task path superseded by 032) |
 | [017](017-m4-native-a2a-delegation.md) | Native A2A delegation and shared execution ceilings |
 | [018](018-m5-debian-package.md) | Debian deployment, first M5 increment |
 | [019](019-m5-operational-recovery.md) | M5 operational recovery and maintenance |
@@ -33,5 +33,7 @@ Each record states the requirement, the open-source candidates considered, fit e
 | [028](028-configurable-worker-profiles.md) | Configurable Worker Profiles |
 | [029](029-supervisor-schedules-expectations-and-run-evidence.md) | Supervisor Schedules, Run Expectations and Run Evidence |
 | [030](030-small-host-profile.md) | Small-Host Profile |
+| [031](031-agent-run-context-operations.md) | Agent-Run Context Operations |
+| [032](032-remove-incident-agent-tasks.md) | Remove the Incident Agent-Task Path |
 
 ADR-022, a gap analysis for a first client application, is not published. ADRs 023–030 cite its gap numbers (for example "gap #3"); each of those records restates its own requirement in full.

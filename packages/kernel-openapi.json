@@ -1,31 +1,6 @@
 {
   "components": {
     "schemas": {
-      "AgentInput": {
-        "additionalProperties": false,
-        "properties": {
-          "inputs": {
-            "$ref": "#/components/schemas/IncidentBatch"
-          },
-          "request_id": {
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
-            "title": "Request Id",
-            "type": "string"
-          },
-          "schema_version": {
-            "const": "0.2",
-            "default": "0.2",
-            "title": "Schema Version",
-            "type": "string"
-          }
-        },
-        "required": [
-          "request_id",
-          "inputs"
-        ],
-        "title": "AgentInput",
-        "type": "object"
-      },
       "AgentRunRequest": {
         "additionalProperties": false,
         "description": "One bounded agent session whose only tools are installed operations (ADR-027).",
@@ -75,9 +50,6 @@
                     "host.sha256",
                     "host.copy",
                     "models.invoke",
-                    "models.disclose",
-                    "tools.incidents",
-                    "inputs.append",
                     "tasks.delegate",
                     "tasks.schedule"
                   ],
@@ -222,109 +194,6 @@
           "operations"
         ],
         "title": "AgentRunRequest",
-        "type": "object"
-      },
-      "AgentTaskRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "agent_id": {
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
-            "title": "Agent Id",
-            "type": "string"
-          },
-          "grants": {
-            "items": {
-              "enum": [
-                "objects.read",
-                "objects.write",
-                "tasks.inspect",
-                "tasks.cancel",
-                "tasks.resume",
-                "events.read",
-                "tasks.submit",
-                "host.sha256",
-                "host.copy",
-                "models.invoke",
-                "models.disclose",
-                "tools.incidents",
-                "inputs.append",
-                "tasks.delegate",
-                "tasks.schedule"
-              ],
-              "type": "string"
-            },
-            "maxItems": 13,
-            "minItems": 1,
-            "title": "Grants",
-            "type": "array"
-          },
-          "inputs": {
-            "$ref": "#/components/schemas/IncidentBatch"
-          },
-          "max_output_tokens": {
-            "default": 2048,
-            "maximum": 4096.0,
-            "minimum": 256.0,
-            "title": "Max Output Tokens",
-            "type": "integer"
-          },
-          "namespace": {
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
-            "title": "Namespace",
-            "type": "string"
-          },
-          "objective": {
-            "maxLength": 1024,
-            "minLength": 1,
-            "title": "Objective",
-            "type": "string"
-          },
-          "parent_task_id": {
-            "title": "Parent Task Id",
-            "type": "null"
-          },
-          "payload": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue"
-            },
-            "maxProperties": 0,
-            "title": "Payload",
-            "type": "object"
-          },
-          "request_id": {
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
-            "title": "Request Id",
-            "type": "string"
-          },
-          "schema_version": {
-            "const": "0.2",
-            "default": "0.2",
-            "title": "Schema Version",
-            "type": "string"
-          },
-          "timeout_seconds": {
-            "default": 600,
-            "maximum": 3600.0,
-            "minimum": 120.0,
-            "title": "Timeout Seconds",
-            "type": "integer"
-          },
-          "wait_for_event": {
-            "const": true,
-            "default": true,
-            "title": "Wait For Event",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "request_id",
-          "agent_id",
-          "namespace",
-          "objective",
-          "grants",
-          "inputs"
-        ],
-        "title": "AgentTaskRequest",
         "type": "object"
       },
       "AuthorityWait": {
@@ -567,9 +436,6 @@
                 "host.sha256",
                 "host.copy",
                 "models.invoke",
-                "models.disclose",
-                "tools.incidents",
-                "inputs.append",
                 "tasks.delegate",
                 "tasks.schedule"
               ],
@@ -848,9 +714,6 @@
                 "host.sha256",
                 "host.copy",
                 "models.invoke",
-                "models.disclose",
-                "tools.incidents",
-                "inputs.append",
                 "tasks.delegate",
                 "tasks.schedule"
               ],
@@ -953,9 +816,6 @@
                 "host.sha256",
                 "host.copy",
                 "models.invoke",
-                "models.disclose",
-                "tools.incidents",
-                "inputs.append",
                 "tasks.delegate",
                 "tasks.schedule"
               ],
@@ -1031,57 +891,6 @@
           "operation"
         ],
         "title": "HostTaskRequest",
-        "type": "object"
-      },
-      "Incident": {
-        "additionalProperties": false,
-        "properties": {
-          "id": {
-            "pattern": "^[A-Z][A-Z0-9-]{0,31}$",
-            "title": "Id",
-            "type": "string"
-          },
-          "severity": {
-            "enum": [
-              "low",
-              "medium",
-              "high"
-            ],
-            "title": "Severity",
-            "type": "string"
-          },
-          "title": {
-            "maxLength": 160,
-            "minLength": 1,
-            "title": "Title",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "title",
-          "severity"
-        ],
-        "title": "Incident",
-        "type": "object"
-      },
-      "IncidentBatch": {
-        "additionalProperties": false,
-        "properties": {
-          "records": {
-            "items": {
-              "$ref": "#/components/schemas/Incident"
-            },
-            "maxItems": 20,
-            "minItems": 1,
-            "title": "Records",
-            "type": "array"
-          }
-        },
-        "required": [
-          "records"
-        ],
-        "title": "IncidentBatch",
         "type": "object"
       },
       "JsonValue": {},
@@ -1271,9 +1080,6 @@
                     "host.sha256",
                     "host.copy",
                     "models.invoke",
-                    "models.disclose",
-                    "tools.incidents",
-                    "inputs.append",
                     "tasks.delegate",
                     "tasks.schedule"
                   ],
@@ -1632,9 +1438,6 @@
                     "host.sha256",
                     "host.copy",
                     "models.invoke",
-                    "models.disclose",
-                    "tools.incidents",
-                    "inputs.append",
                     "tasks.delegate",
                     "tasks.schedule"
                   ],
@@ -1758,9 +1561,6 @@
                     "host.sha256",
                     "host.copy",
                     "models.invoke",
-                    "models.disclose",
-                    "tools.incidents",
-                    "inputs.append",
                     "tasks.delegate",
                     "tasks.schedule"
                   ],
@@ -1900,7 +1700,6 @@
               "host-object",
               "operation",
               "delegation",
-              "agent",
               "agent-run"
             ],
             "title": "Template Kind",
@@ -2169,171 +1968,6 @@
           }
         ],
         "summary": "Submit Agent Run"
-      }
-    },
-    "/v0.2/agent-tasks": {
-      "post": {
-        "operationId": "submit_agent_v0_2_agent_tasks_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "x-cardea-auth",
-            "required": false,
-            "schema": {
-              "default": "spiffe",
-              "title": "X-Cardea-Auth",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AgentTaskRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskView"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "405": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Method Not Allowed"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "413": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Content Too Large"
-          },
-          "415": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Unsupported Media Type"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Unprocessable Content"
-          },
-          "429": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Too Many Requests"
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Internal Server Error"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Submit Agent"
       }
     },
     "/v0.2/delegation-tasks": {
@@ -2996,173 +2630,6 @@
           }
         ],
         "summary": "Submit Host"
-      }
-    },
-    "/v0.2/model-budget": {
-      "get": {
-        "operationId": "model_budget_v0_2_model_budget_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "namespace",
-            "required": true,
-            "schema": {
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
-              "title": "Namespace",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "x-cardea-auth",
-            "required": false,
-            "schema": {
-              "default": "spiffe",
-              "title": "X-Cardea-Auth",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Model Budget V0 2 Model Budget Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "405": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Method Not Allowed"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "413": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Content Too Large"
-          },
-          "415": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Unsupported Media Type"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Unprocessable Content"
-          },
-          "429": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Too Many Requests"
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Internal Server Error"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Model Budget"
       }
     },
     "/v0.2/operation-tasks": {
@@ -3986,7 +3453,7 @@
     },
     "/v0.2/tasks/{task_id}/agent-receipts": {
       "get": {
-        "description": "Receipts of an agent's model and tool calls.\n\nAn agent run (ADR-027) receipts each tool call as an operation ``call-NNNN``; an M3\nagent task (ADR-016) lists the operations recorded in its own budget table.",
+        "description": "Receipts of an agent's model and tool calls.\n\nAn agent run (ADR-027) receipts each context and tool call as an operation ``ctx-NN`` /\n``call-NNNN``. Tasks of the removed M3 incident profile (ADR-016, ADR-032) keep their\nhistorical receipts, listed from that profile's table.",
         "operationId": "agent_receipts_v0_2_tasks__task_id__agent_receipts_get",
         "parameters": [
           {
@@ -4684,181 +4151,6 @@
           }
         ],
         "summary": "Events"
-      }
-    },
-    "/v0.2/tasks/{task_id}/inputs": {
-      "post": {
-        "operationId": "append_input_v0_2_tasks__task_id__inputs_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "task_id",
-            "required": true,
-            "schema": {
-              "pattern": "^task-[0-9a-f]{32}$",
-              "title": "Task Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "x-cardea-auth",
-            "required": false,
-            "schema": {
-              "default": "spiffe",
-              "title": "X-Cardea-Auth",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AgentInput"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskView"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "405": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Method Not Allowed"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "413": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Content Too Large"
-          },
-          "415": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Unsupported Media Type"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Unprocessable Content"
-          },
-          "429": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Too Many Requests"
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Internal Server Error"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Append Input"
       }
     },
     "/v0.2/tasks/{task_id}/operations/{operation_id}/reconcile": {

@@ -1,14 +1,11 @@
-"""Separate, immutable comparison contract for the bounded M3 agent profile."""
+"""Comparison machinery from the M3 agent contract, reused by the M4 delegation contract."""
 
 from __future__ import annotations
 
-import json
 import statistics
-import subprocess
-from pathlib import Path
 from typing import Any
 
-from cardea_load.metrics import fingerprint, save
+from cardea_load.metrics import fingerprint
 
 PROFILE = {
     "name": "m3-incidents-v1",
@@ -27,27 +24,6 @@ PROFILE = {
     "host_concurrency": 4,
 }
 METRICS = ("admission_p95_ms", "completion_p95_ms", "completion_rps")
-
-
-def run_agent(repo: Path, python: Path, output: Path, kind: str) -> None:
-    output.mkdir(mode=0o700, parents=True, exist_ok=False)
-    with (output / "private-fixture.log").open("x") as log:
-        process = subprocess.run(
-            [
-                str(python),
-                str(Path(__file__).with_name("agent_fixture.py")),
-                str(repo),
-                str(output),
-                kind,
-                json.dumps(PROFILE),
-            ],
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            timeout=1500,
-            check=False,
-        )
-    if process.returncode:
-        raise RuntimeError(f"Agent campaign failed; inspect {output}")
 
 
 def agent_baseline(run: dict[str, Any]) -> dict[str, Any]:
@@ -110,7 +86,3 @@ def agent_compare(reference: dict[str, Any], run: dict[str, Any]) -> dict[str, A
         "warnings": warnings,
         "correctness_passed": point["passed"],
     }
-
-
-def write_agent_baseline(source: Path, output: Path) -> None:
-    save(output, agent_baseline(json.loads(source.read_text())))

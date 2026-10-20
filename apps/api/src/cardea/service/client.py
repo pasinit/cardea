@@ -14,8 +14,7 @@ from spiffe.spiffe_id.spiffe_id import SpiffeId
 from spiffe.workloadapi.workload_api_client import WorkloadApiClient
 
 from cardea.service.models import (
-    AgentInput,
-    AgentTaskRequest,
+    AgentRunRequest,
     DelegationTaskRequest,
     HostObjectTaskRequest,
     HostTaskRequest,
@@ -141,19 +140,14 @@ class KernelClient:
             self.request("POST", "/host-object-tasks", json=request.model_dump(mode="json"))
         )
 
+    def submit_agent_run(self, request: AgentRunRequest) -> TaskView:
+        return TaskView.model_validate(
+            self.request("POST", "/agent-runs", json=request.model_dump(mode="json"))
+        )
+
     def submit_delegation(self, request: DelegationTaskRequest) -> TaskView:
         return TaskView.model_validate(
             self.request("POST", "/delegation-tasks", json=request.model_dump(mode="json"))
-        )
-
-    def submit_agent(self, request: AgentTaskRequest) -> TaskView:
-        return TaskView.model_validate(
-            self.request("POST", "/agent-tasks", json=request.model_dump(mode="json"))
-        )
-
-    def append_input(self, task_id: str, request: AgentInput) -> TaskView:
-        return TaskView.model_validate(
-            self.request("POST", f"/tasks/{task_id}/inputs", json=request.model_dump(mode="json"))
         )
 
     def inspect(self, task_id: str) -> TaskView:

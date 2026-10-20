@@ -3,7 +3,6 @@
 import json
 from collections.abc import Callable
 from datetime import timedelta
-from hashlib import sha256
 from uuid import uuid4
 
 import sqlalchemy as sa
@@ -14,16 +13,13 @@ from cardea.hosts.debian import Host
 from cardea.kernel.models import BudgetLimits, Task, TaskState
 from cardea.kernel.store import KernelTransaction
 from cardea.runtime.agent_session import AgentSession
-from cardea.runtime.openrouter import OpenRouterModel
-from cardea.service import agent_budget, host_budget
+from cardea.service import host_budget
 from cardea.service.auth import IdentityProvider, Proof
 from cardea.service.confined import ConfinedAgentSession, Workers, confined_handler, job_id
 from cardea.service.database import Database, Fault, borrow
 from cardea.service.models import (
     DEFAULT_MAX_TASK_REQUEST_BYTES,
-    AgentInput,
     AgentRunRequest,
-    AgentTaskRequest,
     BaseHostTaskRequest,
     DelegationTaskRequest,
     HostObjectTaskRequest,
@@ -42,7 +38,6 @@ from cardea.service.policy import Policy, object_key
 from cardea.service.profiles import (
     AGENT_RUN_QUEUE,
     AGENT_RUN_WORKFLOW,
-    AGENT_WORKFLOW,
     DELEGATION_QUEUE,
     DELEGATION_WORKFLOW,
     HOST_WORKFLOW,
@@ -60,7 +55,6 @@ from cardea.service.triggers import install as install_triggers
 __all__ = [
     "AGENT_RUN_QUEUE",
     "AGENT_RUN_WORKFLOW",
-    "AGENT_WORKFLOW",
     "DELEGATION_QUEUE",
     "DELEGATION_WORKFLOW",
     "HOST_WORKFLOW",
@@ -189,21 +183,6 @@ def provision(
                         budget.concurrent_operations,
                     ),
                 )
-            conn.exec_driver_sql("DELETE FROM model_budget_limits")
-            for allocation in document.model_budgets:
-                if not conn.exec_driver_sql(
-                    "SELECT 1 FROM principals WHERE principal_id=?", (allocation.principal_id,)
-                ).first():
-                    raise Fault("unknown_principal", "Budget principal is not provisioned")
-                conn.exec_driver_sql(
-                    "INSERT INTO model_budget_limits VALUES (?,?,?,?)",
-                    (
-                        allocation.principal_id,
-                        allocation.namespace,
-                        allocation.calls,
-                        allocation.tokens,
-                    ),
-                )
             install_triggers(conn, document.triggers, installed, now(), max_task_request_bytes)
             revision = (
                 int(
@@ -250,7 +229,6 @@ class Kernel:
         auth: IdentityProvider,
         fault: Callable[[str], None] = lambda stage: None,
         host: Host | None = None,
-        model: OpenRouterModel | None = None,
         operations: Registry | None = None,
         session: AgentSession | None = None,
         workers: Workers | None = None,
@@ -258,7 +236,7 @@ class Kernel:
     ) -> None:
         self.database, self.auth, self.fault = database, auth, fault
         self.max_task_request_bytes = max_task_request_bytes
-        self.host, self.model = host, model
+        self.host = host
         self.operations = operations or Registry(handlers={})
         self.session = session
         # Confined operation workers under host-owner profiles (ADR-028).
@@ -270,20 +248,25 @@ class Kernel:
             (
                 "host_required_for_recovery",
                 "Enable the host adapter to recover unfinished tasks",
-                lambda p: host is None and p.requires_host and not p.requires_model,
+                lambda p: host is None and p.requires_host,
             ),
             (
                 "session_required_for_recovery",
                 "Configure the agent session to recover unfinished agent runs",
                 lambda p: p.requires_session and session is None,
             ),
-            (
-                "agent_required_for_recovery",
-                "Enable agent and host adapters",
-                lambda p: p.requires_model and (model is None or host is None),
-            ),
         )
         with database.engine.begin() as conn:
+            # The incident agent-task profile was removed (ADR-032); its tasks cannot resume.
+            if conn.exec_driver_sql(
+                "SELECT 1 FROM tasks WHERE state NOT IN ('succeeded','failed','cancelled') "
+                "AND json_extract(snapshot,'$.runtime_id')='incident-agent-v1' LIMIT 1"
+            ).first():
+                raise Fault(
+                    "retired_profile",
+                    "Cancel unfinished incident agent tasks with the previous release first",
+                    503,
+                )
             for code, message, unavailable in missing:
                 blocked = runtime_ids(unavailable)
                 if (
@@ -478,8 +461,6 @@ class Kernel:
         is_host = isinstance(request, BaseHostTaskRequest)
         if request.parent_task_id and (is_host or profile.owns_children) and delegation is None:
             raise Fault("delegation_binding", "Child admission requires a bound peer request")
-        if profile.requires_model and (self.model is None or self.host is None):
-            raise Fault("agent_disabled", "Agent execution requires model and host adapters", 503)
         if profile.requires_session and self.session is None:
             raise Fault("agent_disabled", "Agent runs require a configured agent session", 503)
         if isinstance(request, AgentRunRequest):
@@ -531,13 +512,6 @@ class Kernel:
             else:
                 raise Fault("invalid_provenance", "Ancestor chain exceeds the supported bound")
         policy.admission(supervisor, request, self.runtime_id)
-        if isinstance(request, AgentTaskRequest):
-            agent_budget.available(
-                conn,
-                supervisor,
-                request.namespace,
-                agent_budget.INPUT_RESERVE + request.max_output_tokens,
-            )
         if profile.reserves_host_budget:
             host_budget.available(conn, supervisor, request.namespace, reserve=True)
         if (
@@ -603,19 +577,6 @@ class Kernel:
                 peer = policy.principal(child.agent_id)
                 if peer["kind"] != "agent" or peer["runtime_id"] != self.runtime_id:
                     raise Fault("peer_binding", "Peer is not installed in this trust domain")
-        if isinstance(request, AgentTaskRequest):
-            content = request.inputs.model_dump_json()
-            conn.exec_driver_sql("INSERT INTO agent_runs(task_id) VALUES (?)", (task_id,))
-            conn.exec_driver_sql(
-                "INSERT INTO agent_inputs VALUES (?,0,?,?,?,?)",
-                (
-                    task_id,
-                    request.request_id,
-                    sha256(content.encode()).hexdigest(),
-                    content,
-                    tx.latest_cursor(),
-                ),
-            )
         # Provenance is immutable; this event contains IDs/digest, never identity proofs.
         tx.append_event(
             namespace="kernel.authority",
@@ -710,58 +671,6 @@ class Kernel:
             result = view(conn, task_id)
         self.fault("control.after_commit")
         return result
-
-    def append_input(self, proof: Proof, task_id: str, request: AgentInput) -> TaskView:
-        with self.database.engine.begin() as conn, borrow(conn) as tx:
-            principal = proof.resolve(conn)
-            binding = Policy(conn).access(principal, task_id, "inputs.append")
-            content = request.inputs.model_dump_json()
-            digest = sha256(content.encode()).hexdigest()
-            previous = conn.exec_driver_sql(
-                "SELECT digest FROM agent_inputs WHERE task_id=? AND request_id=?",
-                (task_id, request.request_id),
-            ).first()
-            if previous:
-                if previous[0] != digest:
-                    raise Fault("request_conflict", "Input request ID has different bytes", 409)
-                return view(conn, task_id)
-            task = tx.get_task(task_id)
-            if not for_runtime(task.runtime_id).accepts_input or task.state in TERMINAL:
-                raise Fault("input_denied", "Task cannot accept this input", 409)
-            if conn.exec_driver_sql(
-                "SELECT 1 FROM agent_inputs WHERE task_id=? AND round=1", (task_id,)
-            ).first():
-                raise Fault("input_limit", "This profile accepts one additive update", 409)
-            original = AgentTaskRequest.model_validate_json(binding["request_json"])
-            initial = {r.id: r for r in original.inputs.records}
-            updated = {r.id: r for r in request.inputs.records}
-            if len(updated) != len(initial) + 1 or any(
-                updated.get(k) != v for k, v in initial.items()
-            ):
-                raise Fault(
-                    "input_not_additive", "Update must preserve inputs and add one record", 409
-                )
-            event = tx.append_event(
-                namespace=binding["namespace"],
-                event_type=f"input.{task_id}",
-                producer_id=principal,
-                correlation_id=request.request_id,
-                task_id=task_id,
-                at=now(),
-                payload={"digest": digest},
-            )
-            conn.exec_driver_sql(
-                "INSERT INTO agent_inputs VALUES (?,1,?,?,?,?)",
-                (task_id, request.request_id, digest, content, event.cursor),
-            )
-            self.client.send_in_transaction(
-                conn,
-                workflow_id(task_id),
-                "input",
-                topic="control",
-                idempotency_key=f"input:{task_id}:{request.request_id}",
-            )
-            return view(conn, task_id)
 
     def close(self) -> None:
         self.client.destroy()

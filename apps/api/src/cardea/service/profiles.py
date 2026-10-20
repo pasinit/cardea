@@ -4,11 +4,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from cardea.service import agent_budget
 from cardea.service.database import Fault
 from cardea.service.models import (
     AgentRunRequest,
-    AgentTaskRequest,
     BaseHostTaskRequest,
     DelegationTaskRequest,
     OperationTaskRequest,
@@ -18,7 +16,6 @@ from cardea.service.models import (
 QUEUE = "cardea-m1"
 WORKFLOW = "cardea.m1.task"
 HOST_WORKFLOW = "cardea.m2.host"
-AGENT_WORKFLOW = "cardea.m3.agent"
 DELEGATION_WORKFLOW = "cardea.m4.delegation"
 DELEGATION_QUEUE = "cardea-coordinators"
 OPERATION_WORKFLOW = "cardea.m6.operation"
@@ -36,7 +33,6 @@ class Profile:
     workflow: str = WORKFLOW
     queue: str = QUEUE
     requires_host: bool = False
-    requires_model: bool = False
     # Needs the configured agent session runtime (ADR-027).
     requires_session: bool = False
     # The runtime, not admission, cancels a RUNNING task: it must stop an effect first.
@@ -45,7 +41,6 @@ class Profile:
     runtime_cancels: bool = False
     # Children may only be admitted through this profile's installed peer path.
     owns_children: bool = False
-    accepts_input: bool = False
     # Operation whose receipt is the task's receipt; None means its latest operation.
     receipt_operation: str | None = "publish"
     # Admission checks the supervisor's host allocation before queueing.
@@ -77,25 +72,6 @@ def host_profile(operation: str) -> Profile:
 PROFILES: tuple[Profile, ...] = (
     host_profile("host.sha256"),
     host_profile("host.copy"),
-    Profile(
-        runtime_id="incident-agent-v1",
-        verifier_id="incident-verifier-v1",
-        matches=lambda r: isinstance(r, AgentTaskRequest),
-        limits=lambda r: {
-            "max_steps": 4,
-            "max_model_calls": 2,
-            "max_model_tokens": 2 * (agent_budget.INPUT_RESERVE + r.max_output_tokens),
-            "max_tool_milliseconds": 20000,
-            "max_output_bytes": 131072,
-        },
-        workflow=AGENT_WORKFLOW,
-        requires_host=True,
-        requires_model=True,
-        reserves_host_budget=True,
-        runtime_cancels_running=True,
-        accepts_input=True,
-        receipt_operation=None,
-    ),
     Profile(
         runtime_id="delegation-v1",
         verifier_id="delegation-verifier-v1",
