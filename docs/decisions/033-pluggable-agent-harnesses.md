@@ -126,7 +126,7 @@ Its gaps are a soft step cap, an estimated cost, and a silent continue when MCP 
 ## Verification
 
 - **Contract** (#17): 7 tests in `tests/service/test_harness_contract.py`; all existing agent-run, confined and workload tests pass unchanged.
-- **Registry, selection and authority:** pending, in the next PR.
+- **Registry, selection and authority** (#19): 27 tests in `tests/service/test_harnesses.py` cover entry and file validation (field-named errors, unsafe or symlinked files, unpriced models), pins (binary hash, package version), defaults by request, namespace and file, `harness_not_installed`/`model_not_allowed`/`harness_not_granted`, supervisor policy, revocation stopping a run, provisioning, trigger templates, and service start. Existing tests are unchanged.
 - **OpenCode:** pending. It will be an end-to-end test with the pinned binary, a fake OpenAI-compatible server and the real per-attempt endpoint: an installed operation is called and receipted; only MCP tools are offered; turn and cost kills; a failed MCP connection fails the run; the schema contract test.
 
 ## Revisit
