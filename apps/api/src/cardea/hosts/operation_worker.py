@@ -14,7 +14,12 @@ import sys
 from datetime import datetime
 from importlib.metadata import entry_points
 
-from cardea.service.operations import ENTRY_POINT_GROUP, OperationContext, OperationRejected
+from cardea.service.operations import (
+    ENTRY_POINT_GROUP,
+    OperationContext,
+    OperationRejected,
+    http_status,
+)
 
 MAX_INPUT = 131072
 
@@ -44,6 +49,10 @@ def main(argv: list[str]) -> int:
         output = asyncio.run(handler(document["arguments"], context))
     except OperationRejected as rejected:
         print(json.dumps({"rejected": str(rejected)[:256]}))
+        return 0
+    except Exception as error:
+        # Describe the failure without its message, which may carry URLs or secrets.
+        print(json.dumps({"error": {"type": type(error).__name__, "status": http_status(error)}}))
         return 0
     print(json.dumps({"output": output}))
     return 0

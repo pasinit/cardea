@@ -5,6 +5,7 @@ single-operation task and by any runtime that dispatches several operations in o
 """
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -21,9 +22,77 @@ from cardea.kernel.models import (
     Task,
 )
 from cardea.kernel.store import KernelTransaction
+from cardea.service.confined import ExecutorBusy, WorkerFailed, WorkerNotStarted
 from cardea.service.database import Fault
 from cardea.service.models import now
-from cardea.service.operations import OperationContext, Registry
+from cardea.service.operations import (
+    OperationContext,
+    OperationRejected,
+    Registry,
+    http_status,
+)
+
+# Why a call failed, recorded in the receipt's failure details and told to the agent.
+REASONS = frozenset(
+    {
+        "timeout",  # no result within the operation's timeout
+        "queue_timeout",  # no worker slot within the profile's queue timeout; nothing ran
+        "worker_exit",  # the confined worker exited, was killed or stopped without a result
+        "worker_refused",  # the helper refused to start the worker; nothing ran
+        "upstream_http_error",  # the handler failed on an HTTP error from a remote service
+        "invalid_output",  # the result did not match the operation's output schema or size
+        "rejected",  # the operation itself refused the call (handler's own message)
+        "denied",  # authority changed before the result could be recorded
+        "error",  # any other handler exception (class name only)
+    }
+)
+MAX_SUMMARY = 200
+FAILURE_MESSAGE = "Operation did not produce a verified result"
+
+
+def bounded(text: str) -> str:
+    """One printable line of at most 200 characters."""
+    return re.sub(r"\s+", " ", re.sub(r"[^\x20-\x7e\s]", "", text)).strip()[:MAX_SUMMARY]
+
+
+@dataclass(frozen=True)
+class Failure:
+    """A definite failure: the receipt code plus a bounded, sanitized reason."""
+
+    code: str
+    reason: str
+    summary: str = ""
+    retryable: bool = False
+
+    def details(self) -> dict[str, JsonValue]:
+        return {"reason": self.reason, "summary": bounded(self.summary)}
+
+    def describe(self) -> str:
+        return f"{self.reason}: {bounded(self.summary)}" if self.summary else self.reason
+
+
+def classify(error: BaseException, timeout: float) -> Failure:
+    """Describe a handler failure without exception text that could carry secrets.
+
+    Only messages written for the agent (``OperationRejected``) are kept; for any other
+    exception the summary is its class name and, for HTTP errors, the status code.
+    """
+    if isinstance(error, ExecutorBusy):
+        return Failure("executor_busy", "queue_timeout", str(error), retryable=True)
+    if isinstance(error, WorkerNotStarted):
+        return Failure("operation_rejected", "worker_refused", str(error))
+    if isinstance(error, OperationRejected):
+        return Failure("operation_rejected", "rejected", str(error))
+    if isinstance(error, WorkerFailed):
+        return Failure(error.code, error.reason, error.summary)
+    if isinstance(error, TimeoutError):
+        return Failure("operation_failed", "timeout", f"no result within {timeout:.0f} s")
+    status = http_status(error)
+    if status is not None:
+        return Failure(
+            "operation_failed", "upstream_http_error", f"{type(error).__name__} (HTTP {status})"
+        )
+    return Failure("operation_failed", "error", type(error).__name__)
 
 
 @dataclass(frozen=True)
@@ -173,18 +242,30 @@ def settle(
     lease_id: str,
     operation_id: str,
     output: object,
-    error: str,
+    error: str | Failure,
     elapsed_ms: int,
-) -> tuple[str, bytes]:
-    """Record a definite outcome. Returns the error code (empty on success) and output."""
+) -> tuple[Failure | None, bytes]:
+    """Record a definite outcome. Returns the failure (None on success) and output."""
     receipt = tx.get_operation(task.task_id, operation_id)
     content = b""
-    if not error:
+    failure = (
+        error
+        if isinstance(error, Failure)
+        else Failure(error, "denied" if error.endswith("_denied") else "error", error)
+        if error
+        else None
+    )
+    if failure is None:
         checked = registry.check_output(receipt.request.name, output)
         if checked is None:
-            error = "verification_failed"
+            failure = Failure(
+                "verification_failed",
+                "invalid_output",
+                "result does not match the operation's output schema or size limit",
+            )
         else:
             content = checked
+    error = failure.code if failure else ""
     state = (
         OperationState.CANCELLED
         if error == "cancel_requested"
@@ -199,18 +280,29 @@ def settle(
         expected_revision=receipt.revision,
         lease_id=lease_id,
         at=now(),
-        failure=KernelFailure(code=error, message="Operation did not produce a verified result")
-        if state is OperationState.FAILED
+        failure=KernelFailure(
+            code=error,
+            message=FAILURE_MESSAGE,
+            retryable=failure.retryable,
+            details=failure.details(),
+        )
+        if state is OperationState.FAILED and failure is not None
         else None,
         result={"output": json.loads(content)} if state is OperationState.SUCCEEDED else None,
         usage=ResourceUsage(steps=1, tool_milliseconds=elapsed_ms, output_bytes=len(content)),
     )
     _scope(conn, task.task_id, operation_id, "succeeded" if not error else "failed")
-    return error, content
+    return failure, content
 
 
 def uncertain(
-    conn: sa.Connection, tx: KernelTransaction, task: Task, *, lease_id: str, operation_id: str
+    conn: sa.Connection,
+    tx: KernelTransaction,
+    task: Task,
+    *,
+    lease_id: str,
+    operation_id: str,
+    failure: Failure | None = None,
 ) -> None:
     """Record that an effect may have happened; it is never dispatched again."""
     receipt = tx.get_operation(task.task_id, operation_id)
@@ -223,15 +315,20 @@ def uncertain(
             lease_id=lease_id,
             at=now(),
             failure=KernelFailure(
-                code="operation_outcome_unknown", message="Interrupted operation; no replay"
+                code="operation_outcome_unknown",
+                message="Interrupted operation; no replay",
+                details=failure.details() if failure else {},
             ),
             usage=ResourceUsage(steps=1),
         )
     _scope(conn, task.task_id, operation_id, "unknown")
 
 
-def timeout_for(registry: Registry, name: str, lease_expires: datetime, margin: float) -> float:
+def timeout_for(
+    registry: Registry, name: str, lease_expires: datetime, margin: float, queue: float = 0.0
+) -> float:
+    """The operation's timeout plus any time it may wait for a worker slot, within the lease."""
     return min(
-        float(registry.get(name).cardea.timeout_seconds),
+        float(registry.get(name).cardea.timeout_seconds) + queue,
         (lease_expires - now() - timedelta(seconds=margin)).total_seconds(),
     )

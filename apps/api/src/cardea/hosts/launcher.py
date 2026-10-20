@@ -109,6 +109,10 @@ LIMITS = {
 # Optional: how many workers of one profile the kernel runs at once. JIT profiles (browsers)
 # default to one, so parallel tool calls cannot start several large processes together.
 CONCURRENCY = (1, 64)
+# Optional: how long a call may wait for a free slot of a limited profile before it fails
+# as executor_busy. It never counts against the operation's own timeout.
+QUEUE_TIMEOUT = (1, 3600)
+DEFAULT_QUEUE_TIMEOUT = 600
 # `public_web`: any public destination through the proxy, which must refuse non-public
 # addresses (private, loopback, link-local, CGNAT, multicast, reserved); there is no host list.
 NETWORK = {"none", "model_api_only", "allow_list", "public_web"}
@@ -134,7 +138,7 @@ def _proxy(value: object) -> tuple[str, int]:
 def validate_profile(entry: object) -> dict[str, Any]:
     if not isinstance(entry, dict):
         raise ValueError("invalid_profile")
-    optional = {"jit", "credential", "concurrency"}
+    optional = {"jit", "credential", "concurrency", "queue_timeout_seconds"}
     if not {*LIMITS, "network"} <= set(entry) <= {*LIMITS, "network", *optional}:
         raise ValueError("invalid_profile")
     for key, (low, high) in LIMITS.items():
@@ -145,6 +149,9 @@ def validate_profile(entry: object) -> dict[str, Any]:
         raise ValueError("invalid_profile")
     concurrency = entry.get("concurrency", 1)
     if type(concurrency) is not int or not CONCURRENCY[0] <= concurrency <= CONCURRENCY[1]:
+        raise ValueError("invalid_profile")
+    queue = entry.get("queue_timeout_seconds", DEFAULT_QUEUE_TIMEOUT)
+    if type(queue) is not int or not QUEUE_TIMEOUT[0] <= queue <= QUEUE_TIMEOUT[1]:
         raise ValueError("invalid_profile")
     credential = entry.get("credential")
     if credential is not None and (
@@ -252,6 +259,7 @@ def installed_profiles() -> dict[str, Any]:
                 "jit": entry.get("jit", False),
                 # None: no per-profile limit beyond the kernel's own queues.
                 "concurrency": entry.get("concurrency", 1 if entry.get("jit") else None),
+                "queue_timeout_seconds": entry.get("queue_timeout_seconds", DEFAULT_QUEUE_TIMEOUT),
                 "credential": entry.get("credential") is not None,
                 "sha256": digest(entry),
             }

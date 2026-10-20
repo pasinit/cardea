@@ -111,10 +111,14 @@ class OperationRuntime:
                     request, descriptor = self.guard(conn, task)
                     handler = self.kernel.handler(request.operation)
                     executor = self.kernel.executor_record(request.operation)
+                    queue = self.kernel.queue_allowance(request.operation)
                     at = now()
                     expires = min(
                         task.limits.deadline,
-                        at + timedelta(seconds=descriptor.cardea.timeout_seconds + LEASE_MARGIN),
+                        at
+                        + timedelta(
+                            seconds=descriptor.cardea.timeout_seconds + queue + LEASE_MARGIN
+                        ),
                     )
                     task = tx.change_task(
                         task_id,
@@ -148,7 +152,7 @@ class OperationRuntime:
                     # Raising rolls back the lease and intent: nothing was dispatched.
                     raise _Refused(error) from None
                 timeout = invocation.timeout_for(
-                    self.kernel.operations, request.operation, expires, SETTLE_MARGIN
+                    self.kernel.operations, request.operation, expires, SETTLE_MARGIN, queue
                 )
         self.kernel.fault("operation.intent_committed")
         if recovering:
@@ -165,19 +169,20 @@ class OperationRuntime:
             output = asyncio.run(
                 asyncio.wait_for(handler(dict(request.arguments), admitted.context), timeout)
             )
-        except OperationRejected:
-            return self.settle(task_id, None, "operation_rejected", started)
+        except OperationRejected as rejected:
+            # Nothing happened: the handler refused, the helper refused or no slot freed up.
+            return self.settle(task_id, None, invocation.classify(rejected, timeout), started)
         except WorkerFailed as failed:
             # The confined worker started: an effect may have happened (ADR-028).
             log.warning("confined worker failed: %s", failed.code, extra={"task_id": task_id})
             if effect:
                 return self.uncertain(task_id)
-            return self.settle(task_id, None, failed.code, started)
-        except Exception:
+            return self.settle(task_id, None, invocation.classify(failed, timeout), started)
+        except Exception as error:
             log.exception("installed operation failed", extra={"task_id": task_id})
             if effect:
                 return self.uncertain(task_id)
-            return self.settle(task_id, None, "operation_failed", started)
+            return self.settle(task_id, None, invocation.classify(error, timeout), started)
         self.kernel.fault("operation.before_settle")
         return self.settle(task_id, output, "", started)
 
@@ -203,7 +208,9 @@ class OperationRuntime:
                 )
             time.sleep(0.1)
 
-    def settle(self, task_id: str, output: object, error: str, started: float) -> str:
+    def settle(
+        self, task_id: str, output: object, error: str | invocation.Failure, started: float
+    ) -> str:
         elapsed = max(0, int((time.monotonic() - started) * 1000))
         with self.kernel.database.engine.begin() as conn, borrow(conn) as tx:
             task = tx.get_task(task_id)
@@ -217,8 +224,8 @@ class OperationRuntime:
             try:
                 self.guard(conn, task)
             except Fault as denied:
-                error = error or denied.code
-            error, content = invocation.settle(
+                error = error or invocation.Failure(denied.code, "denied", denied.message)
+            failure, content = invocation.settle(
                 conn,
                 tx,
                 self.kernel.operations,
@@ -229,15 +236,22 @@ class OperationRuntime:
                 error=error,
                 elapsed_ms=elapsed,
             )
-            if error:
-                target = TaskState.CANCELLED if error == "cancel_requested" else TaskState.FAILED
+            if failure is not None:
+                target = (
+                    TaskState.CANCELLED if failure.code == "cancel_requested" else TaskState.FAILED
+                )
                 tx.change_task(
                     task_id,
                     target,
                     expected_revision=task.revision,
                     lease_id=task.lease.lease_id,
                     at=now(),
-                    failure=KernelFailure(code=error, message="Operation task could not complete")
+                    failure=KernelFailure(
+                        code=failure.code,
+                        message="Operation task could not complete",
+                        retryable=failure.retryable,
+                        details=failure.details(),
+                    )
                     if target is TaskState.FAILED
                     else None,
                 )

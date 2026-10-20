@@ -410,6 +410,13 @@ class Kernel:
             )
         return self.workers.require(executor.profile, executor.worker)
 
+    def queue_allowance(self, name: str) -> float:
+        """Seconds an operation may wait for a confined-worker slot before it runs (ADR-028)."""
+        executor = self.operations.get(name).cardea.executor
+        if executor is None or self.workers is None:
+            return 0.0
+        return self.workers.queue_allowance(executor.profile)
+
     def handler(self, name: str) -> Handler:
         descriptor = self.operations.get(name)
         executor = descriptor.cardea.executor

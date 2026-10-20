@@ -658,7 +658,7 @@ def test_busy_profile_refuses_before_starting(monkeypatch: pytest.MonkeyPatch) -
     slot = workers._slot("browser")
     assert slot is not None and slot.acquire(blocking=False)
     (busy,) = asyncio.run(fetch_pages(workers, 1, time.time() + 0.05))
-    assert isinstance(busy, OperationRejected) and "worker_busy" in str(busy)
+    assert isinstance(busy, confined.ExecutorBusy) and "nothing ran" in str(busy)
     assert host.starts == [] and host.stops == []
     slot.release()
     assert asyncio.run(fetch_pages(workers, 1, time.time() + 10)) == [{"text": "page text"}]
@@ -682,3 +682,144 @@ def test_waiting_call_stops_when_its_task_is_cancelled(monkeypatch: pytest.Monke
         asyncio.run(waiting)
     assert host.starts == []
     slot.release()
+
+
+# Queue wait versus execution time, and failure reasons
+
+
+class Timed:
+    """Makes each job of a WorkerHost run for `seconds` of real time; tracks the peak."""
+
+    def __init__(self, host: WorkerHost, seconds: float, queue_timeout: int = 600) -> None:
+        self.host, self.seconds = host, seconds
+        self.started: dict[str, float] = {}
+        self.active = self.peak = 0
+        host.installed["profiles"]["browser"] |= {
+            "concurrency": 1,
+            "queue_timeout_seconds": queue_timeout,
+        }
+        start, stop = host.start_confined, host.stop
+
+        def start_confined(
+            job: str, content: bytes, deadline: float, profile: str, worker: str
+        ) -> None:
+            start(job, content, deadline, profile, worker)
+            self.started[job] = time.monotonic()
+            self.active += 1
+            self.peak = max(self.peak, self.active)
+
+        def status(job: str) -> dict[str, Any]:
+            if time.monotonic() - self.started[job] < self.seconds:
+                return {"state": "running"}
+            return host.outcome
+
+        def stopped(job: str) -> dict[str, Any]:
+            self.active -= 1
+            return stop(job)
+
+        host.start_confined = start_confined  # type: ignore[method-assign]
+        host.status = status  # type: ignore[method-assign]
+        host.stop = stopped  # type: ignore[method-assign]
+
+
+def test_queue_wait_does_not_count_against_the_operation_timeout(
+    kernel: Kernel, host: WorkerHost
+) -> None:
+    # Four parallel calls on a one-slot profile: each runs 0.4 s within its 1 s timeout,
+    # but the last one waits about 1.2 s for its slot first.
+    timed = Timed(host, 0.4)
+    session = FakeSession()
+    kernel.session = session
+
+    async def burst(client: ClientSession, request: SessionRequest) -> SessionResult:
+        results = await asyncio.gather(
+            *(call(client, "pages-fetch", url=f"https://example.org/{i}") for i in range(4))
+        )
+        assert [r.is_error for r in results] == [False] * 4, [r.content for r in results]
+        return SessionResult(text="Read four pages.", is_error=False)
+
+    session.scripts = [burst]
+    task_id = kernel.submit(kernel.auth.validate("supervisor"), run_request()).task.task_id
+    begun = time.monotonic()
+    assert AgentRunRuntime(kernel).execute(task_id) == "succeeded"
+    assert time.monotonic() - begun > 1.5  # the burst really outlasted one call's timeout
+    assert timed.peak == 1 and len(host.starts) == 4
+
+
+def test_queue_expiry_is_a_distinct_retryable_failure(kernel: Kernel, host: WorkerHost) -> None:
+    Timed(host, 0.1, queue_timeout=1)
+    session = FakeSession()
+    kernel.session = session
+    assert kernel.workers is not None
+    slot = kernel.workers._slot("browser")
+    assert slot is not None and slot.acquire(blocking=False)
+
+    async def busy(client: ClientSession, request: SessionRequest) -> SessionResult:
+        result = await call(client, "pages-fetch", url="https://example.org")
+        text = str(result.content)
+        assert result.is_error and "executor_busy" in text and "queue_timeout" in text
+        return SessionResult(text="The browser was busy.", is_error=False)
+
+    session.scripts = [busy]
+    task_id = kernel.submit(kernel.auth.validate("supervisor"), run_request()).task.task_id
+    try:
+        assert AgentRunRuntime(kernel).execute(task_id) == "succeeded"
+    finally:
+        slot.release()
+    failure = receipt(kernel, task_id, "call-0001").failure
+    assert failure.code == "executor_busy" and failure.retryable is True
+    assert failure.details["reason"] == "queue_timeout"
+    assert host.starts == []
+
+
+@pytest.mark.parametrize(
+    ("status", "code", "reason", "summary"),
+    [
+        (finished(None, "exit-code", "1"), "worker_failed", "worker_exit", "exit status 1"),
+        (finished(None, "oom-kill", "9"), "worker_memory_limit", "worker_exit", "oom-kill"),
+        (finished(None, "timeout", "0"), "worker_timeout", "timeout", "profile limit"),
+        (
+            {**finished(None), "output": "bm90IGpzb24="},
+            "worker_output_invalid",
+            "invalid_output",
+            "",
+        ),
+        (
+            finished({"error": {"type": "HTTPStatusError", "status": 502}}),
+            "worker_error",
+            "upstream_http_error",
+            "HTTPStatusError (HTTP 502)",
+        ),
+        (
+            finished({"error": {"type": "KeyError", "status": None}}),
+            "worker_error",
+            "error",
+            "KeyError",
+        ),
+        (
+            finished({"error": {"type": "Bad\nType token=abc", "status": 99}}),
+            "worker_error",
+            "error",
+            "handler error",
+        ),
+    ],
+)
+def test_worker_results_carry_a_bounded_reason(
+    status: dict[str, Any], code: str, reason: str, summary: str
+) -> None:
+    with pytest.raises(confined.WorkerFailed) as failed:
+        confined._result(status)
+    assert (failed.value.code, failed.value.reason) == (code, reason)
+    assert summary in failed.value.summary and len(failed.value.summary) <= 200
+
+
+def test_failed_read_receipt_records_the_reason(kernel: Kernel, host: WorkerHost) -> None:
+    host.outcome = finished({"error": {"type": "HTTPStatusError", "status": 503}})
+    task_id = submit(kernel)
+    assert OperationRuntime(kernel).execute(task_id) == "failed"
+    failure = receipt(kernel, task_id).failure
+    assert failure.code == "worker_error" and failure.retryable is False
+    assert failure.details == {
+        "reason": "upstream_http_error",
+        "summary": "HTTPStatusError (HTTP 503)",
+    }

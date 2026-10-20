@@ -36,6 +36,16 @@ class OperationRejected(Exception):
     """Raised by a handler that is certain no external effect happened."""
 
 
+def http_status(error: BaseException) -> int | None:
+    """The HTTP status an exception carries (httpx, requests, urllib style), if any."""
+    for candidate in (getattr(error, "response", None), error):
+        for name in ("status_code", "status", "code"):
+            value = getattr(candidate, name, None)
+            if type(value) is int and 100 <= value <= 599:
+                return value
+    return None
+
+
 @dataclass(frozen=True)
 class OperationContext:
     task_id: str

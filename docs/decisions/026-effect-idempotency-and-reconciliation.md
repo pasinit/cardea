@@ -46,6 +46,27 @@ Checked 2026-10-15.
      - a service loop every 30 s for operations whose descriptor names a reconciler.
 5. **The task stays terminal.** A task failed with `reconciliation_required` remains failed. Reconciliation settles the effect and its scope, so the next invocation in that scope either dedupes or may proceed.
 
+
+### Failure reasons (added 2026-10-20)
+
+A failed call's receipt, the run view (`calls[].failure_details`) and the agent's error text explain *why* it failed. Each failure carries `details = {"reason", "summary"}`.
+
+`reason` is one of:
+
+| Reason | Meaning |
+|---|---|
+| `timeout` | no result within the operation's timeout |
+| `queue_timeout` | no confined-worker slot within the profile's queue timeout (code `executor_busy`, retryable); nothing ran |
+| `worker_exit` | the confined worker exited, was killed at a limit or was stopped without a result |
+| `worker_refused` | the helper refused to start the worker, or it was stopped before starting; nothing ran |
+| `upstream_http_error` | the handler failed on an HTTP error from a remote service |
+| `invalid_output` | the result did not match the output schema or size limit |
+| `rejected` | the operation refused the call itself (`OperationRejected`) |
+| `denied` | authority changed before the result was recorded |
+| `error` | any other handler exception |
+
+`summary` is one printable line of at most 200 characters. It holds the message only when an `OperationRejected` was written for the agent. For any other exception it holds only the class name, plus the HTTP status for HTTP errors; never the exception text, stderr or a traceback, which may contain URLs, tokens or personal data. For confined workers it holds the systemd result and exit status. Uncertain effects record the same details next to `operation_outcome_unknown`, and failed context calls record them too (their prompt block carries the `reason` attribute; ADR-031). Codes are unchanged except for the new `executor_busy`; `message` keeps its fixed text.
+
 ## Integration
 
 - **Authority.** Unchanged ceiling checks at admission, dispatch and settlement. Reconciliation needs live authority over the task and the operation, and it performs no effect.

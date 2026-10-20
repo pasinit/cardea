@@ -248,6 +248,9 @@ def test_requests_cannot_carry_command_lines_or_limits(
         ("profiles", "browser", {"credential": "/var/lib/cardea/secret"}),
         ("profiles", "browser", {"unknown": 1}),
         ("profiles", "browser", {"concurrency": 0}),
+        ("profiles", "browser", {"queue_timeout_seconds": 0}),
+        ("profiles", "browser", {"queue_timeout_seconds": 3601}),
+        ("profiles", "browser", {"queue_timeout_seconds": 1.5}),
         (
             "profiles",
             "browser",
@@ -328,6 +331,18 @@ def test_profiles_report_concurrency_with_one_by_default_for_jit(
     assert profiles["browser"]["concurrency"] == 1  # jit, unset
     assert profiles["session"]["concurrency"] == 2  # jit, set by the host owner
     assert profiles["small"]["concurrency"] is None  # no jit, unset
+    assert profiles["browser"]["queue_timeout_seconds"] == 600  # default
+
+
+def test_profiles_report_a_configured_queue_timeout(
+    helper: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config: dict[str, Any] = json.loads(json.dumps(CONFIG))
+    config["profiles"]["browser"]["queue_timeout_seconds"] = 900
+    launcher.validate_profile(config["profiles"]["browser"])
+    monkeypatch.setattr(launcher, "worker_config", lambda: config)
+    reported = launcher.handle({"action": "profiles"})["profiles"]["browser"]
+    assert reported["queue_timeout_seconds"] == 900
 
 
 @pytest.mark.parametrize(
@@ -462,6 +477,26 @@ def test_operation_worker_speaks_json_on_stdin_and_stdout(
         raise OperationRejected("blocked by robots.txt")
 
     assert run_worker(monkeypatch, capsys, refuse) == {"rejected": "blocked by robots.txt"}
+
+    class HTTPStatusError(Exception):
+        def __init__(self) -> None:
+            super().__init__("GET https://api.invalid/?token=s3cret: 404")
+            self.response = type("Response", (), {"status_code": 404})()
+
+    async def missing(arguments: dict[str, Any], context: OperationContext) -> dict[str, Any]:
+        raise HTTPStatusError()
+
+    # Class name and status only: the message may carry URLs or secrets.
+    assert run_worker(monkeypatch, capsys, missing) == {
+        "error": {"type": "HTTPStatusError", "status": 404}
+    }
+
+    async def broken(arguments: dict[str, Any], context: OperationContext) -> dict[str, Any]:
+        raise KeyError("s3cret")
+
+    assert run_worker(monkeypatch, capsys, broken) == {
+        "error": {"type": "KeyError", "status": None}
+    }
 
 
 def test_debian_probe_configuration_is_a_valid_host_owner_file() -> None:
