@@ -4,9 +4,10 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
 from typing import Annotated, Literal, Self
+from zoneinfo import ZoneInfo
 
 import rfc8785
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from cardea.kernel.models import Identifier, ObjectVersion, OperationName, Task, Timestamp
 from cardea.runtime.incidents import IncidentBatch
@@ -178,6 +179,8 @@ class OperationTaskRequest(TaskRequest):
     # Shared by every invocation that may repeat the same effect, e.g. one scheduled slot.
     # Defaults to the task itself.
     idempotency_context: Identifier | None = None
+    # The scheduled slot this task serves, in its trigger's timezone; set by the trigger.
+    slot_time: AwareDatetime | None = None
     payload: Annotated[dict[str, JsonValue], Field(max_length=0)] = Field(default_factory=dict)
     grants: Annotated[tuple[Grant, ...], Field(min_length=1, max_length=16)]
     parent_task_id: None = None
@@ -225,6 +228,8 @@ class AgentRunRequest(TaskRequest):
     timeout_seconds: Annotated[int, Field(strict=True, ge=60, le=3600)] = 1800
     # Effects in this run share one idempotency context, e.g. a scheduled slot.
     idempotency_context: Identifier | None = None
+    # The scheduled slot this run serves, in its trigger's timezone; set by the trigger.
+    slot_time: AwareDatetime | None = None
     max_attempts: Annotated[int, Field(strict=True, ge=1, le=3)] = 2
     attempt_timeout_seconds: Annotated[int, Field(strict=True, ge=30, le=3600)] = 900
     max_turns: Annotated[int, Field(strict=True, ge=1, le=200)] = 40
@@ -437,22 +442,28 @@ class TriggerSpec(Record):
         validate_schedule(self.schedule, self.timezone)
         if (self.misfire == "grace") != (self.grace_seconds is not None):
             raise ValueError("grace_seconds is required for, and only for, the grace policy")
-        if {"request_id", "idempotency_context"} & set(self.template):
+        # A null slot_time is accepted so a dumped request model can serve as a template.
+        if {"request_id", "idempotency_context"} & set(self.template) or self.template.get(
+            "slot_time"
+        ):
             raise ValueError("The trigger assigns request and idempotency IDs per slot")
         if self.template.get("parent_task_id") is not None:
             raise ValueError("Triggers admit root tasks only")
         self.request("validation.20000101T000000Z")
         return self
 
-    def request(self, request_id: str) -> TaskRequest:
+    def request(self, request_id: str, slot_time: datetime | None = None) -> TaskRequest:
         """The slot's request; `request_id` is the slot identity `<trigger_id>.<slot>`.
 
         Operation effects in one slot share that identity as their idempotency
         context (ADR-026), so a retried slot cannot repeat a committed effect.
+        `slot_time` is the scheduled instant, recorded on the wall clock of `timezone`.
         """
-        slot = {"request_id": request_id}
+        slot: dict[str, JsonValue] = {"request_id": request_id}
         if self.template_kind in {"operation", "agent-run"}:
             slot["idempotency_context"] = request_id
+            if slot_time is not None:
+                slot["slot_time"] = slot_time.astimezone(ZoneInfo(self.timezone)).isoformat()
         return TEMPLATES[self.template_kind].model_validate({**self.template, **slot})
 
     @property

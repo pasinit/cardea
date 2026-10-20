@@ -44,17 +44,31 @@ def admit(
     name: str,
     namespace: str,
     arguments: dict[str, JsonValue],
-    scope_context: str,
+    idempotency_context: str | None,
     deadline: datetime,
     executor: dict[str, JsonValue] | None = None,
+    agent_id: str | None = None,
+    slot_time: str | None = None,
 ) -> Admitted:
     """Commit the intent (or a deduplicated receipt) before any handler can run.
 
-    ``executor`` pins the installed worker profile of a confined operation (ADR-028).
+    Effect scopes use ``idempotency_context`` when set, else the task, so another task
+    with the same context (e.g. a second task for one scheduled slot) cannot repeat an
+    effect. ``executor`` pins the installed worker profile of a confined operation
+    (ADR-028). ``agent_id`` and ``slot_time`` describe the caller to the handler.
     """
     descriptor = registry.get(name)
     registry.validate_arguments(name, arguments)
-    key = registry.scope_key(name, namespace, scope_context, arguments)
+    key = registry.scope_key(name, namespace, idempotency_context or task.task_id, arguments)
+    provenance: dict[str, JsonValue] = {
+        k: v
+        for k, v in (
+            ("agent_id", agent_id),
+            ("idempotency_context", idempotency_context),
+            ("slot_time", slot_time),
+        )
+        if v is not None
+    }
     prior: dict[str, JsonValue] | None = None
     if key is not None:
         row = (
@@ -89,6 +103,8 @@ def admit(
                     "SELECT value FROM service_meta WHERE name='policy_revision'"
                 ).scalar_one(),
                 **({"executor": executor} if executor is not None else {}),
+                # Recorded so a reconciler sees the context the handler saw.
+                **({"context": provenance} if provenance else {}),
             },
             deadline=deadline,
         ),
@@ -115,6 +131,9 @@ def admit(
         deadline=deadline,
         effect_key=key or receipt.receipt_id,
         lease_id=lease_id,
+        agent_id=agent_id,
+        idempotency_context=idempotency_context,
+        slot_time=slot_time,
     )
     if prior is not None:
         tx.change_operation(

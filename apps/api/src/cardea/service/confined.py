@@ -179,6 +179,9 @@ def confined_handler(
                 "receipt_id": context.receipt_id,
                 "deadline": context.deadline.isoformat(),
                 "effect_key": context.effect_key,
+                "agent_id": context.agent_id,
+                "idempotency_context": context.idempotency_context,
+                "slot_time": context.slot_time,
             },
         }
         return await workers.run(

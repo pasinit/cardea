@@ -215,7 +215,7 @@ class Scheduler:
                 self._record_missed(conn, trigger_id, decision, at)
                 outcome = "missed"
                 if decision.admit:
-                    request = spec.request(f"{trigger_id}.{slot_key(decision.slot)}")
+                    request = spec.request(f"{trigger_id}.{slot_key(decision.slot)}", decision.slot)
                     view = self.kernel.admit_scheduled(
                         conn,
                         tx,

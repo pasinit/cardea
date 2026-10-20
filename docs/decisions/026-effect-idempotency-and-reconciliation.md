@@ -31,6 +31,9 @@ Checked 2026-10-15.
    - **`running` or `unknown`:** refused with `effect_in_doubt`, because a second dispatch could repeat the effect.
    - **`failed` or absent:** the invocation claims the scope.
 3. **Effect key.** The handler context carries `effect_key`: the scope key when declared, else the receipt ID. Handlers should derive provider idempotency keys and mail `Message-ID`s from it, so that a retry after "not applied" reuses the same identity.
+   - The context also describes the caller (added 2026-10-20). `agent_id` is the agent principal of the agent run that made the call, or null outside agent runs. `idempotency_context` is the request's idempotency context; scheduled tasks get `<trigger_id>.<slot>`. `slot_time` is the scheduled slot as ISO 8601 on the trigger's wall clock, with its UTC offset, or null outside triggers.
+   - Scopes are keyed by `idempotency_context` when it is set and by the task otherwise. Another task for the same slot therefore deduplicates against the first task's effect.
+   - The receipt records these fields under `arguments.context`, so a reconciler receives the same context the handler saw.
 4. **Reconciliation.** An effect operation may declare a `reconciler` entry point, which returns `Reconciliation(applied, output)` from observed destination state, for example a provider's events API looked up by `Message-ID`.
    - Cardea stores the observation as an evidence object.
    - It then calls the existing `reconcile_operation`:

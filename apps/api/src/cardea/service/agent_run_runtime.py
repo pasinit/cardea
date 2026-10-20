@@ -243,6 +243,18 @@ class AgentRunRuntime:
             if receipt.request.operation_id.startswith("call-")
         ]
 
+    @staticmethod
+    def _system_prompt(request: AgentRunRequest) -> str:
+        # Sessions have no clock of their own; scheduled work needs the date.
+        prompt = f"{SYSTEM_PROMPT}\nThe current time is {now().isoformat()} (UTC)."
+        if request.slot_time is not None:
+            local = request.slot_time
+            prompt += (
+                f"\nThis run serves the scheduled time {local:%A %Y-%m-%d %H:%M} local time "
+                f"(UTC{local:%z}, {local.isoformat()})."
+            )
+        return prompt
+
     def _prompt(
         self, request: AgentRunRequest, attempt: int, journal: list[OperationReceipt]
     ) -> str:
@@ -300,8 +312,7 @@ class AgentRunRuntime:
         )
         with ToolEndpoint(tools, call) as endpoint:
             session_request = SessionRequest(
-                # Sessions have no clock of their own; scheduled work needs the date.
-                system_prompt=f"{SYSTEM_PROMPT}\nThe current time is {now().isoformat()} (UTC).",
+                system_prompt=self._system_prompt(request),
                 prompt=self._prompt(request, attempt, journal),
                 mcp_url=endpoint.url,
                 mcp_token=endpoint.token,
@@ -391,9 +402,11 @@ class AgentRunRuntime:
                     name=name,
                     namespace=request.namespace,
                     arguments=arguments,
-                    scope_context=request.idempotency_context or task_id,
+                    idempotency_context=request.idempotency_context,
                     deadline=task.limits.deadline,
                     executor=executor,
+                    agent_id=task.agent_id,
+                    slot_time=request.slot_time.isoformat() if request.slot_time else None,
                 )
                 operation_id = f"call-{count + 1:04d}"
                 timeout = invocation.timeout_for(

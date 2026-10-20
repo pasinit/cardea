@@ -139,9 +139,10 @@ class OperationRuntime:
                         name=request.operation,
                         namespace=request.namespace,
                         arguments=request.arguments,
-                        scope_context=request.idempotency_context or task_id,
+                        idempotency_context=request.idempotency_context,
                         deadline=task.limits.deadline,
                         executor=executor,
+                        slot_time=request.slot_time.isoformat() if request.slot_time else None,
                     )
                 except Fault as error:
                     # Raising rolls back the lease and intent: nothing was dispatched.
@@ -330,12 +331,15 @@ class OperationRuntime:
             arguments = recorded["arguments"]
             assert isinstance(arguments, dict)
             scope_key = recorded.get("scope_key")
+            caller = recorded.get("context")
+            provenance = caller if isinstance(caller, dict) else {}
             context = OperationContext(
                 task_id=task_id,
                 namespace=receipt.request.resource.namespace,
                 receipt_id=receipt.receipt_id,
                 deadline=receipt.request.deadline,
                 effect_key=str(scope_key) if scope_key else receipt.receipt_id,
+                **{k: str(v) for k, v in provenance.items() if v is not None},
             )
             timeout = float(self.kernel.operations.get(name).cardea.timeout_seconds)
         observed = asyncio.run(asyncio.wait_for(reconciler(dict(arguments), context), timeout))
