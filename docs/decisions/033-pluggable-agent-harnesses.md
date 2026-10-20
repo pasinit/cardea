@@ -1,7 +1,7 @@
 # ADR-033: Pluggable Agent Harnesses
 
 - **Date / owner / milestones:** 2026-10-20; runtime maintainers. Supersedes the "session adapter" parts of [ADR-027](027-agent-runs.md) (decision items 1 and 6): the Claude Agent SDK session is now one harness of several. The rest of ADR-027 (attempts, tool endpoint, journal, completion), [ADR-028](028-configurable-worker-profiles.md) and [ADR-031](031-agent-run-context-operations.md) are unchanged.
-- **Status:** selected and implemented for portable execution: the contract (#17), the registry and selection (#19), and OpenCode. Nothing here has run against a live provider: tests use a fake OpenAI-compatible model server, and the OpenCode tests run the real pinned binary against it. Confined OpenCode is not implemented yet (see Limits).
+- **Status:** selected and implemented for portable execution: the contract (#17), the registry and selection (#19), and OpenCode. Nothing here has run against a live provider: tests use a fake OpenAI-compatible model server, and the OpenCode tests run the real pinned binary against it. Both harness kinds can run confined under ADR-028 profiles (decision item 7); like all of ADR-028, that is verified portably and not yet on Debian.
 - **Requirement:**
   - A *harness* is the program that runs the model loop of an agent-run attempt and calls tools. The host owner installs one or more harnesses, and an agent run selects one, together with a model.
   - Provider choice belongs to the harness. Running GLM via OpenRouter is `harness=<an OpenCode entry whose provider is OpenRouter>`, `model=<the OpenRouter model id>`. The kernel has no provider-specific logic.
@@ -109,9 +109,21 @@ Its gaps are a soft step cap, an estimated cost, and a silent continue when MCP 
       - `snapshot: false`, `--title` (so there is no extra title model call) and `--pure`.
       - `OPENCODE_DISABLE_{AUTOUPDATE, MODELS_FETCH, SHARE, PROJECT_CONFIG, CLAUDE_CODE, DEFAULT_PLUGINS, LSP_DOWNLOAD}=1`.
       - The environment is built from scratch, with no inherited variables beyond `PATH`, locale and certificates, so there is no OTEL exporter and no stray secrets.
-      - Under a confined profile (ADR-028, `model_api_only`), the only network would be the model API via the proxy plus the loopback endpoint. **Not implemented yet:** the registry refuses `confined` for `opencode` entries, so OpenCode runs unconfined, as the Claude session first did (ADR-027 Limits).
+      - Under a confined profile (ADR-028, `model_api_only`), the only network is the model API through the profile's proxy plus the loopback endpoint (item 7).
    5. **Pinning.** The binary's SHA-256 is in the registry and checked at start. A contract test parses a recorded `run --format json` transcript of the pinned version: `step_start`, `tool_use`, `text`, `step_finish` with `tokens.{input, output, reasoning, cache.{read, write}}` and `cost`, and `error`. An upgrade that renames fields fails it loudly. The end-to-end test runs the real pinned binary.
    6. **Credentials.** The provider key is read from the registry's credential file and reaches the process only through its environment, referenced from the configuration as `{env:CARDEA_PROVIDER_KEY}`. It is never written to a file and never logged. The MCP bearer token is handled the same way.
+
+7. **Confined harnesses** (both kinds). A registry entry may set `confined: {profile, worker}` instead of `credential`, for `claude-agent-sdk` and for `opencode`. The session runs in an ADR-028 worker through the root helper: systemd-run plus bubblewrap, the profile's memory, CPU, task and wall limits, and `model_api_only` networking, which reaches only the profile's proxy (hostname allow-list = the provider's host) and the loopback tool endpoint.
+   - **Which harness** runs is worker configuration, never the caller's. The worker runs `cardea.hosts.session_worker`, and its environment sets:
+     - `CARDEA_HARNESS_KIND`, either `claude-agent-sdk` (the default) or `opencode`;
+     - for the Claude Agent SDK, `CARDEA_CREDENTIAL_KIND`;
+     - for OpenCode, `CARDEA_OPENCODE_BINARY`, a path under a read-only bind.
+   - **What crosses the helper boundary** is the request plus the entry's non-secret settings: kind, provider base URL and headers, prices, default model, and the binary's pinned SHA-256.
+     - The worker refuses `harness_kind_mismatch` if its kind differs, and `harness_pin_mismatch` if its binary's hash differs.
+     - The credential stays in the profile (systemd `LoadCredential=`) and reaches OpenCode only through its environment.
+   - **The OpenCode adapter** passes the profile's proxy variables through. Model calls therefore go via the proxy, and `NO_PROXY` keeps the tool endpoint direct. Its preflight never uses a proxy.
+   - **Unchanged from unconfined runs:** turn, cost and tool-listing enforcement (item 6) work the same way. The runtime's tool-listing check applies to a confined OpenCode entry too.
+   - **Kit:** the small-host kit (`deploy/small-host`) has a two-harness registry (Claude and OpenRouter via OpenCode, both confined), the `openrouter` profile, worker and proxy port, and install checks.
 
 ## Integration
 
@@ -144,10 +156,20 @@ Its gaps are a soft step cap, an estimated cost, and a silent continue when MCP 
   - the runtime failing a tool-listing harness that never listed its tools.
 
   CI fetches the binary and sets `CARDEA_REQUIRE_OPENCODE=1`, so the end-to-end tests cannot skip there.
+- **Confined harnesses:** `tests/service/test_confined_harnesses.py` runs the real session worker as a separate process with only a sandbox's environment, in place of the Debian helper.
+  - A kernel agent run on a confined OpenCode entry calls two installed operations, both receipted.
+  - Every model call goes through a forward proxy to the provider's host, while the tool endpoint is reached directly.
+  - The provider key reaches the model only as the bearer header and never appears in the helper payload.
+  - The worker refuses a binary that does not match the pin, a kind mismatch, and a Claude worker without a credential.
+
+  `tests/service/test_deploy_examples.py` checks that every kit harness runs under a worker that lists its profile. The profile reaches only the provider's host and holds the credential, and the worker's kind matches the entry's.
+
+  **Not run:** the same flow under bubblewrap on Debian (ADR-028's unverified list applies).
 
 ## Limits
 
-- OpenCode runs unconfined. Its isolation is a private directory, a clean environment and denied built-ins; network egress is not limited. A confined OpenCode worker, a session worker that runs the adapter inside an ADR-028 profile, is the next step.
+- An unconfined harness (an entry with `credential`, not `confined`) has a private directory, a clean environment and denied built-ins, but no egress limit. Production hosts should confine every harness (item 7).
+- Confinement is verified portably only. Bun honouring `HTTPS_PROXY`/`NO_PROXY` is tested with a forward proxy, but not inside bubblewrap on Debian. The memory and task sizing of an OpenCode worker is unmeasured.
 - Metered cost uses the registry price and charges cache tokens at the input price, so it is conservative. It is not the provider's bill.
 - A kill at `max_turns` or `max_cost_usd` is a failed attempt and is retried while attempts remain, as any failed session is (ADR-027).
 

@@ -312,8 +312,20 @@ class ConfinedAgentSession:
     and sees neither the Cardea store nor the service's configuration.
     """
 
-    def __init__(self, workers: Workers, profile: str, worker: str, model: str | None) -> None:
+    def __init__(
+        self,
+        workers: Workers,
+        profile: str,
+        worker: str,
+        model: str | None,
+        *,
+        settings: dict[str, Any] | None = None,
+        requires_tool_listing: bool = False,
+    ) -> None:
         self.workers, self.profile, self.worker, self.model = workers, profile, worker, model
+        # Non-secret harness settings from the registry (ADR-033), checked by the worker.
+        self.settings = settings
+        self.requires_tool_listing = requires_tool_listing
 
     def check(self) -> None:
         self.workers.require(self.profile, self.worker)
@@ -335,6 +347,7 @@ class ConfinedAgentSession:
                     "request": request.model_dump(
                         mode="json", exclude={"model"}, exclude_none=True
                     ),
+                    **({"harness": self.settings} if self.settings is not None else {}),
                 },
                 profile=self.profile,
                 worker=self.worker,

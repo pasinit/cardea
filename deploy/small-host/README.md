@@ -141,6 +141,26 @@ curl -s -o /dev/null -w '%{http_connect}\n' -x $W https://example.com:8443/     
 
 Check: `sudo -u cardea-kernel sudo -n /usr/libexec/cardea-host <<< '{"action":"probe"}'` prints the profile and source hash. An error means the kernel version, package versions or helper bytes do not match.
 
+7. Optional: several confined harnesses ([ADR-033](../../docs/decisions/033-pluggable-agent-harnesses.md)). Use this to run agent runs on Claude and on another provider, such as OpenRouter through OpenCode, each in its own profile. It replaces step 6's `agent_session`.
+   1. Install the pinned OpenCode binary under the workers' read-only bind. The script checks the archive's SHA-256 and prints the binary's path and SHA-256:
+
+```sh
+python3 /opt/cardea/packaging/fetch_opencode.py /opt/cardea/opencode
+```
+
+   2. Put the printed SHA-256 into `cardea/cardea-host-harnesses.json`; the example holds the linux-x64 value. Install it as `/etc/cardea-host-harnesses.json` (root, `0644`).
+      - Each entry names its `confined` profile and worker.
+      - The `openrouter` profile reaches only `openrouter.ai` through its own proxy port, `127.0.10.4`.
+      - Its credential is `/etc/cardea/credentials/openrouter` (`0600 root`).
+      - The `opencode` worker runs `cardea.hosts.session_worker` with `CARDEA_HARNESS_KIND=opencode`, and refuses to run if its binary does not match the registry's pin.
+   3. Switch `/etc/cardea/config.json` to `cardea/config.harnesses.json`, provision `harness:claude` and `harness:openrouter` for the platform and the supervisors that may use them, and restart.
+
+   Checks:
+   - `ss -ltnp | grep squid` also lists `127.0.10.4:3128`.
+   - `curl -s -o /dev/null -w '%{http_connect}\n' -x http://127.0.10.4:3128 https://openrouter.ai/` prints 200, and the same request for `https://api.anthropic.com/` prints 403.
+   - `sha256sum /opt/cardea/opencode/opencode` matches the registry.
+   - The kernel starts. On a mismatched pin it refuses with `harness_pin_mismatch`, and on a missing profile or worker with `worker_profile_not_installed` at the first admission.
+
 ## 5. Telos host
 
 1. Run a SPIRE agent with `spire/agent-telos.conf` (replace `CARDEA_PRIVATE_IP`), using the second join token. Its socket must be at `/run/spire/agent.sock`.

@@ -123,8 +123,6 @@ class HarnessEntry(Record):
                 raise ValueError(f"Harness {self.id}: {self.kind} needs a provider base_url")
             if self.package.binary is None:
                 raise ValueError(f"Harness {self.id}: {self.kind} runs a binary pinned by hash")
-            if self.confined is not None:
-                raise ValueError(f"Harness {self.id}: {self.kind} does not run confined yet")
             if not self.models:
                 raise ValueError(f"Harness {self.id}: {self.kind} needs at least one model")
             unpriced = [m for m, e in self.models.items() if e.price is None]

@@ -1,0 +1,48 @@
+{
+  "default": "claude",
+  "concurrent_sessions": 1,
+  "harnesses": [
+    {
+      "id": "claude",
+      "kind": "claude-agent-sdk",
+      "package": {
+        "name": "claude-agent-sdk",
+        "version": "0.2.163"
+      },
+      "confined": {
+        "profile": "session",
+        "worker": "agent"
+      },
+      "default_model": "claude-sonnet-5-5",
+      "models": {
+        "claude-sonnet-5-5": {}
+      }
+    },
+    {
+      "id": "openrouter",
+      "kind": "opencode",
+      "package": {
+        "name": "opencode-ai",
+        "version": "1.18.35",
+        "binary": "/opt/cardea/opencode/opencode",
+        "sha256": "77b2cfe4b97df6f15c3673b22100b9f79c711f25ecb9bf513bb82526b15d24fa"
+      },
+      "confined": {
+        "profile": "openrouter",
+        "worker": "opencode"
+      },
+      "provider": {
+        "base_url": "https://openrouter.ai/api/v1"
+      },
+      "default_model": "z-ai/glm-4.6",
+      "models": {
+        "z-ai/glm-4.6": {
+          "price": {
+            "input_usd_per_mtok": 0.6,
+            "output_usd_per_mtok": 2.2
+          }
+        }
+      }
+    }
+  ]
+}
