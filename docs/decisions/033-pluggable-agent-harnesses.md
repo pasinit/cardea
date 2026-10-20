@@ -64,7 +64,17 @@ Its gaps are a soft step cap, an estimated cost, and a silent continue when MCP 
      - `provider`: a `base_url` and optional headers;
      - `default_model` and `models`, the allowed model ids, each with its USD price per million input and output tokens.
    - Validation names the offending entry and field. Start fails with `harness_config_invalid`, `harness_not_installed` or `harness_pin_mismatch`.
-   - A configuration with only the ADR-027 `agent_session` block keeps working. It becomes a single implicit harness with no model choice and no harness grant.
+   - **One code path.** A configuration with only the ADR-027 `agent_session` block keeps working. It is turned into an implicit registry entry `claude-sdk` (kind `claude-agent-sdk`):
+     - its `model` becomes the entry's only allowed model;
+     - its credential or confined profile carries over;
+     - it is the default harness.
+
+     Only that implicit entry is exempt from the harness grant, so existing clients need no change. Configuring both `agent_session` and `harnesses_file` is refused.
+   - **Migration to an explicit entry.**
+     1. Write `/etc/cardea-host-harnesses.json` with one `claude-agent-sdk` entry carrying the same credential (or `confined`) and model, plus any further models with prices.
+     2. Replace `agent_session` with `harnesses_file` in the service configuration.
+     3. Provision `harness:<id>` for the platform and the supervisors, and add it to client requests and trigger templates.
+     4. Restart.
 3. **Selection.** `AgentRunRequest` gains optional `harness` and `model`.
    - The harness resolves from the request, else the namespace default, else the file default. The model resolves from the request, else the harness's `default_model`.
    - Both are checked at admission, at trigger install and at each attempt. An unknown harness is `harness_not_installed` (422). A model outside the harness's `models` is `model_not_allowed` (422).
@@ -91,7 +101,9 @@ Its gaps are a soft step cap, an estimated cost, and a silent continue when MCP 
    3. **No toolless runs.** A run whose MCP connection failed must fail, not run without tools. Three checks:
       - the adapter preflights the endpoint (MCP `initialize` with the bearer token) before starting;
       - it stops the process when OpenCode reports the `cardea` server `failed`;
-      - the endpoint counts authenticated `tools/list` requests, and an OpenCode attempt that never listed tools fails with `mcp_not_connected`, even if it ended "successfully".
+      - the endpoint counts authenticated `tools/list` requests, and an OpenCode attempt that never listed tools fails, even if it ended "successfully".
+
+      Each check is a hard failure with the distinct reason `harness_tools_unavailable`.
    4. **Isolation.**
       - Each attempt gets an empty working directory and a private temporary `HOME`, `XDG_*` and `OPENCODE_DB`.
       - `snapshot: false`, `--title` (so there is no extra title model call) and `--pure`.
