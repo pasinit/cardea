@@ -174,6 +174,8 @@ def test_supervisor_schedules_an_agent_run_per_slot(kernel: Kernel, clock: Clock
     request = AgentRunRequest.model_validate_json(request_json)
     assert request.request_id == "loft-search.20261001T073000Z"
     assert request.idempotency_context == request.request_id
+    assert request.slot_time is not None
+    assert request.slot_time.isoformat() == "2026-10-01T08:30:00+01:00"
 
 
 def test_scheduling_needs_the_schedule_right(kernel: Kernel, clock: Clock) -> None:

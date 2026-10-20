@@ -47,6 +47,12 @@ class OperationContext:
     effect_key: str
     # Dispatch lease of the invoking attempt; a confined worker stops when it is lost.
     lease_id: str = ""
+    # Agent principal of the agent run that made the call; None outside agent runs.
+    agent_id: str | None = None
+    # The request's idempotency context, e.g. `<trigger_id>.<slot>` for a scheduled task.
+    idempotency_context: str | None = None
+    # ISO 8601 scheduled slot time with its trigger's UTC offset; None outside triggers.
+    slot_time: str | None = None
 
 
 @dataclass(frozen=True)

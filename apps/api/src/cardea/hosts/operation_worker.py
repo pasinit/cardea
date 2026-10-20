@@ -36,6 +36,9 @@ def main(argv: list[str]) -> int:
         receipt_id=recorded["receipt_id"],
         deadline=datetime.fromisoformat(recorded["deadline"]),
         effect_key=recorded["effect_key"],
+        agent_id=recorded.get("agent_id"),
+        idempotency_context=recorded.get("idempotency_context"),
+        slot_time=recorded.get("slot_time"),
     )
     try:
         output = asyncio.run(handler(document["arguments"], context))

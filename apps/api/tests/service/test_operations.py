@@ -447,11 +447,13 @@ class Reconciler:
     def __init__(self) -> None:
         self.applied: bool | None = True
         self.calls = 0
+        self.contexts: list[OperationContext] = []
 
     async def __call__(
         self, arguments: dict[str, JsonValue], context: OperationContext
     ) -> Reconciliation:
         self.calls += 1
+        self.contexts.append(context)
         if self.applied is None:
             raise ConnectionError("provider events API unavailable")
         if self.applied:
@@ -544,6 +546,10 @@ def test_reconciled_applied_effect_deduplicates_later_attempts(
     first = slot_send(kernel, "attempt-1", "3 new listings")
     assert OperationRuntime(kernel).execute(first) == "failed"
     assert OperationRuntime(kernel).reconcile(first, "execute") == "succeeded"
+    # The reconciler sees the caller context the handler saw; no agent made this call.
+    seen, observed = handler.calls[0][1], scoped.contexts[0]
+    assert observed.idempotency_context == seen.idempotency_context == "slot-0830"
+    assert observed.agent_id is None and observed.slot_time is None
     handler.behaviour = "ok"
     later = slot_send(kernel, "attempt-2", "3 new listings")
     assert OperationRuntime(kernel).execute(later) == "succeeded"

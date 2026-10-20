@@ -177,6 +177,18 @@
             "title": "Schema Version",
             "type": "string"
           },
+          "slot_time": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slot Time"
+          },
           "timeout_seconds": {
             "default": 1800,
             "maximum": 3600.0,
@@ -1297,6 +1309,18 @@
             "default": "0.2",
             "title": "Schema Version",
             "type": "string"
+          },
+          "slot_time": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slot Time"
           },
           "timeout_seconds": {
             "default": 300,

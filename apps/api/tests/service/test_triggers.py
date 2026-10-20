@@ -276,6 +276,7 @@ def test_nonexistent_and_repeated_local_times_run_once() -> None:
         {"misfire": "grace", "grace_seconds": 10},
         {"template": {**template(), "request_id": "fixed"}},
         {"template": {**template(), "idempotency_context": "fixed"}},
+        {"template": {**template(), "slot_time": "2026-10-01T08:30:00+01:00"}},
         {"template": template(arguments="not-an-object")},
         {"template": template(grants=list(RIGHTS))},
         {"trigger_id": "x" * 112},
@@ -292,6 +293,11 @@ def test_longest_trigger_id_still_forms_a_valid_request_id() -> None:
     assert isinstance(request, OperationTaskRequest) and len(request.request_id) == 128
     # Effects within one slot share the slot identity as their idempotency context.
     assert request.idempotency_context == request.request_id
+    assert request.slot_time is None
+    timed = long.request(request.request_id, at("2026-10-01T07:30:00"))
+    assert isinstance(timed, OperationTaskRequest) and timed.slot_time is not None
+    # The slot is recorded on the trigger's wall clock (London summer time here).
+    assert timed.slot_time.isoformat() == "2026-10-01T08:30:00+01:00"
 
 
 # Installation

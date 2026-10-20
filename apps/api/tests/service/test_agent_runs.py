@@ -87,12 +87,14 @@ def descriptor(name: str, effect: str, **binding: Any) -> OperationDescriptor:
 class Tools:
     def __init__(self) -> None:
         self.sent: list[dict[str, JsonValue]] = []
+        self.contexts: list[OperationContext] = []
         self.crash = False
 
     async def send(
         self, arguments: dict[str, JsonValue], context: OperationContext
     ) -> dict[str, JsonValue]:
         self.sent.append(arguments)
+        self.contexts.append(context)
         if self.crash:
             raise ConnectionError("reset after the provider accepted")
         return {"message_id": f"<{context.effect_key[:16]}@test>"}
@@ -284,6 +286,53 @@ def test_every_tool_call_is_a_receipted_operation(
         document = json.loads(tx.read_object(output))
         assert document["text"] == "Sent the recap." and document["attempts"] == 1
         assert tx.get_task(task_id).verification is not None
+
+
+def test_second_task_for_the_same_slot_cannot_repeat_an_effect(
+    kernel: Kernel, tools: Tools, session: FakeSession
+) -> None:
+    async def resends(client: ClientSession, request: SessionRequest) -> SessionResult:
+        again = await call(client, "mail-send", to="user@example.invalid", body="recap, again")
+        assert not again.is_error
+        assert "Already done" in cast(types.TextContent, again.content[0]).text
+        return SessionResult(text="The recap was already sent.", is_error=False)
+
+    session.scripts = [routine, resends]
+    slot = {
+        "idempotency_context": "daily.20261020T073000Z",
+        "slot_time": "2026-10-20T08:30:00+01:00",
+    }
+    first = submit(kernel, request_id="routine-0830-a", **slot)
+    second = submit(kernel, request_id="routine-0830-b", **slot)
+    assert first != second
+    runtime = AgentRunRuntime(kernel)
+    assert runtime.execute(first) == "succeeded"
+    assert runtime.execute(second) == "succeeded"
+    assert len(tools.sent) == 1
+    duplicate = calls(kernel, second)[0]
+    assert duplicate.result is not None and duplicate.result["deduplicated"] is True
+    (context,) = tools.contexts
+    assert context.agent_id == "agent"
+    assert context.idempotency_context == "daily.20261020T073000Z"
+    assert context.slot_time == "2026-10-20T08:30:00+01:00"
+    assert duplicate.request.arguments["context"] == {
+        "agent_id": "agent",
+        "idempotency_context": "daily.20261020T073000Z",
+        "slot_time": "2026-10-20T08:30:00+01:00",
+    }
+    assert "Tuesday 2026-10-20 08:30 local time (UTC+0100" in session.requests[0].system_prompt
+
+
+def test_unscheduled_runs_scope_effects_to_the_task(
+    kernel: Kernel, tools: Tools, session: FakeSession
+) -> None:
+    session.scripts = [routine, routine]
+    runtime = AgentRunRuntime(kernel)
+    assert runtime.execute(submit(kernel, request_id="ad-hoc-a")) == "succeeded"
+    assert runtime.execute(submit(kernel, request_id="ad-hoc-b")) == "succeeded"
+    assert len(tools.sent) == 2
+    assert all(c.idempotency_context is None and c.slot_time is None for c in tools.contexts)
+    assert "scheduled time" not in session.requests[0].system_prompt
 
 
 def test_endpoint_requires_the_attempt_token(kernel: Kernel, session: FakeSession) -> None:
