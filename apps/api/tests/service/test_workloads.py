@@ -6,9 +6,11 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from fastapi.encoders import jsonable_encoder
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from mcp.client.session import ClientSession
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from test_agent_runs import (
     GRANTS,
     Auth,
@@ -38,7 +40,22 @@ from cardea.service.models import (
     Provisioning,
     TriggerSpec,
 )
-from cardea.service.operations import Registry
+from cardea.service.operations import Reconciliation, Registry
+from cardea.service.responses import (
+    AgentReceipts,
+    AgentRunOutput,
+    ChildrenView,
+    HostBudgetView,
+    OperationCatalog,
+    ReconcileResult,
+    RunOutput,
+    RunView,
+    SystemView,
+    TaskReceipt,
+    TriggerList,
+    TriggerRemoved,
+    TriggerScheduled,
+)
 from cardea.service.triggers import Scheduler
 
 SCHEDULE_GRANTS = (*GRANTS, "tasks.schedule")
@@ -353,3 +370,126 @@ def test_run_view_shows_calls_output_and_evidence(
         headers={"Authorization": "Bearer outsider", "X-Cardea-Auth": "spiffe"},
     )
     assert outsider.status_code == 404
+
+
+# Typed responses keep the wire shape
+
+
+def test_typed_responses_match_what_the_handlers_return(
+    kernel: Kernel,
+    tools: Tools,
+    session: FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every JSON route's response model validates real handler output and serializes it to
+    exactly the JSON the untyped handler produced."""
+    monkeypatch.setattr(agent_run_runtime, "attempt_lease_seconds", lambda request: 4.0)
+    monkeypatch.setattr(agent_run_runtime, "LEASE_MARGIN", 1.0)
+
+    async def fails_a_read(client: ClientSession, request: SessionRequest) -> SessionResult:
+        await call(client, "listings-search", to="upstream-503")
+        return await routine(client, request)
+
+    async def sends(client: ClientSession, request: SessionRequest) -> SessionResult:
+        await call(client, "mail-send", to="other@example.invalid", body="recap")
+        return SessionResult(text="Tried to send.", is_error=False)
+
+    session.scripts = [fails_a_read, sends]
+    done = submit(kernel, expect=[{"operation": "mail.send"}])
+    assert AgentRunRuntime(kernel).execute(done) == "succeeded"
+    tools.crash = True
+    uncertain = submit(kernel, request_id="uncertain-send")
+    assert AgentRunRuntime(kernel).execute(uncertain) == "failed"
+
+    app = create_app(kernel)
+    endpoints = {
+        (route.path, method): route.endpoint
+        for route in app.routes
+        if isinstance(route, APIRoute)
+        for method in route.methods
+    }
+    proof = kernel.auth.validate("supervisor")
+    client = TestClient(app)
+
+    def same(path: str, model: type[BaseModel], raw: Any, **params: Any) -> dict[str, Any]:
+        """The HTTP body equals the untyped handler's JSON and validates as `model`."""
+        body = client.get(path, headers=HEADERS, params=params)
+        assert body.status_code == 200, body.text
+        document: dict[str, Any] = body.json()
+        assert document == jsonable_encoder(raw), path
+        assert model.model_validate(document).model_dump(mode="json") == document, path
+        return document
+
+    v = "/v0.2"
+    same(f"{v}/system", SystemView, endpoints[(f"{v}/system", "GET")](proof))
+    same(
+        f"{v}/operations",
+        OperationCatalog,
+        endpoints[(f"{v}/operations", "GET")](proof, "test"),
+        namespace="test",
+    )
+    same(
+        f"{v}/host-budget",
+        HostBudgetView,
+        endpoints[(f"{v}/host-budget", "GET")](proof, "test"),
+        namespace="test",
+    )
+    for task_id in (done, uncertain):
+        for suffix, model in (
+            ("run", RunView),
+            ("receipt", TaskReceipt),
+            ("agent-receipts", AgentReceipts),
+            ("children", ChildrenView),
+        ):
+            path = f"{v}/tasks/{{task_id}}/{suffix}"
+            same(path.format(task_id=task_id), model, endpoints[(path, "GET")](task_id, proof))
+    output = f"{v}/tasks/{{task_id}}/output"
+    same(output.format(task_id=done), RunOutput, endpoints[(output, "GET")](done, proof))
+    run = same(
+        f"{v}/tasks/{done}/run",
+        RunView,
+        endpoints[(f"{v}/tasks/{{task_id}}/run", "GET")](done, proof),
+    )
+    assert run["calls"][0]["failure_details"] == {
+        "reason": "upstream_http_error",
+        "summary": "UpstreamError (HTTP 503)",
+    }
+    assert isinstance(RunView.model_validate(run).output, AgentRunOutput)
+
+    # Triggers: the mutating routes are compared on their second, idempotent call.
+    spec = routine_spec()
+    installed = endpoints[(f"{v}/triggers/{{trigger_id}}", "PUT")](spec.trigger_id, spec, proof)
+    assert installed == {
+        "schema_version": "0.2",
+        "trigger_id": "loft-search",
+        "change": "installed",
+    }
+    again = put(client, spec).json()
+    assert again == {**installed, "change": "unchanged"}
+    TriggerScheduled.model_validate(again)
+    same(
+        f"{v}/triggers",
+        TriggerList,
+        endpoints[(f"{v}/triggers", "GET")](proof, after="", limit=20, history=20),
+    )
+    removed = endpoints[(f"{v}/triggers/{{trigger_id}}", "DELETE")](spec.trigger_id, proof)
+    repeated = client.delete(f"{v}/triggers/{spec.trigger_id}", headers=HEADERS).json()
+    assert repeated == jsonable_encoder(removed)
+    TriggerRemoved.model_validate(repeated)
+
+    # Reconcile: settle the uncertain send through the route.
+    async def found(arguments: dict[str, Any], context: Any) -> Reconciliation:
+        return Reconciliation(applied=True, output={"message_id": "<found@test>"})
+
+    kernel.operations = Registry(
+        (
+            descriptor("mail.send", "effect", idempotency_scope=["/to"], reconciler="test.found"),
+            descriptor("listings.search", "read"),
+        ),
+        {"test.mail.send": tools.send, "test.listings.search": tools.search, "test.found": found},
+    )
+    settled = client.post(
+        f"{v}/tasks/{uncertain}/operations/call-0001/reconcile", headers=HEADERS
+    ).json()
+    assert settled == {"schema_version": "0.2", "state": "succeeded"}
+    ReconcileResult.model_validate(settled)

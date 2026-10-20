@@ -1,6 +1,81 @@
 {
   "components": {
     "schemas": {
+      "AgentReceipts": {
+        "additionalProperties": false,
+        "description": "`GET /v0.2/tasks/{task_id}/agent-receipts`: full receipts of an agent's calls.",
+        "properties": {
+          "receipts": {
+            "description": "Each call's receipt: request with arguments and scope key, state, result or failure, and reconciliation evidence.",
+            "items": {
+              "$ref": "#/components/schemas/OperationReceipt"
+            },
+            "title": "Receipts",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "receipts"
+        ],
+        "title": "AgentReceipts",
+        "type": "object"
+      },
+      "AgentRunOutput": {
+        "additionalProperties": false,
+        "description": "The published output document of a successful agent run (ADR-027).",
+        "properties": {
+          "attempts": {
+            "description": "Session attempts used.",
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "calls": {
+            "description": "Every context and tool call, in order.",
+            "items": {
+              "$ref": "#/components/schemas/RunOutputCall"
+            },
+            "title": "Calls",
+            "type": "array"
+          },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cost the session reported, if any.",
+            "title": "Cost Usd"
+          },
+          "text": {
+            "description": "The session's final reply.",
+            "title": "Text",
+            "type": "string"
+          },
+          "turns": {
+            "description": "Model turns of the successful attempt.",
+            "title": "Turns",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "text",
+          "attempts",
+          "turns",
+          "cost_usd",
+          "calls"
+        ],
+        "title": "AgentRunOutput",
+        "type": "object"
+      },
       "AgentRunRequest": {
         "additionalProperties": false,
         "description": "One bounded agent session whose only tools are installed operations (ADR-027).",
@@ -196,6 +271,49 @@
         "title": "AgentRunRequest",
         "type": "object"
       },
+      "AgentRunVerification": {
+        "additionalProperties": false,
+        "description": "The verification evidence of a successful agent run.",
+        "properties": {
+          "calls": {
+            "title": "Calls",
+            "type": "integer"
+          },
+          "check": {
+            "title": "Check",
+            "type": "string"
+          },
+          "effects_succeeded": {
+            "title": "Effects Succeeded",
+            "type": "integer"
+          },
+          "expectations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Expectations",
+            "type": "array"
+          },
+          "output_digest": {
+            "title": "Output Digest",
+            "type": "string"
+          },
+          "passed": {
+            "title": "Passed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "passed",
+          "check",
+          "expectations",
+          "calls",
+          "effects_succeeded",
+          "output_digest"
+        ],
+        "title": "AgentRunVerification",
+        "type": "object"
+      },
       "AuthorityWait": {
         "additionalProperties": false,
         "properties": {
@@ -343,6 +461,59 @@
         "title": "Checkpoint",
         "type": "object"
       },
+      "ChildLink": {
+        "additionalProperties": false,
+        "properties": {
+          "child_id": {
+            "title": "Child Id",
+            "type": "string"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          },
+          "slot": {
+            "title": "Slot",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "slot",
+          "child_id",
+          "message_id"
+        ],
+        "title": "ChildLink",
+        "type": "object"
+      },
+      "ChildUsage": {
+        "additionalProperties": false,
+        "properties": {
+          "active_operations": {
+            "title": "Active Operations",
+            "type": "integer"
+          },
+          "children": {
+            "title": "Children",
+            "type": "integer"
+          },
+          "output_bytes": {
+            "title": "Output Bytes",
+            "type": "integer"
+          },
+          "tool_milliseconds": {
+            "title": "Tool Milliseconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "children",
+          "tool_milliseconds",
+          "output_bytes",
+          "active_operations"
+        ],
+        "title": "ChildUsage",
+        "type": "object"
+      },
       "ChildWork": {
         "additionalProperties": false,
         "properties": {
@@ -373,6 +544,34 @@
           "payload"
         ],
         "title": "ChildWork",
+        "type": "object"
+      },
+      "ChildrenView": {
+        "additionalProperties": false,
+        "description": "`GET /v0.2/tasks/{task_id}/children`: a coordinator's delegated children (ADR-017).",
+        "properties": {
+          "children": {
+            "items": {
+              "$ref": "#/components/schemas/ChildLink"
+            },
+            "title": "Children",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/ChildUsage"
+          }
+        },
+        "required": [
+          "children",
+          "usage"
+        ],
+        "title": "ChildrenView",
         "type": "object"
       },
       "ContextCall": {
@@ -693,6 +892,110 @@
         "title": "Expectation",
         "type": "object"
       },
+      "FailureDetails": {
+        "additionalProperties": false,
+        "description": "Why a call failed (ADR-026): a fixed reason and a bounded, sanitized summary.",
+        "properties": {
+          "reason": {
+            "description": "timeout, queue_timeout, worker_exit, worker_refused, upstream_http_error, invalid_output, rejected, denied or error.",
+            "title": "Reason",
+            "type": "string"
+          },
+          "summary": {
+            "description": "At most 200 printable characters; never exception text or stderr.",
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason",
+          "summary"
+        ],
+        "title": "FailureDetails",
+        "type": "object"
+      },
+      "HostBudgetLimits": {
+        "additionalProperties": false,
+        "properties": {
+          "concurrency": {
+            "title": "Concurrency",
+            "type": "integer"
+          },
+          "output_bytes": {
+            "title": "Output Bytes",
+            "type": "integer"
+          },
+          "tool_ms": {
+            "title": "Tool Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tool_ms",
+          "output_bytes",
+          "concurrency"
+        ],
+        "title": "HostBudgetLimits",
+        "type": "object"
+      },
+      "HostBudgetView": {
+        "additionalProperties": false,
+        "description": "`GET /v0.2/host-budget`: the caller's host allocation and its cumulative use.",
+        "properties": {
+          "active_reservations": {
+            "title": "Active Reservations",
+            "type": "integer"
+          },
+          "allocated_output_bytes": {
+            "title": "Allocated Output Bytes",
+            "type": "integer"
+          },
+          "allocated_tool_ms": {
+            "title": "Allocated Tool Ms",
+            "type": "integer"
+          },
+          "charged_output_bytes": {
+            "title": "Charged Output Bytes",
+            "type": "integer"
+          },
+          "charged_tool_ms": {
+            "title": "Charged Tool Ms",
+            "type": "integer"
+          },
+          "cleanup_pending": {
+            "title": "Cleanup Pending",
+            "type": "integer"
+          },
+          "limits": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HostBudgetLimits"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null when no allocation exists."
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "limits",
+          "allocated_tool_ms",
+          "allocated_output_bytes",
+          "active_reservations",
+          "charged_tool_ms",
+          "charged_output_bytes",
+          "cleanup_pending"
+        ],
+        "title": "HostBudgetView",
+        "type": "object"
+      },
       "HostObjectTaskRequest": {
         "additionalProperties": false,
         "properties": {
@@ -793,6 +1096,64 @@
           "input_object"
         ],
         "title": "HostObjectTaskRequest",
+        "type": "object"
+      },
+      "HostOperationInfo": {
+        "additionalProperties": false,
+        "description": "A fixed M2 host operation the caller may submit as a host task.",
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "input_modes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Input Modes",
+            "type": "array"
+          },
+          "max_input_bytes": {
+            "title": "Max Input Bytes",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "network": {
+            "title": "Network",
+            "type": "string"
+          },
+          "output_scope": {
+            "title": "Output Scope",
+            "type": "string"
+          },
+          "reserved_output_bytes": {
+            "title": "Reserved Output Bytes",
+            "type": "integer"
+          },
+          "reserved_tool_milliseconds": {
+            "title": "Reserved Tool Milliseconds",
+            "type": "integer"
+          },
+          "retry": {
+            "title": "Retry",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "input_modes",
+          "max_input_bytes",
+          "reserved_tool_milliseconds",
+          "reserved_output_bytes",
+          "network",
+          "output_scope",
+          "retry"
+        ],
+        "title": "HostOperationInfo",
         "type": "object"
       },
       "HostTaskRequest": {
@@ -1049,6 +1410,218 @@
         "title": "ObjectVersion",
         "type": "object"
       },
+      "OperationCatalog": {
+        "additionalProperties": false,
+        "description": "`GET /v0.2/operations`: what the caller may do in a namespace under the live ceiling.",
+        "properties": {
+          "installed": {
+            "items": {
+              "$ref": "#/components/schemas/HostOperationInfo"
+            },
+            "title": "Installed",
+            "type": "array"
+          },
+          "operations": {
+            "description": "Every right and operation name the caller holds.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Operations",
+            "type": "array"
+          },
+          "registered": {
+            "items": {
+              "$ref": "#/components/schemas/RegisteredOperation"
+            },
+            "title": "Registered",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operations",
+          "installed",
+          "registered"
+        ],
+        "title": "OperationCatalog",
+        "type": "object"
+      },
+      "OperationReceipt": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KernelFailure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "grant_ids": {
+            "items": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Grant Ids",
+            "type": "array"
+          },
+          "receipt_id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "title": "Receipt Id",
+            "type": "string"
+          },
+          "reconciliation_evidence": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResourceRef"
+            },
+            "title": "Reconciliation Evidence",
+            "type": "array"
+          },
+          "request": {
+            "$ref": "#/components/schemas/OperationRequest"
+          },
+          "request_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Request Digest",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "retry_class": {
+            "$ref": "#/components/schemas/RetryClass"
+          },
+          "revision": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "schema_version": {
+            "const": "0.1",
+            "default": "0.1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/OperationState",
+            "default": "accepted"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/ResourceUsage"
+          }
+        },
+        "required": [
+          "receipt_id",
+          "request",
+          "request_digest",
+          "grant_ids",
+          "retry_class",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "OperationReceipt",
+        "type": "object"
+      },
+      "OperationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "arguments": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Arguments",
+            "type": "object"
+          },
+          "deadline": {
+            "format": "date-time",
+            "title": "Deadline",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+            "title": "Name",
+            "type": "string"
+          },
+          "operation_id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "resource": {
+            "$ref": "#/components/schemas/ResourceRef"
+          },
+          "schema_version": {
+            "const": "0.1",
+            "default": "0.1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "subject_id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "title": "Subject Id",
+            "type": "string"
+          },
+          "task_id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation_id",
+          "task_id",
+          "subject_id",
+          "name",
+          "resource",
+          "deadline"
+        ],
+        "title": "OperationRequest",
+        "type": "object"
+      },
+      "OperationState": {
+        "enum": [
+          "accepted",
+          "running",
+          "succeeded",
+          "failed",
+          "cancelled",
+          "outcome_unknown"
+        ],
+        "title": "OperationState",
+        "type": "string"
+      },
       "OperationTaskRequest": {
         "additionalProperties": false,
         "description": "One invocation of an installed operation; arguments are checked at admission.",
@@ -1186,6 +1759,93 @@
         "title": "OperationTaskRequest",
         "type": "object"
       },
+      "ReconcileResult": {
+        "additionalProperties": false,
+        "description": "`POST .../operations/{operation_id}/reconcile`: the operation's state afterwards.",
+        "properties": {
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "ReconcileResult",
+        "type": "object"
+      },
+      "RegisteredOperation": {
+        "additionalProperties": false,
+        "description": "An installed operation (ADR-023) the caller may use in the namespace.",
+        "properties": {
+          "effect": {
+            "enum": [
+              "read",
+              "effect"
+            ],
+            "title": "Effect",
+            "type": "string"
+          },
+          "max_output_bytes": {
+            "title": "Max Output Bytes",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "requires": {
+            "description": "Further grants the operation needs.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Requires",
+            "type": "array"
+          },
+          "retry": {
+            "enum": [
+              "read_only",
+              "reconciliation_required"
+            ],
+            "title": "Retry",
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "title": "Timeout Seconds",
+            "type": "integer"
+          },
+          "tool": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "description": "The operation's MCP tool definition: description and JSON schemas.",
+            "title": "Tool",
+            "type": "object"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "tool",
+          "version",
+          "effect",
+          "timeout_seconds",
+          "max_output_bytes",
+          "requires",
+          "retry"
+        ],
+        "title": "RegisteredOperation",
+        "type": "object"
+      },
       "ResourceRef": {
         "additionalProperties": false,
         "properties": {
@@ -1213,6 +1873,310 @@
         "title": "ResourceRef",
         "type": "object"
       },
+      "ResourceUsage": {
+        "additionalProperties": false,
+        "properties": {
+          "model_calls": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Model Calls",
+            "type": "integer"
+          },
+          "model_tokens": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Model Tokens",
+            "type": "integer"
+          },
+          "output_bytes": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Output Bytes",
+            "type": "integer"
+          },
+          "schema_version": {
+            "const": "0.1",
+            "default": "0.1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "steps": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Steps",
+            "type": "integer"
+          },
+          "tool_milliseconds": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Tool Milliseconds",
+            "type": "integer"
+          }
+        },
+        "title": "ResourceUsage",
+        "type": "object"
+      },
+      "RetryClass": {
+        "enum": [
+          "read_only",
+          "idempotent",
+          "externally_deduplicated",
+          "reconciliation_required"
+        ],
+        "title": "RetryClass",
+        "type": "string"
+      },
+      "RunCall": {
+        "additionalProperties": false,
+        "description": "One receipted call of a run: an agent-run context (`ctx-NN`) or tool (`call-NNNN`)\ncall, or a single-operation task's `execute`.",
+        "properties": {
+          "arguments": {
+            "$ref": "#/components/schemas/JsonValue",
+            "description": "The arguments the call was made with."
+          },
+          "failure": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Failure code of a failed call.",
+            "title": "Failure"
+          },
+          "failure_details": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FailureDetails"
+              },
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the call failed; receipts written before ADR-026's reasons have {}.",
+            "title": "Failure Details"
+          },
+          "operation": {
+            "title": "Operation",
+            "type": "string"
+          },
+          "operation_id": {
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "reconciled": {
+            "description": "The outcome was settled by reconciliation.",
+            "title": "Reconciled",
+            "type": "boolean"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "{\"output\": <the operation's own output>} and, for a call answered from an earlier effect in the same idempotency scope, \"deduplicated\": true.",
+            "title": "Result"
+          },
+          "state": {
+            "description": "accepted, running, succeeded, failed, cancelled or outcome_unknown.",
+            "title": "State",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation_id",
+          "operation",
+          "state",
+          "arguments",
+          "result",
+          "failure",
+          "failure_details",
+          "reconciled",
+          "updated_at"
+        ],
+        "title": "RunCall",
+        "type": "object"
+      },
+      "RunOutput": {
+        "additionalProperties": false,
+        "description": "`GET /v0.2/tasks/{task_id}/output`: the task's latest published output.",
+        "properties": {
+          "artifact": {
+            "$ref": "#/components/schemas/ObjectVersion"
+          },
+          "content": {
+            "$ref": "#/components/schemas/JsonValue",
+            "description": "The output document; its shape is the profile's."
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact",
+          "content"
+        ],
+        "title": "RunOutput",
+        "type": "object"
+      },
+      "RunOutputCall": {
+        "additionalProperties": false,
+        "properties": {
+          "deduplicated": {
+            "title": "Deduplicated",
+            "type": "boolean"
+          },
+          "operation": {
+            "title": "Operation",
+            "type": "string"
+          },
+          "operation_id": {
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation_id",
+          "operation",
+          "state",
+          "deduplicated"
+        ],
+        "title": "RunOutputCall",
+        "type": "object"
+      },
+      "RunView": {
+        "additionalProperties": false,
+        "description": "`GET /v0.2/tasks/{task_id}/run`: what a run did (ADR-029).",
+        "properties": {
+          "attempt": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The agent run's latest attempt number.",
+            "title": "Attempt"
+          },
+          "calls": {
+            "description": "Every receipted call, in the order made.",
+            "items": {
+              "$ref": "#/components/schemas/RunCall"
+            },
+            "title": "Calls",
+            "type": "array"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KernelFailure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "output": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentRunOutput"
+              },
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The published output: an agent run's document, or another profile's own output. Null until published.",
+            "title": "Output"
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "verification": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentRunVerification"
+              },
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "An agent run's evidence, or another profile's. Null until verified.",
+            "title": "Verification"
+          }
+        },
+        "required": [
+          "task_id",
+          "state",
+          "failure",
+          "created_at",
+          "updated_at",
+          "attempt",
+          "output",
+          "verification",
+          "calls"
+        ],
+        "title": "RunView",
+        "type": "object"
+      },
       "Signal": {
         "additionalProperties": false,
         "properties": {
@@ -1232,6 +2196,75 @@
           "request_id"
         ],
         "title": "Signal",
+        "type": "object"
+      },
+      "SystemView": {
+        "additionalProperties": false,
+        "description": "`GET /v0.2/system`: what this kernel runs and the limits its listeners enforce.",
+        "properties": {
+          "agent_execution": {
+            "description": "An agent session runtime is configured, so agent runs can be admitted.",
+            "title": "Agent Execution",
+            "type": "boolean"
+          },
+          "delegation_execution": {
+            "title": "Delegation Execution",
+            "type": "boolean"
+          },
+          "host_execution": {
+            "description": "The Debian host adapter is enabled.",
+            "title": "Host Execution",
+            "type": "boolean"
+          },
+          "max_request_bytes": {
+            "description": "Request-body cap of every listener.",
+            "title": "Max Request Bytes",
+            "type": "integer"
+          },
+          "max_response_bytes": {
+            "title": "Max Response Bytes",
+            "type": "integer"
+          },
+          "max_task_request_bytes": {
+            "description": "Canonical size cap of one task request.",
+            "title": "Max Task Request Bytes",
+            "type": "integer"
+          },
+          "new_namespace_prefix": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Prefix new namespaces must use after a snapshot restore; null otherwise.",
+            "title": "New Namespace Prefix"
+          },
+          "runtime": {
+            "description": "Runtime of the deterministic default profile.",
+            "title": "Runtime",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "runtime",
+          "host_execution",
+          "agent_execution",
+          "delegation_execution",
+          "new_namespace_prefix",
+          "max_request_bytes",
+          "max_task_request_bytes",
+          "max_response_bytes"
+        ],
+        "title": "SystemView",
         "type": "object"
       },
       "Task": {
@@ -1404,6 +2437,32 @@
           "updated_at"
         ],
         "title": "Task",
+        "type": "object"
+      },
+      "TaskReceipt": {
+        "additionalProperties": false,
+        "description": "`GET /v0.2/tasks/{task_id}/receipt`: the receipt that stands for the whole task.",
+        "properties": {
+          "digest_format": {
+            "const": "legacy-v0.1",
+            "title": "Digest Format",
+            "type": "string"
+          },
+          "receipt": {
+            "$ref": "#/components/schemas/OperationReceipt"
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "digest_format",
+          "receipt"
+        ],
+        "title": "TaskReceipt",
         "type": "object"
       },
       "TaskRequest": {
@@ -1642,6 +2701,240 @@
           "wake_at"
         ],
         "title": "TimerWait",
+        "type": "object"
+      },
+      "TriggerEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "definition": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "description": "The installed TriggerSpec.",
+            "title": "Definition",
+            "type": "object"
+          },
+          "definition_sha256": {
+            "title": "Definition Sha256",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "events": {
+            "description": "Most recent history first.",
+            "items": {
+              "$ref": "#/components/schemas/TriggerEvent"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "last_slot": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Slot"
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "removed": {
+            "title": "Removed",
+            "type": "boolean"
+          },
+          "trigger_id": {
+            "title": "Trigger Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "trigger_id",
+          "namespace",
+          "definition",
+          "definition_sha256",
+          "enabled",
+          "removed",
+          "last_slot",
+          "events"
+        ],
+        "title": "TriggerEntry",
+        "type": "object"
+      },
+      "TriggerEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Refusal code when admission failed.",
+            "title": "Code"
+          },
+          "detail": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "description": "Event-specific facts, e.g. missed counts.",
+            "title": "Detail",
+            "type": "object"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "integer"
+          },
+          "kind": {
+            "description": "installed, updated, admitted, missed, failed, removed, ...",
+            "title": "Kind",
+            "type": "string"
+          },
+          "slot": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The scheduled slot (ISO 8601, UTC) it concerns.",
+            "title": "Slot"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The task admitted for the slot, if any.",
+            "title": "Task Id"
+          }
+        },
+        "required": [
+          "event_id",
+          "kind",
+          "slot",
+          "task_id",
+          "code",
+          "at",
+          "detail"
+        ],
+        "title": "TriggerEvent",
+        "type": "object"
+      },
+      "TriggerList": {
+        "additionalProperties": false,
+        "description": "`GET /v0.2/triggers`: the caller's own triggers and their recent slot history.",
+        "properties": {
+          "next": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pass as `after` for the next page; null on the last.",
+            "title": "Next"
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "triggers": {
+            "items": {
+              "$ref": "#/components/schemas/TriggerEntry"
+            },
+            "title": "Triggers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "triggers",
+          "next"
+        ],
+        "title": "TriggerList",
+        "type": "object"
+      },
+      "TriggerRemoved": {
+        "additionalProperties": false,
+        "description": "`DELETE /v0.2/triggers/{trigger_id}`: removal is idempotent.",
+        "properties": {
+          "change": {
+            "const": "removed",
+            "title": "Change",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "trigger_id": {
+            "title": "Trigger Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "trigger_id",
+          "change"
+        ],
+        "title": "TriggerRemoved",
+        "type": "object"
+      },
+      "TriggerScheduled": {
+        "additionalProperties": false,
+        "description": "`PUT /v0.2/triggers/{trigger_id}`: the trigger and what the request changed.",
+        "properties": {
+          "change": {
+            "enum": [
+              "installed",
+              "updated",
+              "enabled",
+              "disabled",
+              "unchanged"
+            ],
+            "title": "Change",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "trigger_id": {
+            "title": "Trigger Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "trigger_id",
+          "change"
+        ],
+        "title": "TriggerScheduled",
         "type": "object"
       },
       "TriggerSpec": {
@@ -2165,9 +3458,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Budget V0 2 Host Budget Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/HostBudgetView"
                 }
               }
             },
@@ -2827,9 +4118,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Operations V0 2 Operations Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/OperationCatalog"
                 }
               }
             },
@@ -2984,9 +4273,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Describe V0 2 System Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/SystemView"
                 }
               }
             },
@@ -3482,9 +4769,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Agent Receipts V0 2 Tasks  Task Id  Agent Receipts Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/AgentReceipts"
                 }
               }
             },
@@ -3824,9 +5109,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Children V0 2 Tasks  Task Id  Children Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ChildrenView"
                 }
               }
             },
@@ -4193,9 +5476,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Reconcile V0 2 Tasks  Task Id  Operations  Operation Id  Reconcile Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ReconcileResult"
                 }
               }
             },
@@ -4360,9 +5641,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Output V0 2 Tasks  Task Id  Output Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/RunOutput"
                 }
               }
             },
@@ -4527,9 +5806,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Receipt V0 2 Tasks  Task Id  Receipt Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/TaskReceipt"
                 }
               }
             },
@@ -4870,9 +6147,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Run View V0 2 Tasks  Task Id  Run Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/RunView"
                 }
               }
             },
@@ -5063,9 +6338,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Triggers V0 2 Triggers Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/TriggerList"
                 }
               }
             },
@@ -5230,9 +6503,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Unschedule V0 2 Triggers  Trigger Id  Delete",
-                  "type": "object"
+                  "$ref": "#/components/schemas/TriggerRemoved"
                 }
               }
             },
@@ -5405,9 +6676,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Schedule V0 2 Triggers  Trigger Id  Put",
-                  "type": "object"
+                  "$ref": "#/components/schemas/TriggerScheduled"
                 }
               }
             },
