@@ -405,7 +405,15 @@ class AgentRunRuntime:
                 model=model or None,
                 job_key=f"{task_id}:{attempt}",
             )
-            return asyncio.run(self._supervise(task_id, harness, session_request))
+            result = asyncio.run(self._supervise(task_id, harness, session_request))
+            if (
+                result.success
+                and getattr(harness, "requires_tool_listing", False)
+                and endpoint.listings == 0
+            ):
+                # The harness ran without ever connecting to its tools (ADR-033).
+                return HarnessResult.failed("harness_tools_unavailable", text=result.text)
+            return result
 
     async def _supervise(
         self, task_id: str, harness: Harness, request: HarnessRequest

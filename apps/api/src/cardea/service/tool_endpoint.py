@@ -50,6 +50,9 @@ class ToolEndpoint:
         self.tools = tools
         self.call = call
         self.port = 0
+        # Authenticated tools/list requests served; a harness that never lists tools never
+        # connected to its tools (ADR-033).
+        self.listings = 0
         self._server: uvicorn.Server | None = None
         self._thread: threading.Thread | None = None
 
@@ -63,6 +66,7 @@ class ToolEndpoint:
         call = self.call
 
         async def list_tools(ctx: Any, params: Any) -> types.ListToolsResult:
+            self.listings += 1
             return types.ListToolsResult(tools=tools)
 
         async def call_tool(ctx: Any, params: types.CallToolRequestParams) -> types.CallToolResult:

@@ -23,7 +23,11 @@ jobs:
       - run: cd apps/api && uv sync --locked
       - run: make lint-api
       - run: make typecheck-api
+      - name: Fetch the pinned OpenCode binary (ADR-033)
+        run: echo "CARDEA_TEST_OPENCODE=$(python3 packaging/fetch_opencode.py "$RUNNER_TEMP/opencode" | head -n1)" >> "$GITHUB_ENV"
       - run: make api-test
+        env:
+          CARDEA_REQUIRE_OPENCODE: "1"
       - run: make load-check
       - run: make m4-test
       - run: make m2-host-check m3-check m4-check m5-check try-check

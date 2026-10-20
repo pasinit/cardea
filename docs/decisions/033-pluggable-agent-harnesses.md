@@ -1,7 +1,7 @@
 # ADR-033: Pluggable Agent Harnesses
 
 - **Date / owner / milestones:** 2026-10-20; runtime maintainers. Supersedes the "session adapter" parts of [ADR-027](027-agent-runs.md) (decision items 1 and 6): the Claude Agent SDK session is now one harness of several. The rest of ADR-027 (attempts, tool endpoint, journal, completion), [ADR-028](028-configurable-worker-profiles.md) and [ADR-031](031-agent-run-context-operations.md) are unchanged.
-- **Status:** selected. Implemented in steps: the contract (#17), then the registry and selection, then OpenCode. Each step updates this record's Verification section. Nothing here has run against a live provider; tests use a fake OpenAI-compatible model server.
+- **Status:** selected and implemented for portable execution: the contract (#17), the registry and selection (#19), and OpenCode. Nothing here has run against a live provider: tests use a fake OpenAI-compatible model server, and the OpenCode tests run the real pinned binary against it. Confined OpenCode is not implemented yet (see Limits).
 - **Requirement:**
   - A *harness* is the program that runs the model loop of an agent-run attempt and calls tools. The host owner installs one or more harnesses, and an agent run selects one, together with a model.
   - Provider choice belongs to the harness. Running GLM via OpenRouter is `harness=<an OpenCode entry whose provider is OpenRouter>`, `model=<the OpenRouter model id>`. The kernel has no provider-specific logic.
@@ -109,7 +109,7 @@ Its gaps are a soft step cap, an estimated cost, and a silent continue when MCP 
       - `snapshot: false`, `--title` (so there is no extra title model call) and `--pure`.
       - `OPENCODE_DISABLE_{AUTOUPDATE, MODELS_FETCH, SHARE, PROJECT_CONFIG, CLAUDE_CODE, DEFAULT_PLUGINS, LSP_DOWNLOAD}=1`.
       - The environment is built from scratch, with no inherited variables beyond `PATH`, locale and certificates, so there is no OTEL exporter and no stray secrets.
-      - Under a confined profile (ADR-028, `model_api_only`), the only network is the model API via the proxy plus the loopback endpoint.
+      - Under a confined profile (ADR-028, `model_api_only`), the only network would be the model API via the proxy plus the loopback endpoint. **Not implemented yet:** the registry refuses `confined` for `opencode` entries, so OpenCode runs unconfined, as the Claude session first did (ADR-027 Limits).
    5. **Pinning.** The binary's SHA-256 is in the registry and checked at start. A contract test parses a recorded `run --format json` transcript of the pinned version: `step_start`, `tool_use`, `text`, `step_finish` with `tokens.{input, output, reasoning, cache.{read, write}}` and `cost`, and `error`. An upgrade that renames fields fails it loudly. The end-to-end test runs the real pinned binary.
    6. **Credentials.** The provider key is read from the registry's credential file and reaches the process only through its environment, referenced from the configuration as `{env:CARDEA_PROVIDER_KEY}`. It is never written to a file and never logged. The MCP bearer token is handled the same way.
 
@@ -127,7 +127,29 @@ Its gaps are a soft step cap, an estimated cost, and a silent continue when MCP 
 
 - **Contract** (#17): 7 tests in `tests/service/test_harness_contract.py`; all existing agent-run, confined and workload tests pass unchanged.
 - **Registry, selection and authority** (#19): 27 tests in `tests/service/test_harnesses.py` cover entry and file validation (field-named errors, unsafe or symlinked files, unpriced models), pins (binary hash, package version), defaults by request, namespace and file, `harness_not_installed`/`model_not_allowed`/`harness_not_granted`, supervisor policy, revocation stopping a run, provisioning, trigger templates, and service start. Existing tests are unchanged.
-- **OpenCode:** pending. It will be an end-to-end test with the pinned binary, a fake OpenAI-compatible server and the real per-attempt endpoint: an installed operation is called and receipted; only MCP tools are offered; turn and cost kills; a failed MCP connection fails the run; the schema contract test.
+- **OpenCode:** `tests/service/test_opencode.py` has 12 tests. The 7 end-to-end tests run the pinned 1.18.35 binary (`packaging/fetch_opencode.py`, archive SHA-256 checked) against `tests/service/fake_model.py`:
+  - a kernel agent run with `harness=glm` calls two installed operations, both receipted;
+  - the model is offered only `cardea_*` tools on every request, and the provider key arrives only as the request's bearer header;
+  - the model asking for `bash` or `write` has no effect;
+  - the run is killed at `max_turns` (2 steps) and past `max_cost_usd`, with the metered cost matching OpenCode's estimate;
+  - a failed MCP connection after a successful preflight stops the run (`harness_tools_unavailable`);
+  - cancellation on timeout kills the process.
+
+  Portable tests cover the rest:
+  - the NDJSON schema contract against a recorded transcript of the pinned version;
+  - a renamed field failing loudly;
+  - a configuration with no secrets, built-ins denied and no inherited environment;
+  - the binary pin required in the registry;
+  - an unreachable endpoint refused before start;
+  - the runtime failing a tool-listing harness that never listed its tools.
+
+  CI fetches the binary and sets `CARDEA_REQUIRE_OPENCODE=1`, so the end-to-end tests cannot skip there.
+
+## Limits
+
+- OpenCode runs unconfined. Its isolation is a private directory, a clean environment and denied built-ins; network egress is not limited. A confined OpenCode worker, a session worker that runs the adapter inside an ADR-028 profile, is the next step.
+- Metered cost uses the registry price and charges cache tokens at the input price, so it is conservative. It is not the provider's bill.
+- A kill at `max_turns` or `max_cost_usd` is a failed attempt and is retried while attempts remain, as any failed session is (ADR-027).
 
 ## Revisit
 
