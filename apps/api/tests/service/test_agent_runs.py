@@ -953,7 +953,7 @@ def test_large_runs_stay_under_the_response_cap_and_page_everything(
     kernel.operations = Registry(
         (
             descriptor("mail.send", "effect", idempotency_scope=["/to"]),
-            descriptor("listings.search", "read", max_output_bytes=262144),
+            descriptor("listings.search", "read"),
         ),
         {"test.mail.send": tools.send, "test.listings.search": page_text},
     )

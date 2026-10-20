@@ -39,6 +39,7 @@ Every API response is capped at 256 KiB. A realistic agent run broke that: `GET 
   - Admission now refuses arguments that would exceed it, with `413 arguments_too_large`.
   - Settlement treats an output that cannot be recorded as `verification_failed` (reason `invalid_output`), whatever the descriptor's `max_output_bytes` says.
   - Before, both raised inside the call: an agent saw an MCP protocol error, and the call stayed `running`, which fenced the run.
+  - Descriptors may not declare `max_output_bytes` above 65,536 (refused at load, ADR-023), so no installed operation can produce an output its receipt cannot hold.
   - One receipt therefore always fits a response: `GET /v0.2/tasks/{id}/operations/{operation_id}` returns it whole.
 - **The run view summarizes calls and pages them.** Each call carries its receipt ID, timestamps, failure code and details, `deduplicated`, `reconciled`, and for arguments and result: size, SHA-256 of the canonical (RFC 8785) JSON, and a preview of its first `run_preview_bytes`. That is host configuration, 0–16384, default 2048. The full `arguments` and `result` stay inline only when they fit that preview size.
   - Calls are listed in the order made, one page at a time. A page holds as many calls as fit the budget, up to `limit`. `calls_next` is the cursor for `?after=`, and `calls_total` counts all calls.
