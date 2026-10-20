@@ -122,6 +122,7 @@ def main() -> None:
                     database,
                     Provisioning.model_validate_json(private_file(args.path)),
                     Registry.load(config.operations_dir, resolve=False),
+                    config.max_task_request_bytes,
                 )
             finally:
                 database.close()

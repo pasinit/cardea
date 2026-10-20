@@ -386,10 +386,16 @@ def test_request_cap_is_host_configuration() -> None:
     for value in (4095, 1048577, "65536"):
         with pytest.raises(ValidationError):
             ServiceConfig.model_validate({**base, "max_request_bytes": value})
+    assert ServiceConfig.model_validate(base).max_task_request_bytes == 16384
+    assert ServiceConfig.model_validate({**base, "max_task_request_bytes": 65536})
+    for value in (4095, 1048577, "65536"):
+        with pytest.raises(ValidationError):
+            ServiceConfig.model_validate({**base, "max_task_request_bytes": value})
 
 
 def test_configured_request_cap_applies_to_every_listener(kernel: Kernel, pki: Pki) -> None:
     headers = {"Authorization": "Bearer supervisor", "Content-Type": "application/json"}
+    kernel.max_task_request_bytes = 49152
     for running in start(kernel, listener_config(pki), max_request_bytes=65536):
         with (
             httpx.Client(
@@ -402,6 +408,7 @@ def test_configured_request_cap_applies_to_every_listener(kernel: Kernel, pki: P
             for http in (local, remote):
                 system = http.get("/v0.2/system", headers=headers).json()
                 assert system["max_request_bytes"] == 65536
+                assert system["max_task_request_bytes"] == 49152
                 assert system["max_response_bytes"] == 262144
                 # Above the default cap but within the configured one: reaches validation.
                 within = b'{"x":"' + b"a" * 40000 + b'"}'

@@ -247,6 +247,25 @@ def test_trigger_templates_carry_context_in_their_digest(kernel: Kernel, clock: 
     assert refused.status_code == 422 and refused.json()["code"] == "context_not_read_only"
 
 
+def test_trigger_templates_obey_the_configured_task_request_cap(
+    kernel: Kernel, clock: Clock
+) -> None:
+    long = routine_spec(template=template(instructions="Follow the house style. " * 1300))
+    client = TestClient(create_app(kernel, max_request_bytes=131072))
+    refused = put(client, long)
+    assert refused.status_code == 413 and refused.json()["code"] == "request_too_large"
+    with pytest.raises(Fault) as provisioned:
+        provision(kernel.database, document(triggers=(long,)), kernel.operations)
+    assert provisioned.value.code == "request_too_large"
+    # The host owner raises the cap: supervisor and host-owned triggers both install and admit.
+    kernel.max_task_request_bytes = 65536
+    assert put(client, long).status_code == 200
+    host = long.model_copy(update={"trigger_id": "host-long"})
+    provision(kernel.database, document(triggers=(host,)), kernel.operations, 65536)
+    clock.now = datetime(2026, 10, 1, 7, 30, 30, tzinfo=UTC)
+    assert Scheduler(kernel, clock).tick() == {"host-long": "admitted", "loft-search": "admitted"}
+
+
 # Expectations
 
 

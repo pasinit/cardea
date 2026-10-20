@@ -20,6 +20,7 @@ from cardea.service.auth import IdentityProvider, Proof
 from cardea.service.confined import ConfinedAgentSession, Workers, confined_handler, job_id
 from cardea.service.database import Database, Fault, borrow
 from cardea.service.models import (
+    DEFAULT_MAX_TASK_REQUEST_BYTES,
     AgentInput,
     AgentRunRequest,
     AgentTaskRequest,
@@ -53,6 +54,7 @@ from cardea.service.profiles import (
     for_runtime,
     runtime_ids,
 )
+from cardea.service.triggers import check_size
 from cardea.service.triggers import install as install_triggers
 
 __all__ = [
@@ -97,7 +99,10 @@ def view(conn: sa.Connection, task_id: str) -> TaskView:
 
 
 def provision(
-    database: Database, document: Provisioning, operations: Registry | None = None
+    database: Database,
+    document: Provisioning,
+    operations: Registry | None = None,
+    max_task_request_bytes: int = DEFAULT_MAX_TASK_REQUEST_BYTES,
 ) -> None:
     """Host-owner administration, intentionally separate from authenticated agent routes."""
     database.check_version()
@@ -199,7 +204,7 @@ def provision(
                         allocation.tokens,
                     ),
                 )
-            install_triggers(conn, document.triggers, installed, now())
+            install_triggers(conn, document.triggers, installed, now(), max_task_request_bytes)
             revision = (
                 int(
                     conn.exec_driver_sql(
@@ -249,8 +254,10 @@ class Kernel:
         operations: Registry | None = None,
         session: AgentSession | None = None,
         workers: Workers | None = None,
+        max_task_request_bytes: int = DEFAULT_MAX_TASK_REQUEST_BYTES,
     ) -> None:
         self.database, self.auth, self.fault = database, auth, fault
+        self.max_task_request_bytes = max_task_request_bytes
         self.host, self.model = host, model
         self.operations = operations or Registry(handlers={})
         self.session = session
@@ -337,7 +344,14 @@ class Kernel:
             policy.require("platform", request.namespace, "tasks.schedule")
             self._precheck(request, None)
             policy.admission(principal, request, self.runtime_id)
-            kind = upsert(conn, spec, self.operations, now(), managed_by="supervisor")
+            kind = upsert(
+                conn,
+                spec,
+                self.operations,
+                now(),
+                managed_by="supervisor",
+                max_task_request_bytes=self.max_task_request_bytes,
+            )
         return {"trigger_id": spec.trigger_id, "change": kind}
 
     def unschedule(self, proof: Proof, trigger_id: str) -> dict[str, str]:
@@ -446,6 +460,7 @@ class Kernel:
 
     def _precheck(self, request: TaskRequest, delegation: tuple[str, int] | None) -> Profile:
         profile = for_request(request)
+        check_size(request, self.max_task_request_bytes)
         self.operations.check_grants(request.grants)
         if isinstance(request, OperationTaskRequest):
             descriptor = self.operations.get(request.operation)
