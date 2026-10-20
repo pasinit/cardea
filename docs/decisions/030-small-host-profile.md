@@ -20,9 +20,18 @@
 - **Telos is trusted across its namespaces.** A compromised Telos host can act for every Telos user within the provisioned grants. This is the same trust Telos has today, but bounded by the namespaces, the grants and the expiry dates.
 - **Certificate rotation needs a restart.** The private CA's key must be kept offline.
 - **Memory is unmeasured.** Cardea, SPIRE and a Claude session together on 2 GB is the target; measure with real routine runs before relying on it, and use a 4 GB VM otherwise.
-- **Sessions are not confined yet.** Confined workers for agent sessions and browsers (ADR-028) need that profile enabled here once accepted on Debian.
+- **Confined workers are documented but not yet run here.** The kit's section 4 enables ADR-028 workers for the session and browser profiles. It covers bubblewrap, the helper from the same commit with its sudoers rule, `cardea-worker`, `/etc/cardea-host-workers.json` with per-profile concurrency, a Squid egress proxy and a kernel unit drop-in. It still needs Debian acceptance.
 
 ## Verification
 
-- `tests/service/test_deploy_examples.py` validates `config.json` and `provision.telos.json` against the current models.
+- `tests/service/test_deploy_examples.py` checks the kit:
+  - `config.json`, `config.confined.json` and `provision.telos.json` validate against the current models;
+  - the worker configuration passes the root helper's own checks;
+  - the proxy's host lists equal the profiles';
+  - the kernel drop-in, and the SPIRE units' paths against their configuration;
+  - `make-tls.sh` certificates complete a TLS 1.3 handshake with a `VERIFY_X509_STRICT` client (OpenSSL 3 required, otherwise skipped).
+- First real-host run (2026-10-20) found three gaps, now fixed in the kit:
+  - `init` refuses a store directory that is not `0700` (`unsafe_directory`);
+  - SPIRE needed systemd units and a join-token bootstrap;
+  - Python 3.13 clients rejected the private CA ("CA cert does not include key usage extension").
 - Not run: installation, SPIRE attestation, network reachability, memory measurement.
