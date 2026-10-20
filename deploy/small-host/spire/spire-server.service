@@ -1,0 +1,26 @@
+# SPIRE server on the Cardea host (ADR-030). Install SPIRE under /opt/spire and the
+# configuration as /etc/spire/server.conf.
+[Unit]
+Description=SPIRE server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=spire
+Group=spire
+ExecStart=/opt/spire/bin/spire-server run -config /etc/spire/server.conf
+Restart=on-failure
+RestartSec=5
+# /var/lib/spire/server (datastore, keys) and /run/spire-server (admin API socket).
+StateDirectory=spire/server
+StateDirectoryMode=0700
+RuntimeDirectory=spire-server
+RuntimeDirectoryMode=0700
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+MemoryMax=192M
+
+[Install]
+WantedBy=multi-user.target
