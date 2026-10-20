@@ -10,6 +10,9 @@ for in-process operations; this module only maps a worker's life onto handler ou
 - the worker reported ``{"rejected": ...}``: ``OperationRejected`` from trusted worker code;
 - anything else once started (memory cap, wall time, crash, unknown start): ``WorkerFailed``;
 - cancellation or lease loss while running: ``WorkerStopped`` after stop and cleanup.
+
+A profile may limit how many of its workers run at once. A call that cannot get a slot
+before its deadline is refused before anything starts.
 """
 
 import asyncio
@@ -18,6 +21,7 @@ import binascii
 import hashlib
 import json
 import logging
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import asdict
@@ -86,6 +90,9 @@ class Workers:
     def __init__(self, host: WorkerHost) -> None:
         self.host = host
         self._installed: dict[str, Any] | None = None
+        # Per-profile slots. Threading, not asyncio: each attempt runs its own event loop.
+        self._slots: dict[str, threading.BoundedSemaphore] = {}
+        self._slots_lock = threading.Lock()
 
     def installed(self) -> dict[str, Any]:
         # Profiles are root-owned host configuration; changing them requires a restart.
@@ -109,6 +116,25 @@ class Workers:
             )
         return {"profile": profile, "worker": worker, "profile_sha256": str(entry.get("sha256"))}
 
+    def _slot(self, profile: str) -> threading.BoundedSemaphore | None:
+        limit = self.installed().get("profiles", {}).get(profile, {}).get("concurrency")
+        if not isinstance(limit, int) or limit < 1:
+            return None
+        with self._slots_lock:
+            return self._slots.setdefault(profile, threading.BoundedSemaphore(limit))
+
+    async def _acquire(
+        self, slot: threading.BoundedSemaphore, deadline: float, watch: Watch | None
+    ) -> None:
+        """Wait for a free slot without blocking the loop; nothing has started yet."""
+        while not slot.acquire(blocking=False):
+            if time.time() >= deadline:
+                raise OperationRejected("worker_busy: no free slot in this worker profile")
+            reason = await asyncio.to_thread(watch) if watch is not None else None
+            if reason:
+                raise OperationRejected(f"worker_not_started: {reason}")
+            await asyncio.sleep(POLL_SECONDS)
+
     def reap(self, job: str) -> None:
         """Stop the whole unit, then retire and delete its staging. Safe to repeat."""
         try:
@@ -130,6 +156,24 @@ class Workers:
         worker: str,
         deadline: float,
         watch: Watch | None = None,
+    ) -> dict[str, Any]:
+        slot = self._slot(profile)
+        if slot is None:
+            return await self._run(job, payload, profile, worker, deadline, watch)
+        await self._acquire(slot, deadline, watch)
+        try:
+            return await self._run(job, payload, profile, worker, deadline, watch)
+        finally:
+            slot.release()
+
+    async def _run(
+        self,
+        job: str,
+        payload: dict[str, Any],
+        profile: str,
+        worker: str,
+        deadline: float,
+        watch: Watch | None,
     ) -> dict[str, Any]:
         content = json.dumps(payload, separators=(",", ":")).encode()
         try:
