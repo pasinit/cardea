@@ -86,6 +86,10 @@ def test_proxy_enforces_the_same_hosts_as_each_profile() -> None:
             continue
         assert f"http_port {network['proxy']} name={name}" in squid
         listed = re.search(rf"^acl {name}_hosts dstdomain (.+)$", squid, re.MULTILINE)
+        if network["policy"] == "public_web":
+            # No host list: the port allows any destination that non_public does not refuse.
+            assert listed is None and f"\nhttp_access allow {name}_port\n" in squid
+            continue
         assert listed is not None and listed.group(1).split() == network["hosts"]
 
 
@@ -107,14 +111,41 @@ def test_proxy_config_is_standalone_and_denies_by_default() -> None:
         assert match.group(1) != "127.0.0.1", line  # the tool endpoints' address
     for line in lines:
         assert not line.startswith(("https_port", "icp_port 3130", "snmp_port")), line
+    profiles = json.loads((KIT / "cardea" / "cardea-host-workers.json").read_text())["profiles"]
+    public = {n for n, p in profiles.items() if p["network"]["policy"] == "public_web"}
     access = [line for line in lines if line.startswith("http_access")]
     allows = [line for line in access if line.startswith("http_access allow")]
     for line in allows:
-        assert re.fullmatch(r"http_access allow ([a-z][a-z0-9-]*)_port \1_hosts", line), line
+        paired = re.fullmatch(r"http_access allow ([a-z][a-z0-9-]*)_port \1_hosts", line)
+        unrestricted = re.fullmatch(r"http_access allow ([a-z][a-z0-9-]*)_port", line)
+        # Only a public_web profile's port may allow without a host list.
+        assert paired or (unrestricted and unrestricted.group(1) in public), line
     first_allow = access.index(allows[0])
-    for rule in ("deny to_localhost", "deny to_linklocal", "deny CONNECT !tls_port"):
+    for rule in (
+        "deny to_localhost",
+        "deny to_linklocal",
+        "deny non_public",
+        "deny CONNECT !tls_port",
+        "deny !safe_ports",
+    ):
         assert access.index(f"http_access {rule}") < first_allow
     assert access[-1] == "http_access deny all"
+    refused = " ".join(
+        line.split(" ", 3)[3] for line in lines if line.startswith("acl non_public dst")
+    )
+    for network in (
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "127.0.0.0/8",
+        "169.254.0.0/16",
+        "100.64.0.0/10",
+        "224.0.0.0/4",
+        "fc00::/7",
+        "fe80::/10",
+        "::1/128",
+    ):
+        assert network in refused.split(), network
 
 
 def test_kernel_drop_in_allows_the_sudo_helper() -> None:
