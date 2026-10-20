@@ -22,8 +22,8 @@ from pydantic import ValidationError
 from cardea.kernel.lifecycle import ContractError
 from cardea.kernel.store import StoreError
 from cardea.service.database import Fault, borrow
-from cardea.service.models import TriggerSpec, now
-from cardea.service.operations import Registry
+from cardea.service.models import AgentRunRequest, TriggerSpec, now
+from cardea.service.operations import Registry, check_context
 from cardea.service.schedule import Decision, decide, slot_key
 
 if TYPE_CHECKING:
@@ -97,6 +97,9 @@ def upsert(
         raise Fault("unknown_principal", "Trigger supervisor is not provisioned")
     request = spec.request(f"{spec.trigger_id}.{slot_key(at)}")
     operations.check_grants(request.grants)
+    if isinstance(request, AgentRunRequest):
+        for call in request.context:
+            check_context(operations, call.operation)
     old = (
         conn.exec_driver_sql("SELECT * FROM triggers WHERE trigger_id=?", (spec.trigger_id,))
         .mappings()

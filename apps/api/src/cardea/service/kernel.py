@@ -36,7 +36,7 @@ from cardea.service.models import (
     TriggerSpec,
     now,
 )
-from cardea.service.operations import KERNEL_RIGHTS, Handler, Registry
+from cardea.service.operations import KERNEL_RIGHTS, Handler, Registry, check_context
 from cardea.service.policy import Policy, object_key
 from cardea.service.profiles import (
     AGENT_RUN_QUEUE,
@@ -463,6 +463,10 @@ class Kernel:
         if isinstance(request, AgentRunRequest):
             for name in request.operations:
                 self.executor_record(name)
+            for call in request.context:
+                check_context(self.operations, call.operation)
+                self.operations.validate_arguments(call.operation, call.arguments)
+                self.executor_record(call.operation)
             if isinstance(self.session, ConfinedAgentSession):
                 self.session.check()
         if profile.requires_host and self.host is None:

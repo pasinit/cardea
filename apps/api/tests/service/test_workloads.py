@@ -230,6 +230,23 @@ def test_supervisor_removes_only_its_own_triggers(kernel: Kernel, clock: Clock) 
     assert refused.status_code == 409
 
 
+def test_trigger_templates_carry_context_in_their_digest(kernel: Kernel, clock: Clock) -> None:
+    client = TestClient(create_app(kernel))
+    assert put(client, routine_spec()).status_code == 200
+    context = [{"operation": "listings.search", "arguments": {"body": "lofts"}}]
+    with_context = routine_spec(template=template(context=context))
+    assert put(client, with_context).json()["change"] == "updated"
+    clock.now = datetime(2026, 10, 1, 7, 30, 30, tzinfo=UTC)
+    assert Scheduler(kernel, clock).tick() == {"loft-search": "admitted"}
+    with kernel.database.read() as conn:
+        request_json = conn.exec_driver_sql("SELECT request_json FROM task_bindings").scalar_one()
+    request = AgentRunRequest.model_validate_json(request_json)
+    assert [c.model_dump() for c in request.context] == context
+    effect = routine_spec(template=template(context=[{"operation": "mail.send"}]))
+    refused = put(client, effect)
+    assert refused.status_code == 422 and refused.json()["code"] == "context_not_read_only"
+
+
 # Expectations
 
 
@@ -293,6 +310,22 @@ def test_run_view_shows_calls_output_and_evidence(
     view = client.get(f"/v0.2/tasks/{task_id}/run", headers=HEADERS).json()
     assert view["state"] == "succeeded" and view["attempt"] == 1
     assert [c["operation"] for c in view["calls"]] == ["listings.search", "mail.send"]
+    with_context = submit(
+        kernel, request_id="with-context", context=[{"operation": "listings.search"}]
+    )
+    session.scripts = [routine]
+    assert AgentRunRuntime(kernel).execute(with_context) == "succeeded"
+    view_with_context = client.get(f"/v0.2/tasks/{with_context}/run", headers=HEADERS).json()
+    assert [c["operation_id"] for c in view_with_context["calls"]] == [
+        "ctx-01",
+        "call-0001",
+        "call-0002",
+    ]
+    assert [c["operation_id"] for c in view_with_context["output"]["calls"]] == [
+        "ctx-01",
+        "call-0001",
+        "call-0002",
+    ]
     assert view["calls"][1]["arguments"]["to"] == "user@example.invalid"
     assert view["output"]["text"] == "Sent the recap."
     assert view["verification"]["expectations"] == ["at least 1 successful call(s) of mail-send"]

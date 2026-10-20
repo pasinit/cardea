@@ -427,7 +427,11 @@ def create_app(kernel: Kernel) -> FastAPI:
                     "reconciled": bool(r.reconciliation_evidence),
                     "updated_at": r.updated_at.isoformat(),
                 }
-                for r in tx.list_operations(task_id)
+                # In the order they were made: an agent run's context calls come first.
+                for r in sorted(
+                    tx.list_operations(task_id),
+                    key=lambda r: (r.created_at, r.request.operation_id),
+                )
             ]
         return {
             "schema_version": "0.2",

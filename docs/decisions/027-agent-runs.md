@@ -50,6 +50,7 @@ Checked 2026-10-15.
 - **Not confined yet.** The session process is not confined beyond its tool configuration, environment and private directory. Network egress limits (model API only) and process confinement need the configurable worker profiles of ADR-022 gap #6. [ADR-028](028-configurable-worker-profiles.md) adds an optional confined session (`confined_profile`/`confined_worker`), not yet verified on Debian. Unconfined, the Agent SDK merges the service's environment into the CLI's. The adapter therefore blanks every inherited variable except `PATH`, locale, timezone and certificate paths, so item 6 also holds unconfined. This is tested in `test_claude_session_has_no_builtin_tools_or_host_settings`.
 - **Not exercised live.** No live Claude session has run against the endpoint. The portable tests use a scripted MCP client over the real HTTP endpoint.
 - **Cost is reported, not reserved.** Cost comes from the SDK's result; there is no Cardea budget account for it yet.
+- **Context before the session.** Read-only context operations that run before each session (`ctx-NN`) are described in [ADR-031](031-agent-run-context-operations.md).
 
 ## Verification
 
