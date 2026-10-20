@@ -103,6 +103,7 @@ echo 'cardea-kernel ALL=(root) NOPASSWD: /usr/libexec/cardea-host ""' > /etc/sud
 chmod 0440 /etc/sudoers.d/cardea-host && visudo -cf /etc/sudoers.d/cardea-host
 ```
 
+   The helper accepts Debian 13's 6.12 generic and cloud kernels. For any other kernel, add `"kernel_release_pattern": "<regex>"` to `/etc/cardea-host.json`, and only after checking that kernel's confinement.
 3. Profiles and workers: edit `cardea/cardea-host-workers.json` and install it as `/etc/cardea-host-workers.json` (owned by root, mode `0644`).
    - The `session` profile runs the agent session. It may reach only the model API through its proxy and the loopback tool endpoint. Its credential is a root-only file such as `/etc/cardea/credentials/claude` (`0600 root`), which systemd hands to the unit.
    - The `browser` profile runs browser operations. Set its `hosts` to the sites they need.
