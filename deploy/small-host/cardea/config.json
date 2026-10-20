@@ -17,5 +17,6 @@
     "certificate_file": "/etc/cardea/tls/server.crt",
     "key_file": "/etc/cardea/tls/server.key"
   },
-  "max_request_bytes": 131072
+  "max_request_bytes": 131072,
+  "max_task_request_bytes": 65536
 }

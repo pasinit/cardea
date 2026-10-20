@@ -32,6 +32,7 @@ from cardea.service.models import (
     Provisioning,
     TaskRequest,
     now,
+    request_size,
 )
 from cardea.service.operation_runtime import OperationRuntime
 from cardea.service.operations import (
@@ -255,21 +256,38 @@ def test_admission_needs_model_and_operation_grants(kernel: Kernel) -> None:
         run_request(grants=[*RIGHTS, "models.invoke", "mail.send"])
 
 
-def test_agent_runs_accept_long_instructions_other_requests_stay_small() -> None:
-    long = "Follow the house style. " * 1300  # about 31 KB
-    assert len(run_request(instructions=long).instructions) > 30000
-    with pytest.raises(ValidationError):
-        run_request(instructions="x" * 65537)
-    with pytest.raises(ValidationError):
+LONG = "Follow the house style. " * 1300  # about 31 KB of instructions
+
+
+def test_task_request_size_is_capped_by_host_configuration(kernel: Kernel) -> None:
+    # Models enforce only the absolute ceiling; the configured cap applies at admission.
+    request = run_request(instructions=LONG)
+    assert request_size(request) > 16384
+    assert kernel.max_task_request_bytes == 16384
+    with pytest.raises(Fault) as refused:
+        kernel.submit(kernel.auth.validate("supervisor"), request)
+    assert refused.value.code == "request_too_large" and refused.value.status == 413
+    assert "16384" in refused.value.message
+    kernel.max_task_request_bytes = 65536
+    view = kernel.submit(kernel.auth.validate("supervisor"), request)
+    assert view.task.state.value == "queued"
+
+
+def test_model_ceiling_and_duplicate_grants_are_separate_checks() -> None:
+    with pytest.raises(ValidationError, match="Request is too large"):
         TaskRequest.model_validate(
             {
-                "request_id": "small",
+                "request_id": "huge",
                 "agent_id": "agent",
                 "namespace": "test",
                 "objective": "o",
-                "payload": {"text": "x" * 20000},
+                "payload": {"text": "x" * (1048576 + 1)},
             }
         )
+    with pytest.raises(ValidationError, match="Request repeats a grant"):
+        run_request(grants=[*GRANTS, "mail.send"])
+    with pytest.raises(ValidationError):
+        run_request(instructions="x" * 65537)
 
 
 def test_admission_requires_a_session_runtime(kernel: Kernel) -> None:
