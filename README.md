@@ -52,7 +52,7 @@ make try
 
 `make try` runs the real daemon through submit, authority denial, `SIGKILL`, restart, resume and verification in a few seconds, with no SPIRE, Keycloak, VM or model key. Identity in this path is **unenforced**; see [experiments/try](experiments/try/README.md).
 
-For an authenticated setup, follow the [M1 quickstart](docs/m1-quickstart.md). For a real host, use the [Debian package](packaging/README.md) and the [operations guide](docs/operations.md).
+To see what you can run on Cardea (single operations, agent runs on Claude, OpenRouter or a local model, schedules, idempotent effects), read [Getting started](docs/getting-started.md). For an authenticated setup, follow the [M1 quickstart](docs/m1-quickstart.md). For a real host, use the [Debian package](packaging/README.md) and the [operations guide](docs/operations.md).
 
 ## Development
 
@@ -73,6 +73,7 @@ The code lives in `apps/api/src/cardea`: `kernel` (records, lifecycle, SQLite st
 
 ## Documentation
 
+- [Getting started](docs/getting-started.md): six runnable use cases, from one operation to the same agent run on three harnesses.
 - [Docs index](docs/README.md): design, kernel contract, components, decision records and product planning.
 - [Design](design.md) and [kernel contract](docs/kernel-contract.md): architecture, host boundary, trust model.
 - [Decision records](docs/decisions/README.md): every component choice with alternatives and evidence.

@@ -2,6 +2,7 @@
 
 ## Use and operate
 
+- [Getting started](getting-started.md): how a run flows through the kernel, the harness and MCP operations, plus six runnable use cases.
 - [Try without SPIRE](../experiments/try/README.md): `make try`, unenforced identity.
 - [M1 quickstart](m1-quickstart.md): initialize, provision and run the authenticated kernel.
 - [Debian package](../packaging/README.md) and [operations guide](operations.md): install, upgrade, back up, restore, maintain.
@@ -17,7 +18,7 @@
 
 ## Decisions
 
-- [Decision records](decisions/README.md): ADR-001 to ADR-030.
+- [Decision records](decisions/README.md): ADR-001 to ADR-033.
 - [Open-source-first policy](standards-first.md) and [review register](standards-review-2026-09-22.md).
 - [Coding standard](../coding-standard.md).
 
