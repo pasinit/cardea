@@ -9,6 +9,7 @@ from typing import Any, cast
 
 import httpx2
 import pytest
+from fastapi.testclient import TestClient
 from mcp import types
 from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamable_http_client
@@ -19,6 +20,7 @@ from cardea.runtime.agent_session import ClaudeAgentSession, SessionRequest, Ses
 from cardea.service import agent_run_runtime
 from cardea.service import kernel as handlers
 from cardea.service.agent_run_runtime import AgentRunRuntime
+from cardea.service.app import create_app
 from cardea.service.auth import Authentication, Proof
 from cardea.service.database import Database, Fault, borrow
 from cardea.service.kernel import Kernel, provision
@@ -284,6 +286,28 @@ def test_every_tool_call_is_a_receipted_operation(
         document = json.loads(tx.read_object(output))
         assert document["text"] == "Sent the recap." and document["attempts"] == 1
         assert tx.get_task(task_id).verification is not None
+
+
+def test_agent_receipts_list_the_run_calls(kernel: Kernel, session: FakeSession) -> None:
+    session.scripts = [routine]
+    task_id = submit(kernel)
+    assert AgentRunRuntime(kernel).execute(task_id) == "succeeded"
+    with TestClient(create_app(kernel)) as client:
+        headers = {"Authorization": "Bearer supervisor"}
+        receipts = client.get(f"/v0.2/tasks/{task_id}/agent-receipts", headers=headers).json()
+        output = client.get(f"/v0.2/tasks/{task_id}/output", headers=headers).json()
+        outsider = client.get(
+            f"/v0.2/tasks/{task_id}/agent-receipts", headers={"Authorization": "Bearer outsider"}
+        )
+    listed = receipts["receipts"]
+    assert [(r["request"]["operation_id"], r["request"]["name"], r["state"]) for r in listed] == [
+        (c["operation_id"], c["operation"], c["state"]) for c in output["content"]["calls"]
+    ]
+    search, send = listed
+    assert search["retry_class"] == "read_only"
+    assert send["retry_class"] == "reconciliation_required"
+    assert send["request"]["arguments"]["scope_key"] is not None
+    assert outsider.status_code == 404
 
 
 def test_endpoint_requires_the_attempt_token(kernel: Kernel, session: FakeSession) -> None:
