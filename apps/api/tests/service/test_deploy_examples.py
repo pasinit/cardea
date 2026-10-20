@@ -1,17 +1,39 @@
 """The small-host deployment examples (ADR-030) stay valid against the current models."""
 
+import configparser
 import json
+import re
+import shutil
+import socket
+import ssl
+import subprocess
+import threading
 from pathlib import Path
 
+import pytest
+from cryptography import x509
+
+from cardea.hosts import launcher
 from cardea.service.models import Provisioning, ServiceConfig
 
 KIT = Path(__file__).resolve().parents[4] / "deploy" / "small-host"
 
 
-def test_service_config_example_is_valid() -> None:
-    config = json.loads((KIT / "cardea" / "config.json").read_text())
+def unit(path: Path) -> configparser.ConfigParser:
+    parser = configparser.ConfigParser(strict=False, interpolation=None)
+    parser.optionxform = str  # type: ignore[assignment,method-assign]  # keys are case-sensitive
+    parser.read_string(path.read_text())
+    return parser
+
+
+def service_config(name: str) -> ServiceConfig:
+    config = json.loads((KIT / "cardea" / name).read_text())
     config["network"]["host"] = "10.0.0.2"  # placeholder in the example
-    parsed = ServiceConfig.model_validate(config)
+    return ServiceConfig.model_validate(config)
+
+
+def test_service_config_example_is_valid() -> None:
+    parsed = service_config("config.json")
     assert parsed.network is not None and parsed.agent_session is not None
 
 
@@ -22,3 +44,133 @@ def test_provisioning_example_is_valid_and_grants_schedules() -> None:
     rights = {p.operation for p in document.permissions if p.principal_id == "telos"}
     assert {"tasks.schedule", "models.invoke", "mail.send"} <= rights
     assert {p.principal_id for p in document.platform} == {"platform"}
+
+
+def test_readme_requires_a_private_store_directory() -> None:
+    readme = (KIT / "README.md").read_text()
+    assert "-m 0700 /var/lib/cardea" in readme and "unsafe_directory" in readme
+
+
+# Confined workers
+
+
+def test_worker_configuration_passes_the_helper_checks() -> None:
+    config = json.loads((KIT / "cardea" / "cardea-host-workers.json").read_text())
+    assert set(config) == {"profiles", "workers"}
+    for name, entry in config["profiles"].items():
+        assert re.fullmatch(launcher.NAME, name)
+        launcher.validate_profile(entry)
+    for name, entry in config["workers"].items():
+        assert re.fullmatch(launcher.NAME, name)
+        launcher.validate_worker(entry, config["profiles"])
+    # Browsers start one at a time on a small host.
+    assert config["profiles"]["browser"]["concurrency"] == 1
+
+
+def test_confined_config_names_an_installed_session_profile() -> None:
+    parsed = service_config("config.confined.json")
+    workers = json.loads((KIT / "cardea" / "cardea-host-workers.json").read_text())
+    session = parsed.agent_session
+    assert parsed.host_execution and session is not None
+    assert session.confined_profile in workers["workers"][session.confined_worker]["profiles"]
+    profile = workers["profiles"][session.confined_profile]
+    assert profile["network"]["policy"] == "model_api_only" and "credential" in profile
+
+
+def test_proxy_enforces_the_same_hosts_as_each_profile() -> None:
+    squid = (KIT / "cardea" / "squid-workers.conf").read_text()
+    profiles = json.loads((KIT / "cardea" / "cardea-host-workers.json").read_text())["profiles"]
+    for name, entry in profiles.items():
+        network = entry["network"]
+        if network["policy"] == "none":
+            continue
+        assert f"http_port {network['proxy']} name={name}" in squid
+        listed = re.search(rf"^acl {name}_hosts dstdomain (.+)$", squid, re.MULTILINE)
+        assert listed is not None and listed.group(1).split() == network["hosts"]
+    assert squid.rstrip().endswith("http_access deny all\ncache deny all")
+
+
+def test_kernel_drop_in_allows_the_sudo_helper() -> None:
+    service = unit(KIT / "cardea" / "cardea-kernel.service")["Service"]
+    drop_in = unit(KIT / "cardea" / "cardea-kernel.service.d" / "host-execution.conf")["Service"]
+    assert service["NoNewPrivileges"] == "yes" and drop_in["NoNewPrivileges"] == "no"
+    assert drop_in["ReadWritePaths"] == str(launcher.ROOT)
+
+
+# SPIRE
+
+
+def test_spire_units_match_the_configuration() -> None:
+    server = unit(KIT / "spire" / "spire-server.service")["Service"]
+    agent = unit(KIT / "spire" / "spire-agent.service")["Service"]
+    assert server["ExecStart"].endswith("-config /etc/spire/server.conf")
+    assert server["User"] == "spire" and server["StateDirectory"] == "spire/server"
+    server_conf = (KIT / "spire" / "server.conf").read_text()
+    assert 'data_dir = "/var/lib/spire/server"' in server_conf
+    assert f'socket_path = "/run/{server["RuntimeDirectory"]}/api.sock"' in server_conf
+    # Join-token bootstrap: an optional environment file, emptied after first attestation.
+    assert agent["EnvironmentFile"] == "-/etc/spire/agent-join-token.env"
+    assert agent["ExecStart"].endswith("-config /etc/spire/agent.conf $SPIRE_AGENT_JOIN")
+    agent_conf = (KIT / "spire" / "agent-cardea.conf").read_text()
+    assert 'data_dir = "/var/lib/spire/agent"' in agent_conf
+    socket_path = f"/run/{agent['RuntimeDirectory']}/agent.sock"
+    assert f'socket_path = "{socket_path}"' in agent_conf
+    assert service_config("config.json").spiffe_socket == f"unix://{socket_path}"
+    kernel = unit(KIT / "cardea" / "cardea-kernel.service")["Unit"]
+    assert kernel["Requires"] == "spire-agent.service"
+
+
+# TLS
+
+
+def openssl3() -> str:
+    path = shutil.which("openssl")
+    if path is None:
+        pytest.skip("openssl is not installed")
+    version = subprocess.run([path, "version"], capture_output=True, text=True).stdout
+    if not version.startswith("OpenSSL 3"):
+        pytest.skip(f"make-tls.sh needs OpenSSL 3, found {version.strip()}")
+    return path
+
+
+def test_make_tls_certificates_pass_strict_verification(tmp_path: Path) -> None:
+    openssl3()
+    out = tmp_path / "tls"
+    subprocess.run(
+        ["sh", str(KIT / "cardea" / "make-tls.sh"), "127.0.0.1", str(out)],
+        check=True,
+        capture_output=True,
+    )
+    assert sorted(p.name for p in out.iterdir()) == ["ca.crt", "ca.key", "server.crt", "server.key"]
+    ca = x509.load_pem_x509_certificate((out / "ca.crt").read_bytes())
+    leaf = x509.load_pem_x509_certificate((out / "server.crt").read_bytes())
+    ca_usage = ca.extensions.get_extension_for_class(x509.KeyUsage)
+    assert ca_usage.critical and ca_usage.value.key_cert_sign and ca_usage.value.crl_sign
+    assert ca.extensions.get_extension_for_class(x509.BasicConstraints).value.ca
+    leaf_usage = leaf.extensions.get_extension_for_class(x509.KeyUsage)
+    assert leaf_usage.critical and leaf_usage.value.digital_signature
+    leaf.extensions.get_extension_for_class(x509.AuthorityKeyIdentifier)
+    leaf.extensions.get_extension_for_class(x509.SubjectKeyIdentifier)
+
+    # A real handshake with the default client context, which is strict on Python 3.13.
+    server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    server_context.load_cert_chain(out / "server.crt", out / "server.key")
+    client_context = ssl.create_default_context(cafile=out / "ca.crt")
+    client_context.verify_flags |= ssl.VERIFY_X509_STRICT
+    with socket.create_server(("127.0.0.1", 0)) as listener:
+        port = listener.getsockname()[1]
+
+        def serve() -> None:
+            connection, _ = listener.accept()
+            with server_context.wrap_socket(connection, server_side=True) as tls:
+                tls.recv(1)
+
+        thread = threading.Thread(target=serve)
+        thread.start()
+        with (
+            socket.create_connection(("127.0.0.1", port)) as raw,
+            client_context.wrap_socket(raw, server_hostname="127.0.0.1") as tls,
+        ):
+            assert tls.version() == "TLSv1.3"
+            tls.sendall(b"x")
+        thread.join(timeout=5)

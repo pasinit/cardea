@@ -1,0 +1,37 @@
+# SPIRE agent on the Cardea host (ADR-030). Install the configuration as
+# /etc/spire/agent.conf (from agent-cardea.conf).
+#
+# Join-token bootstrap: before the first start, write the node's token to the
+# environment file (root-only):
+#   install -m 0600 /dev/null /etc/spire/agent-join-token.env
+#   echo 'SPIRE_AGENT_JOIN=-joinToken <token>' > /etc/spire/agent-join-token.env
+# Once `spire-agent healthcheck -socketPath /run/spire/agent.sock` succeeds, empty the
+# file (`: > /etc/spire/agent-join-token.env`). Tokens are single-use; later starts
+# re-attest with the agent's stored SVID in /var/lib/spire/agent.
+[Unit]
+Description=SPIRE agent
+After=network-online.target spire-server.service
+Wants=network-online.target spire-server.service
+
+[Service]
+# The unix workload attestor reads callers' process details; it runs as root, as in the
+# SPIRE quickstart. Workloads reach it only through the socket.
+User=root
+EnvironmentFile=-/etc/spire/agent-join-token.env
+ExecStart=/opt/spire/bin/spire-agent run -config /etc/spire/agent.conf $SPIRE_AGENT_JOIN
+Restart=on-failure
+RestartSec=5
+StateDirectory=spire/agent
+StateDirectoryMode=0700
+# /run/spire/agent.sock must be reachable by cardea-kernel.
+RuntimeDirectory=spire
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+MemoryMax=128M
+
+[Install]
+WantedBy=multi-user.target
