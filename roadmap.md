@@ -2,9 +2,11 @@
 
 Updated 2026-09-25. Milestones are dependency-ordered, not calendar promises. M0–M5 are completed infrastructure profiles; M6–M10 are the proposed product sequence for both individual company applications and expansion across departments. See [product direction](product.md), [gaps](docs/product/gaps.md) and [validation](docs/product/validation.md).
 
+Update 2026-10-15: work since M5 has closed kernel gaps for running a first client application's recurring agent work (installed operations, time triggers, remote TLS API, effect reconciliation, agent runs, worker profiles, supervisor schedules, small-host profile). See [ADR-023 to ADR-030](docs/decisions/README.md); most are verified by portable tests only, not yet on Debian.
+
 ## Current Baseline
 
-The customer-escalation demo remains separate. `cardea.kernel` preserves v0.1 records and durable SQLite state. `cardea.service` now provides the M1 authenticated Unix-socket API/client, persisted supervisor provenance, live authority ceilings, deterministic DBOS execution and whole-store recovery. See [M1 quickstart](docs/m1-quickstart.md). M2 adds confined SHA-256/copy workers with inline or explicitly granted immutable-object input, transactional host allocations and durable staging retirement. M3 adds the bounded OpenRouter/native MCP incident task. M4 implements bounded native A2A child delegation; broader tools remain later work.
+`cardea.kernel` preserves v0.1 records and durable SQLite state. `cardea.service` now provides the M1 authenticated Unix-socket API/client, persisted supervisor provenance, live authority ceilings, deterministic DBOS execution and whole-store recovery. See [M1 quickstart](docs/m1-quickstart.md). M2 adds confined SHA-256/copy workers with inline or explicitly granted immutable-object input, transactional host allocations and durable staging retirement. M3 adds the bounded OpenRouter/native MCP incident task. M4 implements bounded native A2A child delegation; broader tools remain later work.
 
 ## Milestone Completion Rule
 

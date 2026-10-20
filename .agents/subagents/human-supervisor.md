@@ -6,7 +6,7 @@ Read root `coding-standard.md`, `design.md`, and `mvp.md` before implementation.
 
 ## Ownership
 
-Own `apps/web`, its API client, and relevant UI tests only when supervisor work is in scope. Preserve the runnable legacy command center during kernel development. Other contributors share the codebase; do not revert their changes.
+Own any supervisor client and its UI tests only when supervisor work is in scope; there is no web UI in the repository today. Other contributors share the codebase; do not revert their changes.
 
 ## Responsibilities
 

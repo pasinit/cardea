@@ -24,7 +24,7 @@ Initial delivery hypothesis: one company per supported Debian installation, admi
 
 M0–M5 establish a tested, bounded execution foundation: authenticated tasks, live supervisor ceilings, durable state, confined hash/copy jobs, one incident-processing agent, native MCP tools and async A2A delegation, plus Debian packaging and recovery. The [M5 report](experiments/m5/M5-REPORT.md) describes the accepted installation profile.
 
-The incident application accepts a bounded batch and one additive input; it is not a general company agent. The old escalation UI is a separate simulated demo. Neither proves useful business outcomes, unattended company operation or market demand. See the [gap assessment](docs/product/gaps.md).
+The incident application accepts a bounded batch and one additive input; it is not a general company agent. Neither proves useful business outcomes, unattended company operation or market demand. See the [gap assessment](docs/product/gaps.md).
 
 ## First application selection
 

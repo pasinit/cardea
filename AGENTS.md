@@ -13,7 +13,7 @@ Prefer established open standards and maintained open-source implementations for
 - Keep candidate, selected, implemented, and verified status separate. Do not silently change existing contracts or mark a milestone complete while its reuse decisions or acceptance checks remain unresolved.
 - Include decision evidence and remaining gaps in handoffs and milestone reviews. This is part of normal autonomous work, not a new requirement to ask the user for permission.
 
-Cardea was rescoped on 2026-09-21 as an agent-first userspace operating layer hosted on Debian/Linux, with future Unix host adapters. The pre-rescope customer-escalation demo lives only on the `archive/legacy-escalation-demo` branch. Use `design.md`, `docs/kernel-contract.md`, `mvp.md`, and `roadmap.md` for current scope. Clearly distinguish proposed primitives from implemented behavior.
+Cardea was rescoped on 2026-09-21 as an agent-first userspace operating layer hosted on Debian/Linux, with future Unix host adapters. The pre-rescope customer-escalation demo was removed on 2026-10-10 and is not part of this repository. Use `design.md`, `docs/kernel-contract.md`, `mvp.md`, and `roadmap.md` for current scope. Clearly distinguish proposed primitives from implemented behavior.
 
 ## Mandatory Authority Ceiling
 
