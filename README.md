@@ -1,8 +1,103 @@
 # Cardea
 
-Cardea is a durable execution kernel for AI agents, running as a userspace service on Debian/Linux. It is for people who run agents unattended and need every action to be authenticated, bounded by a human supervisor's live authority, receipted, and recoverable after a crash.
+**Run AI agents unattended, and know exactly what they did.**
 
-The host OS keeps hardware, processes, networking and low-level isolation. Cardea owns the agent execution contract above it: identity, tasks, installed operations, durable state, events, budgets and recovery.
+Cardea is a kernel for agent work. You hand it a task: an objective, the tools the agent may use and the limits it must stay within. Cardea runs the task under the live authority of a human supervisor and records every tool call with a receipt. It survives crashes and never repeats a side effect it can't prove didn't happen. It runs as a service on a Linux host.
+
+## Why it exists
+
+An agent that runs on a schedule (a daily report, a monitoring job, an inbox sweep) fails in quiet ways:
+
+- **It does too much.** It holds credentials and tools it never needed, so one bad turn can do real damage.
+- **It does things twice.** After a crash or a retry it sends the same email again.
+- **It does nothing, and nobody notices.** A run that "succeeded" without sending its report looks like any other run.
+- **Nobody can say what happened.** The evidence is a chat transcript, if anything.
+
+Cardea treats each of these as a kernel concern, not something every agent has to remember:
+
+| Problem | What Cardea does |
+|---|---|
+| Too much power | Tools are **installed operations**. An agent sees only the ones its task was granted, and grants never exceed its supervisor's current permissions. |
+| Duplicate effects | Every call is written down as an **intent** before it runs. An effect with an idempotency scope can't happen twice, and a call cut off mid-flight is **reconciled** against the destination before anything is retried. |
+| Silent no-ops | A run can declare **expectations**, for example "`messages.send` exactly once". If they aren't met, the run fails. |
+| No evidence | Every call ends in a **receipt**, and the run view lists the calls, cost and turns in order. |
+
+## What it looks like
+
+Ask an agent to write a daily recap and send it once:
+
+```json
+POST /v0.2/agent-runs
+{
+  "request_id": "recap-2026-10-20",
+  "agent_id": "agent-1",
+  "namespace": "team",
+  "objective": "Daily recap",
+  "instructions": "Summarise what changed since the last recap and send it to the team channel.",
+  "operations": ["listings.search", "messages.send"],
+  "context": [{"operation": "notes.recent", "arguments": {"limit": 5}}],
+  "expect": [{"operation": "messages.send", "min_calls": 1, "max_calls": 1}],
+  "harness": "openrouter", "model": "z-ai/glm-4.6",
+  "max_turns": 20, "max_cost_usd": 0.5,
+  "grants": ["objects.read", "objects.write", "models.invoke", "harness:openrouter",
+             "listings.search", "messages.send", "notes.recent"]
+}
+```
+
+Cardea then:
+1. Checks the grants against the supervisor.
+2. Calls `notes.recent` and puts its output in the prompt.
+3. Starts the agent with exactly two tools.
+4. Stops it at 20 turns or $0.50.
+5. Marks the run succeeded only if exactly one message was sent.
+
+`GET /v0.2/tasks/{id}/run` shows what happened, call by call. Put the same request in a **trigger** with a cron schedule and it runs every morning, once per slot, even across restarts.
+
+```mermaid
+flowchart LR
+    C[Client or trigger] -- "POST /v0.2/agent-runs" --> K[Cardea kernel]
+    K -- "authority, lease, bounds" --> K
+    K -- "prompt, MCP URL + token, bounds, model" --> H["Harness<br/>(claude-agent-sdk | opencode)"]
+    H -- "model calls" --> P["Provider<br/>(Anthropic, OpenRouter, Ollama, …)"]
+    H -- "tools/call over MCP" --> E["Per-attempt MCP endpoint<br/>(loopback, bearer token)"]
+    E --> K
+    K -- "intent → receipt" --> O["Installed operations<br/>(in-process or confined worker)"]
+    K -- "output, evidence, receipts" --> C
+```
+
+The agent loop itself is pluggable. A **harness** (the Claude Agent SDK, or OpenCode for OpenRouter, any OpenAI-compatible API or a local model) does the model calls. Cardea gives it nothing but a per-run MCP endpoint that serves the granted operations.
+
+## Try it in two minutes
+
+You need Python 3.12+ and [uv](https://docs.astral.sh/uv/).
+
+```sh
+make install
+make try
+```
+
+`make try` starts the real daemon and walks it through the core cycle:
+1. Submit a task.
+2. See a request beyond the supervisor's authority refused.
+3. `SIGKILL` the daemon mid-task.
+4. Restart it and watch the task resume and finish.
+
+It needs no identity provider, VM or model key, so identity checks are off in this mode ([details](experiments/try/README.md)).
+
+## Where to go next
+
+- **[Getting started](docs/getting-started.md).** Six worked use cases:
+  - a single operation;
+  - an agent run with context;
+  - a scheduled run that must send exactly once;
+  - an idempotent effect with reconciliation;
+  - a confined web-research run;
+  - the same run on Claude, GLM via OpenRouter and a local model.
+- **[Design](design.md) and [kernel contract](docs/kernel-contract.md).** The architecture, the trust model and the host boundary.
+- **[Decision records](docs/decisions/README.md).** Every component choice, with the alternatives and evidence. Cardea reuses open standards wherever they fit: SPIFFE/SPIRE and OIDC for identity, DBOS for durable execution, MCP for tools, A2A for delegation, systemd and bubblewrap for confinement.
+- **Running it for real.** The [M1 quickstart](docs/m1-quickstart.md) (authenticated setup), the [Debian package](packaging/README.md) and the [operations guide](docs/operations.md).
+
+## How it's built
 
 ```mermaid
 flowchart LR
@@ -33,52 +128,30 @@ flowchart LR
     agent -- tool calls --> ops
 ```
 
-Every caller is authenticated per request; a network address or socket access grants nothing. Each operation call records a durable intent, passes a live authority check and produces a receipt. An effect interrupted mid-flight becomes `outcome_unknown` and is reconciled against the destination, never retried on assumption.
+- **Identity.** Every request is authenticated, with a SPIFFE JWT-SVID or an OIDC token. A network address or socket access grants nothing.
+- **Authority.** A task's permissions are intersected with its supervisor's live permissions at admission, dispatch, retry and resume. Revoking the supervisor stops everything below it.
+- **Durability.** Tasks run on DBOS over SQLite, so they resume after a crash.
+- **Confinement.** Operations that touch the host or the web run as confined workers (`systemd-run` plus bubblewrap) behind an egress proxy.
 
-## Status
+The code is in `apps/api/src/cardea`:
+- `kernel`: records, lifecycle and the store;
+- `service`: the daemon, API, operations and triggers;
+- `runtime`: harnesses, MCP and A2A;
+- `hosts`: the Debian launcher and workers.
 
-- **M0–M5 complete** for their documented bounded profiles: authenticated kernel, confined Debian host jobs, an OpenRouter/MCP agent task, A2A delegation, Debian packaging and operational recovery. See the [roadmap](roadmap.md).
-- **Implemented with portable tests, not yet verified on Debian** (2026-10-15): [installed operation registry](docs/decisions/023-installed-operation-registry.md), [time triggers](docs/decisions/024-time-triggers.md), [remote TLS API](docs/decisions/025-remote-kernel-api.md), [effect idempotency and reconciliation](docs/decisions/026-effect-idempotency-and-reconciliation.md), [agent runs](docs/decisions/027-agent-runs.md), [worker profiles](docs/decisions/028-configurable-worker-profiles.md), [supervisor schedules](docs/decisions/029-supervisor-schedules-expectations-and-run-evidence.md), [small-host profile](docs/decisions/030-small-host-profile.md).
-- Company adoption and general-purpose application support are unvalidated.
+The API is `v0.2` and still changing. Its OpenAPI spec is at [`packages/kernel-openapi.json`](packages/kernel-openapi.json).
 
-## Quickstart
-
-Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
-
-```sh
-make install
-make try
-```
-
-`make try` runs the real daemon through submit, authority denial, `SIGKILL`, restart, resume and verification in a few seconds, with no SPIRE, Keycloak, VM or model key. Identity in this path is **unenforced**; see [experiments/try](experiments/try/README.md).
-
-To see what you can run on Cardea (single operations, agent runs on Claude, OpenRouter or a local model, schedules, idempotent effects), read [Getting started](docs/getting-started.md). For an authenticated setup, follow the [M1 quickstart](docs/m1-quickstart.md). For a real host, use the [Debian package](packaging/README.md) and the [operations guide](docs/operations.md).
-
-## Development
+## Contributing
 
 | Command | What it does |
 |---|---|
-| `make test` | All portable suites (API, load package, A2A, `try`) |
+| `make test` | All portable test suites |
 | `make lint` / `make typecheck` | Ruff and mypy, as in CI |
-| `make kernel-test` | Portable record, lifecycle and retry contract tests |
-| `make standards-test` | Identity, Unix-socket transport and digest fit checks |
-| `make m1-demo` | Authenticated submit/crash/restart/resume demo |
-| `make m1-test` | Daemon acceptance with real SPIRE and Keycloak ([setup](experiments/m1/README.md)) |
-| `make kernel-openapi` | Export the v0.2 API to `packages/kernel-openapi.json` |
-| `make kernel-schema` / `make kernel-demo` | Print v0.1 JSON Schemas / run the two-process persistence demo |
+| `make m1-demo` | Authenticated submit, crash, restart and resume demo |
+| `make kernel-openapi` | Regenerate the OpenAPI spec |
 
-`make help` lists the rest, including the workflow-engine fit suites (`dbos-fit`, `temporal-fit`, `absurd-fit`, `hatchet-fit`, `spire-fit`) and the M2–M5 acceptance targets.
-
-The code lives in `apps/api/src/cardea`: `kernel` (records, lifecycle, SQLite store), `service` (authenticated daemon, client, operations, triggers), `runtime` (model, MCP and A2A adapters) and `hosts` (Debian launcher and workers).
-
-## Documentation
-
-- [Getting started](docs/getting-started.md): six runnable use cases, from one operation to the same agent run on three harnesses.
-- [Docs index](docs/README.md): design, kernel contract, components, decision records and product planning.
-- [Design](design.md) and [kernel contract](docs/kernel-contract.md): architecture, host boundary, trust model.
-- [Decision records](docs/decisions/README.md): every component choice with alternatives and evidence.
-- [Coding standard](coding-standard.md) and [open-source-first policy](docs/standards-first.md).
+`make help` lists the rest. Read the [coding standard](coding-standard.md) and the [open-source-first policy](docs/standards-first.md) before proposing a new component.
 
 ## License and security
 
-Licensed under the [Apache License 2.0](LICENSE). See [SECURITY.md](SECURITY.md) for the trust model and how to report vulnerabilities.
+Cardea is licensed under the [Apache License 2.0](LICENSE). See [SECURITY.md](SECURITY.md) for the trust model and how to report a vulnerability.
