@@ -38,7 +38,7 @@ Every task needs `objects.read` and `objects.write`. Agent runs also need `model
 
 **You get:**
 - `202` with a `TaskView`: `task.state` is `queued`.
-- `GET /v0.2/tasks/{task_id}/run` then shows `state: "succeeded"`, `output` (the operation's own output) and one receipted call (`operation_id: "execute"`).
+- `GET /v0.2/tasks/{task_id}/run` then shows `state: "succeeded"`, `output` (the operation's own output) and one receipted call (`operation_id: "execute"`, `calls_total: 1`).
 - Retrying the same `request_id` with the same body returns the same task. Changing the body is `409 request_conflict`.
 
 ## 2. An agent run with context operations
@@ -65,8 +65,10 @@ Every task needs `objects.read` and `objects.write`. Agent runs also need `model
 - Before the session, Cardea calls `notes.recent` (receipt `ctx-01`) and puts its output in the prompt as a `<context>` block ([ADR-031](decisions/031-agent-run-context-operations.md)).
 - The harness sees exactly two tools, `listings-search` and `messages-send`. Each call is receipted as `call-0001`, `call-0002`, ….
 - The run succeeds only if `messages.send` succeeded exactly once.
-- `GET /v0.2/tasks/{id}/run` shows `output.text`, `turns`, `cost_usd`, `harness`, `model` and every call in order.
-- `GET /v0.2/tasks/{id}/agent-receipts` shows the full receipts.
+- `GET /v0.2/tasks/{id}/run` shows `output.text`, `turns`, `cost_usd`, `harness`, `model` and the calls in order. Responses stay under a size cap:
+  - calls come one page at a time, with previews of their arguments and results; `calls_total` counts them all, and you pass `calls_next` as `?after=` for the next page;
+  - a large output is trimmed (`output_truncated: true`), and `GET /v0.2/tasks/{id}/output` returns it whole.
+- `GET /v0.2/tasks/{id}/agent-receipts` pages through the full receipts the same way.
 
 ## 3. A scheduled agent run that must send one message
 
