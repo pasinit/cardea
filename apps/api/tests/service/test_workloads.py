@@ -9,6 +9,7 @@ import pytest
 from fastapi.encoders import jsonable_encoder
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
+from mcp import types
 from mcp.client.session import ClientSession
 from pydantic import BaseModel, ValidationError
 from test_agent_runs import (
@@ -18,6 +19,7 @@ from test_agent_runs import (
     FakeSession,
     Tools,
     call,
+    calls,
     descriptor,
     routine,
     run_request,
@@ -331,6 +333,67 @@ def test_exceeded_expectation_fails_immediately(
     assert AgentRunRuntime(kernel).execute(task_id) == "failed"
     with kernel.database.engine.begin() as conn, borrow(conn) as tx:
         assert cast(Any, tx.get_task(task_id).failure).code == "expectation_exceeded"
+
+
+async def sends_then_stalls(client: ClientSession, request: SessionRequest) -> SessionResult:
+    sent = await call(client, "mail-send", to="user@example.invalid", body="3 new listings")
+    assert not sent.is_error
+    return SessionResult(text="", is_error=True, stop_reason="error_max_turns")
+
+
+def test_deduplicated_retry_counts_as_one_applied_effect(
+    kernel: Kernel, tools: Tools, session: FakeSession
+) -> None:
+    async def resends(client: ClientSession, request: SessionRequest) -> SessionResult:
+        # The retry is told which effects already happened, by operation id.
+        assert "already succeeded in an earlier attempt" in request.prompt
+        assert "- mail-send (call-0001)" in request.prompt
+        again = await call(client, "mail-send", to="user@example.invalid", body="Three listings")
+        assert not again.is_error
+        text = cast(types.TextContent, again.content[0]).text
+        assert text.startswith("Already done earlier in this scope; not repeated.")
+        return SessionResult(text="The recap was already sent.", is_error=False)
+
+    session.scripts = [sends_then_stalls, resends]
+    task_id = submit(kernel, expect=[{"operation": "mail.send", "min_calls": 1, "max_calls": 1}])
+    assert AgentRunRuntime(kernel).execute(task_id) == "succeeded"
+    assert len(tools.sent) == 1
+    sends = [r for r in calls(kernel, task_id) if r.request.name == "mail.send"]
+    assert len(sends) == 2
+    assert sends[1].result is not None and sends[1].result["deduplicated"] is True
+
+
+def test_deduplicated_call_does_not_satisfy_a_second_required_effect(
+    kernel: Kernel, tools: Tools, session: FakeSession
+) -> None:
+    async def resends(client: ClientSession, request: SessionRequest) -> SessionResult:
+        await call(client, "mail-send", to="user@example.invalid", body="again")
+        return SessionResult(text="Sent.", is_error=False)
+
+    session.scripts = [sends_then_stalls, resends]
+    task_id = submit(kernel, expect=[{"operation": "mail.send", "min_calls": 2}])
+    assert AgentRunRuntime(kernel).execute(task_id) == "failed"
+    assert len(tools.sent) == 1
+    with kernel.database.engine.begin() as conn, borrow(conn) as tx:
+        assert cast(Any, tx.get_task(task_id).failure).code == "expectation_unmet"
+
+
+def test_distinct_effects_across_attempts_still_exceed_the_expectation(
+    kernel: Kernel, tools: Tools, session: FakeSession
+) -> None:
+    async def sends_elsewhere(client: ClientSession, request: SessionRequest) -> SessionResult:
+        sent = await call(client, "mail-send", to="other@example.invalid", body="recap")
+        assert not sent.is_error
+        return SessionResult(text="Sent another.", is_error=False)
+
+    session.scripts = [sends_then_stalls, sends_elsewhere]
+    task_id = submit(kernel, expect=[{"operation": "mail.send", "min_calls": 1, "max_calls": 1}])
+    assert AgentRunRuntime(kernel).execute(task_id) == "failed"
+    assert len(tools.sent) == 2
+    with kernel.database.engine.begin() as conn, borrow(conn) as tx:
+        failure = cast(Any, tx.get_task(task_id).failure)
+        assert failure.code == "expectation_exceeded"
+        assert failure.message == "Exceeds exactly 1 successful call(s) of mail-send"
 
 
 # Run evidence

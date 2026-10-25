@@ -18,6 +18,7 @@
    - A `managed_by` column (migration `m6_003`) separates host-owned triggers, which provisioning replaces as a set, from supervisor-owned ones, which provisioning never touches. Neither owner can modify the other's trigger.
 3. **Expectations (C5).** `AgentRunRequest.expect` lists conditions of the form "N to M successful calls of operation X".
    - The prompt states them.
+   - Calls are counted as distinct applied effects: a deduplicated call (replayed from an earlier call in the same effect scope) does not count again. Calls of an operation without an idempotency scope each count once.
    - A session that ends with an unmet expectation is retried while attempts remain, then fails with `expectation_unmet`.
    - Exceeding a maximum fails at once with `expectation_exceeded`, since an effect cannot be undone.
    - Successful calls include deduplicated ones (the effect happened once, earlier in the scope) and reconciled ones.
