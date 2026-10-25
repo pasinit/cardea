@@ -24,6 +24,7 @@ import logging
 import os
 import signal
 import tempfile
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -31,6 +32,8 @@ from typing import Any
 
 import httpx
 
+from cardea.runtime import activity as activities
+from cardea.runtime.activity import AttemptActivity
 from cardea.runtime.harness import HarnessRequest, HarnessResult
 
 log = logging.getLogger(__name__)
@@ -294,7 +297,10 @@ class OpenCodeHarness:
         model = request.model or self.default_model
         if model not in self.prices:
             return HarnessResult.failed("model_not_allowed")
+        activity = activities.current()
+        activity.redact(request.mcp_token, self.api_key)
         if not await self.preflight(request):
+            activity.event("tool endpoint preflight failed", logging.WARNING)
             return HarnessResult.failed(TOOLS_UNAVAILABLE)
         meter = Meter(self.prices[model])
         with tempfile.TemporaryDirectory(prefix="cardea-opencode-") as directory:
@@ -303,8 +309,9 @@ class OpenCodeHarness:
             home, work = root / "home", root / "work"
             for path in (home, home / "tmp", work):
                 path.mkdir(mode=0o700)
+            argv = self.command(model)
             process = await asyncio.create_subprocess_exec(
-                *self.command(model),
+                *argv,
                 cwd=work,
                 env=self.environment(request, model, home),
                 stdin=asyncio.subprocess.PIPE,
@@ -313,21 +320,30 @@ class OpenCodeHarness:
                 start_new_session=True,
                 limit=MAX_LINE,
             )
+            began = time.monotonic()
+            # The argument vector holds no secret: credentials travel in the environment.
+            activity.process_started(process.pid, argv)
             try:
-                return await self._supervise(process, request, meter)
+                return await self._supervise(process, request, meter, activity)
             finally:
                 await self._kill(process)
+                activity.process_exited(process.returncode, time.monotonic() - began)
 
     async def _supervise(
-        self, process: asyncio.subprocess.Process, request: HarnessRequest, meter: Meter
+        self,
+        process: asyncio.subprocess.Process,
+        request: HarnessRequest,
+        meter: Meter,
+        activity: AttemptActivity | None = None,
     ) -> HarnessResult:
         assert process.stdin and process.stdout and process.stderr
+        activity = activity or activities.current()
         process.stdin.write(request.prompt.encode())
         await process.stdin.drain()
         process.stdin.close()
-        watch = asyncio.ensure_future(self._watch_logs(process.stderr))
+        watch = asyncio.ensure_future(self._watch_logs(process.stderr, activity))
         try:
-            reading = asyncio.ensure_future(self._read(process.stdout, request, meter))
+            reading = asyncio.ensure_future(self._read(process.stdout, request, meter, activity))
             done, _ = await asyncio.wait({reading, watch}, return_when=asyncio.FIRST_COMPLETED)
             if watch in done and watch.exception() is not None:
                 reading.cancel()
@@ -335,6 +351,7 @@ class OpenCodeHarness:
             await reading
             code = await process.wait()
         except Stop as stop:
+            activity.event("harness stopped by Cardea", logging.WARNING, reason=stop.reason)
             return HarnessResult(
                 text="",
                 success=False,
@@ -363,8 +380,13 @@ class OpenCodeHarness:
         )
 
     async def _read(
-        self, stream: asyncio.StreamReader, request: HarnessRequest, meter: Meter
+        self,
+        stream: asyncio.StreamReader,
+        request: HarnessRequest,
+        meter: Meter,
+        activity: AttemptActivity | None = None,
     ) -> None:
+        activity = activity or activities.current()
         async for line in stream:
             try:
                 event = json.loads(line)
@@ -376,6 +398,7 @@ class OpenCodeHarness:
                 meter.record(event)
             except (KeyError, TypeError, ValueError):
                 raise Stop("harness_output_invalid") from None
+            observe(activity, event, meter)
             if event.get("type") == "tool_use" and not meter.tools[-1].startswith(f"{SERVER}_"):
                 raise Stop("harness_tool_violation")
             if event.get("type") == "step_finish":
@@ -385,10 +408,14 @@ class OpenCodeHarness:
                     raise Stop("max_turns")
 
     @staticmethod
-    async def _watch_logs(stream: asyncio.StreamReader) -> None:
-        """Stop the run when OpenCode reports Cardea's MCP server failed to connect."""
+    async def _watch_logs(
+        stream: asyncio.StreamReader, activity: AttemptActivity | None = None
+    ) -> None:
+        """Log OpenCode's stderr; stop the run when it reports Cardea's MCP server failed."""
+        activity = activity or activities.current()
         async for raw in stream:
             line = raw.decode(errors="replace")
+            activity.harness_output(line)
             if f"key={SERVER}" in line and "status=failed" in line:
                 raise Stop(TOOLS_UNAVAILABLE)
 
@@ -403,3 +430,28 @@ class OpenCodeHarness:
             with contextlib.suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGKILL)
             await process.wait()
+
+
+def observe(activity: AttemptActivity, event: Mapping[str, Any], meter: Meter) -> None:
+    """Log one OpenCode event as metadata: step boundaries, token counts, tool names, codes."""
+    kind = event.get("type")
+    part = event.get("part") or {}
+    if kind == "step_start":
+        activity.model_activity("request", turns=meter.steps)
+    elif kind == "step_finish":
+        tokens = part.get("tokens") or {}
+        activity.model_activity(
+            "turn",
+            stop_reason=str(part.get("reason", "")) or None,
+            input_tokens=tokens.get("input"),
+            output_tokens=tokens.get("output"),
+            cost_usd=round(meter.cost, 6),
+        )
+    elif kind == "tool_use":
+        state = part.get("state") or {}
+        status = state.get("status") if isinstance(state, dict) else None
+        activity.event("harness tool event", tools=[str(part.get("tool", ""))[:64]], outcome=status)
+    elif kind == "error":
+        error = event.get("error") or {}
+        name = error.get("name", "error") if isinstance(error, dict) else "error"
+        activity.event("harness error event", logging.WARNING, error=str(name)[:64])

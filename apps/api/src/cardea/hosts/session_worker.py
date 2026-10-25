@@ -19,6 +19,7 @@ this worker checks before running anything. The result leaves on stdout as
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import sys
 from pathlib import Path
@@ -76,7 +77,20 @@ def opencode(document: dict[str, Any]) -> Harness:
 KINDS = {"claude-agent-sdk": claude, "opencode": opencode}
 
 
+def quiet_logging() -> None:
+    """Drop the harness adapters' log records inside the worker.
+
+    The unit duplicates stdout (the JSON result file) onto stderr, so anything written to
+    stderr would corrupt the result; Python's last-resort handler would otherwise print
+    warnings there.
+    """
+    root = logging.getLogger("cardea")
+    root.handlers[:] = [logging.NullHandler()]
+    root.propagate = False
+
+
 def main() -> int:
+    quiet_logging()
     document = json.loads(sys.stdin.buffer.read(MAX_INPUT + 1)[:MAX_INPUT])
     kind = os.environ.get("CARDEA_HARNESS_KIND", "claude-agent-sdk")
     if kind not in KINDS:

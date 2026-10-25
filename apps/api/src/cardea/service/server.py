@@ -1,7 +1,6 @@
 """Single-owner native daemon entry point: private Unix socket, optional TLS 1.3 listener."""
 
 import asyncio
-import json
 import logging
 import os
 import socket
@@ -27,35 +26,13 @@ from cardea.service.confined import ConfinedAgentSession, Workers
 from cardea.service.database import Database, Fault, private_file, service_lock
 from cardea.service.host_runtime import HostRuntime
 from cardea.service.kernel import Kernel
+from cardea.service.logs import configure_logging
 from cardea.service.models import NetworkListener, ServiceConfig
 from cardea.service.operation_runtime import OperationRuntime
 from cardea.service.operations import Registry
 from cardea.service.runtime import Runtime
 
 log = logging.getLogger(__name__)
-
-# Structured fields callers may attach via `extra`; anything else is dropped.
-LOG_FIELDS = ("task_id", "code", "reason", "method", "path")
-
-
-class JournalFormatter(logging.Formatter):
-    """One JSON object per line for journald; never includes request bodies or credentials."""
-
-    def format(self, record: logging.LogRecord) -> str:
-        entry = {"level": record.levelname, "logger": record.name, "msg": record.getMessage()}
-        entry |= {k: getattr(record, k) for k in LOG_FIELDS if hasattr(record, k)}
-        if record.exc_info:
-            entry["exc"] = self.formatException(record.exc_info)
-        return json.dumps(entry, default=str)
-
-
-def configure_logging() -> None:
-    handler = logging.StreamHandler()
-    handler.setFormatter(JournalFormatter())
-    root = logging.getLogger("cardea")
-    root.handlers[:] = [handler]
-    root.setLevel(os.environ.get("CARDEA_LOG_LEVEL", "INFO").upper())
-    root.propagate = False
 
 
 def api_config(app: ASGIApp) -> uvicorn.Config:
@@ -227,7 +204,7 @@ def serve(
     """Run the daemon. The installed CLI never passes `identity`; only test/dev launchers do."""
     if any(name.startswith("DBOS_") for name in os.environ):
         raise Fault("unsafe_environment", "Remove inherited DBOS environment overrides", 500)
-    configure_logging()
+    configure_logging(config.log_level)
     with service_lock(config.data_dir):
         database = Database(config.data_dir)
         auth: IdentityProvider | None = None
@@ -281,6 +258,7 @@ def serve(
                 max_task_request_bytes=config.max_task_request_bytes,
                 run_preview_bytes=config.run_preview_bytes,
             )
+            kernel.attempt_logging = config.attempt_logging
             if config.agent_session:
                 kernel.session_limit = config.agent_session.concurrent_sessions
             elif harnesses is not None:

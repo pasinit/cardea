@@ -30,6 +30,7 @@ from typing import Any
 from pydantic import JsonValue
 
 from cardea.hosts.debian import WorkerHost
+from cardea.runtime import activity as activities
 from cardea.runtime.harness import HarnessRequest, HarnessResult
 from cardea.service.database import Fault
 from cardea.service.operations import (
@@ -338,10 +339,19 @@ class ConfinedAgentSession:
         self.workers.reap(self.job(job_key))
 
     async def run(self, request: HarnessRequest) -> HarnessResult:
+        job = self.job(request.job_key or request.mcp_token)
+        activity = activities.current()
+        # The harness runs inside the worker, so its turns and stderr are not visible here;
+        # the unit name ties this attempt to the host's record of the worker.
+        activity.event(
+            "confined session starting",
+            job=job,
+            unit=f"cardea-host-{job}.service",
+        )
         try:
             self.check()
             output = await self.workers.run(
-                self.job(request.job_key or request.mcp_token),
+                job,
                 {
                     "model": request.model or self.model,
                     "request": request.model_dump(
@@ -354,13 +364,24 @@ class ConfinedAgentSession:
                 deadline=time.time() + max(1.0, request.timeout_seconds),
             )
         except Fault as refused:
+            activity.event("confined session refused", logging.WARNING, code=refused.code, job=job)
             return HarnessResult.failed(refused.code)
         except ExecutorBusy:
+            activity.event("confined session found no free slot", logging.WARNING, job=job)
             return HarnessResult.failed("executor_busy")
         except OperationRejected:
+            activity.event("confined session did not start", logging.WARNING, job=job)
             return HarnessResult.failed("worker_not_started")
         except WorkerFailed as failed:
+            activity.event(
+                "confined session worker failed",
+                logging.WARNING,
+                code=failed.code,
+                reason=failed.summary,
+                job=job,
+            )
             return HarnessResult.failed(failed.code)
+        activity.event("confined session finished", job=job)
         try:
             fields = {
                 key: output[key]
