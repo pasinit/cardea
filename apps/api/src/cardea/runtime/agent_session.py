@@ -6,11 +6,15 @@ The kernel treats a session as an opaque unit. Every tool it can use is served b
 per-attempt Cardea MCP endpoint; the adapter's job is to make sure nothing else is.
 """
 
+import logging
 import os
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
+from cardea.runtime import activity as activities
+from cardea.runtime.activity import AttemptActivity
 from cardea.runtime.harness import Harness, HarnessRequest, HarnessResult
 
 # Inherited variables a session may keep; all others are blanked (secrets included).
@@ -102,13 +106,33 @@ class ClaudeAgentSession:
     async def run(self, request: HarnessRequest) -> HarnessResult:
         from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 
+        activity = activities.current()
+        activity.redact(request.mcp_token, self.api_key, self.oauth_token)
+        began = time.monotonic()
         with tempfile.TemporaryDirectory(prefix="cardea-session-") as directory:
             os.chmod(directory, 0o700)
-            options = ClaudeAgentOptions(**self.options(request, Path(directory)))
+            options = ClaudeAgentOptions(
+                **self.options(request, Path(directory)),
+                # The CLI's stderr, line by line, bounded and scrubbed (never a debug dump).
+                stderr=activity.harness_output,
+            )
             result: ResultMessage | None = None
-            async for message in query(prompt=request.prompt, options=options):
-                if isinstance(message, ResultMessage):
-                    result = message
+            activity.event("sdk session starting")
+            try:
+                async for message in query(prompt=request.prompt, options=options):
+                    observe(activity, message)
+                    if isinstance(message, ResultMessage):
+                        result = message
+            except Exception as error:
+                activity.event(
+                    "sdk session failed",
+                    logging.WARNING,
+                    error=type(error).__name__,
+                    returncode=getattr(error, "exit_code", None),
+                    duration_s=round(time.monotonic() - began, 3),
+                )
+                raise
+        activity.event("sdk session ended", duration_s=round(time.monotonic() - began, 3))
         if result is None:
             return HarnessResult.failed("no_result")
         stop = str(result.stop_reason or result.subtype)
@@ -121,3 +145,60 @@ class ClaudeAgentSession:
             stop_reason=stop,
             usage=dict(result.usage or {}),
         )
+
+
+def observe(activity: AttemptActivity, message: object) -> None:
+    """Log one SDK message as metadata: kinds, counts, tool names, codes; never content."""
+    from claude_agent_sdk import (
+        AssistantMessage,
+        RateLimitEvent,
+        ResultMessage,
+        SystemMessage,
+        ToolUseBlock,
+        UserMessage,
+    )
+
+    if isinstance(message, AssistantMessage):
+        usage = message.usage or {}
+        activity.model_activity(
+            "turn",
+            logging.WARNING if message.error else logging.INFO,
+            blocks=",".join(type(block).__name__ for block in message.content),
+            tools=[b.name for b in message.content if isinstance(b, ToolUseBlock)] or None,
+            stop_reason=message.stop_reason,
+            error=message.error,
+            input_tokens=usage.get("input_tokens"),
+            output_tokens=usage.get("output_tokens"),
+        )
+    elif isinstance(message, UserMessage):
+        # Tool results went back to the model; the next model call is now in flight.
+        activity.model_activity("request", logging.DEBUG)
+    elif isinstance(message, ResultMessage):
+        activity.model_activity(
+            "result",
+            logging.WARNING if message.is_error else logging.INFO,
+            outcome=message.subtype,
+            stop_reason=message.stop_reason,
+            turns=message.num_turns,
+            cost_usd=message.total_cost_usd,
+            code=message.api_error_status,
+            reason=message.terminal_reason,
+        )
+    elif isinstance(message, SystemMessage):
+        servers = message.data.get("mcp_servers") if isinstance(message.data, dict) else None
+        mcp = (
+            [f"{s.get('name')}:{s.get('status')}" for s in servers if isinstance(s, dict)]
+            if isinstance(servers, list)
+            else None
+        )
+        activity.event(f"sdk system message: {message.subtype}", step=message.subtype, mcp=mcp)
+    elif isinstance(message, RateLimitEvent):
+        info = message.rate_limit_info
+        activity.model_activity(
+            "rate_limit",
+            logging.INFO if info.status == "allowed" else logging.WARNING,
+            outcome=info.status,
+            reason=info.rate_limit_type,
+        )
+    else:
+        activity.event(f"sdk message: {type(message).__name__}", logging.DEBUG)

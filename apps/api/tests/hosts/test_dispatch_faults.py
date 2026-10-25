@@ -21,7 +21,7 @@ from cardea.service import host_runtime
 from cardea.service.database import Fault, borrow
 from cardea.service.host_runtime import HostRuntime
 from cardea.service.kernel import Kernel
-from cardea.service.server import JournalFormatter
+from cardea.service.logs import JournalFormatter
 
 
 @pytest.mark.parametrize(

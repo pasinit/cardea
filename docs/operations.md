@@ -50,6 +50,32 @@ Every subsequent restore creates another prefix. Stable request IDs can still re
 
 Use local journald for operational investigation. Raw logs are not a redacted support bundle. The host owner controls journald limits using its standard configuration; Cardea does not change global host log retention.
 
+### Agent-run attempt logs
+
+The daemon writes one JSON object per line to stderr, which journald stores under `cardea-kernel`. `log_level` in the service configuration sets the level (default `INFO`); the `CARDEA_LOG_LEVEL` environment variable overrides it. Every agent-run attempt logs, with its `task_id` and `attempt`:
+
+- `attempt started` (harness, model, lease expiry, attempt timeout) and `attempt finished` (outcome, failure code, duration, turns and tool-call counts);
+- `harness process started` / `harness process exited` (pid, argument vector, return code, signal, duration) for process harnesses, and `confined session starting` with the worker's `unit` for confined ones;
+- `model request` / `model turn` / `model result` as the harness reports them (token counts, stop reason, provider error status, tool names), and `sdk system message: init` with the MCP server status;
+- `tool call started` / `tool call finished` (operation, `operation_id`, duration, outcome code and reason), plus refused and deduplicated calls;
+- `harness stderr: ...`: the harness's stderr line by line;
+- `attempt still running`, every `attempt_logging.heartbeat_seconds`, with `since_model_s`, `since_tool_s`, `since_output_s` (absent means never in this attempt) and `tools_in_flight`. A stall shows here first. A growing `since_model_s` with no tool in flight means the harness is waiting on the model API. A tool in flight with a growing `since_tool_s` means a tool is hung. No heartbeat at all means the kernel itself is stuck.
+- lease expiry, worker reaping and recovery of an interrupted attempt, at `WARNING`.
+
+Logs never contain tool arguments or outputs, prompts, completions, credential files, provider keys or the per-attempt endpoint token. Harness stderr is the one free-text source. It is truncated to `output_line_bytes` per line and `output_max_bytes` per attempt (later lines are counted, not logged), and scrubbed of registered secrets, bearer tokens and key-like assignments. A confined session's harness runs inside its worker, whose stderr shares the result file, so its turns and stderr are not visible in the kernel log yet. Use its tool calls and the worker unit name.
+
+```sh
+journalctl -u cardea-kernel -o cat --since -2h | jq -c 'select(.task_id == "task-...")'
+journalctl -u cardea-kernel -o cat -f | jq -c 'select(.msg == "attempt still running")'
+```
+
+With `attempt_logging.files` set, each attempt's records are also written, with timestamps, to `<data_dir>/attempt-logs/<task_id>-<attempt>.log` (directory `0700`, files `0600`). Only the newest `files_retained` files are kept. The files receive the same records at the same level as the service log.
+
+```json
+"log_level": "INFO",
+"attempt_logging": {"heartbeat_seconds": 60, "output_line_bytes": 2048, "output_max_bytes": 262144, "files": false, "files_retained": 200}
+```
+
 ## Retention and deletion
 
 Task, object, event, provenance, budget, receipt and idempotency history is retained for the lifetime of a store. Host payload cleanup is recoverable and retains reconciliation tombstones. Partial history or tombstone garbage collection is unsupported because deleting it could destroy evidence or permit duplicate effects.

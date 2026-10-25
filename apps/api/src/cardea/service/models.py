@@ -327,6 +327,20 @@ class NetworkListener(Record):
     client_ca_file: Path | None = None
 
 
+class AttemptLogging(Record):
+    """Observability of agent-run attempts: heartbeat, harness output bounds, log files."""
+
+    # Seconds between "attempt still running" lines per active attempt; 0 turns them off.
+    heartbeat_seconds: Annotated[int, Field(strict=True, ge=0, le=3600)] = 60
+    # Harness stderr (and SDK diagnostics): bytes kept per line, and logged per attempt.
+    output_line_bytes: Annotated[int, Field(strict=True, ge=256, le=65536)] = 2048
+    output_max_bytes: Annotated[int, Field(strict=True, ge=0, le=16777216)] = 262144
+    # Also write each attempt's records to <data_dir>/attempt-logs/<task_id>-<attempt>.log,
+    # keeping the newest `files_retained` files.
+    files: Annotated[bool, Field(strict=True)] = False
+    files_retained: Annotated[int, Field(strict=True, ge=1, le=100000)] = 200
+
+
 class ServiceConfig(Record):
     data_dir: Path
     spiffe_socket: str
@@ -352,6 +366,9 @@ class ServiceConfig(Record):
     max_task_request_bytes: Annotated[
         int, Field(strict=True, ge=4096, le=MAX_TASK_REQUEST_BYTES)
     ] = DEFAULT_MAX_TASK_REQUEST_BYTES
+    # Service log level on stderr (journald under systemd); CARDEA_LOG_LEVEL overrides it.
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+    attempt_logging: AttemptLogging = AttemptLogging()
 
     @model_validator(mode="after")
     def one_harness_source(self) -> Self:

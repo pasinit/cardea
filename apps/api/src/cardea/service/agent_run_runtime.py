@@ -9,7 +9,8 @@ import asyncio
 import json
 import logging
 import time
-from contextlib import suppress
+from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager, suppress
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Literal
@@ -31,13 +32,16 @@ from cardea.kernel.models import (
     VerificationRecord,
 )
 from cardea.kernel.store import KernelTransaction
+from cardea.runtime import activity as activities
+from cardea.runtime.activity import AttemptActivity, OutputLimits
 from cardea.runtime.harness import Harness, HarnessRequest, HarnessResult
 from cardea.service import invocation
 from cardea.service.confined import ConfinedAgentSession, WorkerFailed
 from cardea.service.database import Fault, borrow
 from cardea.service.kernel import TERMINAL, Kernel
+from cardea.service.logs import ATTEMPT_LOGS, attempt_log_file
 from cardea.service.models import AgentRunRequest, now
-from cardea.service.operations import OperationRejected
+from cardea.service.operations import Handler, OperationContext, OperationRejected
 from cardea.service.policy import Policy
 from cardea.service.tool_endpoint import ToolEndpoint, operation_name, tool_name
 
@@ -111,6 +115,8 @@ def attempt_lease_seconds(request: AgentRunRequest) -> float:
 class AgentRunRuntime:
     def __init__(self, kernel: Kernel) -> None:
         self.kernel = kernel
+        # The attempt in progress; tool calls arrive on the endpoint's thread and report here.
+        self.activity: AttemptActivity | None = None
 
     # Authority
 
@@ -155,10 +161,20 @@ class AgentRunRuntime:
                     continue
                 return started
             request, lease, attempt = started
-            self.kernel.fault("agent_run.attempt_started")
-            result = self._attempt(task_id, request, lease, attempt)
-            self.kernel.fault("agent_run.before_finish")
-            outcome = self._finish(task_id, request, lease, attempt, result)
+            with self._observe(task_id, request, lease, attempt) as activity:
+                self.kernel.fault("agent_run.attempt_started")
+                result = self._attempt(task_id, request, lease, attempt)
+                self.kernel.fault("agent_run.before_finish")
+                outcome = self._finish(task_id, request, lease, attempt, result)
+                activity.event(
+                    "attempt finished",
+                    logging.INFO if outcome in {"succeeded", "retry"} else logging.WARNING,
+                    outcome=outcome,
+                    reason=_reason(result) if result.is_error else None,
+                    code=self._failure_code(task_id) if outcome == "failed" else None,
+                    duration_s=round(activity.clock() - activity.started, 3),
+                    **activity.summary(),
+                )
             if outcome == "retry":
                 continue
             if outcome == "uncertain":
@@ -175,6 +191,11 @@ class AgentRunRuntime:
                 return task.state.value
             if task.state is TaskState.RUNNING:
                 # An interrupted attempt: its lease must expire before anything else runs.
+                expires = task.lease.expires_at if task.lease else None
+                log.warning(
+                    "found an interrupted attempt; waiting for its lease",
+                    extra={"task_id": task_id, "lease_expires_at": expires},
+                )
                 return "recover"
             if task.state is TaskState.SUSPENDED:
                 task = tx.change_task(
@@ -193,6 +214,10 @@ class AgentRunRuntime:
                     expected_revision=task.revision,
                     at=now(),
                     failure=KernelFailure(code=error.code, message=error.message),
+                )
+                log.warning(
+                    "attempt refused before it started",
+                    extra={"task_id": task_id, "attempt": attempt, "code": error.code},
                 )
                 return "failed"
             # Record the attempt before it starts, so a crash cannot repeat its number and
@@ -251,6 +276,10 @@ class AgentRunRuntime:
                 ).one()
             seen = Task.model_validate_json(row[0])
             if seen.lease is not None and now() >= seen.lease.expires_at:
+                log.warning(
+                    "attempt lease expired; stopping its workers and fencing it",
+                    extra={"task_id": task_id, "lease_expires_at": seen.lease.expires_at},
+                )
                 # Outside the write transaction: helper calls can take seconds.
                 self._reap(task_id, seen)
             with self.kernel.database.engine.begin() as conn, borrow(conn) as tx:
@@ -264,9 +293,14 @@ class AgentRunRuntime:
                         "WHERE task_id=? AND state='running'",
                         (task_id,),
                     )
-                    return tx.recover_task(
+                    state = tx.recover_task(
                         task_id, expected_revision=task.revision, at=now()
                     ).state.value
+                    log.warning(
+                        "recovered an expired attempt",
+                        extra={"task_id": task_id, "outcome": state},
+                    )
+                    return state
             time.sleep(POLL_SECONDS)
 
     def _reap(self, task_id: str, task: Task) -> None:
@@ -279,6 +313,67 @@ class AgentRunRuntime:
             # Job ids derive from the attempt alone; stopping an absent job is a no-op.
             if isinstance(harness, ConfinedAgentSession):
                 harness.reap(f"{task_id}:{recorded}")
+
+    # Observability
+
+    def _current(self, task_id: str) -> AttemptActivity:
+        """The attempt in progress for `task_id`, else a detached record for that task."""
+        if self.activity is not None and self.activity.task_id == task_id:
+            return self.activity
+        return AttemptActivity(task_id, 0)
+
+    @contextmanager
+    def _observe(
+        self, task_id: str, request: AgentRunRequest, lease: DispatchLease, attempt: int
+    ) -> Iterator[AttemptActivity]:
+        """Bind one attempt's activity (and its log file, when configured) for its life."""
+        settings = self.kernel.attempt_logging
+        harness_id, model = "", ""
+        if self.kernel.harnesses is not None:
+            # Observability must never fail an attempt; `_attempt` reports a bad selection.
+            with suppress(Fault, KeyError):
+                harness_id, model = self.kernel.selection(request)
+        activity = AttemptActivity(
+            task_id,
+            attempt,
+            harness=harness_id,
+            model=model or "",
+            limits=OutputLimits(settings.output_line_bytes, settings.output_max_bytes),
+            heartbeat_seconds=settings.heartbeat_seconds,
+        )
+        with ExitStack() as stack:
+            if settings.files:
+                directory = self.kernel.database.directory / ATTEMPT_LOGS
+                try:
+                    stack.enter_context(
+                        attempt_log_file(directory, task_id, attempt, settings.files_retained)
+                    )
+                except OSError:
+                    log.warning(
+                        "attempt log file unavailable", exc_info=True, extra={"task_id": task_id}
+                    )
+            stack.enter_context(activities.bind(activity))
+            self.activity = activity
+            activity.event(
+                "attempt started",
+                lease_expires_at=lease.expires_at,
+                timeout_s=float(request.attempt_timeout_seconds),
+            )
+            try:
+                yield activity
+            except BaseException:
+                activity.event("attempt interrupted", logging.ERROR, exc_info=True)
+                raise
+            finally:
+                self.activity = None
+
+    def _failure_code(self, task_id: str) -> str | None:
+        with self.kernel.database.read() as conn:
+            row = conn.exec_driver_sql(
+                "SELECT snapshot FROM tasks WHERE task_id=?", (task_id,)
+            ).one()
+        failure = Task.model_validate_json(row[0]).failure
+        return failure.code if failure else None
 
     # One session
 
@@ -392,6 +487,8 @@ class AgentRunRuntime:
             (lease.expires_at - now()).total_seconds() - LEASE_MARGIN,
         )
         with ToolEndpoint(tools, call) as endpoint:
+            # Defence in depth: the token is never logged, and is scrubbed from harness output.
+            self._current(task_id).redact(endpoint.token)
             session_request = HarnessRequest(
                 system_prompt=self._system_prompt(request),
                 prompt=self._prompt(request, attempt, journal, context),
@@ -405,7 +502,21 @@ class AgentRunRuntime:
                 model=model or None,
                 job_key=f"{task_id}:{attempt}",
             )
+            self._current(task_id).event(
+                "harness session starting",
+                tools=len(tools),
+                timeout_s=round(timeout, 1),
+            )
             result = asyncio.run(self._supervise(task_id, harness, session_request))
+            self._current(task_id).event(
+                "harness session ended",
+                logging.INFO if result.success else logging.WARNING,
+                outcome="ok" if result.success else "failed",
+                reason=_reason(result) if result.is_error else None,
+                stop_reason=result.stop_reason or None,
+                turns=result.turns,
+                cost_usd=result.cost_usd,
+            )
             if (
                 result.success
                 and getattr(harness, "requires_tool_listing", False)
@@ -420,17 +531,22 @@ class AgentRunRuntime:
     ) -> HarnessResult:
         running = asyncio.ensure_future(harness.run(request))
         deadline = time.monotonic() + max(0.0, request.timeout_seconds)
+        activity = self._current(task_id)
         try:
             while True:
                 done, _ = await asyncio.wait({running}, timeout=POLL_SECONDS)
                 if done:
                     return running.result()
+                activity.tick()
                 if time.monotonic() >= deadline:
+                    activity.event("attempt timed out; stopping the harness", logging.WARNING)
+                    activity.heartbeat()
                     return HarnessResult.failed("attempt_timeout")
                 if self._cancel_requested(task_id):
+                    activity.event("cancellation requested; stopping the harness")
                     return HarnessResult.failed("cancel_requested")
         except Exception as error:
-            log.exception("agent session failed", extra={"task_id": task_id})
+            log.exception("agent session failed", extra=activity.fields())
             return HarnessResult.failed(type(error).__name__)
         finally:
             if not running.done():
@@ -537,9 +653,54 @@ class AgentRunRuntime:
                     self.kernel.queue_allowance(name),
                 )
         except Fault as refused:
+            self._current(task_id).event(
+                "tool call refused", logging.WARNING, operation=name, kind=kind, code=refused.code
+            )
             return Outcome(refused.code, refused.message)
+        activity = self._current(task_id)
         if admitted.deduplicated is not None:
+            activity.event(
+                "tool call deduplicated", operation=name, operation_id=operation_id, kind=kind
+            )
             return Outcome(output=admitted.deduplicated, deduplicated=True)
+        activity.tool_started(name, operation_id, kind)
+        began = time.monotonic()
+        outcome = Outcome("interrupted")
+        try:
+            outcome = await self._dispatch(
+                task_id,
+                lease_id,
+                operation_id,
+                arguments,
+                descriptor.cardea.effect == "effect",
+                handler,
+                admitted.context,
+                timeout,
+            )
+            return outcome
+        finally:
+            activity.tool_finished(
+                name,
+                operation_id,
+                kind=kind,
+                duration_ms=max(0, int((time.monotonic() - began) * 1000)),
+                outcome=outcome.code or "ok",
+                reason=outcome.reason,
+            )
+
+    async def _dispatch(
+        self,
+        task_id: str,
+        lease_id: str,
+        operation_id: str,
+        arguments: dict[str, Any],
+        effect: bool,
+        handler: Handler,
+        context: OperationContext,
+        timeout: float,
+    ) -> Outcome:
+        """Run one admitted invocation and settle its receipt."""
+        registry = self.kernel.operations
         # The intent is committed and nothing has run yet (fault injection for recovery tests).
         self.kernel.fault("agent_run.call_admitted")
         started = time.monotonic()
@@ -548,22 +709,29 @@ class AgentRunRuntime:
         try:
             if timeout <= 0:
                 raise OperationRejected("no time left in this attempt")
-            output = await asyncio.wait_for(handler(dict(arguments), admitted.context), timeout)
+            output = await asyncio.wait_for(handler(dict(arguments), context), timeout)
         except OperationRejected as rejected:
             # Nothing happened: the handler refused, the helper refused or no slot freed up.
             error = invocation.classify(rejected, timeout)
             output = str(rejected)
         except WorkerFailed as failed:
             # A confined worker started and gave no result (ADR-028).
-            log.warning("confined worker failed: %s", failed.code, extra={"task_id": task_id})
+            log.warning(
+                "confined worker failed: %s",
+                failed.code,
+                extra={"task_id": task_id, "operation_id": operation_id, "code": failed.code},
+            )
             error = invocation.classify(failed, timeout)
-            if descriptor.cardea.effect == "effect":
+            if effect:
                 self._mark_uncertain(task_id, lease_id, operation_id, error)
                 return Outcome("outcome_unknown", UNCERTAIN, reason=error.reason)
         except Exception as raised:
-            log.exception("installed operation failed", extra={"task_id": task_id})
+            log.exception(
+                "installed operation failed",
+                extra={"task_id": task_id, "operation_id": operation_id},
+            )
             error = invocation.classify(raised, timeout)
-            if descriptor.cardea.effect == "effect":
+            if effect:
                 self._mark_uncertain(task_id, lease_id, operation_id, error)
                 return Outcome("outcome_unknown", UNCERTAIN, reason=error.reason)
         elapsed = max(0, int((time.monotonic() - started) * 1000))
