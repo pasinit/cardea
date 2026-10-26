@@ -8,6 +8,7 @@ never part of a request. Every tool the harness may use is served by the MCP end
 everything it does outside its own model calls is a receipted Cardea operation.
 """
 
+import math
 from typing import Annotated, Any, Protocol, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -33,12 +34,24 @@ class HarnessRequest(_Frozen):
     max_cost_usd: Annotated[float, Field(gt=0)]
     timeout_seconds: float
     max_tool_calls: Annotated[int, Field(ge=1)] | None = None
+    # How long the harness's MCP client must wait for one tool call before giving up. A
+    # call can wait for a worker slot and then run, so the runtime sets this from the
+    # slowest exposed operation's worst case; a client's own default (often a minute) would
+    # abandon calls that Cardea then completes for nothing. None keeps the client default.
+    tool_timeout_seconds: Annotated[float, Field(gt=0)] | None = None
     # Provider model id, already checked against the harness's allowed models. None means
     # the harness's own default.
     model: str | None = None
     # Stable identity of this attempt (task and attempt number); a confined harness's
     # worker job derives from it so recovery can stop it (ADR-028).
     job_key: str = ""
+
+
+def tool_timeout_ms(request: HarnessRequest) -> int | None:
+    """The request's tool-call timeout in whole milliseconds, at least one second."""
+    if request.tool_timeout_seconds is None:
+        return None
+    return max(1000, math.ceil(request.tool_timeout_seconds * 1000))
 
 
 class HarnessResult(_Frozen):

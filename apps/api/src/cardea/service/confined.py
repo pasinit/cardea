@@ -25,6 +25,7 @@ import re
 import threading
 import time
 from collections.abc import Callable
+from contextvars import ContextVar
 from typing import Any
 
 from pydantic import JsonValue
@@ -47,6 +48,10 @@ DEFAULT_QUEUE_TIMEOUT_SECONDS = 600
 # systemd unit results that identify an enforced limit.
 LIMIT_RESULTS = {"oom-kill": "worker_memory_limit", "timeout": "worker_timeout"}
 Watch = Callable[[], str | None]
+# Whether whoever asked for the call has given up on it (an agent's MCP client disconnected
+# or sent a cancellation). Set by the caller's context; checked only while the call waits
+# for a slot, so a worker that already started always finishes and settles.
+abandoned: ContextVar[Callable[[], bool] | None] = ContextVar("cardea_abandoned", default=None)
 
 
 class WorkerFailed(Exception):
@@ -62,6 +67,10 @@ class WorkerFailed(Exception):
 
 class WorkerNotStarted(OperationRejected):
     """The helper refused the job, or it was stopped before it started: nothing ran."""
+
+
+class CallAbandoned(WorkerNotStarted):
+    """The caller gave up while the call waited for a slot; it was withdrawn and nothing ran."""
 
 
 class ExecutorBusy(OperationRejected):
@@ -169,7 +178,10 @@ class Workers:
         self, slot: threading.BoundedSemaphore, deadline: float, watch: Watch | None
     ) -> None:
         """Wait for a free slot without blocking the loop; nothing has started yet."""
+        gone = abandoned.get()
         while not slot.acquire(blocking=False):
+            if gone is not None and gone():
+                raise CallAbandoned("the caller gave up while it waited for a slot; nothing ran")
             if time.time() >= deadline:
                 raise ExecutorBusy("no free slot in this worker profile; nothing ran, retry later")
             reason = await asyncio.to_thread(watch) if watch is not None else None

@@ -21,6 +21,7 @@ from cardea.service.harnesses import Catalog, Harnesses, check_harness_grants
 from cardea.service.models import (
     DEFAULT_MAX_TASK_REQUEST_BYTES,
     AgentRunRequest,
+    AgentTools,
     AttemptLogging,
     BaseHostTaskRequest,
     DelegationTaskRequest,
@@ -263,6 +264,8 @@ class Kernel:
         self.session_limit = 1
         # Attempt observability (heartbeat, harness output bounds, per-attempt files).
         self.attempt_logging = AttemptLogging()
+        # Tool-call timeout handed to harnesses and the per-attempt in-flight cap.
+        self.agent_tools = AgentTools()
         # Unfinished tasks of a profile whose adapters are missing could never recover.
         missing: tuple[tuple[str, str, Callable[[Profile], bool]], ...] = (
             (

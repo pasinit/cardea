@@ -47,6 +47,7 @@ Its gaps are a soft step cap, an estimated cost, and a silent continue when MCP 
      - the system prompt and the prompt (instructions, journal, context);
      - the per-attempt MCP URL and bearer token, and the exposed tool names;
      - the bounds: `max_turns`, `max_tool_calls`, `max_cost_usd` and `timeout_seconds`;
+     - `tool_timeout_seconds`: how long the harness's MCP client must wait for one tool call (ADR-027, revised 2026-10-26);
      - the model id;
      - the attempt's job key.
    - `HarnessResult` (Pydantic) carries `text`, `success`, `turns`, `cost_usd` (nullable), `failure_reason` (set exactly when `success` is false), the harness's own `stop_reason`, and `usage`.
