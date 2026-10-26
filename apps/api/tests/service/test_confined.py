@@ -10,6 +10,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any, cast
 
+import httpx
 import pytest
 import rfc8785
 from mcp.client.session import ClientSession
@@ -823,3 +824,160 @@ def test_failed_read_receipt_records_the_reason(kernel: Kernel, host: WorkerHost
         "reason": "upstream_http_error",
         "summary": "HTTPStatusError (HTTP 503)",
     }
+
+
+# Abandoned calls: the agent's MCP client gave up on a call
+
+
+def test_an_abandoned_call_is_withdrawn_while_it_waits(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(confined, "POLL_SECONDS", 0.01)
+    host = SlowHost(1)
+    workers = Workers(host)
+    slot = workers._slot("browser")
+    assert slot is not None and slot.acquire(blocking=False)
+
+    async def abandoned() -> Any:
+        confined.abandoned.set(lambda: True)
+        return await workers.run(
+            "b" * 32, {}, profile="browser", worker="fetch", deadline=time.time() + 10
+        )
+
+    with pytest.raises(confined.CallAbandoned, match="nothing ran"):
+        asyncio.run(abandoned())
+    assert host.starts == []
+    slot.release()
+    # With a free slot the worker starts at once, and abandonment no longer stops it.
+    assert asyncio.run(abandoned()) == {"text": "page text"}
+    assert len(host.starts) == 1 and host.stops == ["b" * 32]
+
+
+def tools_call(request_id: int, **arguments: Any) -> dict[str, Any]:
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "method": "tools/call",
+        "params": {"name": "pages-fetch", "arguments": arguments},
+    }
+
+
+def mcp_headers(token: str) -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json, text/event-stream",
+        "Content-Type": "application/json",
+    }
+
+
+async def settled(kernel: Kernel, task_id: str, operation_id: str) -> Any:
+    """The call's receipt once it is no longer running (the endpoint settles it)."""
+    for _ in range(200):
+        found = receipt(kernel, task_id, operation_id)
+        if found.state is not OperationState.RUNNING:
+            return found
+        await asyncio.sleep(0.02)
+    raise AssertionError("the call never settled")
+
+
+def test_a_client_that_disconnects_withdraws_its_waiting_call(
+    kernel: Kernel, host: WorkerHost
+) -> None:
+    Timed(host, 0.1)
+    assert kernel.workers is not None
+    slot = kernel.workers._slot("browser")
+    assert slot is not None and slot.acquire(blocking=False)
+    session = FakeSession()
+    kernel.session = session
+    task_id = ""
+
+    async def gives_up(client: ClientSession, request: SessionRequest) -> SessionResult:
+        # Like a harness whose MCP client stops waiting: it closes the connection.
+        async with httpx.AsyncClient(timeout=0.3, trust_env=False) as http:
+            with pytest.raises(httpx.TimeoutException):
+                await http.post(
+                    request.mcp_url,
+                    json=tools_call(1, url="https://example.org"),
+                    headers=mcp_headers(request.mcp_token),
+                )
+        withdrawn = await settled(kernel, task_id, "call-0001")
+        assert withdrawn.state is OperationState.FAILED
+        return SessionResult(text="Gave up.", is_error=False)
+
+    session.scripts = [gives_up]
+    task_id = kernel.submit(kernel.auth.validate("supervisor"), run_request()).task.task_id
+    try:
+        assert AgentRunRuntime(kernel).execute(task_id) == "succeeded"
+    finally:
+        slot.release()
+    failure = receipt(kernel, task_id, "call-0001").failure
+    assert failure.code == "call_abandoned" and failure.retryable is True
+    assert failure.details["reason"] == "abandoned"
+    assert host.starts == []
+
+
+def test_a_cancel_notification_withdraws_the_waiting_call_it_names(
+    kernel: Kernel, host: WorkerHost
+) -> None:
+    Timed(host, 0.1)
+    assert kernel.workers is not None
+    slot = kernel.workers._slot("browser")
+    assert slot is not None and slot.acquire(blocking=False)
+    session = FakeSession()
+    kernel.session = session
+
+    async def cancels(client: ClientSession, request: SessionRequest) -> SessionResult:
+        headers = mcp_headers(request.mcp_token)
+        async with httpx.AsyncClient(timeout=10, trust_env=False) as http:
+            waiting = asyncio.ensure_future(
+                http.post(
+                    request.mcp_url, json=tools_call(7, url="https://a.example"), headers=headers
+                )
+            )
+            await asyncio.sleep(0.3)
+            # A cancellation naming another request changes nothing.
+            for target in (8, 7):
+                notice = {
+                    "jsonrpc": "2.0",
+                    "method": "notifications/cancelled",
+                    "params": {"requestId": target, "reason": "user stopped"},
+                }
+                accepted = await http.post(request.mcp_url, json=notice, headers=headers)
+                assert accepted.status_code == 202
+            answer = (await waiting).json()
+        assert answer["id"] == 7 and answer["result"]["isError"] is True
+        assert "call_abandoned" in answer["result"]["content"][0]["text"]
+        return SessionResult(text="Cancelled.", is_error=False)
+
+    session.scripts = [cancels]
+    task_id = kernel.submit(kernel.auth.validate("supervisor"), run_request()).task.task_id
+    try:
+        assert AgentRunRuntime(kernel).execute(task_id) == "succeeded"
+    finally:
+        slot.release()
+    assert receipt(kernel, task_id, "call-0001").failure.code == "call_abandoned"
+    assert host.starts == []
+
+
+def test_a_running_call_finishes_and_settles_after_its_client_leaves(
+    kernel: Kernel, host: WorkerHost
+) -> None:
+    timed = Timed(host, 0.5)
+    session = FakeSession()
+    kernel.session = session
+    task_id = ""
+
+    async def leaves(client: ClientSession, request: SessionRequest) -> SessionResult:
+        async with httpx.AsyncClient(timeout=0.2, trust_env=False) as http:
+            with pytest.raises(httpx.TimeoutException):
+                await http.post(
+                    request.mcp_url,
+                    json=tools_call(1, url="https://example.org"),
+                    headers=mcp_headers(request.mcp_token),
+                )
+        done = await settled(kernel, task_id, "call-0001")
+        assert done.state is OperationState.SUCCEEDED
+        return SessionResult(text="Read it.", is_error=False)
+
+    session.scripts = [leaves]
+    task_id = kernel.submit(kernel.auth.validate("supervisor"), run_request()).task.task_id
+    assert AgentRunRuntime(kernel).execute(task_id) == "succeeded"
+    assert len(host.starts) == 1 and timed.active == 0

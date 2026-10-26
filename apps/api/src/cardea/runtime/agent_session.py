@@ -15,7 +15,7 @@ from typing import Any
 
 from cardea.runtime import activity as activities
 from cardea.runtime.activity import AttemptActivity
-from cardea.runtime.harness import Harness, HarnessRequest, HarnessResult
+from cardea.runtime.harness import Harness, HarnessRequest, HarnessResult, tool_timeout_ms
 
 # Inherited variables a session may keep; all others are blanked (secrets included).
 INHERITED = frozenset({"PATH", "LANG", "LC_ALL", "TZ", "SSL_CERT_FILE", "SSL_CERT_DIR"})
@@ -69,18 +69,24 @@ class ClaudeAgentSession:
         self.oauth_token = oauth_token
 
     def options(self, request: HarnessRequest, workdir: Path) -> dict[str, Any]:
+        server: dict[str, Any] = {
+            "type": "http",
+            "url": request.mcp_url,
+            "headers": {"Authorization": f"Bearer {request.mcp_token}"},
+        }
+        # Claude Code bounds each MCP tool call three ways: a per-call timeout, the HTTP
+        # request timeout (60 s unless raised) and an idle timeout (5 min for HTTP servers).
+        # The per-server `timeout` (ms) raises all three for this server; MCP_TOOL_TIMEOUT
+        # is the documented global equivalent and gets the same value.
+        timeout = tool_timeout_ms(request)
+        if timeout is not None:
+            server["timeout"] = timeout
         return {
             "system_prompt": request.system_prompt,
             # No built-in tools at all: shell, files, web, scheduling and subagents are off.
             "tools": [],
             "allowed_tools": [f"mcp__{SERVER_NAME}__{name}" for name in request.tool_names],
-            "mcp_servers": {
-                SERVER_NAME: {
-                    "type": "http",
-                    "url": request.mcp_url,
-                    "headers": {"Authorization": f"Bearer {request.mcp_token}"},
-                }
-            },
+            "mcp_servers": {SERVER_NAME: server},
             # Ignore any MCP servers, settings, skills or plugins found on the host.
             "strict_mcp_config": True,
             "setting_sources": [],
@@ -100,6 +106,7 @@ class ClaudeAgentSession:
                 "ENABLE_TOOL_SEARCH": "false",
                 "DISABLE_AUTOUPDATER": "1",
                 "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+                **({"MCP_TOOL_TIMEOUT": str(timeout)} if timeout is not None else {}),
             },
         }
 

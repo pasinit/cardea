@@ -9,7 +9,9 @@ provider is ever called. They need `CARDEA_TEST_OPENCODE` (the binary, as fetche
 import asyncio
 import json
 import os
+import sys
 import threading
+from collections.abc import Callable
 from datetime import timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -139,6 +141,42 @@ def test_config_offers_only_cardea_tools_and_holds_no_secret(
     for name in ("AUTOUPDATE", "MODELS_FETCH", "SHARE", "PROJECT_CONFIG", "CLAUDE_CODE"):
         assert env[f"OPENCODE_DISABLE_{name}"] == "1"
     assert {"--pure", "--title"} <= set(adapter.command("z-ai/glm-4.6"))
+
+
+def test_mcp_server_timeout_is_the_requested_tool_timeout() -> None:
+    # OpenCode 1.18.35 uses the server's `timeout` (ms, positive integer) for connecting,
+    # listing tools and every tool call; unset, a call falls back to the MCP SDK's 60 s.
+    adapter = harness()
+    assert "timeout" not in adapter.config(request(), "z-ai/glm-4.6")["mcp"]["cardea"]
+    server = adapter.config(request(tool_timeout_seconds=630.5), "z-ai/glm-4.6")["mcp"]["cardea"]
+    assert server["timeout"] == 630500 and isinstance(server["timeout"], int)
+
+
+FAKE_RECORDING = """#!{python}
+import json, os, sys
+sys.stdin.read()
+with open({record!r}, "w") as out:
+    out.write(os.environ["OPENCODE_CONFIG_CONTENT"])
+print(json.dumps({{"type": "step_start", "timestamp": 1, "sessionID": "s", "part": {{}}}}))
+print(json.dumps({{"type": "text", "timestamp": 1, "sessionID": "s", "part": {{"text": "ok"}}}}))
+print(json.dumps({{"type": "step_finish", "timestamp": 1, "sessionID": "s", "part": {{
+    "tokens": {{"input": 1, "output": 1}}, "cost": 0, "reason": "stop"}}}}))
+"""
+
+
+def test_the_opencode_process_gets_the_tool_timeout(tmp_path: Path) -> None:
+    record = tmp_path / "config.json"
+    binary = tmp_path / "opencode"
+    binary.write_text(FAKE_RECORDING.format(python=sys.executable, record=str(record)))
+    binary.chmod(0o755)
+    with ToolEndpoint(listing_tools(), found) as endpoint:
+        result = asyncio.run(
+            harness(binary=binary).run(
+                request(mcp_url=endpoint.url, mcp_token=endpoint.token, tool_timeout_seconds=45)
+            )
+        )
+    assert result.success and result.text == "ok"
+    assert json.loads(record.read_text())["mcp"]["cardea"]["timeout"] == 45000
 
 
 def test_registry_pins_opencode_as_a_binary() -> None:
@@ -288,7 +326,9 @@ def listing_tools() -> list[types.Tool]:
     ]
 
 
-async def found(name: str, arguments: dict[str, Any]) -> types.CallToolResult:
+async def found(
+    name: str, arguments: dict[str, Any], abandoned: Callable[[], bool]
+) -> types.CallToolResult:
     return types.CallToolResult(content=[types.TextContent(type="text", text='{"listings": 3}')])
 
 
@@ -335,6 +375,44 @@ def test_a_run_on_opencode_calls_installed_operations_with_receipts(
             "cardea_mail-send",
         }
     assert {h["authorization"] for h in model.headers} == {"Bearer sk-provider-secret"}
+
+
+async def slow_found(
+    name: str, arguments: dict[str, Any], abandoned: Callable[[], bool]
+) -> types.CallToolResult:
+    await asyncio.sleep(2.5)
+    return await found(name, arguments, abandoned)
+
+
+def tool_result_sent_back(model: FakeModel) -> str:
+    """What OpenCode told the model the tool call returned."""
+    (message,) = [m for m in model.requests[1]["messages"] if m.get("role") == "tool"]
+    return json.dumps(message["content"])
+
+
+@needs_binary
+@pytest.mark.parametrize(("tool_timeout", "answered"), [(1.0, False), (6.0, True)])
+def test_opencode_waits_for_a_tool_call_as_long_as_requested(
+    binary: Path, tool_timeout: float, answered: bool
+) -> None:
+    replies = [Reply(tool_calls=[("cardea_listings-search", {})]), Reply(text="Done.")]
+    with FakeModel(replies) as model, ToolEndpoint(listing_tools(), slow_found) as endpoint:
+        result = asyncio.run(
+            harness(model.base_url, binary=binary).run(
+                request(
+                    mcp_url=endpoint.url,
+                    mcp_token=endpoint.token,
+                    tool_timeout_seconds=tool_timeout,
+                )
+            )
+        )
+    assert result.success and result.text == "Done."
+    sent = tool_result_sent_back(model)
+    if answered:
+        assert '{\\"listings\\": 3}' in sent
+    else:
+        # The client gave up: exactly what a too-short default does to a slow call.
+        assert "Request timed out" in sent
 
 
 @needs_binary

@@ -28,6 +28,7 @@ from cardea.service.kernel import Kernel, provision
 from cardea.service.models import (
     RIGHTS,
     AgentRunRequest,
+    AgentTools,
     Permission,
     Principal,
     Provisioning,
@@ -126,6 +127,8 @@ class Tools:
             raise UpstreamError(503, "https://listings.invalid/?api_key=s3cret failed")
         if arguments.get("to") == "slow":
             await asyncio.sleep(5)
+        if arguments.get("to") == "hold":
+            await asyncio.sleep(0.5)
         if arguments.get("to") == "malformed":
             return cast(dict[str, JsonValue], ["not", "an", "object"])
         if arguments.get("to") == "refuse":
@@ -927,6 +930,124 @@ def test_claude_session_has_no_builtin_tools_or_host_settings(
     assert options["mcp_servers"]["cardea"]["headers"] == {"Authorization": "Bearer t"}
     with pytest.raises(ValueError):
         ClaudeAgentSession(model=None)
+
+
+def claude_request(**changes: Any) -> SessionRequest:
+    fields: dict[str, Any] = {
+        "system_prompt": "s",
+        "prompt": "p",
+        "mcp_url": "http://127.0.0.1:1/mcp",
+        "mcp_token": "t",
+        "tool_names": ("mail-send",),
+        "max_turns": 5,
+        "max_cost_usd": 1.0,
+        "timeout_seconds": 900,
+        **changes,
+    }
+    return SessionRequest.model_validate(fields)
+
+
+def test_claude_session_waits_as_long_as_a_tool_call_may_take(tmp_path: Path) -> None:
+    from claude_agent_sdk import ClaudeAgentOptions
+    from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
+
+    adapter = ClaudeAgentSession(model="claude-sonnet-5-5", api_key="k")
+    options = adapter.options(claude_request(tool_timeout_seconds=612.25), tmp_path)
+    # The per-server timeout raises Claude Code's call, HTTP-request and idle timeouts for
+    # this server; MCP_TOOL_TIMEOUT is the global equivalent. Both are milliseconds.
+    assert options["mcp_servers"]["cardea"]["timeout"] == 612250
+    assert options["env"]["MCP_TOOL_TIMEOUT"] == "612250"
+    # The pinned SDK passes an external server's entry to the CLI unchanged.
+    command = SubprocessCLITransport(
+        "p", ClaudeAgentOptions(**options, cli_path="/nonexistent/claude")
+    )._build_command()
+    config = json.loads(command[command.index("--mcp-config") + 1])
+    assert config["mcpServers"]["cardea"]["timeout"] == 612250
+    # Below a second Claude Code would ignore the value; it is raised to one second.
+    short = adapter.options(claude_request(tool_timeout_seconds=0.2), tmp_path)
+    assert short["mcp_servers"]["cardea"]["timeout"] == 1000
+
+
+def test_claude_session_keeps_client_defaults_without_a_tool_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MCP_TOOL_TIMEOUT", "5")
+    options = ClaudeAgentSession(model=None, api_key="k").options(claude_request(), tmp_path)
+    assert "timeout" not in options["mcp_servers"]["cardea"]
+    # A host-level value is never inherited.
+    assert options["env"]["MCP_TOOL_TIMEOUT"] == ""
+
+
+def test_harness_tool_timeout_covers_the_slowest_operation(
+    kernel: Kernel, session: FakeSession
+) -> None:
+    session.scripts = [routine]
+    assert AgentRunRuntime(kernel).execute(submit(kernel)) == "succeeded"
+    # Both operations time out after 2 s and never queue: 2 s plus the settle margin.
+    expected = 2 + agent_run_runtime.TOOL_TIMEOUT_MARGIN
+    assert session.requests[0].tool_timeout_seconds == pytest.approx(expected, abs=0.5)
+
+
+def test_configured_tool_timeout_never_outlasts_the_session(
+    kernel: Kernel, session: FakeSession
+) -> None:
+    kernel.agent_tools = AgentTools(tool_timeout_seconds=900)
+    session.scripts = [routine, routine]
+    assert AgentRunRuntime(kernel).execute(submit(kernel)) == "succeeded"
+    first = session.requests[0]
+    assert first.tool_timeout_seconds is not None
+    assert first.tool_timeout_seconds == first.timeout_seconds <= 30
+    kernel.agent_tools = AgentTools(tool_timeout_seconds=20)
+    assert AgentRunRuntime(kernel).execute(submit(kernel, request_id="again")) == "succeeded"
+    assert session.requests[1].tool_timeout_seconds == 20
+
+
+def test_system_prompt_states_how_many_calls_may_run_at_once(
+    kernel: Kernel, session: FakeSession
+) -> None:
+    session.scripts = [routine, routine]
+    assert AgentRunRuntime(kernel).execute(submit(kernel)) == "succeeded"
+    assert "At most 4 tool calls can run at once" in session.requests[0].system_prompt
+    kernel.agent_tools = AgentTools(max_concurrent_tool_calls=2)
+    assert AgentRunRuntime(kernel).execute(submit(kernel, request_id="again")) == "succeeded"
+    prompt = session.requests[1].system_prompt
+    assert "At most 2 tool calls can run at once" in prompt and "tool_busy" in prompt
+
+
+def test_calls_beyond_the_concurrency_cap_are_refused_before_admission(
+    kernel: Kernel, tools: Tools, session: FakeSession
+) -> None:
+    kernel.agent_tools = AgentTools(max_concurrent_tool_calls=2)
+
+    async def fan_out(client: ClientSession, request: SessionRequest) -> SessionResult:
+        held = [asyncio.ensure_future(call(client, "listings-search", to="hold")) for _ in "ab"]
+        await asyncio.sleep(0.2)
+        refused = await call(client, "listings-search")
+        text = cast(types.TextContent, refused.content[0]).text
+        assert refused.is_error and text.startswith("tool_busy: 2 calls of this run")
+        assert "wait for their results" in text
+        assert not any(r.is_error for r in await asyncio.gather(*held))
+        # Once the earlier calls returned, the same call is admitted.
+        assert not (await call(client, "listings-search")).is_error
+        return SessionResult(text="Searched.", is_error=False)
+
+    session.scripts = [fan_out]
+    task_id = submit(kernel)
+    assert AgentRunRuntime(kernel).execute(task_id) == "succeeded"
+    # The refused call left no intent or receipt and used no budget.
+    assert [r.request.operation_id for r in calls(kernel, task_id)] == [
+        "call-0001",
+        "call-0002",
+        "call-0003",
+    ]
+    assert len(tools.searches) == 3
+
+
+def test_service_config_has_agent_tool_defaults() -> None:
+    tools = AgentTools()
+    assert tools.tool_timeout_seconds is None and tools.max_concurrent_tool_calls == 4
+    with pytest.raises(ValidationError):
+        AgentTools(max_concurrent_tool_calls=0)
 
 
 # Bounded run evidence (ADR-029)

@@ -341,6 +341,19 @@ class AttemptLogging(Record):
     files_retained: Annotated[int, Field(strict=True, ge=1, le=100000)] = 200
 
 
+class AgentTools(Record):
+    """How an agent run's harness may use its per-attempt tool endpoint (ADR-027)."""
+
+    # Seconds the harness's MCP client waits for one tool call before giving up. None
+    # derives it per attempt: the slowest exposed operation's worst case (its timeout plus
+    # any worker-slot queue allowance, within the lease) plus a settle margin, capped at
+    # the attempt's remaining time. Never the client's own default (about a minute).
+    tool_timeout_seconds: Annotated[int, Field(strict=True, ge=1, le=86400)] | None = None
+    # Tool calls of one attempt that may be in flight (admitted, waiting or running) at
+    # once; another call is refused before admission with the retryable `tool_busy`.
+    max_concurrent_tool_calls: Annotated[int, Field(strict=True, ge=1, le=64)] = 4
+
+
 class ServiceConfig(Record):
     data_dir: Path
     spiffe_socket: str
@@ -369,6 +382,7 @@ class ServiceConfig(Record):
     # Service log level on stderr (journald under systemd); CARDEA_LOG_LEVEL overrides it.
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     attempt_logging: AttemptLogging = AttemptLogging()
+    agent_tools: AgentTools = AgentTools()
 
     @model_validator(mode="after")
     def one_harness_source(self) -> Self:

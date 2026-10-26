@@ -87,6 +87,8 @@ class AttemptActivity:
         self.last_output: float | None = None
         self.tools_in_flight = 0
         self.tool_calls = 0
+        # Calls refused before admission (no receipt), for example `tool_busy`.
+        self.tool_calls_refused = 0
         self.turns = 0
         self.output_bytes = 0
         self.output_dropped = 0
@@ -150,6 +152,15 @@ class AttemptActivity:
             self.tools_in_flight += 1
             self.tool_calls += 1
         self.event("tool call started", operation=operation, operation_id=operation_id, kind=kind)
+
+    def tool_refused(self, operation: str, code: str, *, kind: str = "call", **extra: Any) -> None:
+        """A call refused before admission: nothing ran and no receipt was written."""
+        with self._lock:
+            self.last_tool = self.clock()
+            self.tool_calls_refused += 1
+        self.event(
+            "tool call refused", logging.WARNING, operation=operation, kind=kind, code=code, **extra
+        )
 
     def tool_finished(
         self,
@@ -230,6 +241,7 @@ class AttemptActivity:
                 "since_output_s": _ago(now, self.last_output),
                 "tools_in_flight": self.tools_in_flight,
                 "tool_calls": self.tool_calls,
+                "tool_calls_refused": self.tool_calls_refused,
                 "turns": self.turns,
             }
         # Absent `since_*` fields mean "never" in this attempt.
@@ -240,6 +252,7 @@ class AttemptActivity:
             return {
                 "turns": self.turns,
                 "tool_calls": self.tool_calls,
+                "tool_calls_refused": self.tool_calls_refused,
                 "output_bytes": self.output_bytes,
                 "output_lines_dropped": self.output_dropped,
             }

@@ -8,8 +8,9 @@ cannot act after its lease is replaced, and a retried session receives the call 
 import asyncio
 import json
 import logging
+import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager, suppress
 from dataclasses import dataclass
 from datetime import timedelta
@@ -35,7 +36,7 @@ from cardea.kernel.store import KernelTransaction
 from cardea.runtime import activity as activities
 from cardea.runtime.activity import AttemptActivity, OutputLimits
 from cardea.runtime.harness import Harness, HarnessRequest, HarnessResult
-from cardea.service import invocation
+from cardea.service import confined, invocation
 from cardea.service.confined import ConfinedAgentSession, WorkerFailed
 from cardea.service.database import Fault, borrow
 from cardea.service.kernel import TERMINAL, Kernel
@@ -50,6 +51,9 @@ LEASE_MARGIN = 30.0
 SETTLE_MARGIN = 1.0
 POLL_SECONDS = 1.0
 MAX_TOOL_TEXT = 16384
+# Added to the slowest operation's worst case for admission and settlement when the
+# harness's tool-call timeout is derived.
+TOOL_TIMEOUT_MARGIN = 10.0
 
 SYSTEM_PROMPT = """You are carrying out one task inside Cardea, an execution kernel.
 Your only tools are the ones provided; you have no shell, files or web access of your own.
@@ -69,6 +73,15 @@ APPLIED_PREFACE = """These effects already succeeded in an earlier attempt of th
 count toward its completion. Do not call them again; a repeat is not performed."""
 
 UNCERTAIN = "the effect may or may not have happened; do not retry it, Cardea will reconcile it"
+
+CONCURRENCY = """At most {limit} tool calls can run at once in this run, and some can take
+minutes. Wait for results before starting more. A call refused with tool_busy did nothing;
+make it again once an earlier call has returned."""
+
+BUSY = (
+    "{limit} calls of this run are already running; wait for their results before starting "
+    "more. Nothing was done; make this call again once one of them returns."
+)
 
 
 @dataclass(frozen=True)
@@ -114,6 +127,30 @@ def _effect_identity(receipt: OperationReceipt) -> str:
     """The effect a succeeded call stands for: its scope key, else the call itself."""
     key = receipt.request.arguments.get("scope_key")
     return f"scope:{key}" if isinstance(key, str) else f"call:{receipt.request.operation_id}"
+
+
+class ToolGate:
+    """Bounds how many tool calls of one attempt are in flight (admitted, waiting or running).
+
+    A call beyond the bound is refused before admission, so it leaves no intent or receipt.
+    Calls arrive on the endpoint's thread; the lock keeps the count exact regardless.
+    """
+
+    def __init__(self, limit: int) -> None:
+        self.limit = limit
+        self.in_flight = 0
+        self._lock = threading.Lock()
+
+    def enter(self) -> bool:
+        with self._lock:
+            if self.in_flight >= self.limit:
+                return False
+            self.in_flight += 1
+            return True
+
+    def leave(self) -> None:
+        with self._lock:
+            self.in_flight = max(0, self.in_flight - 1)
 
 
 def attempt_lease_seconds(request: AgentRunRequest) -> float:
@@ -418,10 +455,11 @@ class AgentRunRuntime:
             blocks.append(context_block(call.operation, outcome))
         return tuple(blocks)
 
-    @staticmethod
-    def _system_prompt(request: AgentRunRequest) -> str:
+    def _system_prompt(self, request: AgentRunRequest) -> str:
+        limit = self.kernel.agent_tools.max_concurrent_tool_calls
+        prompt = f"{SYSTEM_PROMPT}\n{CONCURRENCY.format(limit=limit)}"
         # Sessions have no clock of their own; scheduled work needs the date.
-        prompt = f"{SYSTEM_PROMPT}\nThe current time is {now().isoformat()} (UTC)."
+        prompt += f"\nThe current time is {now().isoformat()} (UTC)."
         if request.slot_time is not None:
             local = request.slot_time
             prompt += (
@@ -496,9 +534,19 @@ class AgentRunRuntime:
             tool = types.Tool.model_validate(descriptor.tool)
             tools.append(tool.model_copy(update={"name": tool_name(name)}))
 
-        async def call(tool: str, arguments: dict[str, Any]) -> types.CallToolResult:
+        gate = ToolGate(self.kernel.agent_tools.max_concurrent_tool_calls)
+
+        async def call(
+            tool: str, arguments: dict[str, Any], abandoned: Callable[[], bool]
+        ) -> types.CallToolResult:
             return await self.call_tool(
-                task_id, lease.lease_id, request, operation_name(tool), arguments
+                task_id,
+                lease.lease_id,
+                request,
+                operation_name(tool),
+                arguments,
+                gate=gate,
+                abandoned=abandoned,
             )
 
         context = asyncio.run(self._context(task_id, lease.lease_id, request))
@@ -506,6 +554,7 @@ class AgentRunRuntime:
             float(request.attempt_timeout_seconds),
             (lease.expires_at - now()).total_seconds() - LEASE_MARGIN,
         )
+        tool_timeout = self._tool_timeout(request, lease, timeout)
         with ToolEndpoint(tools, call) as endpoint:
             # Defence in depth: the token is never logged, and is scrubbed from harness output.
             self._current(task_id).redact(endpoint.token)
@@ -518,6 +567,7 @@ class AgentRunRuntime:
                 max_turns=request.max_turns,
                 max_cost_usd=request.max_cost_usd,
                 max_tool_calls=request.max_tool_calls,
+                tool_timeout_seconds=tool_timeout,
                 timeout_seconds=timeout,
                 model=model or None,
                 job_key=f"{task_id}:{attempt}",
@@ -526,6 +576,8 @@ class AgentRunRuntime:
                 "harness session starting",
                 tools=len(tools),
                 timeout_s=round(timeout, 1),
+                tool_timeout_s=round(tool_timeout, 1),
+                max_concurrent_tool_calls=gate.limit,
             )
             result = asyncio.run(self._supervise(task_id, harness, session_request))
             self._current(task_id).event(
@@ -545,6 +597,35 @@ class AgentRunRuntime:
                 # The harness ran without ever connecting to its tools (ADR-033).
                 return HarnessResult.failed("harness_tools_unavailable", text=result.text)
             return result
+
+    def _tool_timeout(
+        self, request: AgentRunRequest, lease: DispatchLease, session_timeout: float
+    ) -> float:
+        """How long the harness's MCP client waits for one tool call.
+
+        The configured value, else the slowest exposed operation's worst case (its timeout
+        plus any worker-slot queue allowance, within the lease) plus a settle margin; never
+        more than the session itself may last.
+        """
+        configured = self.kernel.agent_tools.tool_timeout_seconds
+        if configured is not None:
+            wanted = float(configured)
+        else:
+            registry = self.kernel.operations
+            wanted = TOOL_TIMEOUT_MARGIN + max(
+                (
+                    invocation.timeout_for(
+                        registry,
+                        name,
+                        lease.expires_at,
+                        SETTLE_MARGIN,
+                        self.kernel.queue_allowance(name),
+                    )
+                    for name in request.operations
+                ),
+                default=0.0,
+            )
+        return max(1.0, min(wanted, session_timeout))
 
     async def _supervise(
         self, task_id: str, harness: Harness, request: HarnessRequest
@@ -593,10 +674,23 @@ class AgentRunRuntime:
         request: AgentRunRequest,
         name: str,
         arguments: dict[str, Any],
+        *,
+        gate: ToolGate | None = None,
+        abandoned: Callable[[], bool] | None = None,
     ) -> types.CallToolResult:
         if name not in request.operations:
             return _error("tool_not_exposed")
-        outcome = await self._invoke(task_id, lease_id, request, name, arguments, "call")
+        if gate is not None and not gate.enter():
+            # Refused before admission: no intent, no receipt, nothing counted as a call.
+            self._current(task_id).tool_refused(name, "tool_busy", in_flight=gate.limit)
+            return _error("tool_busy", BUSY.format(limit=gate.limit))
+        try:
+            outcome = await self._invoke(
+                task_id, lease_id, request, name, arguments, "call", abandoned
+            )
+        finally:
+            if gate is not None:
+                gate.leave()
         if outcome.code:
             return _error(outcome.code, outcome.detail)
         if outcome.deduplicated:
@@ -623,6 +717,7 @@ class AgentRunRuntime:
         name: str,
         arguments: dict[str, Any],
         kind: Literal["call", "ctx"],
+        abandoned: Callable[[], bool] | None = None,
     ) -> Outcome:
         """One receipted invocation under this attempt's lease: a tool call or context call."""
         registry = self.kernel.operations
@@ -673,9 +768,7 @@ class AgentRunRuntime:
                     self.kernel.queue_allowance(name),
                 )
         except Fault as refused:
-            self._current(task_id).event(
-                "tool call refused", logging.WARNING, operation=name, kind=kind, code=refused.code
-            )
+            self._current(task_id).tool_refused(name, refused.code, kind=kind)
             return Outcome(refused.code, refused.message)
         activity = self._current(task_id)
         if admitted.deduplicated is not None:
@@ -696,6 +789,7 @@ class AgentRunRuntime:
                 handler,
                 admitted.context,
                 timeout,
+                abandoned,
             )
             return outcome
         finally:
@@ -718,8 +812,13 @@ class AgentRunRuntime:
         handler: Handler,
         context: OperationContext,
         timeout: float,
+        abandoned: Callable[[], bool] | None = None,
     ) -> Outcome:
-        """Run one admitted invocation and settle its receipt."""
+        """Run one admitted invocation and settle its receipt.
+
+        `abandoned` reports whether the caller gave up; a call still waiting for a worker
+        slot is then withdrawn (nothing ran), while a started one finishes and settles.
+        """
         registry = self.kernel.operations
         # The intent is committed and nothing has run yet (fault injection for recovery tests).
         self.kernel.fault("agent_run.call_admitted")
@@ -729,7 +828,11 @@ class AgentRunRuntime:
         try:
             if timeout <= 0:
                 raise OperationRejected("no time left in this attempt")
-            output = await asyncio.wait_for(handler(dict(arguments), context), timeout)
+            token = confined.abandoned.set(abandoned)
+            try:
+                output = await asyncio.wait_for(handler(dict(arguments), context), timeout)
+            finally:
+                confined.abandoned.reset(token)
         except OperationRejected as rejected:
             # Nothing happened: the handler refused, the helper refused or no slot freed up.
             error = invocation.classify(rejected, timeout)

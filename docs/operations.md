@@ -57,7 +57,7 @@ The daemon writes one JSON object per line to stderr, which journald stores unde
 - `attempt started` (harness, model, lease expiry, attempt timeout) and `attempt finished` (outcome, failure code, duration, turns and tool-call counts);
 - `harness process started` / `harness process exited` (pid, argument vector, return code, signal, duration) for process harnesses, and `confined session starting` with the worker's `unit` for confined ones;
 - `model request` / `model turn` / `model result` as the harness reports them (token counts, stop reason, provider error status, tool names), and `sdk system message: init` with the MCP server status;
-- `tool call started` / `tool call finished` (operation, `operation_id`, duration, outcome code and reason), plus refused and deduplicated calls;
+- `tool call started` / `tool call finished` (operation, `operation_id`, duration, outcome code and reason), plus refused (`tool call refused`, with its code, for example `tool_busy`) and deduplicated calls;
 - `harness stderr: ...`: the harness's stderr line by line;
 - `attempt still running`, every `attempt_logging.heartbeat_seconds`, with `since_model_s`, `since_tool_s`, `since_output_s` (absent means never in this attempt) and `tools_in_flight`. A stall shows here first. A growing `since_model_s` with no tool in flight means the harness is waiting on the model API. A tool in flight with a growing `since_tool_s` means a tool is hung. No heartbeat at all means the kernel itself is stuck.
 - lease expiry, worker reaping and recovery of an interrupted attempt, at `WARNING`.
@@ -74,6 +74,19 @@ With `attempt_logging.files` set, each attempt's records are also written, with 
 ```json
 "log_level": "INFO",
 "attempt_logging": {"heartbeat_seconds": 60, "output_line_bytes": 2048, "output_max_bytes": 262144, "files": false, "files_retained": 200}
+```
+
+### Agent-run tool calls
+
+The harness's MCP client must wait for tool calls that queue for a confined-worker slot. If it gives up sooner, the model is told the call timed out while Cardea still runs it. `agent_tools` in the service configuration controls this (ADR-027, revised 2026-10-26):
+
+- `tool_timeout_seconds` (1–86400, default unset): how long the harness waits for one tool call. Unset, each attempt derives it from the slowest exposed operation's timeout plus its profile's `queue_timeout_seconds`, plus 10 s, never longer than the attempt. It reaches Claude Code as the MCP server's `timeout` and `MCP_TOOL_TIMEOUT` (milliseconds), and OpenCode as the remote MCP server's `timeout`.
+- `max_concurrent_tool_calls` (1–64, default 4): tool calls of one attempt that may be in flight at once. Another call is refused before admission with the retryable `tool_busy` error and leaves no receipt. The system prompt states this limit. Size it to the host: a heavy profile with `concurrency` 2 gains nothing from many more queued calls.
+
+A call still waiting for a slot when its client disconnects or cancels it is withdrawn, settling with code `call_abandoned`. A call already running finishes and settles. `harness session starting` logs `tool_timeout_s` and `max_concurrent_tool_calls`; `tool call refused` with `code=tool_busy` and the `tool_calls_refused` count in `attempt still running` and `attempt finished` show refusals.
+
+```json
+"agent_tools": {"tool_timeout_seconds": null, "max_concurrent_tool_calls": 4}
 ```
 
 ## Retention and deletion

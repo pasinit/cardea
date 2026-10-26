@@ -34,7 +34,7 @@ import httpx
 
 from cardea.runtime import activity as activities
 from cardea.runtime.activity import AttemptActivity
-from cardea.runtime.harness import HarnessRequest, HarnessResult
+from cardea.runtime.harness import HarnessRequest, HarnessResult, tool_timeout_ms
 
 log = logging.getLogger(__name__)
 
@@ -185,6 +185,18 @@ class OpenCodeHarness:
         and the endpoint token are `{env:...}` references."""
         deny_all = {"*": "deny", f"{SERVER}_*": "allow"}
         price = self.prices[model]
+        server: dict[str, Any] = {
+            "type": "remote",
+            "url": request.mcp_url,
+            "headers": {"Authorization": "Bearer {env:" + TOKEN_VARIABLE + "}"},
+            "oauth": False,
+            "enabled": True,
+        }
+        # OpenCode applies the server's `timeout` (ms) to connecting, listing tools and
+        # every tool call; unset, a call falls back to the MCP SDK's 60 s request default.
+        timeout = tool_timeout_ms(request)
+        if timeout is not None:
+            server["timeout"] = timeout
         return {
             "$schema": "https://opencode.ai/config.json",
             "autoupdate": False,
@@ -210,15 +222,7 @@ class OpenCodeHarness:
                     },
                 }
             },
-            "mcp": {
-                SERVER: {
-                    "type": "remote",
-                    "url": request.mcp_url,
-                    "headers": {"Authorization": "Bearer {env:" + TOKEN_VARIABLE + "}"},
-                    "oauth": False,
-                    "enabled": True,
-                }
-            },
+            "mcp": {SERVER: server},
             "permission": deny_all,
             "agent": {
                 AGENT: {

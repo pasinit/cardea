@@ -24,7 +24,7 @@ from cardea.kernel.models import (
     canonical_json,
 )
 from cardea.kernel.store import KernelTransaction
-from cardea.service.confined import ExecutorBusy, WorkerFailed, WorkerNotStarted
+from cardea.service.confined import CallAbandoned, ExecutorBusy, WorkerFailed, WorkerNotStarted
 from cardea.service.database import Fault
 from cardea.service.models import now
 from cardea.service.operations import (
@@ -41,6 +41,7 @@ REASONS = frozenset(
         "queue_timeout",  # no worker slot within the profile's queue timeout; nothing ran
         "worker_exit",  # the confined worker exited, was killed or stopped without a result
         "worker_refused",  # the helper refused to start the worker; nothing ran
+        "abandoned",  # the caller gave up while the call waited for a slot; nothing ran
         "upstream_http_error",  # the handler failed on an HTTP error from a remote service
         "invalid_output",  # the result did not match the operation's output schema or size
         "rejected",  # the operation itself refused the call (handler's own message)
@@ -81,6 +82,8 @@ def classify(error: BaseException, timeout: float) -> Failure:
     """
     if isinstance(error, ExecutorBusy):
         return Failure("executor_busy", "queue_timeout", str(error), retryable=True)
+    if isinstance(error, CallAbandoned):
+        return Failure("call_abandoned", "abandoned", str(error), retryable=True)
     if isinstance(error, WorkerNotStarted):
         return Failure("operation_rejected", "worker_refused", str(error))
     if isinstance(error, OperationRejected):

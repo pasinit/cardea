@@ -39,7 +39,7 @@ from cardea.service.logs import (
     configure_logging,
     log_level,
 )
-from cardea.service.models import AttemptLogging, ServiceConfig
+from cardea.service.models import AgentTools, AttemptLogging, ServiceConfig
 from cardea.service.tool_endpoint import ToolEndpoint
 
 # The agent-run fixtures: a provisioned kernel, scripted session and fake tools.
@@ -121,6 +121,35 @@ def test_failed_tool_calls_and_failed_attempts_log_their_codes(
     assert finished.levelno == logging.WARNING
     assert finished.__dict__["outcome"] == "failed"
     assert finished.__dict__["code"] == "session_failed"
+
+
+def test_a_busy_refusal_is_logged_and_counted_but_not_receipted(
+    kernel: Kernel, session: FakeSession, logs: pytest.LogCaptureFixture
+) -> None:
+    kernel.agent_tools = AgentTools(max_concurrent_tool_calls=1)
+
+    async def eager(client: ClientSession, req: SessionRequest) -> SessionResult:
+        held = asyncio.ensure_future(call(client, "listings-search", to="hold"))
+        await asyncio.sleep(0.2)
+        assert "tool_busy" in str((await call(client, "mail-send", to="x@example.invalid")).content)
+        assert not (await held).is_error
+        return SessionResult(text="Searched.", is_error=False)
+
+    session.scripts = [eager]
+    task_id = submit(kernel)
+    assert AgentRunRuntime(kernel).execute(task_id) == "succeeded"
+    (refused,) = records(logs, "tool call refused")
+    assert refused.levelno == logging.WARNING and refused.__dict__["task_id"] == task_id
+    assert refused.__dict__["code"] == "tool_busy" and refused.__dict__["operation"] == "mail.send"
+    assert refused.__dict__["in_flight"] == 1
+    assert [r.__dict__["operation"] for r in records(logs, "tool call started")] == [
+        "listings.search"
+    ]
+    (finished,) = records(logs, "attempt finished")
+    assert finished.__dict__["tool_calls"] == 1 and finished.__dict__["tool_calls_refused"] == 1
+    (starting,) = records(logs, "harness session starting")
+    assert starting.__dict__["max_concurrent_tool_calls"] == 1
+    assert starting.__dict__["tool_timeout_s"] > 0
 
 
 # Secrets

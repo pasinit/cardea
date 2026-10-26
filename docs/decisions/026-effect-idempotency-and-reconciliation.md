@@ -59,6 +59,7 @@ A failed call's receipt, the run view (`calls[].failure_details`) and the agent'
 | `queue_timeout` | no confined-worker slot within the profile's queue timeout (code `executor_busy`, retryable); nothing ran |
 | `worker_exit` | the confined worker exited, was killed at a limit or was stopped without a result |
 | `worker_refused` | the helper refused to start the worker, or it was stopped before starting; nothing ran |
+| `abandoned` | the agent's MCP client gave up on the call while it waited for a confined-worker slot (code `call_abandoned`, retryable); nothing ran |
 | `upstream_http_error` | the handler failed on an HTTP error from a remote service |
 | `invalid_output` | the result did not match the output schema or size limit |
 | `rejected` | the operation refused the call itself (`OperationRejected`) |

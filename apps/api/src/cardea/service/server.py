@@ -259,6 +259,7 @@ def serve(
                 run_preview_bytes=config.run_preview_bytes,
             )
             kernel.attempt_logging = config.attempt_logging
+            kernel.agent_tools = config.agent_tools
             if config.agent_session:
                 kernel.session_limit = config.agent_session.concurrent_sessions
             elif harnesses is not None:
