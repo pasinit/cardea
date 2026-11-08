@@ -92,7 +92,7 @@ The 2026-09-22 [standards-first decision](standards-first.md) revises the earlie
 
 - `queued`: accepted and durably recorded; waiting for admission.
 - `running`: admitted under a bounded dispatch lease; may execute model/tool steps.
-- `waiting`: checkpointed with an event cursor, timer, dependency, or authority request.
+- `waiting`: checkpointed with an event cursor, timer, dependency, or authority request. [ADR-036](decisions/036-approval-waits.md) proposes (not implemented) approval waits: an exact, argument-bound effect waits for an authorised approver, as an extra condition inside the live ceiling.
 - `suspended`: explicit supervisor pause at a durable boundary; not native memory suspension.
 - `succeeded`: independent result checks passed and outputs are committed.
 - `failed`: terminal error with a structured reason and evidence.

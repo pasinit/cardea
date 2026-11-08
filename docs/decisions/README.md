@@ -36,5 +36,6 @@ Each record states the requirement, the open-source candidates considered, fit e
 | [031](031-agent-run-context-operations.md) | Agent-Run Context Operations |
 | [032](032-remove-incident-agent-tasks.md) | Remove the Incident Agent-Task Path |
 | [033](033-pluggable-agent-harnesses.md) | Pluggable Agent Harnesses |
+| [036](036-approval-waits.md) | Approval Waits and Per-Operation Autonomy (proposed) |
 
 ADR-022, a gap analysis for a first client application, is not published. ADRs 023–030 cite its gap numbers (for example "gap #3"); each of those records restates its own requirement in full.
