@@ -51,7 +51,7 @@ Cardea then:
 4. Stops it at 20 turns or $0.50.
 5. Marks the run succeeded only if exactly one message was sent.
 
-`GET /v0.2/tasks/{id}/run` shows what happened, call by call. Put the same request in a **trigger** with a cron schedule and it runs every morning, once per slot, even across restarts.
+`GET /v0.2/tasks/{id}/run` shows what happened, call by call. Put the same request in a **trigger** with a cron schedule and it runs every morning, once per slot, even across restarts. Give it an `event` match instead and a signed CloudEvent starts it, once per event ([ADR-035](docs/decisions/035-event-triggers.md)).
 
 ```mermaid
 flowchart LR
@@ -102,7 +102,7 @@ flowchart LR
     subgraph callers[Callers]
         sup[Supervisor<br/>CLI / HTTPX client]
         app[Client application]
-        trig[Time triggers<br/>one task per slot]
+        trig[Time and event triggers<br/>one task per slot or event]
     end
     subgraph kernel[Cardea kernel service]
         api[v0.2 API<br/>Unix socket / optional TLS]

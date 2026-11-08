@@ -216,6 +216,20 @@ class ContextCall(Record):
     arguments: dict[str, JsonValue] = Field(default_factory=dict)
 
 
+class InboundEvent(Record):
+    """The CloudEvents 1.0 event that started an event-triggered run (ADR-035).
+
+    Set by the trigger, never by its template. The run receives it as untrusted data.
+    """
+
+    id: Annotated[str, Field(strict=True, min_length=1, max_length=256)]
+    source: Annotated[str, Field(strict=True, min_length=1, max_length=512)]
+    type: Annotated[str, Field(strict=True, min_length=1, max_length=256)]
+    subject: Annotated[str, Field(strict=True, max_length=512)] | None = None
+    time: Annotated[str, Field(strict=True, max_length=64)] | None = None
+    data: JsonValue = None
+
+
 class AgentRunRequest(TaskRequest):
     """One bounded agent session whose only tools are installed operations (ADR-027)."""
 
@@ -242,6 +256,8 @@ class AgentRunRequest(TaskRequest):
     # The harness and model to run (ADR-033); defaults come from the host's registry.
     harness: HarnessID | None = None
     model: ModelID | None = None
+    # The inbound event this run serves; set by an event trigger (ADR-035).
+    trigger_event: InboundEvent | None = None
 
     @model_validator(mode="after")
     def run_grants(self) -> Self:
@@ -354,6 +370,16 @@ class AgentTools(Record):
     max_concurrent_tool_calls: Annotated[int, Field(strict=True, ge=1, le=64)] = 4
 
 
+class EventTriggers(Record):
+    """Inbound event intake for event triggers (ADR-035)."""
+
+    # Largest accepted event body: the whole signed CloudEvent, data included. The
+    # listener's `max_request_bytes` and `max_task_request_bytes` still apply on top.
+    max_event_bytes: Annotated[int, Field(strict=True, ge=1024, le=262144)] = 8192
+    # Largest accepted distance between a signature's timestamp and the kernel clock.
+    timestamp_tolerance_seconds: Annotated[int, Field(strict=True, ge=1, le=300)] = 300
+
+
 class ServiceConfig(Record):
     data_dir: Path
     spiffe_socket: str
@@ -383,6 +409,7 @@ class ServiceConfig(Record):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     attempt_logging: AttemptLogging = AttemptLogging()
     agent_tools: AgentTools = AgentTools()
+    event_triggers: EventTriggers = EventTriggers()
 
     @model_validator(mode="after")
     def one_harness_source(self) -> Self:
@@ -448,16 +475,80 @@ TEMPLATES: dict[str, type[TaskRequest]] = {
 }
 
 
+# A CloudEvents context attribute name: lower-case letters and digits (CloudEvents 1.0).
+EventAttribute = Annotated[str, Field(strict=True, pattern=r"^[a-z0-9]{1,20}$")]
+EventText = Annotated[str, Field(strict=True, min_length=1, max_length=512)]
+EventType = Annotated[str, Field(strict=True, min_length=1, max_length=256)]
+
+
+class EventFilter(Record):
+    """One CloudEvents Subscriptions API filter: `exact`, `prefix` or `suffix` on one
+    context attribute. An event without that attribute does not match."""
+
+    exact: dict[EventAttribute, EventText] | None = None
+    prefix: dict[EventAttribute, EventText] | None = None
+    suffix: dict[EventAttribute, EventText] | None = None
+
+    @model_validator(mode="after")
+    def one_dialect(self) -> Self:
+        dialects = [d for d in (self.exact, self.prefix, self.suffix) if d is not None]
+        if len(dialects) != 1 or len(dialects[0]) != 1:
+            raise ValueError("A filter names one dialect with exactly one attribute")
+        return self
+
+    def matches(self, attributes: dict[str, str]) -> bool:
+        for dialect, test in (
+            (self.exact, str.__eq__),
+            (self.prefix, str.startswith),
+            (self.suffix, str.endswith),
+        ):
+            if dialect is not None:
+                ((name, expected),) = dialect.items()
+                value = attributes.get(name)
+                return value is not None and bool(test(value, expected))
+        return False
+
+
+class EventMatch(Record):
+    """Which signed inbound events start an event trigger's template (ADR-035)."""
+
+    # The exact CloudEvents `source`, and the accepted `type` values.
+    source: EventText
+    types: Annotated[tuple[EventType, ...], Field(min_length=1, max_length=16)]
+    # Every filter must match.
+    filters: Annotated[tuple[EventFilter, ...], Field(max_length=8)] = ()
+    signing: Literal["standard-webhooks"] = "standard-webhooks"
+    # Host-owner private file of Standard Webhooks secrets (`whsec_...`), one per line.
+    # Any of them verifies, so a secret is rotated without dropping deliveries.
+    secret_file: Path
+
+    @model_validator(mode="after")
+    def absolute(self) -> Self:
+        if not self.secret_file.is_absolute():
+            raise ValueError("secret_file must be an absolute path")
+        return self
+
+    def matches(self, event: InboundEvent, attributes: dict[str, str]) -> bool:
+        return (
+            event.source == self.source
+            and event.type in self.types
+            and all(f.matches(attributes) for f in self.filters)
+        )
+
+
 class TriggerSpec(Record):
-    """A host-owner-installed time trigger; it admits one task per scheduled slot."""
+    """An installed trigger. A time trigger admits one task per scheduled slot (ADR-024);
+    an event trigger admits one task per matching inbound event (ADR-035)."""
 
     trigger_id: TriggerID
     supervisor_id: Identifier
-    # Five-field POSIX/Vixie cron, evaluated on the wall clock of `timezone`.
-    schedule: Annotated[str, Field(strict=True, min_length=9, max_length=128)]
-    timezone: Annotated[str, Field(strict=True, min_length=1, max_length=64)]
-    misfire: Literal["skip", "run_once_late", "grace"]
+    # Time triggers: five-field POSIX/Vixie cron, evaluated on the wall clock of `timezone`.
+    schedule: Annotated[str, Field(strict=True, min_length=9, max_length=128)] | None = None
+    timezone: Annotated[str, Field(strict=True, min_length=1, max_length=64)] | None = None
+    misfire: Literal["skip", "run_once_late", "grace"] | None = None
     grace_seconds: Annotated[int, Field(strict=True, ge=60, le=86400)] | None = None
+    # Event triggers: the inbound events that start the template, instead of a schedule.
+    event: EventMatch | None = None
     enabled: Annotated[bool, Field(strict=True)] = True
     template_kind: TemplateKind
     # A complete request of `template_kind` without `request_id`; validated at install and
@@ -466,31 +557,54 @@ class TriggerSpec(Record):
 
     @model_validator(mode="after")
     def coherent(self) -> Self:
-        validate_schedule(self.schedule, self.timezone)
-        if (self.misfire == "grace") != (self.grace_seconds is not None):
-            raise ValueError("grace_seconds is required for, and only for, the grace policy")
+        if self.event is None:
+            if self.schedule is None or self.timezone is None or self.misfire is None:
+                raise ValueError("A time trigger needs schedule, timezone and misfire")
+            validate_schedule(self.schedule, self.timezone)
+            if (self.misfire == "grace") != (self.grace_seconds is not None):
+                raise ValueError("grace_seconds is required for, and only for, the grace policy")
+        else:
+            if {self.schedule, self.timezone, self.misfire, self.grace_seconds} != {None}:
+                raise ValueError("An event trigger has no schedule")
+            if self.template_kind != "agent-run":
+                raise ValueError("Event triggers admit agent runs")
         # A null slot_time is accepted so a dumped request model can serve as a template.
         if {"request_id", "idempotency_context"} & set(self.template) or self.template.get(
             "slot_time"
         ):
             raise ValueError("The trigger assigns request and idempotency IDs per slot")
+        if self.template.get("trigger_event") is not None:
+            raise ValueError("The trigger assigns the inbound event")
         if self.template.get("parent_task_id") is not None:
             raise ValueError("Triggers admit root tasks only")
         self.request("validation.20000101T000000Z")
         return self
 
-    def request(self, request_id: str, slot_time: datetime | None = None) -> TaskRequest:
-        """The slot's request; `request_id` is the slot identity `<trigger_id>.<slot>`.
+    @property
+    def kind(self) -> Literal["time", "event"]:
+        return "time" if self.event is None else "event"
 
-        Operation effects in one slot share that identity as their idempotency
-        context (ADR-026), so a retried slot cannot repeat a committed effect.
-        `slot_time` is the scheduled instant, recorded on the wall clock of `timezone`.
+    def request(
+        self,
+        request_id: str,
+        slot_time: datetime | None = None,
+        event: InboundEvent | None = None,
+    ) -> TaskRequest:
+        """The request for one slot or event; `request_id` is its identity,
+        `<trigger_id>.<slot>` or `<trigger_id>.e<event digest>`.
+
+        Operation effects in one slot or event share that identity as their idempotency
+        context (ADR-026), so a retry cannot repeat a committed effect. `slot_time` is the
+        scheduled instant, recorded on the wall clock of `timezone`; `event` is the inbound
+        event an event trigger matched.
         """
         slot: dict[str, JsonValue] = {"request_id": request_id}
         if self.template_kind in {"operation", "agent-run"}:
             slot["idempotency_context"] = request_id
-            if slot_time is not None:
+            if slot_time is not None and self.timezone is not None:
                 slot["slot_time"] = slot_time.astimezone(ZoneInfo(self.timezone)).isoformat()
+            if event is not None:
+                slot["trigger_event"] = event.model_dump(mode="json")
         return TEMPLATES[self.template_kind].model_validate({**self.template, **slot})
 
     @property

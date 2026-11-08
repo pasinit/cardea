@@ -25,6 +25,7 @@ from cardea.service.models import (
     AttemptLogging,
     BaseHostTaskRequest,
     DelegationTaskRequest,
+    EventTriggers,
     HostObjectTaskRequest,
     ObjectPermission,
     OperationTaskRequest,
@@ -266,6 +267,8 @@ class Kernel:
         self.attempt_logging = AttemptLogging()
         # Tool-call timeout handed to harnesses and the per-attempt in-flight cap.
         self.agent_tools = AgentTools()
+        # Inbound event intake bounds for event triggers (ADR-035).
+        self.event_triggers = EventTriggers()
         # Unfinished tasks of a profile whose adapters are missing could never recover.
         missing: tuple[tuple[str, str, Callable[[Profile], bool]], ...] = (
             (
@@ -344,6 +347,11 @@ class Kernel:
             principal = proof.resolve(conn)
             if spec.supervisor_id != principal:
                 raise Fault("trigger_supervisor", "Supervisors schedule only their own work", 403)
+            if spec.event is not None:
+                # Their signing secret is a host-owner file (ADR-035).
+                raise Fault(
+                    "event_trigger_host_owned", "Event triggers are installed by provisioning"
+                )
             request = spec.request(f"{spec.trigger_id}.{slot_key(now())}")
             policy = Policy(conn)
             policy.require(principal, request.namespace, "tasks.schedule")
