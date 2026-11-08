@@ -1,0 +1,19 @@
+[project]
+name = "cardea-cel-fit"
+version = "0.1.0"
+description = "Isolated CEL implementation evaluation for ADR-036; not the Cardea runtime"
+requires-python = ">=3.12"
+dependencies = ["cel-python==0.5.0", "common-expression-language==0.10.0", "pytest==9.0.3"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
