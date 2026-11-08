@@ -121,8 +121,22 @@ class TriggerEvent(Record):
     detail: dict[str, JsonValue] = Field(description="Event-specific facts, e.g. missed counts.")
 
 
+class TriggerDelivery(Record):
+    """One decided delivery of an inbound event to an event trigger (ADR-035)."""
+
+    delivery_id: int
+    source: str
+    event_id: str = Field(description="The CloudEvents `id`.")
+    event_type: str
+    outcome: Literal["admitted", "refused"]
+    task_id: str | None = Field(description="The task the event started, if admitted.")
+    code: str | None = Field(description="Refusal code; a refused event can be redelivered.")
+    at: str
+
+
 class TriggerEntry(Record):
     trigger_id: str
+    kind: Literal["time", "event"] = "time"
     namespace: str
     definition: dict[str, JsonValue] = Field(description="The installed TriggerSpec.")
     definition_sha256: str
@@ -130,6 +144,20 @@ class TriggerEntry(Record):
     removed: bool
     last_slot: str | None
     events: list[TriggerEvent] = Field(description="Most recent history first.")
+    deliveries: list[TriggerDelivery] = Field(
+        default_factory=list, description="Event triggers: most recent deliveries first."
+    )
+
+
+class EventDelivered(Wire):
+    """`POST /v0.2/events/{trigger_id}`: what the kernel did with one signed event."""
+
+    trigger_id: str
+    outcome: Literal["admitted", "duplicate", "ignored"] = Field(
+        description="admitted: a new task; duplicate: the task this event already started; "
+        "ignored: the event does not match the trigger, and nothing was started."
+    )
+    task_id: str | None
 
 
 class TriggerList(Wire):

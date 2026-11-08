@@ -6,6 +6,9 @@ through `Kernel.admit_scheduled` and records the outcome and `last_slot`. A cras
 before that commit leaves nothing; a crash after it leaves a decided slot. The slot
 request ID `<trigger_id>.<slot>` additionally makes a repeated admission return the
 existing task.
+
+Event triggers (ADR-035) share installation and history here; the scheduler skips them,
+and `events.deliver` admits them per signed inbound event.
 """
 
 import json
@@ -41,7 +44,11 @@ log = logging.getLogger(__name__)
 
 
 def digest(spec: TriggerSpec) -> str:
-    return sha256(rfc8785.dumps(spec.model_dump(mode="json"))).hexdigest()
+    document = spec.model_dump(mode="json")
+    # Time triggers keep the digest they had before event triggers existed (ADR-035).
+    if document.get("event") is None:
+        document.pop("event", None)
+    return sha256(rfc8785.dumps(document)).hexdigest()
 
 
 def _event(
@@ -132,6 +139,11 @@ def upsert(
     if isinstance(request, AgentRunRequest):
         for call in request.context:
             check_context(operations, call.operation)
+    if spec.event is not None:
+        from cardea.service.events import load_secrets
+
+        # Fail at install, not at the first delivery, when the secret is unusable.
+        load_secrets(spec.event.secret_file)
     old = (
         conn.exec_driver_sql("SELECT * FROM triggers WHERE trigger_id=?", (spec.trigger_id,))
         .mappings()
@@ -141,8 +153,8 @@ def upsert(
     if old is None:
         conn.exec_driver_sql(
             "INSERT INTO triggers(trigger_id,supervisor_id,namespace,definition_json,"
-            "definition_sha256,enabled,removed,anchor,last_slot,updated_at,managed_by) "
-            "VALUES (?,?,?,?,?,?,0,?,NULL,?,?)",
+            "definition_sha256,enabled,removed,anchor,last_slot,updated_at,managed_by,kind) "
+            "VALUES (?,?,?,?,?,?,0,?,NULL,?,?,?)",
             (
                 spec.trigger_id,
                 spec.supervisor_id,
@@ -153,6 +165,7 @@ def upsert(
                 at.isoformat(),
                 at.isoformat(),
                 managed_by,
+                spec.kind,
             ),
         )
         _event(conn, spec.trigger_id, "installed", at, detail={"sha256": checksum})
@@ -161,6 +174,8 @@ def upsert(
         raise Fault("trigger_owner", "Trigger is managed by another owner", 409)
     if old["supervisor_id"] != spec.supervisor_id:
         raise Fault("trigger_immutable", "Install a new trigger to change its supervisor")
+    if old["kind"] != spec.kind:
+        raise Fault("trigger_immutable", "Install a new trigger to change its kind")
     if old["definition_sha256"] == checksum and not old["removed"]:
         return "unchanged"
     # Slots while disabled or removed are not caught up: re-enabling restarts the
@@ -207,7 +222,7 @@ class Scheduler:
                 str(row[0])
                 for row in conn.exec_driver_sql(
                     "SELECT trigger_id FROM triggers WHERE enabled=1 AND removed=0 "
-                    "ORDER BY trigger_id"
+                    "AND kind='time' ORDER BY trigger_id"
                 )
             ]
         outcomes: dict[str, str] = {}
@@ -223,7 +238,8 @@ class Scheduler:
     def _state(self, conn: sa.Connection, trigger_id: str) -> sa.RowMapping | None:
         return (
             conn.exec_driver_sql(
-                "SELECT * FROM triggers WHERE trigger_id=? AND enabled=1 AND removed=0",
+                "SELECT * FROM triggers WHERE trigger_id=? AND enabled=1 AND removed=0 "
+                "AND kind='time'",
                 (trigger_id,),
             )
             .mappings()
@@ -237,6 +253,7 @@ class Scheduler:
         if state is None:
             return "inactive"
         spec = TriggerSpec.model_validate_json(state["definition_json"])
+        assert spec.schedule and spec.timezone and spec.misfire, "time trigger"
         after = datetime.fromisoformat(state["last_slot"] or state["anchor"])
         decision = decide(spec.schedule, spec.timezone, spec.misfire, spec.grace_seconds, after, at)
         if decision.slot is None:
