@@ -67,7 +67,7 @@ def verify(
     except ValueError:
         stamp = None
     if stamp is None or abs(time.time() - stamp) > tolerance:
-        raise Fault("invalid_signature", "Event signature could not be verified", 401)
+        raise _unauthenticated()
     signed = {
         name: headers.get(name, "")
         for name in ("webhook-id", "webhook-timestamp", "webhook-signature")
@@ -78,7 +78,7 @@ def verify(
             return
         except Exception:
             continue
-    raise Fault("invalid_signature", "Event signature could not be verified", 401)
+    raise _unauthenticated()
 
 
 def _text(value: object) -> str | None:
@@ -139,8 +139,12 @@ def request_id(trigger_id: str, event: InboundEvent) -> str:
     return f"{trigger_id}.e{key[:15]}"
 
 
-def _trigger(conn: sa.Connection, trigger_id: str) -> sa.RowMapping:
-    row = (
+def _unauthenticated() -> Fault:
+    return Fault("invalid_signature", "Event signature could not be verified", 401)
+
+
+def _active(conn: sa.Connection, trigger_id: str) -> sa.RowMapping | None:
+    return (
         conn.exec_driver_sql(
             "SELECT * FROM triggers WHERE trigger_id=? AND kind='event' AND enabled=1 "
             "AND removed=0",
@@ -149,6 +153,11 @@ def _trigger(conn: sa.Connection, trigger_id: str) -> sa.RowMapping:
         .mappings()
         .first()
     )
+
+
+def _trigger(conn: sa.Connection, trigger_id: str) -> sa.RowMapping:
+    """The trigger, still active, after the sender has been authenticated."""
+    row = _active(conn, trigger_id)
     if row is None:
         raise Fault("trigger_not_found", "No active event trigger", 404)
     return row
@@ -196,16 +205,28 @@ def deliver(
     if len(body) > limits.max_event_bytes:
         raise Fault("event_too_large", f"Event exceeds {limits.max_event_bytes} bytes", 413)
     with kernel.database.read() as conn:
-        state = _trigger(conn, trigger_id)
+        state = _active(conn, trigger_id)
+    # Before a signature verifies, every failure looks the same to the caller, so an
+    # unauthenticated request cannot tell which event triggers exist. The log has the reason.
+    if state is None:
+        log.info("event refused", extra={"code": "trigger_not_found", "reason": trigger_id})
+        raise _unauthenticated()
     spec = TriggerSpec.model_validate_json(state["definition_json"])
     assert spec.event is not None, "event trigger"
-    verify(load_secrets(spec.event.secret_file), headers, body, limits.timestamp_tolerance_seconds)
+    try:
+        secrets = load_secrets(spec.event.secret_file)
+    except Fault as error:
+        log.error("event refused", extra={"code": error.code, "reason": trigger_id})
+        raise _unauthenticated() from None
+    verify(secrets, headers, body, limits.timestamp_tolerance_seconds)
     event, attributes = parse(headers, body)
     result: dict[str, Any] = {"schema_version": "0.2", "trigger_id": trigger_id}
     if not spec.event.matches(event, attributes):
         return {**result, "outcome": "ignored", "task_id": None}
     expected = state["definition_sha256"]
     try:
+        # `engine.begin()` issues BEGIN IMMEDIATE (database.py): concurrent deliveries of
+        # one event serialize here, and the later one sees the earlier one's admission.
         with kernel.database.engine.begin() as conn, borrow(conn) as tx:
             current = _trigger(conn, trigger_id)
             if current["definition_sha256"] != expected:
@@ -223,6 +244,14 @@ def deliver(
             )
             _record(conn, trigger_id, event, task_id=view.task.task_id)
             kernel.fault("event.before_commit")
+    except sa.exc.IntegrityError:
+        # Defence in depth: should another writer ever admit the same event first, the
+        # unique index refuses this one; answer with the task that won.
+        with kernel.database.read() as conn:
+            winner = _admitted(conn, trigger_id, event)
+        if winner is None:
+            raise
+        return {**result, "outcome": "duplicate", "task_id": winner}
     except (Fault, ValidationError, StoreError, ContractError) as error:
         if isinstance(error, Fault) and error.code in {"trigger_not_found", "trigger_changed"}:
             raise

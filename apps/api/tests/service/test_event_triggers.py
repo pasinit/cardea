@@ -3,6 +3,7 @@
 import base64
 import json
 import os
+import threading
 import time
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -317,6 +318,60 @@ def test_crash_before_commit_leaves_the_event_open(kernel: Kernel) -> None:
     assert len(bindings(kernel)) == 1
 
 
+def test_concurrent_deliveries_of_one_event_start_one_task(kernel: Kernel) -> None:
+    """Two deliveries race on the file-backed store: one admits, the other is a duplicate
+    of the same task, and neither fails."""
+    inside = threading.Event()
+
+    def hold(stage: str) -> None:
+        # The first delivery holds its write transaction open while the second arrives.
+        if stage == "event.before_commit" and not inside.is_set():
+            inside.set()
+            time.sleep(0.5)
+
+    kernel.fault = hold
+    barrier = threading.Barrier(2)
+    responses: list[Any] = []
+
+    def send(message_id: str) -> None:
+        client = TestClient(create_app(kernel))
+        barrier.wait()
+        responses.append(deliver(client, message_id=message_id))
+
+    threads = [threading.Thread(target=send, args=(f"msg-{n}",)) for n in (1, 2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+    assert [r.status_code for r in responses] == [202, 202]
+    bodies = [r.json() for r in responses]
+    assert sorted(b["outcome"] for b in bodies) == ["admitted", "duplicate"]
+    assert bodies[0]["task_id"] == bodies[1]["task_id"]
+    assert len(bindings(kernel)) == 1
+    assert [d["outcome"] for d in deliveries(kernel)] == ["admitted"]
+
+
+def test_a_lost_admission_race_answers_with_the_winner(
+    kernel: Kernel, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If a delivery ever missed the earlier admission, the unique index refuses its
+    record and it reports the winner's task instead of failing."""
+    client = TestClient(create_app(kernel))
+    first = deliver(client).json()
+    real = events._admitted
+    calls: list[None] = []
+
+    def misses_once(*args: Any) -> str | None:
+        calls.append(None)
+        return None if len(calls) == 1 else real(*args)
+
+    monkeypatch.setattr(events, "_admitted", misses_once)
+    late = deliver(client, message_id="msg-2")
+    assert late.status_code == 202
+    assert late.json() == {**first, "outcome": "duplicate"}
+    assert len(bindings(kernel)) == 1
+
+
 # Authentication
 
 
@@ -415,11 +470,23 @@ def test_binary_mode_and_other_media_are_refused(kernel: Kernel) -> None:
     assert deliver(client, base64_data).status_code == 400
 
 
-def test_unknown_disabled_and_time_triggers_have_no_event_endpoint(
+def test_unauthenticated_callers_cannot_enumerate_event_triggers(
     kernel: Kernel, secret: Path, tools: Tools
 ) -> None:
+    """Unknown, disabled and time triggers, an unusable secret and a bad signature all
+    answer the same 401 before anything is verified."""
     client = TestClient(create_app(kernel))
-    assert deliver(client, trigger_id="no-such-trigger").status_code == 404
+    bad_signature = deliver(client, secret=OTHER)
+    assert (bad_signature.status_code, bad_signature.json()["code"]) == (401, "invalid_signature")
+
+    def same_as_bad_signature(response: Any) -> None:
+        assert response.status_code == 401
+        assert response.json() == bad_signature.json()
+
+    same_as_bad_signature(deliver(client, trigger_id="no-such-trigger"))
+    os.chmod(secret, 0o644)
+    same_as_bad_signature(deliver(client))
+    os.chmod(secret, 0o600)
     timed = TriggerSpec.model_validate(
         {
             "trigger_id": "daily",
@@ -433,8 +500,9 @@ def test_unknown_disabled_and_time_triggers_have_no_event_endpoint(
     )
     disabled = event_spec(secret, enabled=False)
     provision(kernel.database, document((disabled, timed)), registry(tools))
-    assert deliver(client, trigger_id="daily").status_code == 404
-    assert deliver(client).status_code == 404
+    same_as_bad_signature(deliver(client, trigger_id="daily"))
+    same_as_bad_signature(deliver(client))
+    assert bindings(kernel) == [] and deliveries(kernel) == []
 
 
 # Size caps

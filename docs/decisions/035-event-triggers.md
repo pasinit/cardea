@@ -1,7 +1,7 @@
 # ADR-035: Event Triggers
 
 - **Date / owner / milestones:** 2026-11-08; runtime and API maintainers; extends ADR-024 (time triggers) and ADR-029 (supervisor schedules) with the "wait for events" part of the kernel contract.
-- **Status:** selected; first slice implemented. Portable tests pass (macOS, Python 3.13). Not run: a delivery through the live daemon's TLS listener, any test on Debian, and interoperability with a third-party sender.
+- **Status:** selected; slice 1 implemented. Open questions decided by the lead on 2026-11-08, subject to the owner's veto (see [Decided](#decided)). Portable tests pass (macOS, Python 3.13). Not run: a delivery through the live daemon's TLS listener, any test on Debian, and interoperability with a third-party sender.
 - **Requirement:** a task can be started by an authenticated inbound event, not only by the clock.
   - **Authentication.** Only a sender holding the trigger's secret can start its task. A replayed request is either outside the replay window or a duplicate. An unauthenticated request does nothing and records nothing.
   - **Matching.** A trigger matches events by source and type, plus simple attribute filters. An event that does not match does nothing.
@@ -35,7 +35,8 @@ Compose them: **CloudEvents 1.0 structured JSON mode for the envelope, Standard 
    - The file is read at installation, which fails with `event_secret_unavailable` if it is missing, not private or malformed, and again at every delivery, so a rotation needs no restart.
    - The timestamp must be within `event_triggers.timestamp_tolerance_seconds` of the kernel clock.
    - The signature authenticates the sender. It confers no authority: the task runs under the trigger's supervisor, inside that supervisor's live ceiling.
-   - Order of checks: body size (`413 event_too_large`), an active event trigger (`404 trigger_not_found`), the signature (`401 invalid_signature`), then parsing. Nothing is recorded before the signature verifies.
+   - Order of checks: body size (`413 event_too_large`), then an active event trigger with a usable secret and a valid signature, then parsing. Nothing is recorded before the signature verifies.
+   - **No trigger enumeration.** Before verification, an unknown, disabled, removed or time trigger and an unusable secret file all get the same `401 invalid_signature` as a bad signature. The real reason is logged server-side (`event refused`, with `code` `trigger_not_found` or `event_secret_unavailable`). The size check comes first but does not depend on the trigger.
 3. **Envelope.** CloudEvents 1.0 in structured JSON mode only (`Content-Type: application/cloudevents+json`), parsed with the CloudEvents SDK.
    - Binary mode (`ce-*` headers) is refused with `415 event_mode_unsupported`. Standard Webhooks signs only the body, so headers such as `ce-id` or `ce-type` could be changed on a captured request within the tolerance window. Structured mode keeps every attribute inside the signed body.
    - `data` must be JSON. `data_base64` and non-JSON `datacontenttype` are refused (`400 invalid_event`).
@@ -51,6 +52,7 @@ Compose them: **CloudEvents 1.0 structured JSON mode for the envelope, Standard 
    - A crash before the commit leaves nothing, and the sender's retry admits.
    - A crash after the commit leaves the delivery decided, and a retry returns the same task.
    - The `webhook-id` is not the dedupe key: a sender's retry may carry a new one.
+   - **Concurrent deliveries.** The kernel's write engine starts every transaction with `BEGIN IMMEDIATE` (`database.py`), so two simultaneous deliveries of one event serialize on the write lock before either looks for an admission. The later one sees the earlier one's row and answers `duplicate` with its task. As defence in depth, if the unique index ever refuses an `admitted` row, the delivery re-reads the winning admission and answers `202 duplicate` with that task, instead of failing.
 6. **Refusals leave the event open.** If admission is refused, the transaction rolls back and the refusal is appended as a `refused` delivery with its code. Refusals include authority denied, a disabled principal, request too large, capacity and an invalid template. The response carries the same status and code as an HTTP submission. This differs from a time slot, which a refusal closes. A slot recurs; an event does not, and senders retry non-2xx deliveries, so a transient refusal (capacity, a missing grant the owner then restores) does not lose the event. Each retry is evaluated again, and only an admission is unique.
 7. **The event as data.** Agent runs gain `trigger_event`: `id`, `source`, `type`, `subject`, `time` and `data`. The trigger sets it, and a template may not.
    - It is part of the bound request, so it is in the request digest and is checked by `max_task_request_bytes`.
@@ -87,7 +89,10 @@ Compose them: **CloudEvents 1.0 structured JSON mode for the envelope, Standard 
 
 ## Verification
 
-`apps/api/tests/service/test_event_triggers.py` has 18 portable tests and no real DBOS. They cover:
+`apps/api/tests/service/test_event_triggers.py` has 20 portable tests and no real DBOS. They cover:
+- two concurrent deliveries of one event on the file-backed store, the first holding its write transaction open, giving exactly one task and two `202`s (`admitted` and `duplicate`);
+- a delivery that loses the admission race at the unique index answering with the winner's task;
+- unknown, disabled and time triggers and an unusable secret answering exactly like a bad signature;
 - admission of one agent run with the event as `trigger_event`, its request ID and idempotency context, and the prompt's data block and preface, through a real attempt;
 - escaping of markup in event data;
 - redelivery with a new `webhook-id` returning the same task, before and after reopening the store, with only one task bound;
@@ -97,7 +102,6 @@ Compose them: **CloudEvents 1.0 structured JSON mode for the envelope, Standard 
 - the configured tolerance;
 - rotation with two secrets;
 - refusal of binary mode, non-CloudEvents media, invalid envelopes and `data_base64`;
-- 404 for unknown, disabled and time triggers;
 - the body cap, at its default and when configured;
 - the task-request cap refusing and recording, then admitting after the host owner raises it;
 - a revoked grant (`403`) and a disabled supervisor (`principal_disabled`) refused and recorded, then admitted once authority is restored;
@@ -111,9 +115,20 @@ Compose them: **CloudEvents 1.0 structured JSON mode for the envelope, Standard 
 
 `make lint`, `make typecheck` and `make test` pass (2026-11-08, macOS, Python 3.13).
 
+## Decided
+
+Decided by the lead on 2026-11-08; the owner may veto any of these.
+
+1. **Authentication** is a per-trigger signing secret (Standard Webhooks). A bearer-authenticated publish path is deferred.
+2. **Refusals leave the event open**, so a sender's retry is evaluated again (Decision 6).
+3. **Supervisor-managed event triggers** are deferred to a later slice of this ADR. The preferred direction is a kernel-generated secret returned once by `PUT /v0.2/triggers/{id}`.
+4. **Migration numbering.** `m6_004` stands. Whichever concurrent change merges second renumbers its migration.
+5. **Mutual TLS and webhook senders.** Senders that cannot present a client certificate reach the endpoint through a TLS-terminating proxy (Integration, Exposure).
+6. **Dependencies.** `cloudevents==2.2.0` and `standardwebhooks==1.1.0` are accepted.
+
 ## Deferred
 
-- Supervisor-managed event triggers. These need a secret the supervisor can obtain without a host file, for example a kernel-generated secret returned once by `PUT`.
+- Supervisor-managed event triggers (see Decided 3).
 - A bearer-authenticated publish path for senders that hold a Cardea identity.
 - CloudEvents binary mode. It needs a signature that covers headers, such as [HTTP Message Signatures, RFC 9421](https://www.rfc-editor.org/rfc/rfc9421).
 - A GitHub signature adapter.
