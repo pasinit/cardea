@@ -1,7 +1,7 @@
 # ADR-036: Approval Waits and Per-Operation Autonomy
 
 - **Date / owner / milestones:** 2026-11-08; kernel and runtime maintainers. Affects the operation registry (ADR-023), the invocation core and effect scopes (ADR-026), agent runs (ADR-027, ADR-031), triggers (ADR-024, ADR-029) and policy provisioning (ADR-010). Related proposals written in parallel: ADR-034 (agent teams: roles, work items, messaging) and ADR-035 (event triggers). This record does not design either.
-- **Status:** proposed. Design only: nothing below is implemented, and no fit test in this record has run. The condition-language choice is a shortlist pending the fit test in slice 1.
+- **Status:** selected (design), 2026-11-08, by the lead reviewer; the project owner may veto. Implementation is pending: nothing below is implemented, and no fit test in this record has run. The CEL implementation is chosen by the fit test in slice 1. The open questions are settled under [Decisions settled in review](#decisions-settled-in-review-2026-11-08).
 - **Requirement:** some effects must not run until an authorised principal has approved that exact effect. Examples: an agent proposes an order, a payment, a deployment or a merge, and a principal holding approval authority approves or rejects it. A reviewer role can block a change. Small effects inside tighter limits run without approval.
   - Whether approval is needed is configuration per operation and per grant, never code in the kernel.
   - The wait is durable. It survives daemon restarts and the loss of any lease, and it has a deadline with a defined outcome.
@@ -40,7 +40,7 @@ Checked 2026-11-08. Versions are the pinned dependency where Cardea already uses
 | **BPMN 2.0 user tasks** ([OMG BPMN 2.0.2](https://www.omg.org/spec/BPMN/2.0.2/)) as run by Camunda 8 ([user tasks](https://docs.camunda.io/docs/components/modeler/bpmn/user-tasks/), [timer boundary events](https://docs.camunda.io/docs/components/modeler/bpmn/timer-events/); release 8.10.x seen) | A user task has candidate users/groups, a due date and a follow-up date; an interrupting timer boundary event models expiry; the process continues with the task's output. | **Reference model; not adopted.** ADR-021 keeps the process-engine question open for multi-step company processes, and ADR-029 rejected a process DSL for single-step agent runs. A BPMN engine would become a second owner of execution and would not see Cardea's ceiling or receipts. Adopted semantics: candidate approvers are a permission, not a list of names; expiry is a timer that interrupts the wait and takes a declared path. A future process application on ADR-021 can map a user task onto an approval request. |
 | **Zanzibar-style relationship checks** ([Zanzibar paper](https://research.google/pubs/zanzibar-googles-consistent-global-authorization-system/), [OpenFGA](https://openfga.dev/docs/concepts) v1.22.1 seen, Apache-2.0) | Relationship tuples ("user U is approver of project P"), usersets and conditions. | **Not needed now.** "May principal P approve operation X in namespace N" is an exact ACL that the selected Casbin model already expresses as one more `mode`. ADR-010 kept Casbin and said to revisit relationships only for a concrete unmet requirement. Approver sets derived from org structure (for example "the requester's manager") would be that requirement; ADR-034 roles may raise it. |
 | **Casbin ABAC matchers** ([ABAC](https://casbin.org/docs/abac); pinned `casbin==1.43.0`, Apache-2.0) | Matchers can evaluate request attributes such as `r.obj.amount > 100`. | **Not used for thresholds.** ADR-010 deliberately keeps an exact-match model with no expression evaluation in the authorization matcher. Mixing argument thresholds into it would turn every policy decision into a per-argument evaluation. Thresholds belong to approval rules, evaluated once against the frozen arguments. |
-| **CEL, the Common Expression Language** ([spec](https://github.com/google/cel-spec)); used for conditions by [Kubernetes ValidatingAdmissionPolicy](https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/) and Google Cloud IAM Conditions. Python implementations: [`cel-python`](https://github.com/cloud-custodian/cel-python) 0.5.0 (2026-01-31, Apache-2.0, beta, pure Python with `lark`, `google-re2`, `pendulum` dependencies) and [`common-expression-language`](https://github.com/hardbyte/python-common-expression-language) 0.10.0 (2026-09-15, Apache-2.0, bindings to a Rust implementation) | A standard, side-effect-free, terminating expression language over JSON-like values, designed for exactly "does this request need extra checks". | **Shortlisted for rule conditions; fit test pending (slice 1).** The test must show: evaluation over validated JSON arguments; no access to time, I/O or host state; a bounded cost per expression; errors (missing field, type mismatch) surfaced as errors so Cardea can fail closed; install on the supported Debian profile. Do not mark either implementation unsuitable before that test. If neither passes, the fallback is the smallest custom form: RFC 6901 pointers (already used by ADR-026) with `lt/le/gt/ge/eq/in` comparisons, recorded as an exception. |
+| **CEL, the Common Expression Language** ([spec](https://github.com/google/cel-spec)); used for conditions by [Kubernetes ValidatingAdmissionPolicy](https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/) and Google Cloud IAM Conditions. Python implementations: [`cel-python`](https://github.com/cloud-custodian/cel-python) 0.5.0 (2026-01-31, Apache-2.0, beta, pure Python with `lark`, `google-re2`, `pendulum` dependencies) and [`common-expression-language`](https://github.com/hardbyte/python-common-expression-language) 0.10.0 (2026-09-15, Apache-2.0, bindings to a Rust implementation) | A standard, side-effect-free, terminating expression language over JSON-like values, designed for exactly "does this request need extra checks". | **Selected for rule conditions; implementation chosen by the slice-1 fit test.** If both pass, prefer the one with fewer native dependencies. The test must show: evaluation over validated JSON arguments; no access to time, I/O or host state; a bounded cost per expression; errors (missing field, type mismatch) surfaced as errors so Cardea can fail closed; install on the supported Debian profile. Do not mark either implementation unsuitable before that test. If neither passes, the fallback is the smallest custom form: RFC 6901 pointers (already used by ADR-026) with `lt/le/gt/ge/eq/in` comparisons. It is acceptable only as an exception recorded in this ADR. |
 | **MCP elicitation** ([MCP 2025-06-18, elicitation](https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation)) | A server asks the connected client's user for structured input mid-call. | **Rejected.** The "user" is whoever drives the MCP client, here the headless harness, not an authorised principal. The request lives in one open call, which is neither durable nor survivable across attempts. |
 | **A2A `input-required` / `auth-required` task states** ([A2A specification](https://a2a-protocol.org/latest/specification/)) | Standard task states telling a peer agent that a task is blocked on input or authorization. | **Mapping only, later.** Useful for presenting a waiting delegated child (ADR-017) to its parent agent. It carries no approver identity or argument binding, so it cannot be the record. |
 | **Cardea's own lease, fencing and receipt model** (ADR-010, ADR-026, ADR-027) | Leases fence workers; receipts bind a request digest; recovery cancels accepted-but-undispatched operations and marks dispatched ones uncertain; effect scopes dedupe across attempts. | **Reused unchanged for execution.** A wait holds no lease, so lease loss cannot touch it. The pending intent is *not* an `accepted` receipt, because recovery would cancel it and v0.1 has no "awaiting approval" operation state. Adding one would be a versioned contract change for no gain. The approved effect runs later under a fresh lease through the shared invocation core, so fencing, scopes, receipts and reconciliation apply exactly as for any other call. |
@@ -77,8 +77,8 @@ A rule has:
   - `conditional`: approval is required when `when` is true for the validated arguments;
   - `always`: every call needs approval.
 - `when` is a condition over `args` (the validated arguments), `operation` and `namespace` only. It cannot see time, other tasks or external state, so the same frozen intent always evaluates the same way. **An evaluation error requires approval** (fail closed).
-- `expires_after_seconds` bounds the wait (60 s to 30 days). `on_expiry` is `resume` (the run continues and is told) or `fail` (the task fails with `approval_expired`).
-- `distinct_from_supervisor: true` adds four-eyes separation: the task's own supervisor cannot approve.
+- `expires_after_seconds` bounds the wait (60 s to 30 days). `on_expiry` is `resume` (the run continues and is told) or `fail` (the task fails with `approval_expired`). When a rule omits it, the default depends on the task: `resume` for agent runs, so the agent is told and can report, and `fail` for single-operation tasks, which have no agent to tell.
+- `distinct_from_supervisor: true` adds four-eyes separation: the task's own supervisor cannot approve. It is opt-in. By default the supervisor may approve.
 - When several rules require approval, the request takes the earliest expiry, `fail` over `resume`, and the union of separation constraints. It lists every requiring `rule_id`.
 - A per-grant rule is part of the agent-run request and of a trigger's definition digest (ADR-024), so changing it creates a new definition version.
 
@@ -91,7 +91,8 @@ These levels are generic. Nothing in the kernel names payments, merges or curren
   - be an enabled principal holding the `approve` row now;
   - not be the task's agent or runtime principal, nor the agent or runtime of any ancestor task;
   - not be the task's supervisor when the request says `distinct_from_supervisor`.
-- Agents may be approvers when they hold the `approve` row; this is how an ADR-034 reviewer role can block a change. The requester exclusion still applies.
+- Agents may be approvers when they hold the `approve` row; this is how an ADR-034 reviewer role can block a change. The requester exclusion still applies: the agent is neither the requester nor an ancestor's agent or runtime.
+- An agent approver is checked at decision time like any other approver, live. When it decides from inside a task (for example an ADR-034 reviewer run), the `approve` right must also be inside that task's own live ceiling. The task must be granted it, its supervisor must currently hold it with `delegate`, and the platform and every ancestor must allow it. An agent cannot approve with authority its own supervisor does not have.
 - The approver's own broader access is irrelevant to the ceiling. The task's live ceiling for the operation and its `requires` rights (`policy.ceiling`) is checked at proposal, at decision and at execution. If it fails at decision or execution, the request becomes `void` and nothing runs.
 - One approval is enough in this record. A rejection by any authorised approver is final. Quorum (n of m approvers) is a later slice.
 
@@ -122,7 +123,7 @@ An identical proposal (same `intent_digest`) while one is pending returns the ex
   - with `on_expiry: resume`, the task wakes (WAITING → QUEUED) and its continuation is enqueued in the same transaction;
   - with `fail`, the task fails with `approval_expired`.
 - **Withdrawal:** `tasks.cancel` on a waiting task marks its request `withdrawn`. Withdrawal by the agent is not offered in this record.
-- **Bounds:** an agent run has `max_approval_waits` (default 4, at most 16). A further approval-required call is refused with `approval_limit`, so a looping agent cannot create unbounded waits. An agent-run request that may wait must cover the wait in its deadline: it gains `approval_wait_seconds`, which is added to the task deadline at admission, and `expires_at` is capped by that deadline.
+- **Bounds:** an agent run has `max_approval_waits` (default 4, at most 16). A further approval-required call is refused with `approval_limit`, so a looping agent cannot create unbounded waits. An agent-run request that may wait must cover the wait in its deadline. It gains `approval_wait_seconds` (at most 30 days), which is added to the task deadline at admission, and `expires_at` is capped by that deadline.
 
 ### 5. Deciding
 
@@ -145,7 +146,7 @@ POST /v0.2/approvals/{request_id}/decision
   This is the same pattern `tasks.cancel` already uses with `control_requests` and `send_in_transaction`. A crash before commit leaves nothing; a crash after commit leaves a committed decision with an enqueued continuation that DBOS recovers.
 - **Idempotency:** `decision_id` is the idempotency key. Replaying the same `decision_id` with the same body returns the recorded decision. The same `decision_id` with a different body is `409 decision_conflict`. Any other decision on a request that is no longer pending is `409 approval_closed` and carries the current state, so a client that lost a response can learn the outcome. Two approvers racing: the first commit wins, the second gets `approval_closed`.
 - **Refusals** (`403 approver_denied`, `403 self_approval`, `409 approval_expired`, `409 intent_mismatch`) write nothing.
-- **Reason text** is bounded to one printable line of 200 characters, like ADR-026 failure summaries. It is shown to the agent as untrusted data.
+- **Reason text** is bounded to one printable line of 200 characters, like ADR-026 failure summaries. It is shown to the agent, marked as untrusted data.
 
 ### 6. Execution and the receipt
 
@@ -180,7 +181,7 @@ The run view (ADR-029) and `GET /agent-receipts` show it with the call. Rejectio
   ```
 
   Expectations (ADR-029) are evaluated only when a session ends with no open request. An executed `apr-NN` counts as a distinct applied effect of its operation.
-- **Single-operation tasks:** approve leads to execution and the normal verified result. Reject fails the task with `approval_rejected`, void with `approval_void` and expiry with `approval_expired`.
+- **Single-operation tasks:** approve leads to execution and the normal verified result. Reject fails the task with `approval_rejected` and void with `approval_void`. Expiry always fails it with `approval_expired`, because there is no agent to resume, so `on_expiry: resume` has no effect on these tasks.
 - **Any client** can follow `GET /v0.2/approvals/{id}`, the task view or `events.wait` on the namespace.
 
 Re-asking the agent to call the tool again after approval was rejected as a design. It would depend on the model reproducing byte-identical arguments, and a reworded call would either fail the digest check or need a second approval.
@@ -211,6 +212,19 @@ New code is limited to:
 
 The wait reuses the v0.1 `EventWait`. Delivery reuses DBOS transactional enqueue and the existing minute schedule. Authorization reuses Casbin, and effects reuse ADR-026.
 
+## Decisions settled in review (2026-11-08)
+
+The lead reviewer decided these open questions on 2026-11-08. The project owner may veto any of them.
+
+1. **Supervisor approval.** The task's supervisor may approve by default. Four-eyes separation stays an opt-in rule (`distinct_from_supervisor`).
+2. **Expiry default.** `resume` for agent runs, `fail` for single-operation tasks, when a rule does not set `on_expiry`.
+3. **Open requests.** At most one open request per task for now.
+4. **Agent approvers.** Allowed when the agent holds `approve` and is neither the requester nor an ancestor's agent or runtime. Its own authority is checked against the live ceiling at decision time like any approver's (item 2).
+5. **CEL implementation.** The slice-1 fit test decides between `cel-python` and `common-expression-language`; if both pass, take the one with fewer native dependencies. The JSON-pointer fallback is acceptable only as a recorded exception.
+6. **Deadline.** An approval wait extends the task deadline through `approval_wait_seconds`, at most 30 days.
+7. **Reason text.** Shown to the agent, bounded to 200 characters and marked untrusted.
+8. **Bounds.** A maximum expiry of 30 days and a default of 4 approval waits per run (`max_approval_waits`, at most 16).
+
 ## Integration
 
 - **Authority:** the ceiling formula is unchanged. Approval adds a conjunct for selected effects. The live ceiling is checked at proposal, decision and execution, and the approver's `approve` right at decision and execution. Supervisor revocation or disablement while a task waits voids its request at the next decision, expiry or execution check. Snapshot restore (ADR-019) seals old namespaces: pending requests in a sealed namespace are voided by the restore fence.
@@ -239,7 +253,7 @@ Portable tests, plus one Debian acceptance run with a real OIDC human approver i
     - an operation reinstalled at a new version voids the request (`operation_changed`);
     - an agent re-proposing with different arguments while a request is open gets `approval_pending`; with identical arguments it gets the same request back.
 12. **Idempotent decision.** Replaying the same `decision_id` returns the same result; the same ID with a different decision gets `409 decision_conflict`; two racing approvers produce one decision.
-13. **Who may approve.** The requesting agent and runtime are refused (`self_approval`); the supervisor is refused when `distinct_from_supervisor`; a principal without `approve` is refused; an approve-only principal can approve but cannot invoke the operation.
+13. **Who may approve.** The requesting agent and runtime are refused (`self_approval`); the supervisor can approve by default and is refused when `distinct_from_supervisor`; a reviewer agent can approve only while its own task's live ceiling includes `approve`, and is refused once its supervisor loses it; a principal without `approve` is refused; an approve-only principal can approve but cannot invoke the operation.
 14. **Autonomy configuration:**
     - a condition error requires approval;
     - a per-grant rule adds a requirement but cannot remove a host or operation-default one;
