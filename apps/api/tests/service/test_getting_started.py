@@ -6,7 +6,12 @@ from pathlib import Path
 from typing import Any
 
 from cardea.service.harnesses import Catalog, HarnessFile
-from cardea.service.models import AgentRunRequest, OperationTaskRequest, TriggerSpec
+from cardea.service.models import (
+    AgentRunRequest,
+    InboundEvent,
+    OperationTaskRequest,
+    TriggerSpec,
+)
 from cardea.service.operations import Binding
 
 GUIDE = Path(__file__).parents[4] / "docs" / "getting-started.md"
@@ -19,10 +24,15 @@ def examples() -> list[dict[str, Any]]:
 
 
 def test_every_example_validates() -> None:
-    (single, run, trigger, effect, confined, research, registry) = examples()
+    (single, run, trigger, on_event, event, effect, confined, research, registry) = examples()
     OperationTaskRequest.model_validate(single)
     AgentRunRequest.model_validate(run)
     assert TriggerSpec.model_validate(trigger).request("daily-recap.20261020T063000Z")
+    spec = TriggerSpec.model_validate(on_event)
+    assert spec.event is not None
+    inbound = InboundEvent.model_validate({k: event[k] for k in ("id", "source", "type", "data")})
+    assert spec.event.matches(inbound, {"subject": event["subject"]})
+    assert spec.request("issue-triage.e0123456789abcd", event=inbound)
     Binding.model_validate(effect["cardea"])
     Binding.model_validate(confined["cardea"])
     AgentRunRequest.model_validate(research)
