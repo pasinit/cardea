@@ -11,3 +11,5 @@
 **Acceptance.** Native client/server calls, SQL SDK fit, concurrent allocation denial, broader/forged messages, ancestor restrictions, cancellation, lost replies, interrupted publication and false peer artifacts. Real Debian and matched load results belong in the [M4 report](../../experiments/m4/M4-REPORT.md).
 
 **Status.** Complete for the bounded profile; portable, real Debian and matched load acceptance pass. Up to four one-level installed host children, zero model calls. Arbitrary remote peers, nested coordinator plans, streaming/push, arbitrary mailbox traffic and general multi-agent execution are outside this profile. See [usage](../../experiments/m4/README.md).
+
+**Teams (proposed).** [ADR-034](../decisions/034-agent-teams.md) proposes durable team messages addressed to a role, an instance or a team, delivered as bounded context on the recipient's next run. It reuses A2A's message body, not a second A2A task store.

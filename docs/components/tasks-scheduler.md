@@ -13,3 +13,5 @@
 **Acceptance.** Competing claims cannot acquire the same revision; a restarted worker resumes acknowledged progress without replaying an uncertain effect.
 
 **Status.** Lifecycle and storage checks exist in [lifecycle.py](../../apps/api/src/cardea/kernel/lifecycle.py) and [store.py](../../apps/api/src/cardea/kernel/store.py). The authenticated service now runs continuous DBOS dispatch, transactional event wakes and deterministic verification, with exclusive process ownership and tested restart recovery. M2 adds real confined worker process-tree cancellation and reconciliation. M4 reuses DBOS control wakeups with a separate two-slot coordinator queue; four worker slots remain available, and committed child associations supply recovery progress. Automatic multi-host failover remains unsupported.
+
+**Teams (proposed).** [ADR-034](../decisions/034-agent-teams.md) proposes standing teams compiled to per-instance triggers, and work-item claims with a lease and fencing epoch modelled on the task lease, swept by the existing trigger tick.
