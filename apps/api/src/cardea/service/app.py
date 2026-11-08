@@ -10,12 +10,14 @@ from fastapi import Depends, FastAPI, Header, Path, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from cardea.kernel.lifecycle import ContractError
 from cardea.kernel.models import KernelEvent, ResourceRef
 from cardea.kernel.store import StoreError
+from cardea.service import events as intake
 from cardea.service import host_budget, host_operations, pages
 from cardea.service.auth import Proof
 from cardea.service.database import Fault, borrow
@@ -40,6 +42,7 @@ from cardea.service.responses import (
     AgentReceipts,
     ChildrenView,
     ContentChunk,
+    EventDelivered,
     HostBudgetView,
     OperationCatalog,
     OperationView,
@@ -388,6 +391,49 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
             raise Fault("trigger_mismatch", "Path and body trigger IDs differ", 422)
         return {"schema_version": "0.2", **kernel.schedule(proof, spec)}
 
+    @app.post(
+        "/v0.2/events/{trigger_id}",
+        response_model=EventDelivered,
+        status_code=202,
+        openapi_extra={
+            "requestBody": {
+                "required": True,
+                "content": {
+                    intake.STRUCTURED: {
+                        "schema": {
+                            "type": "object",
+                            "description": "A CloudEvents 1.0 event in structured JSON mode, "
+                            "signed with the Standard Webhooks headers webhook-id, "
+                            "webhook-timestamp and webhook-signature.",
+                            "required": ["specversion", "id", "source", "type"],
+                            "properties": {
+                                "specversion": {"const": "1.0"},
+                                "id": {"type": "string"},
+                                "source": {"type": "string"},
+                                "type": {"type": "string"},
+                                "subject": {"type": "string"},
+                                "time": {"type": "string", "format": "date-time"},
+                                "datacontenttype": {"type": "string"},
+                                "data": {},
+                            },
+                        }
+                    }
+                },
+            }
+        },
+    )
+    async def deliver_event(trigger_id: TriggerPath, request: Request) -> JSONResponse:
+        """An event trigger's inbound endpoint (ADR-035). It takes no bearer credential:
+        the Standard Webhooks signature under the trigger's secret authenticates the
+        sender, and the trigger's supervisor's live ceiling bounds the task."""
+        body = await request.body()
+        result = await run_in_threadpool(
+            intake.deliver, kernel, trigger_id, dict(request.headers), body
+        )
+        # Every outcome is 202 so a Standard Webhooks sender stops retrying; `outcome` says
+        # whether this delivery started a task, found the one it started, or matched nothing.
+        return JSONResponse(result, status_code=202)
+
     @app.delete("/v0.2/triggers/{trigger_id}", response_model=TriggerRemoved)
     def unschedule(trigger_id: TriggerPath, proof: Credential) -> dict[str, Any]:
         return {"schema_version": "0.2", **kernel.unschedule(proof, trigger_id)}
@@ -480,9 +526,21 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
                     .mappings()
                     .all()
                 )
+                deliveries = (
+                    conn.exec_driver_sql(
+                        "SELECT delivery_id,source,event_id,event_type,outcome,task_id,code,at "
+                        "FROM trigger_deliveries WHERE trigger_id=? "
+                        "ORDER BY delivery_id DESC LIMIT ?",
+                        (row["trigger_id"], history),
+                    )
+                    .mappings()
+                    .all()
+                )
                 listed.append(
                     {
                         "trigger_id": row["trigger_id"],
+                        "kind": row["kind"],
+                        "deliveries": [dict(d) for d in deliveries],
                         "namespace": row["namespace"],
                         "definition": json.loads(row["definition_json"]),
                         "definition_sha256": row["definition_sha256"],

@@ -98,6 +98,63 @@ Every task needs `objects.read` and `objects.write`. Agent runs also need `model
 - `{"trigger_id": "daily-recap", "change": "installed"}`.
 - At each slot, Cardea admits one agent run with `request_id` and `idempotency_context` set to `daily-recap.<slot>`, and `slot_time` in the trigger's timezone. If `messages.send` declares `idempotency_scope`, a retried or duplicate run for the same slot cannot send twice ([ADR-024](decisions/024-time-triggers.md), [ADR-029](decisions/029-supervisor-schedules-expectations-and-run-evidence.md)).
 
+## 3b. An agent run started by a signed event
+
+The host owner adds an event trigger to the provisioning document's `triggers` (event triggers are host-owned; `PUT /v0.2/triggers` refuses them). The secret file is private to the kernel account and holds one Standard Webhooks secret per line, such as `whsec_` followed by 32 random bytes in base64:
+
+```json
+{
+  "trigger_id": "issue-triage",
+  "supervisor_id": "supervisor-1",
+  "event": {
+    "source": "https://tracker.example.invalid/projects/demo",
+    "types": ["com.example.issue.opened"],
+    "filters": [{"prefix": {"subject": "issues/"}}],
+    "secret_file": "/etc/cardea/event-secrets/issue-triage"
+  },
+  "template_kind": "agent-run",
+  "template": {
+    "agent_id": "agent-1",
+    "namespace": "team",
+    "objective": "Triage a new issue",
+    "instructions": "Read the issue in the event and post a triage note to the team channel.",
+    "operations": ["messages.send"],
+    "expect": [{"operation": "messages.send", "min_calls": 1, "max_calls": 1}],
+    "grants": ["objects.read", "objects.write", "models.invoke", "messages.send"]
+  }
+}
+```
+
+The sender posts a CloudEvents 1.0 event in structured JSON mode to `POST /v0.2/events/issue-triage`, with `Content-Type: application/cloudevents+json` and the Standard Webhooks headers `webhook-id`, `webhook-timestamp` and `webhook-signature` (no bearer credential):
+
+```json
+{
+  "specversion": "1.0",
+  "id": "evt-1001",
+  "source": "https://tracker.example.invalid/projects/demo",
+  "type": "com.example.issue.opened",
+  "subject": "issues/42",
+  "datacontenttype": "application/json",
+  "data": {"title": "Login page is slow", "labels": ["performance"]}
+}
+```
+
+Any Standard Webhooks library signs it. In Python, with the exact body bytes you send:
+
+```python
+from datetime import UTC, datetime
+from standardwebhooks.webhooks import Webhook
+
+signature = Webhook(secret).sign("msg-1", datetime.now(UTC), body.decode())
+```
+
+**You get:**
+- `202 {"outcome": "admitted", "task_id": "task-…"}`. The run's `request_id` and `idempotency_context` are `issue-triage.e<15 hex digits>`, derived from the event's `source` and `id`. The prompt carries the event as one `<event>` block that is stated to be untrusted data ([ADR-035](decisions/035-event-triggers.md)).
+- The sender retries (new `webhook-id`, same event): `202 {"outcome": "duplicate"}` with the same task, also after a restart.
+- An event of another type or subject: `202 {"outcome": "ignored"}`, and nothing runs.
+- A bad or stale signature is `401 invalid_signature`. A body over `event_triggers.max_event_bytes` is `413 event_too_large`. A refusal by the supervisor's live ceiling (for example `403` after `messages.send` is revoked) is recorded and leaves the event open, so a later retry can still start it.
+- `GET /v0.2/triggers` lists the trigger's recent `deliveries`.
+
 ## 4. An effect with idempotency and reconciliation
 
 The operation's descriptor declares which arguments identify the effect, and how to observe it afterwards:

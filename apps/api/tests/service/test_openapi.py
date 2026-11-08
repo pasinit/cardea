@@ -18,7 +18,12 @@ def operations() -> list[tuple[str, str, dict[str, Any]]]:
 
 
 def typed(body: dict[str, Any]) -> bool:
-    found = body.get("content", {}).get("application/json", {}).get("schema", {})
+    content = body.get("content", {})
+    if "application/cloudevents+json" in content:
+        # The inbound event endpoint (ADR-035) documents the CloudEvents envelope inline.
+        event = content["application/cloudevents+json"].get("schema", {})
+        return {"id", "source", "type", "specversion"} <= set(event.get("required", ()))
+    found = content.get("application/json", {}).get("schema", {})
     return "$ref" in found or (found.get("type") == "array" and "$ref" in found.get("items", {}))
 
 

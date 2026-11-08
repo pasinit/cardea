@@ -307,6 +307,7 @@ def test_m1_restore_migrates_charges_without_rewriting_receipt(
         ).scalar_one()
         for table in (
             "recovery_epochs",
+            "trigger_deliveries",
             "trigger_events",
             "triggers",
             "effect_scopes",
@@ -350,6 +351,7 @@ def test_failed_m2_migration_is_atomic(kernel: Kernel) -> None:
     with kernel.database.engine.begin() as conn:
         for table in (
             "recovery_epochs",
+            "trigger_deliveries",
             "trigger_events",
             "triggers",
             "effect_scopes",

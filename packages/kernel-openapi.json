@@ -327,6 +327,16 @@
             "title": "Timeout Seconds",
             "type": "integer"
           },
+          "trigger_event": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InboundEvent"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "wait_for_event": {
             "const": false,
             "default": false,
@@ -941,6 +951,162 @@
         "title": "ErrorBody",
         "type": "object"
       },
+      "EventDelivered": {
+        "additionalProperties": false,
+        "description": "`POST /v0.2/events/{trigger_id}`: what the kernel did with one signed event.",
+        "properties": {
+          "outcome": {
+            "description": "admitted: a new task; duplicate: the task this event already started; ignored: the event does not match the trigger, and nothing was started.",
+            "enum": [
+              "admitted",
+              "duplicate",
+              "ignored"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          },
+          "trigger_id": {
+            "title": "Trigger Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "trigger_id",
+          "outcome",
+          "task_id"
+        ],
+        "title": "EventDelivered",
+        "type": "object"
+      },
+      "EventFilter": {
+        "additionalProperties": false,
+        "description": "One CloudEvents Subscriptions API filter: `exact`, `prefix` or `suffix` on one\ncontext attribute. An event without that attribute does not match.",
+        "properties": {
+          "exact": {
+            "anyOf": [
+              {
+                "patternProperties": {
+                  "^[a-z0-9]{1,20}$": {
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exact"
+          },
+          "prefix": {
+            "anyOf": [
+              {
+                "patternProperties": {
+                  "^[a-z0-9]{1,20}$": {
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prefix"
+          },
+          "suffix": {
+            "anyOf": [
+              {
+                "patternProperties": {
+                  "^[a-z0-9]{1,20}$": {
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suffix"
+          }
+        },
+        "title": "EventFilter",
+        "type": "object"
+      },
+      "EventMatch": {
+        "additionalProperties": false,
+        "description": "Which signed inbound events start an event trigger's template (ADR-035).",
+        "properties": {
+          "filters": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/EventFilter"
+            },
+            "maxItems": 8,
+            "title": "Filters",
+            "type": "array"
+          },
+          "secret_file": {
+            "format": "path",
+            "title": "Secret File",
+            "type": "string"
+          },
+          "signing": {
+            "const": "standard-webhooks",
+            "default": "standard-webhooks",
+            "title": "Signing",
+            "type": "string"
+          },
+          "source": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          },
+          "types": {
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Types",
+            "type": "array"
+          }
+        },
+        "required": [
+          "source",
+          "types",
+          "secret_file"
+        ],
+        "title": "EventMatch",
+        "type": "object"
+      },
       "EventWait": {
         "additionalProperties": false,
         "properties": {
@@ -1377,6 +1543,64 @@
           "operation"
         ],
         "title": "HostTaskRequest",
+        "type": "object"
+      },
+      "InboundEvent": {
+        "additionalProperties": false,
+        "description": "The CloudEvents 1.0 event that started an event-triggered run (ADR-035).\n\nSet by the trigger, never by its template. The run receives it as untrusted data.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/JsonValue"
+          },
+          "id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "source": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "time": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time"
+          },
+          "type": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "type"
+        ],
+        "title": "InboundEvent",
         "type": "object"
       },
       "JsonValue": {},
@@ -2978,6 +3202,77 @@
         "title": "TimerWait",
         "type": "object"
       },
+      "TriggerDelivery": {
+        "additionalProperties": false,
+        "description": "One decided delivery of an inbound event to an event trigger (ADR-035).",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Refusal code; a refused event can be redelivered.",
+            "title": "Code"
+          },
+          "delivery_id": {
+            "title": "Delivery Id",
+            "type": "integer"
+          },
+          "event_id": {
+            "description": "The CloudEvents `id`.",
+            "title": "Event Id",
+            "type": "string"
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "admitted",
+              "refused"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The task the event started, if admitted.",
+            "title": "Task Id"
+          }
+        },
+        "required": [
+          "delivery_id",
+          "source",
+          "event_id",
+          "event_type",
+          "outcome",
+          "task_id",
+          "code",
+          "at"
+        ],
+        "title": "TriggerDelivery",
+        "type": "object"
+      },
       "TriggerEntry": {
         "additionalProperties": false,
         "properties": {
@@ -2993,6 +3288,14 @@
             "title": "Definition Sha256",
             "type": "string"
           },
+          "deliveries": {
+            "description": "Event triggers: most recent deliveries first.",
+            "items": {
+              "$ref": "#/components/schemas/TriggerDelivery"
+            },
+            "title": "Deliveries",
+            "type": "array"
+          },
           "enabled": {
             "title": "Enabled",
             "type": "boolean"
@@ -3004,6 +3307,15 @@
             },
             "title": "Events",
             "type": "array"
+          },
+          "kind": {
+            "default": "time",
+            "enum": [
+              "time",
+              "event"
+            ],
+            "title": "Kind",
+            "type": "string"
           },
           "last_slot": {
             "anyOf": [
@@ -3214,12 +3526,22 @@
       },
       "TriggerSpec": {
         "additionalProperties": false,
-        "description": "A host-owner-installed time trigger; it admits one task per scheduled slot.",
+        "description": "An installed trigger. A time trigger admits one task per scheduled slot (ADR-024);\nan event trigger admits one task per matching inbound event (ADR-035).",
         "properties": {
           "enabled": {
             "default": true,
             "title": "Enabled",
             "type": "boolean"
+          },
+          "event": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EventMatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "grace_seconds": {
             "anyOf": [
@@ -3235,19 +3557,33 @@
             "title": "Grace Seconds"
           },
           "misfire": {
-            "enum": [
-              "skip",
-              "run_once_late",
-              "grace"
+            "anyOf": [
+              {
+                "enum": [
+                  "skip",
+                  "run_once_late",
+                  "grace"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "title": "Misfire",
-            "type": "string"
+            "title": "Misfire"
           },
           "schedule": {
-            "maxLength": 128,
-            "minLength": 9,
-            "title": "Schedule",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 9,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schedule"
           },
           "supervisor_id": {
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
@@ -3274,10 +3610,17 @@
             "type": "string"
           },
           "timezone": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Timezone",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timezone"
           },
           "trigger_id": {
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,110}$",
@@ -3288,9 +3631,6 @@
         "required": [
           "trigger_id",
           "supervisor_id",
-          "schedule",
-          "timezone",
-          "misfire",
           "template_kind",
           "template"
         ],
@@ -3701,6 +4041,199 @@
           }
         ],
         "summary": "Submit Delegation"
+      }
+    },
+    "/v0.2/events/{trigger_id}": {
+      "post": {
+        "description": "An event trigger's inbound endpoint (ADR-035). It takes no bearer credential:\nthe Standard Webhooks signature under the trigger's secret authenticates the\nsender, and the trigger's supervisor's live ceiling bounds the task.",
+        "operationId": "deliver_event_v0_2_events__trigger_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trigger_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,110}$",
+              "title": "Trigger Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/cloudevents+json": {
+              "schema": {
+                "description": "A CloudEvents 1.0 event in structured JSON mode, signed with the Standard Webhooks headers webhook-id, webhook-timestamp and webhook-signature.",
+                "properties": {
+                  "data": {},
+                  "datacontenttype": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "specversion": {
+                    "const": "1.0"
+                  },
+                  "subject": {
+                    "type": "string"
+                  },
+                  "time": {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "specversion",
+                  "id",
+                  "source",
+                  "type"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventDelivered"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Method Not Allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Deliver Event"
       }
     },
     "/v0.2/host-budget": {

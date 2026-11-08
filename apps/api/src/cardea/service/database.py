@@ -25,7 +25,7 @@ class Fault(Exception):
 
 
 # Latest Alembic revision this release runs against; older stores need migration.
-SCHEMA_HEAD = "m6_003"
+SCHEMA_HEAD = "m6_004"
 
 
 def private_file(path: Path) -> bytes:
