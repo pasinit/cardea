@@ -102,6 +102,16 @@ An event trigger starts its agent-run template once per signed inbound CloudEven
 "event_triggers": {"max_event_bytes": 8192, "timestamp_tolerance_seconds": 300}
 ```
 
+## Approval waits
+
+Single-operation tasks can wait for an approver before an effect runs ([ADR-036](decisions/036-approval-waits.md); worked example in [getting started](getting-started.md#4b-an-effect-that-waits-for-approval)). Agent runs do not wait yet: a run's call that a rule holds is refused with `approval_unsupported` and nothing runs.
+
+- **Configuration.** Default rules live in the operation descriptor (`cardea.approval`). Host rules go in the provisioning document under `approvals.entries`, one per namespace and operation, and replace the descriptor default there (an empty `rules` list makes the operation autonomous in that namespace). `cardea provision` replaces them as a whole, like policy; the `policy.updated` event and `service_meta.approval_rules_digest` carry the rule-set digest. Provisioning refuses rules for operations that are not installed and conditions that do not pass the ADR-036 static checks.
+- **Approvers.** A permission row with `"approve": true` installs the Casbin `approve` mode; `"allow": false` makes it approve-only. A `platform` row with `"approve": true` for the same namespace and operation is required too. The requesting agent, the kernel runtime and the agent and runtime of any ancestor task can never approve; the supervisor can, unless a rule sets `distinct_from_supervisor` (`403 four_eyes_required`).
+- **Inspection.** `GET /v0.2/approvals?namespace=<ns>&state=pending` lists requests the caller may decide or supervises; `GET /v0.2/approvals/<id>` shows the whole frozen intent; the task view shows `waiting_for`. The journal carries `approval.requested`, `approval.decided` and `approval.void` in the task's namespace, without arguments; route them to people with an event trigger or a client of the events API.
+- **Restart.** A waiting task holds no lease and no workflow; the request, the task and its checkpoint are in SQLite, so restarts change nothing. A decision enqueues the continuation workflow `cardea:<task>.approval.<request>` in its own transaction.
+- **Not yet.** Requests do not expire on their own and cancelling a waiting task does not withdraw its request (ADR-036 slice 3). A decision after the task's deadline is refused with `approval_expired`. A snapshot restore voids open requests (`snapshot_restored`).
+
 ## Retention and deletion
 
 Task, object, event, provenance, budget, receipt and idempotency history is retained for the lifetime of a store. Host payload cleanup is recoverable and retains reconciliation tombstones. Partial history or tombstone garbage collection is unsupported because deleting it could destroy evidence or permit duplicate effects.

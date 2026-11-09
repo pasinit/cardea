@@ -17,8 +17,15 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from cardea.kernel.lifecycle import ContractError
 from cardea.kernel.models import KernelEvent, ResourceRef
 from cardea.kernel.store import StoreError
+from cardea.service import (
+    approval_requests,
+    groups,
+    host_budget,
+    host_operations,
+    mailbox,
+    pages,
+)
 from cardea.service import events as intake
-from cardea.service import groups, host_budget, host_operations, mailbox, pages
 from cardea.service.auth import Proof
 from cardea.service.database import Fault, borrow
 from cardea.service.kernel import Kernel
@@ -42,6 +49,9 @@ from cardea.service.policy import Policy
 from cardea.service.profiles import for_runtime
 from cardea.service.responses import (
     AgentReceipts,
+    ApprovalDecided,
+    ApprovalList,
+    ApprovalView,
     ChildrenView,
     ContentChunk,
     EventDelivered,
@@ -85,6 +95,7 @@ TriggerPath = Annotated[str, Path(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,110}$"
 OperationID = Annotated[str, Path(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")]
 GroupPath = Annotated[str, Path(pattern=r"^[a-z][a-z0-9-]{0,39}$")]
 Namespace = Annotated[str, Query(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")]
+ApprovalID = Annotated[str, Path(pattern=r"^req-[0-9a-f]{32}$")]
 
 
 DEFAULT_MAX_REQUEST_BYTES = 32768
@@ -219,7 +230,12 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
     @app.exception_handler(Fault)
     async def fault_handler(request: Request, error: Fault) -> JSONResponse:
         return JSONResponse(
-            {"schema_version": "0.2", "code": error.code, "message": error.message},
+            {
+                "schema_version": "0.2",
+                "code": error.code,
+                "message": error.message,
+                **error.details,
+            },
             status_code=error.status,
         )
 
@@ -777,6 +793,32 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
         with kernel.database.read() as conn, borrow(conn) as tx:
             Policy(conn).access(proof.resolve(conn), task_id, "tasks.inspect")
             return {"schema_version": "0.2", "receipt": tx.get_operation(task_id, operation_id)}
+
+    @app.get("/v0.2/approvals", response_model=ApprovalList)
+    def approvals(
+        proof: Credential,
+        namespace: Namespace,
+        state: Annotated[
+            str,
+            Query(pattern=r"^(pending|approved|executed|rejected|expired|withdrawn|void)$"),
+        ] = "pending",
+        after: Annotated[str, Query(max_length=128)] = "",
+        limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    ) -> dict[str, Any]:
+        """Approval requests (ADR-036) the caller may decide or supervises, without arguments."""
+        return approval_requests.listing(kernel, proof, namespace, state, after, limit)
+
+    @app.get("/v0.2/approvals/{request_id}", response_model=ApprovalView)
+    def approval(request_id: ApprovalID, proof: Credential) -> dict[str, Any]:
+        """The whole frozen intent; needs `approve` for the operation or to supervise the task."""
+        return approval_requests.inspect(kernel, proof, request_id)
+
+    @app.post("/v0.2/approvals/{request_id}/decision", response_model=ApprovalDecided)
+    def decide(
+        request_id: ApprovalID, body: approval_requests.DecisionRequest, proof: Credential
+    ) -> dict[str, Any]:
+        """Approve or reject; idempotent by `decision_id`, and the first commit wins."""
+        return approval_requests.decide(kernel, proof, request_id, body)
 
     @app.get("/v0.2/tasks/{task_id}", response_model=TaskView)
     def inspect(task_id: TaskID, proof: Credential) -> TaskView:

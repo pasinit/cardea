@@ -443,6 +443,83 @@ class TaskReceipt(Wire):
     receipt: OperationReceipt
 
 
+# Approvals (ADR-036)
+
+
+class ApprovalRuleOutcome(Record):
+    """A rule that required approval for the frozen arguments."""
+
+    source: str = Field(description="operation (descriptor default), host or grant.")
+    rule_id: str
+    reason: str
+    error: str | None = Field(
+        description="Set when the rule required approval because its condition failed to "
+        "evaluate (fail closed)."
+    )
+
+
+class ApprovalDecisionRecord(Record):
+    decision_id: str
+    approver_id: str
+    decision: Literal["approve", "reject"]
+    reason: str | None = Field(description="Approver's text: untrusted, one line, at most 200.")
+    decided_at: str
+
+
+class ApprovalSummary(Record):
+    """One approval request without its arguments."""
+
+    request_id: str
+    task_id: str
+    namespace: str
+    supervisor_id: str
+    agent_id: str
+    runtime_id: str
+    operation: str
+    operation_version: int
+    operation_id: str = Field(description="The receipt the approved effect runs as: apr-NN.")
+    argument_sha256: str = Field(description="SHA-256 of the RFC 8785 arguments.")
+    idempotency_context: str | None
+    scope_key: str | None = Field(description="ADR-026 effect scope key, when declared.")
+    intent_digest: str = Field(description="Echo this with the decision.")
+    rules: list[ApprovalRuleOutcome]
+    rules_digest: str
+    distinct_from_supervisor: bool
+    created_at: str
+    expires_at: str
+    on_expiry: Literal["resume", "fail"]
+    state: Literal["pending", "approved", "executed", "rejected", "expired", "withdrawn", "void"]
+    void_reason: str | None
+    receipt_id: str | None = Field(description="Receipt of the executed effect.")
+    decision: ApprovalDecisionRecord | None
+    updated_at: str
+
+
+class ApprovalView(Wire, ApprovalSummary):
+    """`GET /v0.2/approvals/{request_id}`: the whole frozen intent."""
+
+    arguments: dict[str, JsonValue] = Field(
+        description="The validated arguments that run if approved; at most 64 KiB."
+    )
+
+
+class ApprovalList(Wire):
+    """`GET /v0.2/approvals`: requests the caller may decide or supervises."""
+
+    approvals: list[ApprovalSummary]
+    next: str | None = Field(description="Pass as `after` for the next page; null on the last.")
+
+
+class ApprovalDecided(Wire):
+    """`POST /v0.2/approvals/{request_id}/decision`: the request after the decision."""
+
+    request_id: str
+    task_id: str
+    state: str
+    void_reason: str | None
+    decision: ApprovalDecisionRecord | None
+
+
 # Mailboxes (ADR-034 decision 4)
 
 

@@ -123,6 +123,7 @@ def admit(
     executor: dict[str, JsonValue] | None = None,
     agent_id: str | None = None,
     slot_time: str | None = None,
+    approval: dict[str, JsonValue] | None = None,
 ) -> Admitted:
     """Commit the intent (or a deduplicated receipt) before any handler can run.
 
@@ -130,6 +131,8 @@ def admit(
     with the same context (e.g. a second task for one scheduled slot) cannot repeat an
     effect. ``executor`` pins the installed worker profile of a confined operation
     (ADR-028). ``agent_id`` and ``slot_time`` describe the caller to the handler.
+    ``approval`` is the decision that let this intent run (ADR-036); it is recorded in the
+    receipt's ``arguments.context.approval``.
     """
     descriptor = registry.get(name)
     registry.validate_arguments(name, arguments)
@@ -143,6 +146,8 @@ def admit(
         )
         if v is not None
     }
+    if approval is not None:
+        provenance["approval"] = approval
     prior: dict[str, JsonValue] | None = None
     if key is not None:
         row = (

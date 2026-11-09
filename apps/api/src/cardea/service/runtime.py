@@ -45,6 +45,7 @@ from cardea.service.kernel import (
 from cardea.service.models import TaskRequest, now
 from cardea.service.operation_runtime import OperationRuntime
 from cardea.service.policy import Policy
+from cardea.service.profiles import APPROVAL_WORKFLOW
 from cardea.service.triggers import Scheduler
 
 TRIGGER_WORKFLOW = "cardea.m6.triggers"
@@ -130,6 +131,18 @@ class Runtime:
         @DBOS.workflow(name=OPERATION_WORKFLOW)
         def execute_operation(task_id: str, wait: bool, deadline: float) -> str:
             return operation_effect(task_id)
+
+        @DBOS.step(name="cardea.m6.approval.effect", retries_allowed=False)
+        def approval_effect(task_id: str, request_id: str) -> str:
+            return OperationRuntime(kernel).execute(task_id, approval=request_id)
+
+        # Enqueued by the decision transaction under `<task>.approval.<request>` (ADR-036);
+        # no workflow is held while a task waits for a decision.
+        @DBOS.workflow(name=APPROVAL_WORKFLOW)
+        def continue_approval(task_id: str, request_id: str) -> str:
+            return approval_effect(task_id, request_id)
+
+        self.continue_approval = continue_approval
 
         @DBOS.step(name="cardea.m6.triggers.tick", retries_allowed=False)
         def trigger_tick() -> dict[str, str]:
