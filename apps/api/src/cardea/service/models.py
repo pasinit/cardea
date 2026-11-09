@@ -607,9 +607,34 @@ class EventMatch(Record):
         )
 
 
+class JournalMatch(Record):
+    """Which kernel journal events of the trigger's own namespace start its template
+    (ADR-034 decision 6): an internal ADR-035 source, `cardea://<namespace>`.
+
+    The kernel is the sender, so there is no signature. Matching is ADR-035's: the exact
+    `type`, every filter, and, when given, a `subject` among `subjects`. The `actor`
+    attribute is the principal whose action produced the event; events whose actor is the
+    template's own agent are ignored unless `include_own`, so a run cannot wake itself.
+    """
+
+    types: Annotated[tuple[EventType, ...], Field(min_length=1, max_length=16)]
+    filters: Annotated[tuple[EventFilter, ...], Field(max_length=8)] = ()
+    subjects: Annotated[tuple[EventText, ...], Field(max_length=8)] = ()
+    include_own: Annotated[bool, Field(strict=True)] = False
+
+    def matches(self, event: InboundEvent, attributes: dict[str, str], agent: str) -> bool:
+        return (
+            event.type in self.types
+            and (not self.subjects or event.subject in self.subjects)
+            and (self.include_own or attributes.get("actor") != agent)
+            and all(f.matches(attributes) for f in self.filters)
+        )
+
+
 class TriggerSpec(Record):
     """An installed trigger. A time trigger admits one task per scheduled slot (ADR-024);
-    an event trigger admits one task per matching inbound event (ADR-035)."""
+    an event trigger admits one task per matching inbound event (ADR-035); a journal
+    trigger admits one per matching kernel journal event of its namespace (ADR-034)."""
 
     trigger_id: TriggerID
     supervisor_id: Identifier
@@ -620,6 +645,8 @@ class TriggerSpec(Record):
     grace_seconds: Annotated[int, Field(strict=True, ge=60, le=86400)] | None = None
     # Event triggers: the inbound events that start the template, instead of a schedule.
     event: EventMatch | None = None
+    # Journal triggers: kernel journal events of the template's namespace (ADR-034).
+    journal: JournalMatch | None = None
     enabled: Annotated[bool, Field(strict=True)] = True
     template_kind: TemplateKind
     # A complete request of `template_kind` without `request_id`; validated at install and
@@ -628,7 +655,9 @@ class TriggerSpec(Record):
 
     @model_validator(mode="after")
     def coherent(self) -> Self:
-        if self.event is None:
+        if self.event is not None and self.journal is not None:
+            raise ValueError("A trigger has one source: a schedule, inbound events or the journal")
+        if self.event is None and self.journal is None:
             if self.schedule is None or self.timezone is None or self.misfire is None:
                 raise ValueError("A time trigger needs schedule, timezone and misfire")
             validate_schedule(self.schedule, self.timezone)
@@ -636,7 +665,7 @@ class TriggerSpec(Record):
                 raise ValueError("grace_seconds is required for, and only for, the grace policy")
         else:
             if {self.schedule, self.timezone, self.misfire, self.grace_seconds} != {None}:
-                raise ValueError("An event trigger has no schedule")
+                raise ValueError("An event or journal trigger has no schedule")
             if self.template_kind != "agent-run":
                 raise ValueError("Event triggers admit agent runs")
         # A null slot_time is accepted so a dumped request model can serve as a template.
@@ -652,8 +681,8 @@ class TriggerSpec(Record):
         return self
 
     @property
-    def kind(self) -> Literal["time", "event"]:
-        return "time" if self.event is None else "event"
+    def kind(self) -> Literal["time", "event", "journal"]:
+        return "event" if self.event else "journal" if self.journal else "time"
 
     def request(
         self,
@@ -730,13 +759,19 @@ class GroupSchedule(Record):
 
 
 class GroupEventMatch(Record):
-    """Kernel-journal events that wake a member (ADR-034 decision 6; ADR-034 slice 7).
+    """Kernel-journal events that wake a member (ADR-034 decision 6, slice 7).
 
-    Parsed so a manifest is complete, and refused at apply until slice 7 lands."""
+    Each member gets its own journal trigger. `source`, when given, must be the group's
+    own journal `cardea://<namespace>`; inbound HTTP sources stay host-owned (ADR-035).
+    In `subjects`, `$member`, `$pool` and `$group` stand for the member's principal ID,
+    its pool address `<group>.<pool>` and its group, so one entry serves every replica.
+    """
 
     types: Annotated[tuple[EventType, ...], Field(min_length=1, max_length=16)]
     source: EventText | None = None
     filters: Annotated[tuple[EventFilter, ...], Field(max_length=8)] = ()
+    subjects: Annotated[tuple[EventText, ...], Field(max_length=8)] = ()
+    include_own: Annotated[bool, Field(strict=True)] = False
 
 
 class GroupTrigger(Record):

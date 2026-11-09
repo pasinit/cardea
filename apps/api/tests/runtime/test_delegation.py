@@ -524,7 +524,12 @@ def test_m3_upgrade_preserves_existing_host_receipt(kernel: Kernel) -> None:
         before = conn.exec_driver_sql(
             "SELECT snapshot FROM operations WHERE task_id=?", (task,)
         ).scalar_one()
-        for table in ("mailbox_delivery_events", "mailbox_deliveries", "mailbox_messages"):
+        for table in (
+            "journal_trigger_cursors",
+            "mailbox_delivery_events",
+            "mailbox_deliveries",
+            "mailbox_messages",
+        ):
             conn.exec_driver_sql(f"DROP TABLE {table}")
         conn.exec_driver_sql("DROP INDEX task_bindings_by_agent")
         conn.exec_driver_sql("DROP TABLE group_members")

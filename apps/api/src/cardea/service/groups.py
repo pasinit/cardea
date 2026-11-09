@@ -71,9 +71,9 @@ def spec_digest(spec: GroupSpec) -> str:
 def compile_trigger(
     spec: GroupSpec, namespace: str, pool: GroupPool, member: str, index: int, group: str
 ) -> TriggerSpec:
-    """The ADR-029 trigger of one member for one manifest time trigger."""
+    """The ADR-029 trigger of one member for one manifest trigger: a time trigger, or a
+    journal trigger on the group's own namespace (ADR-034 decision 6)."""
     trigger = pool.triggers[index]
-    assert trigger.schedule is not None, "event triggers are refused before compilation"
     run, bounds = pool.run, pool.run.bounds
     template: dict[str, JsonValue] = {
         "agent_id": member,
@@ -93,15 +93,33 @@ def compile_trigger(
         "attempt_timeout_seconds": bounds.timeout_seconds,
         "timeout_seconds": bounds.run_timeout_seconds,
     }
+    source: dict[str, JsonValue]
+    if trigger.schedule is not None:
+        source = {
+            "schedule": trigger.schedule.cron,
+            "timezone": trigger.schedule.timezone,
+            "misfire": trigger.schedule.misfire,
+            "grace_seconds": trigger.schedule.grace_seconds,
+        }
+    else:
+        assert trigger.event is not None, "a group trigger has a schedule or an event"
+        names = {"$member": member, "$pool": f"{group}.{pool.name}", "$group": group}
+        source = {
+            "journal": {
+                "types": list(trigger.event.types),
+                "filters": [
+                    f.model_dump(mode="json", exclude_none=True) for f in trigger.event.filters
+                ],
+                "subjects": [names.get(s, s) for s in trigger.event.subjects],
+                "include_own": trigger.event.include_own,
+            }
+        }
     try:
         return TriggerSpec.model_validate(
             {
                 "trigger_id": trigger_id(member, index),
                 "supervisor_id": spec.supervisor,
-                "schedule": trigger.schedule.cron,
-                "timezone": trigger.schedule.timezone,
-                "misfire": trigger.schedule.misfire,
-                "grace_seconds": trigger.schedule.grace_seconds,
+                **source,
                 "template_kind": "agent-run",
                 "template": template,
             }
@@ -115,7 +133,7 @@ def compile_trigger(
         ) from None
 
 
-def _unsupported(spec: GroupSpec) -> None:
+def _unsupported(spec: GroupSpec, namespace: str) -> None:
     """Refuse manifest features whose ADR-034 slice has not landed, rather than accept a
     bound the kernel would not enforce."""
     if spec.spend is not None or any(p.spend is not None for p in spec.pools):
@@ -124,6 +142,7 @@ def _unsupported(spec: GroupSpec) -> None:
             "Group and pool spend accounts arrive with ADR-034 slice 9; remove `spend`",
             422,
         )
+    journal_source = f"cardea://{namespace}"
     for pool in spec.pools:
         if pool.expect_window:
             raise Fault(
@@ -131,12 +150,16 @@ def _unsupported(spec: GroupSpec) -> None:
                 f"Pool {pool.name}: windowed expectations arrive with ADR-034 slice 9",
                 422,
             )
-        if any(t.event is not None for t in pool.triggers):
-            raise Fault(
-                "group_event_trigger_unsupported",
-                f"Pool {pool.name}: kernel-journal event triggers arrive with ADR-034 slice 7",
-                422,
-            )
+        for trigger in pool.triggers:
+            # Group event triggers read the group's own journal; inbound HTTP sources need
+            # a host-owner secret, so they stay host-owned (ADR-035).
+            if trigger.event is not None and trigger.event.source not in (None, journal_source):
+                raise Fault(
+                    "group_event_source_unsupported",
+                    f"Pool {pool.name}: event triggers read {journal_source}; inbound "
+                    "sources are host-owned event triggers",
+                    422,
+                )
 
 
 def _check_grants(policy: Policy, supervisor: str, namespace: str, pool: GroupPool) -> None:
@@ -227,7 +250,7 @@ def _apply(
     if spec.supervisor != principal:
         raise Fault("group_supervisor", "Supervisors manage only their own groups", 403)
     policy = _authorize(conn, principal, namespace)
-    _unsupported(spec)
+    _unsupported(spec, namespace)
     # `mail:<address>` grants must name exactly one thing (ADR-034 slice 5 review).
     mailbox.check_group_addresses(conn, namespace, name, [p.name for p in spec.pools])
     # Each collection the group uses must exist here under the same supervisor (2.1), with

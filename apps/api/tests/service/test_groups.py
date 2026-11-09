@@ -335,8 +335,10 @@ def test_scale_down_pool_removal_and_deletion_wait_for_slice_8(kernel: Kernel) -
             "group_expect_window_unsupported",
         ),
         (
-            {"triggers": [{"event": {"types": ["cardea.mailbox.sent"]}}]},
-            "group_event_trigger_unsupported",
+            # Group event triggers read the group's own journal (ADR-034 slice 7); an
+            # inbound source stays a host-owned event trigger.
+            {"triggers": [{"event": {"source": "broker", "types": ["fill"]}}]},
+            "group_event_source_unsupported",
         ),
     ],
 )
