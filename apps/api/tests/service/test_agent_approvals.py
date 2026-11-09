@@ -21,7 +21,7 @@ from cardea.service import agent_run_runtime, approval_requests
 from cardea.service.agent_run_runtime import AgentRunRuntime
 from cardea.service.approval_requests import DecisionRequest
 from cardea.service.auth import Proof
-from cardea.service.database import Fault, borrow
+from cardea.service.database import Database, Fault, borrow
 from cardea.service.kernel import Kernel, provision
 from cardea.service.models import RIGHTS, AgentRunRequest, Provisioning, Signal, now
 
@@ -64,8 +64,7 @@ def setup(
         }
         for p in ("runtime", "supervisor", "outsider", "approver")
     ] + [
-        {"principal_id": a, "kind": "agent", "runtime_id": "runtime"}
-        for a in ("agent", "reviewer")
+        {"principal_id": a, "kind": "agent", "runtime_id": "runtime"} for a in ("agent", "reviewer")
     ]
     permissions: list[dict[str, Any]] = [
         {
@@ -283,9 +282,7 @@ def test_expiry_with_resume_wakes_the_run_and_tells_it(
     task_id = submit(kernel)
     assert AgentRunRuntime(kernel).execute(task_id) == "waiting"
     row = held_row(kernel, task_id)
-    assert overdue(kernel, row) == {
-        row["request_id"]: "expired"
-    }
+    assert overdue(kernel, row) == {row["request_id"]: "expired"}
     assert task_of(kernel, task_id).state is TaskState.QUEUED
     assert len(recorder.continuations()) == 1
     assert AgentRunRuntime(kernel).execute(task_id) == "succeeded"
@@ -319,9 +316,7 @@ def test_expiry_during_the_attempt_applies_after_it_parks(
     async def expires_meanwhile(client: ClientSession, request: SessionRequest) -> SessionResult:
         result = await proposes(client, request)
         row = held_row(kernel, request.job_key.split(":")[0])
-        assert overdue(kernel, row) == {
-            row["request_id"]: "expired"
-        }
+        assert overdue(kernel, row) == {row["request_id"]: "expired"}
         return result
 
     session.scripts = [expires_meanwhile]
@@ -400,7 +395,7 @@ def test_restart_while_parked_keeps_the_wait(
     assert AgentRunRuntime(kernel).execute(task_id) == "waiting"
     assert len(session.requests) == 1
     kernel.database.close()
-    database = runs.Database(kernel.database.directory)
+    database = Database(kernel.database.directory)
     kernel.database = database
     assert task_of(kernel, task_id).state is TaskState.WAITING
     decide(kernel, held_row(kernel, task_id))
@@ -440,9 +435,7 @@ def test_lease_loss_after_proposing_parks_without_a_session(
     assert held_row(kernel, task_id)["state"] == "pending"
 
 
-def test_cancel_withdraws_a_parked_run(
-    kernel: Kernel, tools: Tools, session: FakeSession
-) -> None:
+def test_cancel_withdraws_a_parked_run(kernel: Kernel, tools: Tools, session: FakeSession) -> None:
     setup(kernel)
     session.scripts = [proposes]
     task_id = submit(kernel)
