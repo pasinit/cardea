@@ -446,3 +446,128 @@ def test_a_collection_that_gains_states_adopts_its_records(kernel: Kernel) -> No
     assert stored(kernel, record["record_id"])["state"] == "open"
     refused = apply(kernel, "work", plain)
     assert refused.json()["code"] == "state_occupied"
+
+
+# Approval gates (decision 3.2, ADR-036 amendment of 2026-11-09)
+
+ORDERS_SPEC: dict[str, Any] = {
+    "supervisor": "supervisor",
+    "schema": {"type": "object"},
+    "states": ["proposed", "approved"],
+    "initial": "proposed",
+    "terminal": ["approved"],
+    "transitions": [
+        {
+            "name": "approve",
+            "from": ["proposed"],
+            "to": "approved",
+            "approval": {"level": "always", "reason": "Every order needs a desk approver"},
+        }
+    ],
+}
+
+
+def order(kernel: Kernel) -> tuple[str, dict[str, Any]]:
+    """A proposed order and a task asking to approve it, which waits for a decision."""
+    assert apply(kernel, "orders", ORDERS_SPEC).status_code == 200
+    state, output, code = run(
+        kernel,
+        "records.create",
+        {"collection": "orders", "client_key": "o1", "data": {"qty": 1}},
+        grants=ORDERS,
+    )
+    assert output is not None, code
+    record = output["record"]
+    request = OperationTaskRequest.model_validate(
+        {
+            "request_id": "approve-o1",
+            "agent_id": "a1",
+            "namespace": "test",
+            "objective": "Approve the order",
+            "operation": "records.transition",
+            "arguments": {
+                "collection": "orders",
+                "record_id": record["record_id"],
+                "transition": "approve",
+            },
+            "grants": ["objects.read", "objects.write", *ORDERS],
+        }
+    )
+    task_id = kernel.submit(kernel.auth.validate("supervisor"), request).task.task_id
+    assert OperationRuntime(kernel).execute(task_id) == "waiting"
+    return task_id, record
+
+
+def pending(kernel: Kernel, task_id: str) -> dict[str, Any]:
+    with kernel.database.read() as conn:
+        return dict(
+            conn.exec_driver_sql("SELECT * FROM approval_requests WHERE task_id=?", (task_id,))
+            .mappings()
+            .one()
+        )
+
+
+def decide(kernel: Kernel, token: str, row: dict[str, Any]) -> Any:
+    return TestClient(create_app(kernel)).post(
+        f"/v0.2/approvals/{row['request_id']}/decision",
+        json={"decision_id": f"{token}-1", "decision": "approve",
+              "intent_digest": row["intent_digest"]},
+        headers={"Authorization": f"Bearer {token}", "X-Cardea-Auth": "spiffe"},
+    )
+
+
+def test_an_approval_gate_waits_for_the_resource_qualified_approver(kernel: Kernel) -> None:
+    task_id, record = order(kernel)
+    row = pending(kernel, task_id)
+    assert row["approval_resource"] == "record:orders/approve"
+    assert row["operation"] == "records.transition"
+    assert stored(kernel, record["record_id"])["state"] == "proposed"
+    # Operation-level approve on records.transition does not decide a transition gate.
+    assert decide(kernel, "operator", row).json()["code"] == "approver_denied"
+    assert decide(kernel, "outsider", row).json()["code"] == "approver_denied"
+    decided = decide(kernel, "approver", row)
+    assert decided.status_code == 200, decided.json()
+    assert OperationRuntime(kernel).execute(task_id, approval=row["request_id"]) == "succeeded"
+    assert stored(kernel, record["record_id"])["state"] == "approved"
+    with kernel.database.read() as conn, borrow(conn) as tx:
+        receipt = tx.get_operation(task_id, "apr-01")
+    block = cast(Any, receipt.request.arguments)["context"]["approval"]
+    assert block["approver_id"] == "approver"
+
+
+def test_approve_on_one_collection_does_not_decide_another(kernel: Kernel) -> None:
+    task_id, _ = order(kernel)
+    row = pending(kernel, task_id)
+    # The approver holds approve on record:orders/approve only.
+    forged = {**row, "approval_resource": "record:work/approve"}
+    from cardea.service.approval_requests import holds_approve
+    from cardea.service.policy import Policy
+
+    with kernel.database.read() as conn:
+        assert holds_approve(Policy(conn), "approver", row)
+        assert not holds_approve(Policy(conn), "approver", cast(Any, forged))
+
+
+def test_agent_runs_cannot_take_a_gated_transition_yet(kernel: Kernel) -> None:
+    """ADR-036 slice 4 (approval waits in agent runs) is not on main: the call is refused
+    with approval_unsupported and nothing runs."""
+    from cardea.service.approval_requests import evaluate
+
+    assert apply(kernel, "orders", ORDERS_SPEC).status_code == 200
+    with kernel.database.read() as conn:
+        needed = evaluate(
+            conn,
+            kernel.operations,
+            "records.transition",
+            "test",
+            {"collection": "orders", "record_id": "rec-" + "0" * 32, "transition": "approve"},
+        )
+        free = evaluate(
+            conn,
+            kernel.operations,
+            "records.transition",
+            "test",
+            {"collection": "work", "record_id": "rec-" + "0" * 32, "transition": "approve"},
+        )
+    assert needed.required and [r.rule_id for r in needed.rules] == ["transition.approve"]
+    assert not free.required
