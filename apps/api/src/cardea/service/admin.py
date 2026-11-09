@@ -91,6 +91,12 @@ def seal(database: Database, source_digest: str) -> str:
                         message="Historical execution sealed by snapshot recovery.",
                     ),
                 )
+        # Sealed tasks cannot run an approved effect; their open requests end too (ADR-036).
+        conn.exec_driver_sql(
+            "UPDATE approval_requests SET state='void',void_reason='snapshot_restored',"
+            "updated_at=? WHERE state IN ('pending','approved')",
+            (at.isoformat(),),
+        )
         conn.exec_driver_sql("UPDATE principals SET disabled=1")
         conn.exec_driver_sql("DELETE FROM policies")
         conn.exec_driver_sql(

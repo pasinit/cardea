@@ -1,6 +1,8 @@
 """One installed operation as a task: durable intent, live ceiling, checked output.
 
-See ADR-023 (registry) and ADR-026 (idempotency scopes and reconciliation).
+See ADR-023 (registry), ADR-026 (idempotency scopes and reconciliation) and ADR-036
+(approval waits): a call an approval rule requires is frozen and the task waits; after an
+approval the stored intent runs as `apr-01` through the same invocation core.
 """
 
 import asyncio
@@ -16,7 +18,9 @@ import sqlalchemy as sa
 from pydantic import JsonValue
 
 from cardea.kernel.models import (
+    Checkpoint,
     DispatchLease,
+    EventWait,
     KernelFailure,
     OperationState,
     ResourceRef,
@@ -25,7 +29,8 @@ from cardea.kernel.models import (
     VerificationRecord,
 )
 from cardea.kernel.store import KernelTransaction
-from cardea.service import invocation
+from cardea.service import approval_requests, invocation
+from cardea.service.approvals import ApprovalRequirement
 from cardea.service.confined import WorkerFailed
 from cardea.service.database import Fault, borrow
 from cardea.service.kernel import TERMINAL, Kernel
@@ -42,11 +47,39 @@ log = logging.getLogger(__name__)
 LEASE_MARGIN = 5.0
 SETTLE_MARGIN = 1.0
 EXECUTE = "execute"
+# A single-operation task has at most one approval request, so its effect is `apr-01`.
+APPROVED = "apr-01"
+# Receipt context keys that are also OperationContext fields.
+CONTEXT_FIELDS = frozenset({"agent_id", "idempotency_context", "slot_time"})
+# Refusals before an approved intent runs that mean the live ceiling no longer holds.
+AUTHORITY_CODES = frozenset(
+    {
+        "authority_denied",
+        "task_grant_denied",
+        "principal_disabled",
+        "restored_scope_sealed",
+        "runtime_binding",
+        "invalid_provenance",
+    }
+)
 
 
 class _Refused(Exception):
     def __init__(self, fault: Fault) -> None:
         self.fault = fault
+
+
+class _Void(Exception):
+    """An approved intent that must not run; the request becomes void with this reason."""
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+
+
+def _void_reason(fault: Fault) -> str:
+    if fault.code in approval_requests.VOID_REASONS:
+        return approval_requests.VOID_REASONS[fault.code]
+    return "authority_lost" if fault.code in AUTHORITY_CODES else fault.code
 
 
 class OperationRuntime:
@@ -82,10 +115,13 @@ class OperationRuntime:
         self.kernel.operations.validate_arguments(request.operation, request.arguments)
         return request, descriptor
 
-    def execute(self, task_id: str) -> str:
-        """Workflow step entry point: a refusal before dispatch fails the task."""
+    def execute(self, task_id: str, approval: str | None = None) -> str:
+        """Workflow step entry point: a refusal before dispatch fails the task.
+
+        ``approval`` names the request whose decision this continuation runs (ADR-036).
+        """
         try:
-            return self._execute(task_id)
+            return self._execute(task_id, approval)
         except _Refused as refused:
             with self.kernel.database.engine.begin() as conn, borrow(conn) as tx:
                 task = tx.get_task(task_id)
@@ -99,20 +135,172 @@ class OperationRuntime:
                     failure=KernelFailure(code=refused.fault.code, message=refused.fault.message),
                 )
                 return "failed"
+        except _Void as void:
+            assert approval is not None
+            with self.kernel.database.engine.begin() as conn, borrow(conn) as tx:
+                task = tx.get_task(task_id)
+                if task.state in TERMINAL:
+                    return task.state.value
+                row = approval_requests.get(conn, approval)
+                approval_requests.mark_void(
+                    tx, conn, row, void.reason, self.kernel.runtime_id, now()
+                )
+                return self._fail_closed(tx, task, "approval_void", row, reason=void.reason)
 
-    def _execute(self, task_id: str) -> str:
+    def _fail_closed(
+        self,
+        tx: KernelTransaction,
+        task: Task,
+        code: str,
+        row: sa.RowMapping,
+        **details: JsonValue,
+    ) -> str:
+        """Fail a task whose approval did not lead to execution; nothing was dispatched."""
+        tx.change_task(
+            task.task_id,
+            TaskState.FAILED,
+            expected_revision=task.revision,
+            lease_id=task.lease.lease_id if task.lease else None,
+            at=now(),
+            failure=KernelFailure(
+                code=code,
+                message="Approval did not allow the operation to run",
+                details={"request_id": row["request_id"], **details},
+            ),
+        )
+        return "failed"
+
+    def _closed(
+        self, conn: sa.Connection, tx: KernelTransaction, task: Task, row: sa.RowMapping
+    ) -> str | None:
+        """The outcome of a continuation whose request will not run; None when approved."""
+        state = row["state"]
+        if state == "approved":
+            return None
+        if state == "rejected":
+            decision = approval_requests.decision_for(conn, str(row["request_id"]))
+            return self._fail_closed(
+                tx,
+                task,
+                "approval_rejected",
+                row,
+                decision_id=decision["decision_id"] if decision else None,
+            )
+        if state == "void":
+            return self._fail_closed(tx, task, "approval_void", row, reason=row["void_reason"])
+        return task.state.value
+
+    def _approved(
+        self, conn: sa.Connection, row: sa.RowMapping, request: OperationTaskRequest
+    ) -> dict[str, JsonValue]:
+        """Execution checks (ADR-036 item 6) beyond the guard's live ceiling."""
+        descriptor = self.kernel.operations.get(request.operation)
+        if descriptor.cardea.version != row["operation_version"]:
+            raise _Void("operation_changed")
+        digest = approval_requests.argument_sha256(request.arguments)
+        intent = approval_requests.intent_digest(
+            task_id=str(row["task_id"]),
+            namespace=request.namespace,
+            operation=request.operation,
+            version=int(row["operation_version"]),
+            arguments_sha256=digest,
+            idempotency_context=request.idempotency_context,
+        )
+        if digest != row["argument_sha256"] or intent != row["intent_digest"]:
+            raise _Void("intent_changed")
+        decision = approval_requests.decision_for(conn, str(row["request_id"]))
+        assert decision is not None
+        if not approval_requests.holds_approve(Policy(conn), str(decision["approver_id"]), row):
+            raise _Void("approver_authority_lost")
+        return approval_requests.receipt_block(conn, row)
+
+    def _park(
+        self,
+        conn: sa.Connection,
+        tx: KernelTransaction,
+        task: Task,
+        request: OperationTaskRequest,
+        needed: ApprovalRequirement,
+    ) -> str:
+        """Freeze the intent and move RUNNING -> WAITING in the same transaction."""
+        assert task.lease is not None
+        row = approval_requests.propose(
+            conn,
+            tx,
+            task,
+            Policy(conn).binding(task.task_id),
+            request,
+            self.kernel.operations,
+            needed,
+            operation_id=APPROVED,
+            at=now(),
+        )
+        at = now()
+        checkpoint = Checkpoint(
+            checkpoint_id=f"checkpoint-{task.task_id}",
+            task_id=task.task_id,
+            saved_at=at,
+            state={"stage": "awaiting_approval", "approval_request_id": row["request_id"]},
+            event_cursor=tx.latest_cursor(),
+        )
+        tx.change_task(
+            task.task_id,
+            TaskState.WAITING,
+            expected_revision=task.revision,
+            lease_id=task.lease.lease_id,
+            at=at,
+            checkpoint=checkpoint,
+            wait=EventWait(
+                namespace=request.namespace,
+                event_type=f"approval.{row['request_id']}",
+                after_cursor=checkpoint.event_cursor,
+            ),
+        )
+        return "waiting"
+
+    def _execute(self, task_id: str, approval: str | None = None) -> str:
         # An existing running task is an interrupted intent, never permission to replay.
         with self.kernel.database.engine.begin() as conn, borrow(conn) as tx:
             task = tx.get_task(task_id)
             if task.state in TERMINAL:
                 return task.state.value
+            row = approval_requests.for_task(conn, task_id)
+            if approval is None:
+                if row is not None:
+                    # The proposal committed; the decision's continuation owns the task now.
+                    return task.state.value
+                operation_id = EXECUTE
+            else:
+                row = approval_requests.get(conn, approval)
+                if row["task_id"] != task_id:
+                    raise Fault("approval_binding", "Approval request belongs to another task")
+                operation_id = str(row["operation_id"])
+                if task.state is TaskState.WAITING:
+                    return task.state.value
             recovering = task.state is TaskState.RUNNING
             if not recovering:
+                if row is not None:
+                    closed = self._closed(conn, tx, task, row)
+                    if closed is not None:
+                        return closed
                 try:
                     request, descriptor = self.guard(conn, task)
+                    block = self._approved(conn, row, request) if row is not None else None
                     handler = self.kernel.handler(request.operation)
                     executor = self.kernel.executor_record(request.operation)
                     queue = self.kernel.queue_allowance(request.operation)
+                    # Approval is an extra conjunct inside the live ceiling the guard checked.
+                    needed = (
+                        approval_requests.evaluate(
+                            conn,
+                            self.kernel.operations,
+                            request.operation,
+                            request.namespace,
+                            request.arguments,
+                        )
+                        if row is None
+                        else None
+                    )
                     at = now()
                     expires = min(
                         task.limits.deadline,
@@ -134,13 +322,15 @@ class OperationRuntime:
                         ),
                     )
                     assert task.lease is not None
+                    if needed is not None and needed.required:
+                        return self._park(conn, tx, task, request, needed)
                     admitted = invocation.admit(
                         conn,
                         tx,
                         self.kernel.operations,
                         task,
                         lease_id=task.lease.lease_id,
-                        operation_id=EXECUTE,
+                        operation_id=operation_id,
                         name=request.operation,
                         namespace=request.namespace,
                         arguments=request.arguments,
@@ -148,9 +338,19 @@ class OperationRuntime:
                         deadline=task.limits.deadline,
                         executor=executor,
                         slot_time=request.slot_time.isoformat() if request.slot_time else None,
+                        approval=block,
                     )
+                    if row is not None:
+                        # The intent is committed and never replayed: the request is executed.
+                        conn.exec_driver_sql(
+                            "UPDATE approval_requests SET state='executed',receipt_id=?,"
+                            "updated_at=? WHERE request_id=? AND state='approved'",
+                            (admitted.context.receipt_id, now().isoformat(), row["request_id"]),
+                        )
                 except Fault as error:
                     # Raising rolls back the lease and intent: nothing was dispatched.
+                    if row is not None:
+                        raise _Void(_void_reason(error)) from None
                     raise _Refused(error) from None
                 timeout = invocation.timeout_for(
                     self.kernel.operations, request.operation, expires, SETTLE_MARGIN, queue
@@ -159,9 +359,11 @@ class OperationRuntime:
         if recovering:
             # A confined worker may outlive the service: stop its whole process tree.
             self.kernel.reap_workers(task_id)
-            return self.uncertain(task_id)
+            return self.uncertain(task_id, operation_id)
         if admitted.deduplicated is not None:
-            return self.complete(task_id, rfc8785.dumps(admitted.deduplicated), deduplicated=True)
+            return self.complete(
+                task_id, rfc8785.dumps(admitted.deduplicated), operation_id, deduplicated=True
+            )
         effect = descriptor.cardea.effect == "effect"
         started = time.monotonic()
         try:
@@ -172,22 +374,28 @@ class OperationRuntime:
             )
         except OperationRejected as rejected:
             # Nothing happened: the handler refused, the helper refused or no slot freed up.
-            return self.settle(task_id, None, invocation.classify(rejected, timeout), started)
+            return self.settle(
+                task_id, None, invocation.classify(rejected, timeout), started, operation_id
+            )
         except WorkerFailed as failed:
             # The confined worker started: an effect may have happened (ADR-028).
             log.warning("confined worker failed: %s", failed.code, extra={"task_id": task_id})
             if effect:
-                return self.uncertain(task_id)
-            return self.settle(task_id, None, invocation.classify(failed, timeout), started)
+                return self.uncertain(task_id, operation_id)
+            return self.settle(
+                task_id, None, invocation.classify(failed, timeout), started, operation_id
+            )
         except Exception as error:
             log.exception("installed operation failed", extra={"task_id": task_id})
             if effect:
-                return self.uncertain(task_id)
-            return self.settle(task_id, None, invocation.classify(error, timeout), started)
+                return self.uncertain(task_id, operation_id)
+            return self.settle(
+                task_id, None, invocation.classify(error, timeout), started, operation_id
+            )
         self.kernel.fault("operation.before_settle")
-        return self.settle(task_id, output, "", started)
+        return self.settle(task_id, output, "", started, operation_id)
 
-    def uncertain(self, task_id: str) -> str:
+    def uncertain(self, task_id: str, operation_id: str = EXECUTE) -> str:
         # Never infer a result: fence the lease, then let recovery require reconciliation.
         while True:
             with self.kernel.database.engine.begin() as conn, borrow(conn) as tx:
@@ -205,12 +413,17 @@ class OperationRuntime:
                         task_id, expected_revision=task.revision, at=now()
                     ).state.value
                 invocation.uncertain(
-                    conn, tx, task, lease_id=task.lease.lease_id, operation_id=EXECUTE
+                    conn, tx, task, lease_id=task.lease.lease_id, operation_id=operation_id
                 )
             time.sleep(0.1)
 
     def settle(
-        self, task_id: str, output: object, error: str | invocation.Failure, started: float
+        self,
+        task_id: str,
+        output: object,
+        error: str | invocation.Failure,
+        started: float,
+        operation_id: str = EXECUTE,
     ) -> str:
         elapsed = max(0, int((time.monotonic() - started) * 1000))
         with self.kernel.database.engine.begin() as conn, borrow(conn) as tx:
@@ -232,7 +445,7 @@ class OperationRuntime:
                 self.kernel.operations,
                 task,
                 lease_id=task.lease.lease_id,
-                operation_id=EXECUTE,
+                operation_id=operation_id,
                 output=output,
                 error=error,
                 elapsed_ms=elapsed,
@@ -257,14 +470,16 @@ class OperationRuntime:
                     else None,
                 )
                 return target.value
-            return self._publish(conn, tx, task, content, deduplicated=False)
+            return self._publish(conn, tx, task, content, operation_id, deduplicated=False)
 
-    def complete(self, task_id: str, content: bytes, *, deduplicated: bool) -> str:
+    def complete(
+        self, task_id: str, content: bytes, operation_id: str = EXECUTE, *, deduplicated: bool
+    ) -> str:
         with self.kernel.database.engine.begin() as conn, borrow(conn) as tx:
             task = tx.get_task(task_id)
             if task.state in TERMINAL:
                 return task.state.value
-            return self._publish(conn, tx, task, content, deduplicated=deduplicated)
+            return self._publish(conn, tx, task, content, operation_id, deduplicated=deduplicated)
 
     def _publish(
         self,
@@ -272,6 +487,7 @@ class OperationRuntime:
         tx: KernelTransaction,
         task: Task,
         content: bytes,
+        operation_id: str,
         *,
         deduplicated: bool,
     ) -> str:
@@ -279,7 +495,7 @@ class OperationRuntime:
         request = OperationTaskRequest.model_validate_json(
             Policy(conn).binding(task.task_id)["request_json"]
         )
-        receipt = tx.get_operation(task.task_id, EXECUTE)
+        receipt = tx.get_operation(task.task_id, operation_id)
         stored = tx.put_object(
             ResourceRef(namespace=request.namespace, resource_id=f"{task.task_id}.output"),
             content,
@@ -354,7 +570,11 @@ class OperationRuntime:
                 receipt_id=receipt.receipt_id,
                 deadline=receipt.request.deadline,
                 effect_key=str(scope_key) if scope_key else receipt.receipt_id,
-                **{k: str(v) for k, v in provenance.items() if v is not None},
+                **{
+                    k: str(v)
+                    for k, v in provenance.items()
+                    if k in CONTEXT_FIELDS and v is not None
+                },
             )
             timeout = float(self.kernel.operations.get(name).cardea.timeout_seconds)
         observed = asyncio.run(asyncio.wait_for(reconciler(dict(arguments), context), timeout))

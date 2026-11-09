@@ -104,13 +104,23 @@ An event trigger starts its agent-run template once per signed inbound CloudEven
 
 ## Collections and records
 
-Collections are shared, versioned records with a JSON Schema ([ADR-034](decisions/034-agent-groups-and-shared-records.md), slice 1; worked example in [getting started](getting-started.md#8-a-shared-collection-of-records)). Migration `m8_records` adds the `collections`, `records` and `record_events` tables.
+Collections are shared, versioned records with a JSON Schema ([ADR-034](decisions/034-agent-groups-and-shared-records.md), slice 1; worked example in [getting started](getting-started.md#8-a-shared-collection-of-records)). Migration `m10_records` adds the `collections`, `records` and `record_events` tables.
 
 - **Who manages them.** A supervisor applies its own collections with `PUT /v0.2/collections/{name}`. It needs the right `groups.manage` in the namespace, with a matching `platform` row, as for every right. The host owner grants that right by provisioning; there is no host-owner collection file.
 - **Grants.** The built-in operations `records.create`, `records.get`, `records.query` and `records.update` are always installed. They are authorized by resource-qualified grants `record:<collection>/<action>` (`create`, `read`, `update`), provisioned like any other right (`"operation": "record:work/update"`, with `delegate` for supervisors). Revoking one stops the next call of every task that relies on it.
 - **Limits.** Record data is at most `max_record_bytes` (64–49152, default 16384) of canonical JSON, with at most 16 labels and 32 links. A query page holds at most 100 records and 56 KiB. Guards are CEL with ADR-036's limits: 512 characters, no comprehension macros, a fixed function list, failing closed.
 - **Recovery.** A create or update interrupted by a crash becomes `outcome_unknown`. The 30 s reconciliation loop settles it from `record_events`, which records the receipt of every change: the change happened exactly when its history row exists.
 - **History.** `record_events` is append-only (SQLite triggers refuse `UPDATE` and `DELETE`), and records are never deleted. `GET /v0.2/collections/{name}/records/{record_id}/events` pages it for the supervisor and for holders of `record:<name>/read`.
+
+## Approval waits
+
+Single-operation tasks can wait for an approver before an effect runs ([ADR-036](decisions/036-approval-waits.md); worked example in [getting started](getting-started.md#4b-an-effect-that-waits-for-approval)). Agent runs do not wait yet: a run's call that a rule holds is refused with `approval_unsupported` and nothing runs.
+
+- **Configuration.** Default rules live in the operation descriptor (`cardea.approval`). Host rules go in the provisioning document under `approvals.entries`, one per namespace and operation, and replace the descriptor default there (an empty `rules` list makes the operation autonomous in that namespace). `cardea provision` replaces them as a whole, like policy; the `policy.updated` event and `service_meta.approval_rules_digest` carry the rule-set digest. Provisioning refuses rules for operations that are not installed and conditions that do not pass the ADR-036 static checks.
+- **Approvers.** A permission row with `"approve": true` installs the Casbin `approve` mode; `"allow": false` makes it approve-only. A `platform` row with `"approve": true` for the same namespace and operation is required too. The requesting agent, the kernel runtime and the agent and runtime of any ancestor task can never approve; the supervisor can, unless a rule sets `distinct_from_supervisor` (`403 four_eyes_required`).
+- **Inspection.** `GET /v0.2/approvals?namespace=<ns>&state=pending` lists requests the caller may decide or supervises; `GET /v0.2/approvals/<id>` shows the whole frozen intent; the task view shows `waiting_for`. The journal carries `approval.requested`, `approval.decided` and `approval.void` in the task's namespace, without arguments; route them to people with an event trigger or a client of the events API.
+- **Restart.** A waiting task holds no lease and no workflow; the request, the task and its checkpoint are in SQLite, so restarts change nothing. A decision enqueues the continuation workflow `cardea:<task>.approval.<request>` in its own transaction.
+- **Not yet.** Requests do not expire on their own and cancelling a waiting task does not withdraw its request (ADR-036 slice 3). A decision after the task's deadline is refused with `approval_expired`. A snapshot restore voids open requests (`snapshot_restored`).
 
 ## Retention and deletion
 

@@ -21,6 +21,8 @@ DELEGATION_QUEUE = "cardea-coordinators"
 OPERATION_WORKFLOW = "cardea.m6.operation"
 AGENT_RUN_WORKFLOW = "cardea.m6.agent_run"
 AGENT_RUN_QUEUE = "cardea-agent-runs"
+# Continuation of a single-operation task after an approval decision (ADR-036).
+APPROVAL_WORKFLOW = "cardea.m6.approval"
 
 
 @dataclass(frozen=True)
@@ -96,7 +98,8 @@ PROFILES: tuple[Profile, ...] = (
         limits=lambda r: {"max_steps": 2, "max_output_bytes": 262144},
         workflow=OPERATION_WORKFLOW,
         runtime_cancels_running=True,
-        receipt_operation="execute",
+        # Its one operation: `execute`, or `apr-01` when it ran after approval (ADR-036).
+        receipt_operation=None,
     ),
     Profile(
         runtime_id="agent-run-v1",

@@ -10,6 +10,7 @@ import rfc8785
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from cardea.kernel.models import Identifier, ObjectVersion, OperationName, Task, Timestamp
+from cardea.service.approvals import HostApprovals
 from cardea.service.schedule import validate_schedule
 
 Right = Literal[
@@ -313,6 +314,8 @@ class TaskView(Wire):
     grants: tuple[Grant, ...]
     request_digest: str
     digest_format: Literal["sha256-rfc8785-v1"] = "sha256-rfc8785-v1"
+    # What a waiting task waits for, from the service tables: {"approval": request_id}.
+    waiting_for: dict[str, str] | None = None
 
 
 class Signal(Wire):
@@ -474,8 +477,32 @@ class Permission(Record):
     principal_id: Identifier
     namespace: Identifier
     operation: Grant
+    # Casbin modes this row installs: `allow` (may use), `delegate` (may grant to a task;
+    # needs `allow`) and `approve` (may decide approval requests, ADR-036).
+    allow: Annotated[bool, Field(strict=True)] = True
     delegate: Annotated[bool, Field(strict=True)] = False
+    approve: Annotated[bool, Field(strict=True)] = False
     expires_at: Timestamp
+
+    @model_validator(mode="after")
+    def some_mode(self) -> Self:
+        if self.delegate and not self.allow:
+            raise ValueError("delegate requires allow")
+        if not (self.allow or self.approve):
+            raise ValueError("A permission needs allow or approve")
+        return self
+
+    @property
+    def modes(self) -> tuple[str, ...]:
+        return tuple(
+            mode
+            for mode, wanted in (
+                ("allow", self.allow),
+                ("delegate", self.delegate),
+                ("approve", self.approve),
+            )
+            if wanted
+        )
 
 
 class ObjectPermission(Record):
@@ -653,6 +680,8 @@ class Provisioning(Record):
     host_budgets: Annotated[tuple[HostBudget, ...], Field(max_length=1000)] = ()
     # The complete trigger set; a trigger absent from a later document is removed (ADR-024).
     triggers: Annotated[tuple[TriggerSpec, ...], Field(max_length=1000)] = ()
+    # Host approval rules per namespace and operation (ADR-036); replaced as a whole.
+    approvals: HostApprovals = HostApprovals()
 
 
 # Agent groups (ADR-034 decision 1). A Kubernetes-shaped manifest: the kernel reuses the

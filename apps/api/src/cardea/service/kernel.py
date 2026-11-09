@@ -14,6 +14,7 @@ from cardea.kernel.models import BudgetLimits, Task, TaskState
 from cardea.kernel.store import KernelTransaction
 from cardea.runtime.agent_session import AgentSession
 from cardea.service import host_budget
+from cardea.service.approval_requests import waiting_for
 from cardea.service.auth import IdentityProvider, Proof
 from cardea.service.confined import ConfinedAgentSession, Workers, confined_handler, job_id
 from cardea.service.database import Database, Fault, borrow
@@ -102,6 +103,7 @@ def view(conn: sa.Connection, task_id: str) -> TaskView:
         namespace=binding["namespace"],
         grants=json.loads(binding["grants_json"]),
         request_digest=binding["request_digest"],
+        waiting_for=waiting_for(conn, task_id) if task.state is TaskState.WAITING else None,
     )
 
 
@@ -128,6 +130,13 @@ def provision(
         elif rule.operation not in KERNEL_RIGHTS and rule.operation not in installed:
             raise Fault(
                 "operation_not_installed", "Policy names an operation that is not installed"
+            )
+        if rule.approve and rule.operation not in installed:
+            raise Fault("invalid_approve", "Only installed operations take approve rights")
+    for entry in document.approvals.entries:
+        if entry.operation not in installed:
+            raise Fault(
+                "operation_not_installed", "Approval rules name an operation that is not installed"
             )
     client: DBOSClient | None = None
     try:
@@ -177,7 +186,14 @@ def provision(
                         ).first()
                         if not row:
                             raise Fault("unknown_principal", "Policy principal is not provisioned")
-                    for mode in ("allow", "delegate") if permission.delegate else ("allow",):
+                    modes = (
+                        permission.modes
+                        if isinstance(permission, Permission)
+                        else ("allow", "delegate")
+                        if permission.delegate
+                        else ("allow",)
+                    )
+                    for mode in modes:
                         conn.exec_driver_sql(
                             "INSERT INTO policies VALUES (?,?,?,?,?)",
                             (
@@ -190,6 +206,18 @@ def provision(
                                 permission.expires_at.timestamp(),
                             ),
                         )
+            # Host approval rules are replaced like policy and versioned by their digest.
+            conn.exec_driver_sql("DELETE FROM approval_rules")
+            for entry in document.approvals.entries:
+                conn.exec_driver_sql(
+                    "INSERT INTO approval_rules VALUES (?,?,?)",
+                    (entry.namespace, entry.operation, entry.model_dump_json()),
+                )
+            conn.exec_driver_sql(
+                "INSERT INTO service_meta VALUES ('approval_rules_digest',?) "
+                "ON CONFLICT(name) DO UPDATE SET value=excluded.value",
+                (document.approvals.digest,),
+            )
             conn.exec_driver_sql("DELETE FROM host_budget_limits")
             for budget in document.host_budgets:
                 if not conn.exec_driver_sql(
@@ -226,7 +254,7 @@ def provision(
                 producer_id="host-admin",
                 correlation_id=f"policy-{revision}",
                 at=now(),
-                payload={"revision": revision},
+                payload={"revision": revision, "approval_rules_digest": document.approvals.digest},
             )
             pending = conn.exec_driver_sql(
                 "SELECT b.task_id FROM task_bindings b JOIN tasks t USING(task_id) "

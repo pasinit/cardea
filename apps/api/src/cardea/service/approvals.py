@@ -10,7 +10,8 @@ by the slice-1 fit test recorded in ADR-036. They see only ``args`` (the validat
 ``operation`` and ``ns`` (the namespace; ``namespace`` is a reserved CEL identifier). Any
 evaluation error, or a result that is not a boolean, requires approval.
 
-Nothing here is wired into the runtime yet: no call is held for approval until slice 2.
+Slice 2 holds single-operation tasks for approval (`approval_requests`); agent runs refuse a
+call that needs approval until slice 4, and per-grant rules are wired in slice 5.
 """
 
 import re
@@ -22,10 +23,9 @@ from typing import Annotated, Literal, Self
 
 import cel
 import rfc8785
-from pydantic import AfterValidator, Field, JsonValue, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from cardea.kernel.models import Identifier, OperationName
-from cardea.service.models import Record
 
 ApprovalLevel = Literal["autonomous", "conditional", "always"]
 OnExpiry = Literal["resume", "fail"]
@@ -80,6 +80,12 @@ FUNCTIONS = frozenset(
 _MACROS = re.compile(
     r"\b(all|exists|exists_one|map|filter|bind|transformList|transformMap|optMap|optFlatMap)\b"
 )
+
+
+class Record(BaseModel):
+    # Same configuration as `service.models.Record`; defined here so that provisioning and
+    # descriptor models can import these rules without an import cycle.
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
 
 class ConditionInvalid(ValueError):

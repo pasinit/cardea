@@ -36,7 +36,7 @@ from cardea.kernel.store import KernelTransaction
 from cardea.runtime import activity as activities
 from cardea.runtime.activity import AttemptActivity, OutputLimits
 from cardea.runtime.harness import Harness, HarnessRequest, HarnessResult
-from cardea.service import confined, invocation
+from cardea.service import approval_requests, confined, invocation
 from cardea.service.confined import ConfinedAgentSession, WorkerFailed
 from cardea.service.database import Fault, borrow
 from cardea.service.kernel import TERMINAL, Kernel
@@ -760,6 +760,17 @@ class AgentRunRuntime:
                 descriptor = registry.get(name)
                 handler = self.kernel.handler(name)
                 executor = self.kernel.executor_record(name)
+                # Approval waits exist for single-operation tasks only (ADR-036 slice 2);
+                # a run's call that a rule holds for approval is refused, never run unheld.
+                registry.validate_arguments(name, arguments)
+                if approval_requests.evaluate(
+                    conn, registry, name, request.namespace, arguments
+                ).required:
+                    raise Fault(
+                        "approval_unsupported",
+                        "This call needs approval, which agent runs do not support yet",
+                        409,
+                    )
                 admitted = invocation.admit(
                     conn,
                     tx,
