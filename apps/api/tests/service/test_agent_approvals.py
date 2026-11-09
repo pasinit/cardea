@@ -6,7 +6,7 @@ with `AgentRunRuntime.execute`, as the agent-run and continuation workflows woul
 
 import json
 import time
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any, cast
 
 import pytest
@@ -246,3 +246,137 @@ def test_reject_tells_the_run_and_runs_nothing(
     assert 'decision="rejected"' in prompt
     assert 'reason="Not now &quot;&lt;b&gt;&quot;"' in prompt and "<b>" not in prompt
     assert "untrusted data" in prompt
+
+
+# 4. Expiry: resume tells the run; fail fails it
+
+
+def overdue(kernel: Kernel, row: dict[str, Any]) -> dict[str, str]:
+    """Backdate the request's expiry, then tick at real time.
+
+    A tick at a future clock would stamp the woken task in the future and later real-time
+    transitions would regress, so the test database drops the intent trigger instead.
+    """
+    with kernel.database.engine.begin() as conn:
+        conn.exec_driver_sql("DROP TRIGGER IF EXISTS approval_intent_immutable")
+        conn.exec_driver_sql(
+            "UPDATE approval_requests SET expires_at=? WHERE request_id=?",
+            ((now() - timedelta(seconds=1)).isoformat(), row["request_id"]),
+        )
+    return approval_requests.expire_due(kernel)
+
+
+EXPIRING = {**HELD, "expires_after_seconds": 60}
+
+
+def test_expiry_with_resume_wakes_the_run_and_tells_it(
+    kernel: Kernel, tools: Tools, session: FakeSession
+) -> None:
+    recorder = setup(kernel, rule=EXPIRING)
+    prompts: list[str] = []
+
+    async def resumed(client: ClientSession, request: SessionRequest) -> SessionResult:
+        prompts.append(request.prompt)
+        return SessionResult(text="The approval expired; nothing was sent.", is_error=False)
+
+    session.scripts = [proposes, resumed]
+    task_id = submit(kernel)
+    assert AgentRunRuntime(kernel).execute(task_id) == "waiting"
+    row = held_row(kernel, task_id)
+    assert overdue(kernel, row) == {
+        row["request_id"]: "expired"
+    }
+    assert task_of(kernel, task_id).state is TaskState.QUEUED
+    assert len(recorder.continuations()) == 1
+    assert AgentRunRuntime(kernel).execute(task_id) == "succeeded"
+    assert tools.sent == [] and 'decision="expired"' in prompts[0]
+    with pytest.raises(Fault) as late:
+        decide(kernel, row)
+    assert late.value.code == "approval_expired"
+
+
+def test_expiry_with_fail_fails_the_waiting_run(
+    kernel: Kernel, tools: Tools, session: FakeSession
+) -> None:
+    recorder = setup(kernel, rule={**EXPIRING, "on_expiry": "fail"})
+    session.scripts = [proposes]
+    task_id = submit(kernel)
+    assert AgentRunRuntime(kernel).execute(task_id) == "waiting"
+    row = held_row(kernel, task_id)
+    overdue(kernel, row)
+    task = task_of(kernel, task_id)
+    assert task.state is TaskState.FAILED and task.failure.code == "approval_expired"
+    assert recorder.continuations() == [] and tools.sent == []
+
+
+def test_expiry_during_the_attempt_applies_after_it_parks(
+    kernel: Kernel, tools: Tools, session: FakeSession
+) -> None:
+    """A request that closes while its attempt still runs is not lost: the attempt parks,
+    finds the closure already committed, and the continuation applies `fail`."""
+    recorder = setup(kernel, rule={**EXPIRING, "on_expiry": "fail"})
+
+    async def expires_meanwhile(client: ClientSession, request: SessionRequest) -> SessionResult:
+        result = await proposes(client, request)
+        row = held_row(kernel, request.job_key.split(":")[0])
+        assert overdue(kernel, row) == {
+            row["request_id"]: "expired"
+        }
+        return result
+
+    session.scripts = [expires_meanwhile]
+    task_id = submit(kernel)
+    assert AgentRunRuntime(kernel).execute(task_id) == "waiting"
+    # The closure was committed before the park, so the park woke the task at once.
+    assert task_of(kernel, task_id).state is TaskState.QUEUED
+    assert len(recorder.continuations()) == 1
+    assert AgentRunRuntime(kernel).execute(task_id) == "failed"
+    assert task_of(kernel, task_id).failure.code == "approval_expired"
+    assert tools.sent == []
+
+
+# 11 / 16. One open request, the same intent returns it, and the wait cap
+
+
+def test_open_request_rules_and_the_wait_cap(
+    kernel: Kernel, tools: Tools, session: FakeSession
+) -> None:
+    setup(kernel)
+
+    async def first(client: ClientSession, request: SessionRequest) -> SessionResult:
+        a = await call(client, "mail-send", to="user@example.invalid", body="recap")
+        same = await call(client, "mail-send", to="user@example.invalid", body="recap")
+        assert a.structured_content and same.structured_content
+        assert same.structured_content["request_id"] == a.structured_content["request_id"]
+        other = await call(client, "mail-send", to="other@example.invalid", body="recap")
+        assert other.is_error and "approval_pending" in text(other)
+        return SessionResult(text="Waiting.", is_error=False)
+
+    async def again(client: ClientSession, request: SessionRequest) -> SessionResult:
+        capped = await call(client, "mail-send", to="other@example.invalid", body="retry")
+        assert capped.is_error and "approval_limit" in text(capped), capped.content
+        return SessionResult(text="Could not ask again.", is_error=False)
+
+    session.scripts = [first, again]
+    task_id = submit(kernel, max_approval_waits=1)
+    assert AgentRunRuntime(kernel).execute(task_id) == "waiting"
+    with kernel.database.read() as conn:
+        assert conn.exec_driver_sql("SELECT COUNT(*) FROM approval_requests").scalar_one() == 1
+    decide(kernel, held_row(kernel, task_id), "reject")
+    assert AgentRunRuntime(kernel).execute(task_id) == "succeeded"
+    assert tools.sent == []
+
+
+def test_wait_fields_bound_the_run_and_keep_old_digests(kernel: Kernel) -> None:
+    plain = runs.run_request()
+    assert "max_approval_waits" not in plain.model_dump(mode="json")
+    assert plain.approval_waits == 4
+    with pytest.raises(ValueError):
+        runs.run_request(max_approval_waits=17)
+    with pytest.raises(ValueError):
+        runs.run_request(approval_wait_seconds=30 * 24 * 3600 + 1)
+    setup(kernel)
+    base = task_of(kernel, submit(kernel, request_id="plain"))
+    longer = task_of(kernel, submit(kernel, request_id="longer", approval_wait_seconds=86400))
+    extra = longer.limits.deadline - base.limits.deadline
+    assert timedelta(hours=23, minutes=59) < extra < timedelta(hours=24, minutes=1)
