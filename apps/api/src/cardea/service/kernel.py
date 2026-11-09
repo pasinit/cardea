@@ -19,6 +19,8 @@ from cardea.service.auth import IdentityProvider, Proof
 from cardea.service.confined import ConfinedAgentSession, Workers, confined_handler, job_id
 from cardea.service.database import Database, Fault, borrow
 from cardea.service.harnesses import Catalog, Harnesses, check_harness_grants
+from cardea.service.mailbox import BUILTIN
+from cardea.service.mailbox import is_group_address as mailbox_address
 from cardea.service.models import (
     APPROVAL_OPERATIONS,
     DEFAULT_MAX_TASK_REQUEST_BYTES,
@@ -125,6 +127,9 @@ def provision(
     for rule in (*document.permissions, *document.platform):
         if rule.operation.startswith("harness:"):
             check_harness_grants(harnesses, (rule.operation,), required=False)
+        elif rule.operation.startswith("mail:"):
+            # Mail grants name addresses (ADR-034); recipients resolve when mail is sent.
+            continue
         elif rule.operation.startswith(RECORD_GRANT_PREFIX):
             # Collections are supervisor documents; a grant may precede its collection.
             continue
@@ -151,6 +156,12 @@ def provision(
                     .mappings()
                     .first()
                 )
+                if old is None and mailbox_address(conn, principal.principal_id):
+                    raise Fault(
+                        "principal_conflict",
+                        "Principal ID equals an agent group or pool mail address",
+                        409,
+                    )
                 immutable = ("kind", "auth_kind", "issuer", "subject", "runtime_id")
                 if old and any(old[key] != getattr(principal, key) for key in immutable):
                     raise Fault(
@@ -571,6 +582,10 @@ class Kernel:
         check_harness_grants(self.harnesses, request.grants)
         if isinstance(request, OperationTaskRequest):
             descriptor = self.operations.get(request.operation)
+            if request.operation in BUILTIN:
+                raise Fault(
+                    "builtin_operation", "Built-in mailbox operations run in agent runs", 422
+                )
             if not set(descriptor.cardea.requires) <= set(request.grants):
                 raise Fault("task_grant_denied", "Operation requires additional explicit grants")
             self.operations.validate_arguments(request.operation, request.arguments)

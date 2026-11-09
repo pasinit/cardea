@@ -31,6 +31,7 @@ import rfc8785
 import sqlalchemy as sa
 from pydantic import JsonValue, ValidationError
 
+from cardea.service import mailbox
 from cardea.service.auth import Proof
 from cardea.service.database import Fault, borrow
 from cardea.service.models import (
@@ -44,6 +45,7 @@ from cardea.service.models import (
     now,
 )
 from cardea.service.policy import Policy
+from cardea.service.records import CollectionSpec, check_lease
 from cardea.service.schedule import slot_key
 from cardea.service.triggers import MemberBusy, remove, upsert
 
@@ -226,18 +228,22 @@ def _apply(
         raise Fault("group_supervisor", "Supervisors manage only their own groups", 403)
     policy = _authorize(conn, principal, namespace)
     _unsupported(spec)
-    # Each collection the group uses must exist here under the same supervisor (2.1).
+    # `mail:<address>` grants must name exactly one thing (ADR-034 slice 5 review).
+    mailbox.check_group_addresses(conn, namespace, name, [p.name for p in spec.pools])
+    # Each collection the group uses must exist here under the same supervisor (2.1), with
+    # a claim lease long enough for every pool that may claim its records (2.4).
     for collection in spec.collections:
-        owner = conn.exec_driver_sql(
-            "SELECT supervisor_id FROM collections WHERE namespace=? AND name=?",
+        row = conn.exec_driver_sql(
+            "SELECT supervisor_id,spec_json FROM collections WHERE namespace=? AND name=?",
             (namespace, collection),
-        ).scalar()
-        if owner != principal:
+        ).first()
+        if row is None or row[0] != principal:
             raise Fault(
                 "collection_not_found",
                 f"Collection {collection} does not exist in this namespace under this supervisor",
                 422,
             )
+        check_lease(collection, CollectionSpec.model_validate_json(row[1]).claims, spec.pools)
     at = now()
     old = (
         conn.exec_driver_sql(

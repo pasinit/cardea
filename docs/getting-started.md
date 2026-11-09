@@ -320,7 +320,9 @@ A supervisor holding `groups.manage` in the namespace defines a collection ([ADR
     "schema": {"type": "object", "required": ["title"],
                "properties": {"title": {"type": "string"}, "body": {"type": "string"}}},
     "max_record_bytes": 16384,
-    "guards": {"update": "record.created_by == caller.id"}
+    "guards": {"update": "record.created_by == caller.id"},
+    "claims": {"lease_seconds": 14400, "max_per_holder": 1, "max_followups": 6,
+               "standalone": true}
   }
 }
 ```
@@ -360,3 +362,11 @@ and later, from version 1 of the record:
 - `records.create` outputs `{"record": {...}}` with `record_id`, `version: 1` and `created_by: "agent-1"`. Repeating it in the same idempotency context with the same `client_key` returns the same record (`deduplicated`).
 - `records.update` with a stale `expected_version` fails with `version_conflict`. Data that does not match the schema fails with `record_invalid`, and a guard that is false or cannot be evaluated fails with `guard_refused`. A call without the record grant fails with `task_grant_denied`, or `authority_denied` once the supervisor's own grant is revoked.
 - `GET /v0.2/collections/work/records/{record_id}/events?namespace=team` lists the record's append-only history: actor, task, receipt, old and new values.
+
+**Claims** ([ADR-034](decisions/034-agent-groups-and-shared-records.md) slice 2). With `claims` set, an agent holding `record:work/claim` takes a record with `records.claim {"collection": "work", "record_id": …}`:
+- Exactly one of several concurrent claims wins; the others get `record_claimed`. A holder may hold `max_per_holder` records (`claim_limit` beyond that).
+- The output's `claim` carries `claim_epoch`, `lease_expires_at` and `idempotency_context` (`<record_id>.<epoch>`). Use that context for effects taken for the record, so a later holder of the same record cannot repeat them.
+- The claim belongs to the agent principal, not to one run. Each attempt of its runs keeps the lease past that attempt, a successful run renews it to the full `lease_seconds`, and claiming again renews it. Failed runs renew nothing.
+- While a record is held, `records.update` needs the holder's current `claim_epoch`: the holder without it, or a stale holder, gets `claim_lost`, and anyone else gets `record_claimed`. Set `"fence_writes": false` in `claims` to opt out. `records.release` with `claim_epoch` gives the record back.
+- When the lease runs out, the next minute tick releases the record with a new epoch. A group member that holds a record but has no run in progress gets a follow-up run from its first trigger once less than half the lease is left, at most `max_followups` per epoch. If its claim then lapses, the supervisor gets a message.
+- `records.claimed {"collection": "work"}` lists the caller's live claims; it also works as a context operation.

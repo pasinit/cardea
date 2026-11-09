@@ -68,7 +68,15 @@ RECORD_GRANT_PREFIX = "record:"
 # qualified grant for the collection and action each call names, checked under the live
 # ceiling at every call; the operation name itself is not a grant.
 RECORD_OPERATIONS: frozenset[str] = frozenset(
-    {"records.create", "records.get", "records.query", "records.update"}
+    {
+        "records.create",
+        "records.get",
+        "records.query",
+        "records.update",
+        "records.claim",
+        "records.release",
+        "records.claimed",
+    }
 )
 
 
@@ -99,10 +107,15 @@ def approve_grant(operation: str) -> str:
     return f"{APPROVE_GRANT_PREFIX}{operation}"
 
 
+# Right to send mail to one address, written `mail:<address>` (ADR-034 decision 4.2): an
+# instance (a principal ID), a pool (`<group>.<pool>`) or a group (`<group>`).
+MailGrant = Annotated[str, Field(strict=True, pattern=r"^mail:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")]
+
 # A kernel right, the name of an installed operation (ADR-023), a harness grant, a record
-# grant or an approve grant. Installed names are checked against the live registry at
-# provisioning, admission and dispatch; harness grants against the installed harnesses.
-Grant = Right | OperationName | HarnessGrant | RecordGrant | ApproveGrant
+# grant, a mail grant or an approve grant. Installed names are checked against the live
+# registry at provisioning, admission and dispatch; harness grants against the installed
+# harnesses.
+Grant = Right | OperationName | HarnessGrant | RecordGrant | MailGrant | ApproveGrant
 
 RIGHTS: tuple[Right, ...] = (
     "objects.read",

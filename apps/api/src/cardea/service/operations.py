@@ -52,9 +52,12 @@ RESERVED_PREFIXES = (
     "groups.",
     # Built-in record operations (ADR-034); installed only by the kernel itself.
     "records.",
+    # Built-in mailbox operations (ADR-034); they run inside their settle transaction.
+    "mailbox.",
     # Built-in approval operations (ADR-036 slice 4).
     "approvals.",
 )
+BUILTIN_PREFIXES = ("mailbox.",)
 # Room in a receipt's 64 KiB result document for the output and its wrapper keys.
 MAX_RECORDED_OUTPUT_BYTES = MAX_DOCUMENT_BYTES - 64
 _NAME = TypeAdapter(OperationName)
@@ -227,6 +230,7 @@ class Registry:
         descriptors: Iterable[OperationDescriptor] = (),
         handlers: Mapping[str, Handler | Reconciler] | None = None,
     ) -> None:
+        from cardea.service import mailbox
         from cardea.service.approval_requests import DECIDE_DESCRIPTOR
         from cardea.service.records import DESCRIPTORS
 
@@ -239,6 +243,9 @@ class Registry:
             if descriptor.name in self.descriptors:
                 raise Fault("operation_duplicate", "Operation is installed twice", 500)
             self.descriptors[descriptor.name] = descriptor
+        for builtin in mailbox.descriptors():
+            # Always present; a copy of another registry's descriptors may carry them.
+            self.descriptors.setdefault(builtin.name, builtin)
         self.handlers: dict[str, Any] = dict(handlers or {})
         if handlers is not None:
             missing = self.entry_points() - set(self.handlers)
@@ -248,7 +255,9 @@ class Registry:
     def entry_points(self) -> set[str]:
         names = set()
         for descriptor in self.descriptors.values():
-            if descriptor.name in BUILTIN_OPERATIONS:
+            if descriptor.name in BUILTIN_OPERATIONS or descriptor.name.startswith(
+                BUILTIN_PREFIXES
+            ):
                 continue
             if descriptor.cardea.handler:
                 names.add(descriptor.cardea.handler)
@@ -290,6 +299,8 @@ class Registry:
             raise Fault("operation_not_installed", "Operation is not installed", 409) from None
 
     def handler(self, name: str) -> Handler:
+        if name.startswith(BUILTIN_PREFIXES) and name in self.descriptors:
+            return _builtin_handler
         try:
             return cast(Handler, self.handlers[self.get(name).cardea.handler or ""])
         except KeyError:
@@ -330,12 +341,13 @@ class Registry:
     def check_grants(self, grants: Iterable[str]) -> None:
         for grant in grants:
             # Harness grants (ADR-033) are checked against the installed harnesses. Record
-            # grants (ADR-034) name collections, which are documents checked at each call.
-            # An approve grant (ADR-036) names an installed operation.
+            # grants (ADR-034) name collections, which are documents checked at each call;
+            # mail grants name addresses, resolved when mail is sent. An approve grant
+            # (ADR-036) names an installed operation.
             if grant.startswith(APPROVE_GRANT_PREFIX):
                 self.get(grant.removeprefix(APPROVE_GRANT_PREFIX))
             elif grant not in KERNEL_RIGHTS and not grant.startswith(
-                ("harness:", RECORD_GRANT_PREFIX)
+                ("harness:", "mail:", RECORD_GRANT_PREFIX)
             ):
                 self.get(grant)
 
@@ -365,3 +377,10 @@ def check_context(registry: Registry, name: str) -> None:
     """A context operation (ADR-031) must be installed and declare no external effect."""
     if registry.get(name).cardea.effect != "read":
         raise Fault("context_not_read_only", "Context operations must be read-only", 422)
+
+
+async def _builtin_handler(
+    arguments: dict[str, JsonValue], context: OperationContext
+) -> dict[str, JsonValue]:
+    """Built-in operations run inside their settle transaction, never as plain handlers."""
+    raise OperationRejected("This built-in operation runs only inside an agent run")

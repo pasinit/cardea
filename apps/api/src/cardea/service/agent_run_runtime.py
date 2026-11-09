@@ -37,7 +37,7 @@ from cardea.kernel.store import KernelTransaction
 from cardea.runtime import activity as activities
 from cardea.runtime.activity import AttemptActivity, OutputLimits
 from cardea.runtime.harness import Harness, HarnessRequest, HarnessResult
-from cardea.service import approval_requests, confined, invocation
+from cardea.service import approval_requests, claims, confined, invocation, mailbox
 from cardea.service.approvals import ApprovalRequirement
 from cardea.service.confined import ConfinedAgentSession, WorkerFailed
 from cardea.service.database import Fault, borrow
@@ -284,12 +284,12 @@ class AgentRunRuntime:
                 task = tx.change_task(
                     task_id, TaskState.QUEUED, expected_revision=task.revision, at=now()
                 )
-            state = task.checkpoint.state if task.checkpoint else {}
-            recorded, free = state.get("attempt", 0), state.get("free", 0)
+            prior = task.checkpoint.state if task.checkpoint else {}
+            recorded, free = prior.get("attempt", 0), prior.get("free", 0)
             recorded = recorded if isinstance(recorded, int) else 0
             # Attempts that parked after a successful session do not use a retry (ADR-036).
             free = free if isinstance(free, int) else 0
-            parked = state.get("approval_request_id")
+            parked = prior.get("approval_request_id")
             attempt = recorded + 1
             open_request = self._open_request(conn, task_id)
             try:
@@ -336,6 +336,7 @@ class AgentRunRuntime:
                         else {},
                     ),
                 )
+                mailbox.settle(conn, tx, task_id, "failed", self.kernel.runtime_id, now())
                 log.warning(
                     "attempt refused before it started",
                     extra={"task_id": task_id, "attempt": attempt, "code": error.code},
@@ -353,6 +354,21 @@ class AgentRunRuntime:
             )
             assert task.lease is not None
             at = now()
+            state: dict[str, Any] = {"attempt": attempt, "free": free, "resumed": resumed}
+            inbox = next((c for c in request.context if c.operation == mailbox.INBOX), None)
+            if inbox is not None:
+                # Mail for this attempt is leased with its checkpoint (ADR-034 decision 4.3).
+                state["mailbox"] = mailbox.lease(
+                    conn,
+                    tx,
+                    task_id=task_id,
+                    recipient=task.agent_id,
+                    namespace=request.namespace,
+                    attempt=attempt,
+                    budget=mailbox.inbox_budget(dict(inbox.arguments)),
+                    runtime_id=self.kernel.runtime_id,
+                    at=at,
+                )
             task = tx.change_task(
                 task_id,
                 TaskState.SUSPENDED,
@@ -363,7 +379,7 @@ class AgentRunRuntime:
                     checkpoint_id=f"checkpoint-{task_id}-{attempt}",
                     task_id=task_id,
                     saved_at=at,
-                    state={"attempt": attempt, "free": free, "resumed": resumed},
+                    state=state,
                 ),
             )
             task = tx.change_task(
@@ -378,6 +394,8 @@ class AgentRunRuntime:
                 lease=self._lease(at, task.limits.deadline, attempt_lease_seconds(request)),
             )
             assert task.lease is not None
+            # The holder is alive: its record claims outlast this attempt (ADR-034 2.4).
+            claims.renew_for_attempt(conn, task.agent_id, task.lease.expires_at)
             return request, task.lease, attempt
 
     def _lease(self, at: Any, deadline: Any, seconds: float) -> DispatchLease:
@@ -417,6 +435,7 @@ class AgentRunRuntime:
                     state = tx.recover_task(
                         task_id, expected_revision=task.revision, at=now()
                     ).state.value
+                    mailbox.settle(conn, tx, task_id, state, self.kernel.runtime_id, now())
                     log.warning(
                         "recovered an expired attempt",
                         extra={"task_id": task_id, "outcome": state},
@@ -901,6 +920,7 @@ class AgentRunRuntime:
                 task_id,
                 lease_id,
                 operation_id,
+                name,
                 arguments,
                 descriptor.cardea.effect == "effect",
                 handler,
@@ -924,6 +944,7 @@ class AgentRunRuntime:
         task_id: str,
         lease_id: str,
         operation_id: str,
+        name: str,
         arguments: dict[str, Any],
         effect: bool,
         handler: Handler,
@@ -939,6 +960,8 @@ class AgentRunRuntime:
         registry = self.kernel.operations
         # The intent is committed and nothing has run yet (fault injection for recovery tests).
         self.kernel.fault("agent_run.call_admitted")
+        if name in mailbox.BUILTIN:
+            return self._dispatch_builtin(task_id, lease_id, operation_id, name, arguments, context)
         started = time.monotonic()
         error: invocation.Failure | None = None
         output: object = None
@@ -1003,6 +1026,74 @@ class AgentRunRuntime:
             # The operation's own refusal is meant for the agent; keep its full text.
             detail = _text(output) if failure.reason == "rejected" else failure.describe()
             return Outcome(failure.code, detail, reason=failure.reason)
+        return Outcome(output=json.loads(content))
+
+    def _dispatch_builtin(
+        self,
+        task_id: str,
+        lease_id: str,
+        operation_id: str,
+        name: str,
+        arguments: dict[str, Any],
+        context: OperationContext,
+    ) -> Outcome:
+        """Run a built-in mailbox operation inside the transaction that settles its receipt.
+
+        Its writes commit exactly when the receipt does: a refusal rolls them back to a
+        savepoint and settles the call as failed (ADR-034 decision 4.2).
+        """
+        registry = self.kernel.operations
+        started = time.monotonic()
+        with self.kernel.database.engine.begin() as conn, borrow(conn) as tx:
+            task = tx.get_task(task_id)
+            if (
+                task.lease is None
+                or task.lease.lease_id != lease_id
+                or now() >= task.lease.expires_at
+            ):
+                return Outcome("stale_session", "this attempt has ended")
+            error: invocation.Failure | None = None
+            output: object = None
+            try:
+                self.guard(conn, task)
+            except Fault as denied:
+                error = invocation.Failure(denied.code, "denied", denied.message)
+            if error is None:
+                conn.exec_driver_sql("SAVEPOINT builtin")
+                try:
+                    if name == mailbox.SEND:
+                        output = mailbox.agent_send(
+                            conn, tx, task, arguments, context, self.kernel.runtime_id, now()
+                        )
+                    else:
+                        output = mailbox.agent_inbox(conn, task, arguments)
+                    if registry.check_output(name, output) is None:
+                        raise OperationRejected("the result exceeds the operation's output limit")
+                    conn.exec_driver_sql("RELEASE builtin")
+                except Fault as refused:
+                    conn.exec_driver_sql("ROLLBACK TO builtin")
+                    conn.exec_driver_sql("RELEASE builtin")
+                    reason = "denied" if refused.status == 403 else "rejected"
+                    error = invocation.Failure(refused.code, reason, refused.message)
+                    output = refused.message
+                except Exception as raised:
+                    conn.exec_driver_sql("ROLLBACK TO builtin")
+                    conn.exec_driver_sql("RELEASE builtin")
+                    error = invocation.classify(raised, 0.0)
+                    output = str(raised) if isinstance(raised, OperationRejected) else None
+            failure, content = invocation.settle(
+                conn,
+                tx,
+                registry,
+                task,
+                lease_id=lease_id,
+                operation_id=operation_id,
+                output=None if error else output,
+                error=error or "",
+                elapsed_ms=max(0, int((time.monotonic() - started) * 1000)),
+            )
+        if failure is not None:
+            return Outcome(failure.code, failure.summary, reason=failure.reason)
         return Outcome(output=json.loads(content))
 
     def _mark_uncertain(
@@ -1196,6 +1287,7 @@ class AgentRunRuntime:
             task_id,
             lease_id,
             operation_id,
+            name,
             arguments,
             registry.get(name).cardea.effect == "effect",
             handler,
@@ -1323,6 +1415,7 @@ class AgentRunRuntime:
                     lease_id=lease.lease_id,
                     at=now(),
                 )
+                mailbox.settle(conn, tx, task_id, "cancelled", self.kernel.runtime_id, now())
                 return "cancelled"
             state = task.checkpoint.state if task.checkpoint else {}
             free = state.get("free", 0)
@@ -1351,10 +1444,13 @@ class AgentRunRuntime:
                     at=now(),
                     failure=KernelFailure(code="expectation_exceeded", message=unmet[0][1]),
                 )
+                mailbox.settle(conn, tx, task_id, "failed", self.kernel.runtime_id, now())
                 return "failed"
             if not result.is_error and result.text.strip() and not unmet:
+                # A successful run renews the holder's claims to their full lease.
+                claims.renew_for_success(conn, task.agent_id, now())
                 return self._publish(
-                    tx, task, request, lease, attempt, result, self._calls(tx, task_id)
+                    conn, tx, task, request, lease, attempt, result, self._calls(tx, task_id)
                 )
             if unmet and not result.is_error:
                 result = HarnessResult.failed("expectation_unmet", text=result.text)
@@ -1391,6 +1487,7 @@ class AgentRunRuntime:
                     message=f"Agent session did not finish: {_reason(result)[:120]}",
                 ),
             )
+            mailbox.settle(conn, tx, task_id, "failed", self.kernel.runtime_id, now())
             return "failed"
 
     @staticmethod
@@ -1416,6 +1513,7 @@ class AgentRunRuntime:
 
     def _publish(
         self,
+        conn: sa.Connection,
         tx: KernelTransaction,
         task: Task,
         request: AgentRunRequest,
@@ -1496,4 +1594,6 @@ class AgentRunRuntime:
                 ),
             ),
         )
+        # Mail held by the run is consumed exactly when it succeeds (ADR-034 decision 4.3).
+        mailbox.settle(conn, tx, task.task_id, "succeeded", self.kernel.runtime_id, at)
         return "succeeded"
