@@ -1,0 +1,4002 @@
+{
+  "schema_version": 1,
+  "recorded_date": "2026-11-08",
+  "decision": "ADR-036 slice 1: CEL implementation fit test",
+  "interpretation": "Observations, not acceptance. matches_spec compares each result with the CEL specification; timings are wall-clock seconds for one evaluation. Selected: common-expression-language 0.10.0 (no spec mismatches, fewer native distributions).",
+  "reproduce": "make cel-fit; Debian 13: docker run --rm -v \"$PWD/experiments/cel:/fit:ro\" -v \"$OUT:/out\" debian:13 sh /fit/debian.sh",
+  "sources": {
+    "cel-python": "https://github.com/cloud-custodian/cel-python (PyPI 0.5.0, 2026-01-31)",
+    "common-expression-language": "https://github.com/hardbyte/python-common-expression-language (PyPI 0.10.0, 2026-09-15)",
+    "cel-spec": "https://github.com/google/cel-spec/blob/master/doc/langdef.md"
+  },
+  "runs": [
+    {
+      "environment": {
+        "os": "Debian GNU/Linux 13 (trixie)",
+        "machine": "aarch64",
+        "python": "3.12.12",
+        "note": "debian:13 container, native arm64"
+      },
+      "candidates": {
+        "cel-python": {
+          "footprint": {
+            "version": "0.5.0",
+            "license": "",
+            "requires_python": ">=3.10",
+            "dependency_closure": {
+              "cel-python": "0.5.0",
+              "google-re2": "1.1.20251105",
+              "jmespath": "1.1.0",
+              "lark": "1.3.1",
+              "pendulum": "3.3.0",
+              "python-dateutil": "4.0.0",
+              "pyyaml": "6.0.3",
+              "tzdata": "2026.6"
+            },
+            "native_distributions": [
+              {
+                "distribution": "google-re2",
+                "extension_modules": [
+                  "re2/_re2.cpython-312-aarch64-linux-gnu.so"
+                ]
+              },
+              {
+                "distribution": "pendulum",
+                "extension_modules": [
+                  "pendulum/_pendulum.cpython-312-aarch64-linux-gnu.so"
+                ]
+              },
+              {
+                "distribution": "pyyaml",
+                "extension_modules": [
+                  "yaml/_yaml.cpython-312-aarch64-linux-gnu.so"
+                ]
+              }
+            ]
+          },
+          "cases": [
+            {
+              "id": "int_gt_above",
+              "expression": "args.amount > 500",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "int_gt_below",
+              "expression": "args.amount > 500",
+              "expected": false,
+              "observed": false,
+              "detail": "BoolType(False)",
+              "matches_spec": true
+            },
+            {
+              "id": "int_gt_equal",
+              "expression": "args.amount > 500",
+              "expected": false,
+              "observed": false,
+              "detail": "BoolType(False)",
+              "matches_spec": true
+            },
+            {
+              "id": "double_arg_int_literal",
+              "expression": "args.amount > 500",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "int_arg_double_literal",
+              "expression": "args.amount > 500.0",
+              "expected": true,
+              "observed": "error",
+              "detail": "CELEvalError: (\"found no matching overload for Token('RULE', 'relation_gt') applied to '(<class 'celpy.celtypes.IntType'>, <class 'cel",
+              "matches_spec": false
+            },
+            {
+              "id": "le_double",
+              "expression": "args.amount <= 99.99",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "or_currency",
+              "expression": "args.amount > 500 || args.currency != 'EUR'",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "or_currency_false",
+              "expression": "args.amount > 500 || args.currency != 'EUR'",
+              "expected": false,
+              "observed": false,
+              "detail": "BoolType(False)",
+              "matches_spec": true
+            },
+            {
+              "id": "nested_field",
+              "expression": "args.order.total >= 1000",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "in_list",
+              "expression": "args.env in ['prod', 'staging']",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "exists_macro",
+              "expression": "args.tags.exists(t, t == 'prod')",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "has_missing",
+              "expression": "has(args.missing)",
+              "expected": false,
+              "observed": false,
+              "detail": "BoolType(False)",
+              "matches_spec": true
+            },
+            {
+              "id": "operation_and_ns",
+              "expression": "operation == 'payments.create' && ns == 'acme'",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "reserved_namespace_identifier",
+              "expression": "namespace == 'acme'",
+              "expected": "error",
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": false
+            },
+            {
+              "id": "null_compare",
+              "expression": "args.note == null",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "bool_not_int",
+              "expression": "args.flag == 1",
+              "expected": false,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": false
+            },
+            {
+              "id": "bool_ne_int",
+              "expression": "args.flag != 1",
+              "expected": true,
+              "observed": false,
+              "detail": "BoolType(False)",
+              "matches_spec": false
+            },
+            {
+              "id": "string_size",
+              "expression": "size(args.memo) > 3",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_field",
+              "expression": "args.missing > 500",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"no such member in mapping: 'missing'\", <class 'KeyError'>, None)",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_nested",
+              "expression": "args.order.total > 5",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"no such member in mapping: 'total'\", <class 'KeyError'>, None)",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_absorbed_by_or",
+              "expression": "args.missing > 500 || true",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_in_or_false",
+              "expression": "args.missing > 500 || args.currency != 'EUR'",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"no such member in mapping: 'missing'\", <class 'KeyError'>, None)",
+              "matches_spec": true
+            },
+            {
+              "id": "type_mismatch_string",
+              "expression": "args.amount > 'x'",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"found no matching overload for Token('RULE', 'relation_gt') applied to '(<class 'celpy.celtypes.IntType'>, <class 'cel",
+              "matches_spec": true
+            },
+            {
+              "id": "type_mismatch_arg",
+              "expression": "args.amount > 500",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"found no matching overload for Token('RULE', 'relation_gt') applied to '(<class 'celpy.celtypes.StringType'>, <class '",
+              "matches_spec": true
+            },
+            {
+              "id": "int_overflow",
+              "expression": "args.amount * 9223372036854775807 > 0",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: ('return error for overflow', <class 'ValueError'>, ('overflow',))",
+              "matches_spec": true
+            },
+            {
+              "id": "divide_by_zero",
+              "expression": "args.amount / 0 > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: ('modulus or divide by zero', <class 'ZeroDivisionError'>, ('integer division or modulo by zero',))",
+              "matches_spec": true
+            },
+            {
+              "id": "non_bool_result",
+              "expression": "args.amount",
+              "expected": "error",
+              "observed": "non-bool",
+              "detail": "IntType: IntType(1)",
+              "matches_spec": true
+            },
+            {
+              "id": "syntax_error",
+              "expression": "args.amount >",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELParseError: args.amount >",
+              "matches_spec": true
+            },
+            {
+              "id": "no_time_function",
+              "expression": "now() > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"undeclared reference to 'now' (in activation 'Activation(annotations=None, package=None, vars=NameContainer({'google':",
+              "matches_spec": true
+            },
+            {
+              "id": "no_ambient_variable",
+              "expression": "request.time > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"undeclared reference to 'request' (in activation 'Activation(annotations=None, package=None, vars=NameContainer({'goog",
+              "matches_spec": true
+            },
+            {
+              "id": "no_env_variable",
+              "expression": "env.HOME == ''",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"undeclared reference to 'env' (in activation 'Activation(annotations=None, package=None, vars=NameContainer({'google':",
+              "matches_spec": true
+            }
+          ],
+          "spec_mismatches": [
+            "int_arg_double_literal",
+            "reserved_namespace_identifier",
+            "bool_not_int",
+            "bool_ne_int"
+          ],
+          "cost": {
+            "argument_bytes": 65897,
+            "exists_linear_11000": {
+              "seconds": 0.5508,
+              "result": false,
+              "detail": "BoolType(False)"
+            },
+            "map_filter_1000": {
+              "seconds": 0.1158,
+              "result": true,
+              "detail": "BoolType(True)"
+            },
+            "map_filter_2000": {
+              "seconds": 0.2253,
+              "result": true,
+              "detail": "BoolType(True)"
+            },
+            "exists_in_list_2000": {
+              "seconds": 0.4391,
+              "result": false,
+              "detail": "BoolType(False)"
+            },
+            "no_comprehension_60_concat_11000": {
+              "expression_chars": 543,
+              "seconds": 0.1244,
+              "result": false,
+              "detail": "BoolType(False)"
+            },
+            "no_comprehension_60_list_eq_11000": {
+              "seconds": 0.4942,
+              "result": true,
+              "detail": "BoolType(True)"
+            },
+            "nesting": {
+              "deepest_ok": 64,
+              "first_failure": "depth 80: exit 1, RecursionError: maximum recursion depth exceeded"
+            },
+            "built_in_limits": "none exposed (no cost budget, timeout or depth option in the API)"
+          }
+        },
+        "common-expression-language": {
+          "footprint": {
+            "version": "0.10.0",
+            "license": "Apache-2.0",
+            "requires_python": ">=3.11",
+            "dependency_closure": {
+              "annotated-doc": "0.0.5",
+              "common-expression-language": "0.10.0",
+              "markdown-it-py": "4.2.0",
+              "mdurl": "0.1.2",
+              "prompt-toolkit": "3.0.53",
+              "pygments": "2.21.0",
+              "rich": "15.0.0",
+              "shellingham": "1.5.4",
+              "typer": "0.28.0",
+              "wcwidth": "0.9.4"
+            },
+            "native_distributions": [
+              {
+                "distribution": "common-expression-language",
+                "extension_modules": [
+                  "cel/cel.cpython-312-aarch64-linux-gnu.so"
+                ]
+              },
+              {
+                "distribution": "wcwidth",
+                "extension_modules": [
+                  "wcwidth/_wcwidth_c.abi3.so"
+                ]
+              }
+            ]
+          },
+          "cases": [
+            {
+              "id": "int_gt_above",
+              "expression": "args.amount > 500",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "int_gt_below",
+              "expression": "args.amount > 500",
+              "expected": false,
+              "observed": false,
+              "detail": "False",
+              "matches_spec": true
+            },
+            {
+              "id": "int_gt_equal",
+              "expression": "args.amount > 500",
+              "expected": false,
+              "observed": false,
+              "detail": "False",
+              "matches_spec": true
+            },
+            {
+              "id": "double_arg_int_literal",
+              "expression": "args.amount > 500",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "int_arg_double_literal",
+              "expression": "args.amount > 500.0",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "le_double",
+              "expression": "args.amount <= 99.99",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "or_currency",
+              "expression": "args.amount > 500 || args.currency != 'EUR'",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "or_currency_false",
+              "expression": "args.amount > 500 || args.currency != 'EUR'",
+              "expected": false,
+              "observed": false,
+              "detail": "False",
+              "matches_spec": true
+            },
+            {
+              "id": "nested_field",
+              "expression": "args.order.total >= 1000",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "in_list",
+              "expression": "args.env in ['prod', 'staging']",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "exists_macro",
+              "expression": "args.tags.exists(t, t == 'prod')",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "has_missing",
+              "expression": "has(args.missing)",
+              "expected": false,
+              "observed": false,
+              "detail": "False",
+              "matches_spec": true
+            },
+            {
+              "id": "operation_and_ns",
+              "expression": "operation == 'payments.create' && ns == 'acme'",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "reserved_namespace_identifier",
+              "expression": "namespace == 'acme'",
+              "expected": "error",
+              "observed": "error",
+              "detail": "ValueError: Failed to parse expression 'namespace == 'acme'': ERROR: <input>:1:1: reserved identifier: namespace",
+              "matches_spec": true
+            },
+            {
+              "id": "null_compare",
+              "expression": "args.note == null",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "bool_not_int",
+              "expression": "args.flag == 1",
+              "expected": false,
+              "observed": false,
+              "detail": "False",
+              "matches_spec": true
+            },
+            {
+              "id": "bool_ne_int",
+              "expression": "args.flag != 1",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "string_size",
+              "expression": "size(args.memo) > 3",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_field",
+              "expression": "args.missing > 500",
+              "expected": "error",
+              "observed": "error",
+              "detail": "KeyError: 'missing'",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_nested",
+              "expression": "args.order.total > 5",
+              "expected": "error",
+              "observed": "error",
+              "detail": "KeyError: 'total'",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_absorbed_by_or",
+              "expression": "args.missing > 500 || true",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_in_or_false",
+              "expression": "args.missing > 500 || args.currency != 'EUR'",
+              "expected": "error",
+              "observed": "error",
+              "detail": "KeyError: 'missing'",
+              "matches_spec": true
+            },
+            {
+              "id": "type_mismatch_string",
+              "expression": "args.amount > 'x'",
+              "expected": "error",
+              "observed": "error",
+              "detail": "TypeError: No such overload: the operation is not defined for the given operand types. CEL does not coerce between types, so common",
+              "matches_spec": true
+            },
+            {
+              "id": "type_mismatch_arg",
+              "expression": "args.amount > 500",
+              "expected": "error",
+              "observed": "error",
+              "detail": "TypeError: No such overload: the operation is not defined for the given operand types. CEL does not coerce between types, so common",
+              "matches_spec": true
+            },
+            {
+              "id": "int_overflow",
+              "expression": "args.amount * 9223372036854775807 > 0",
+              "expected": "error",
+              "observed": "error",
+              "detail": "OverflowError: Arithmetic overflow in 'mul' on 2 and 9223372036854775807.",
+              "matches_spec": true
+            },
+            {
+              "id": "divide_by_zero",
+              "expression": "args.amount / 0 > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "ZeroDivisionError: division by zero in CEL expression",
+              "matches_spec": true
+            },
+            {
+              "id": "non_bool_result",
+              "expression": "args.amount",
+              "expected": "error",
+              "observed": "non-bool",
+              "detail": "int: 1",
+              "matches_spec": true
+            },
+            {
+              "id": "syntax_error",
+              "expression": "args.amount >",
+              "expected": "error",
+              "observed": "error",
+              "detail": "ValueError: Failed to parse expression 'args.amount >': ERROR: <input>:1:14: Syntax error: mismatched input '<EOF>' expecting {'[', ",
+              "matches_spec": true
+            },
+            {
+              "id": "no_time_function",
+              "expression": "now() > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "RuntimeError: Undefined variable or function: 'now'. Check that the variable is defined in the context or that the function name is sp",
+              "matches_spec": true
+            },
+            {
+              "id": "no_ambient_variable",
+              "expression": "request.time > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "RuntimeError: Undefined variable or function: 'request'. Check that the variable is defined in the context or that the function name i",
+              "matches_spec": true
+            },
+            {
+              "id": "no_env_variable",
+              "expression": "env.HOME == ''",
+              "expected": "error",
+              "observed": "error",
+              "detail": "RuntimeError: Undefined variable or function: 'env'. Check that the variable is defined in the context or that the function name is sp",
+              "matches_spec": true
+            }
+          ],
+          "spec_mismatches": [],
+          "cost": {
+            "argument_bytes": 65897,
+            "exists_linear_11000": {
+              "seconds": 0.0041,
+              "result": false,
+              "detail": "False"
+            },
+            "map_filter_1000": {
+              "seconds": 0.0561,
+              "result": true,
+              "detail": "True"
+            },
+            "map_filter_2000": {
+              "seconds": 0.2184,
+              "result": true,
+              "detail": "True"
+            },
+            "exists_in_list_2000": {
+              "seconds": 0.1022,
+              "result": false,
+              "detail": "False"
+            },
+            "no_comprehension_60_concat_11000": {
+              "expression_chars": 543,
+              "seconds": 0.6458,
+              "result": false,
+              "detail": "False"
+            },
+            "no_comprehension_60_list_eq_11000": {
+              "seconds": 0.0389,
+              "result": true,
+              "detail": "True"
+            },
+            "nesting": {
+              "deepest_ok": 80,
+              "first_failure": "depth 96: exit 1, | ................................................................................................^"
+            },
+            "built_in_limits": "none exposed (no cost budget, timeout or depth option in the API)"
+          }
+        }
+      }
+    },
+    {
+      "environment": {
+        "os": "Debian GNU/Linux 13 (trixie)",
+        "machine": "aarch64",
+        "python": "3.13.5",
+        "note": "debian:13 container, native arm64"
+      },
+      "candidates": {
+        "cel-python": {
+          "footprint": {
+            "version": "0.5.0",
+            "license": "",
+            "requires_python": ">=3.10",
+            "dependency_closure": {
+              "cel-python": "0.5.0",
+              "google-re2": "1.1.20251105",
+              "jmespath": "1.1.0",
+              "lark": "1.3.1",
+              "pendulum": "3.3.0",
+              "python-dateutil": "4.0.0",
+              "pyyaml": "6.0.3",
+              "tzdata": "2026.6"
+            },
+            "native_distributions": [
+              {
+                "distribution": "google-re2",
+                "extension_modules": [
+                  "re2/_re2.cpython-313-aarch64-linux-gnu.so"
+                ]
+              },
+              {
+                "distribution": "pendulum",
+                "extension_modules": [
+                  "pendulum/_pendulum.cpython-313-aarch64-linux-gnu.so"
+                ]
+              },
+              {
+                "distribution": "pyyaml",
+                "extension_modules": [
+                  "yaml/_yaml.cpython-313-aarch64-linux-gnu.so"
+                ]
+              }
+            ]
+          },
+          "cases": [
+            {
+              "id": "int_gt_above",
+              "expression": "args.amount > 500",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "int_gt_below",
+              "expression": "args.amount > 500",
+              "expected": false,
+              "observed": false,
+              "detail": "BoolType(False)",
+              "matches_spec": true
+            },
+            {
+              "id": "int_gt_equal",
+              "expression": "args.amount > 500",
+              "expected": false,
+              "observed": false,
+              "detail": "BoolType(False)",
+              "matches_spec": true
+            },
+            {
+              "id": "double_arg_int_literal",
+              "expression": "args.amount > 500",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "int_arg_double_literal",
+              "expression": "args.amount > 500.0",
+              "expected": true,
+              "observed": "error",
+              "detail": "CELEvalError: (\"found no matching overload for Token('RULE', 'relation_gt') applied to '(<class 'celpy.celtypes.IntType'>, <class 'cel",
+              "matches_spec": false
+            },
+            {
+              "id": "le_double",
+              "expression": "args.amount <= 99.99",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "or_currency",
+              "expression": "args.amount > 500 || args.currency != 'EUR'",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "or_currency_false",
+              "expression": "args.amount > 500 || args.currency != 'EUR'",
+              "expected": false,
+              "observed": false,
+              "detail": "BoolType(False)",
+              "matches_spec": true
+            },
+            {
+              "id": "nested_field",
+              "expression": "args.order.total >= 1000",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "in_list",
+              "expression": "args.env in ['prod', 'staging']",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "exists_macro",
+              "expression": "args.tags.exists(t, t == 'prod')",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "has_missing",
+              "expression": "has(args.missing)",
+              "expected": false,
+              "observed": false,
+              "detail": "BoolType(False)",
+              "matches_spec": true
+            },
+            {
+              "id": "operation_and_ns",
+              "expression": "operation == 'payments.create' && ns == 'acme'",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "reserved_namespace_identifier",
+              "expression": "namespace == 'acme'",
+              "expected": "error",
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": false
+            },
+            {
+              "id": "null_compare",
+              "expression": "args.note == null",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "bool_not_int",
+              "expression": "args.flag == 1",
+              "expected": false,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": false
+            },
+            {
+              "id": "bool_ne_int",
+              "expression": "args.flag != 1",
+              "expected": true,
+              "observed": false,
+              "detail": "BoolType(False)",
+              "matches_spec": false
+            },
+            {
+              "id": "string_size",
+              "expression": "size(args.memo) > 3",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_field",
+              "expression": "args.missing > 500",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"no such member in mapping: 'missing'\", <class 'KeyError'>, None)",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_nested",
+              "expression": "args.order.total > 5",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"no such member in mapping: 'total'\", <class 'KeyError'>, None)",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_absorbed_by_or",
+              "expression": "args.missing > 500 || true",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_in_or_false",
+              "expression": "args.missing > 500 || args.currency != 'EUR'",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"no such member in mapping: 'missing'\", <class 'KeyError'>, None)",
+              "matches_spec": true
+            },
+            {
+              "id": "type_mismatch_string",
+              "expression": "args.amount > 'x'",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"found no matching overload for Token('RULE', 'relation_gt') applied to '(<class 'celpy.celtypes.IntType'>, <class 'cel",
+              "matches_spec": true
+            },
+            {
+              "id": "type_mismatch_arg",
+              "expression": "args.amount > 500",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"found no matching overload for Token('RULE', 'relation_gt') applied to '(<class 'celpy.celtypes.StringType'>, <class '",
+              "matches_spec": true
+            },
+            {
+              "id": "int_overflow",
+              "expression": "args.amount * 9223372036854775807 > 0",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: ('return error for overflow', <class 'ValueError'>, ('overflow',))",
+              "matches_spec": true
+            },
+            {
+              "id": "divide_by_zero",
+              "expression": "args.amount / 0 > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: ('modulus or divide by zero', <class 'ZeroDivisionError'>, ('integer division or modulo by zero',))",
+              "matches_spec": true
+            },
+            {
+              "id": "non_bool_result",
+              "expression": "args.amount",
+              "expected": "error",
+              "observed": "non-bool",
+              "detail": "IntType: IntType(1)",
+              "matches_spec": true
+            },
+            {
+              "id": "syntax_error",
+              "expression": "args.amount >",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELParseError: args.amount >",
+              "matches_spec": true
+            },
+            {
+              "id": "no_time_function",
+              "expression": "now() > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"undeclared reference to 'now' (in activation 'Activation(annotations=None, package=None, vars=NameContainer({'google':",
+              "matches_spec": true
+            },
+            {
+              "id": "no_ambient_variable",
+              "expression": "request.time > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"undeclared reference to 'request' (in activation 'Activation(annotations=None, package=None, vars=NameContainer({'goog",
+              "matches_spec": true
+            },
+            {
+              "id": "no_env_variable",
+              "expression": "env.HOME == ''",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"undeclared reference to 'env' (in activation 'Activation(annotations=None, package=None, vars=NameContainer({'google':",
+              "matches_spec": true
+            }
+          ],
+          "spec_mismatches": [
+            "int_arg_double_literal",
+            "reserved_namespace_identifier",
+            "bool_not_int",
+            "bool_ne_int"
+          ],
+          "cost": {
+            "argument_bytes": 65897,
+            "exists_linear_11000": {
+              "seconds": 0.5088,
+              "result": false,
+              "detail": "BoolType(False)"
+            },
+            "map_filter_1000": {
+              "seconds": 0.1102,
+              "result": true,
+              "detail": "BoolType(True)"
+            },
+            "map_filter_2000": {
+              "seconds": 0.218,
+              "result": true,
+              "detail": "BoolType(True)"
+            },
+            "exists_in_list_2000": {
+              "seconds": 0.4796,
+              "result": false,
+              "detail": "BoolType(False)"
+            },
+            "no_comprehension_60_concat_11000": {
+              "expression_chars": 543,
+              "seconds": 0.1204,
+              "result": false,
+              "detail": "BoolType(False)"
+            },
+            "no_comprehension_60_list_eq_11000": {
+              "seconds": 0.5199,
+              "result": true,
+              "detail": "BoolType(True)"
+            },
+            "nesting": {
+              "deepest_ok": 64,
+              "first_failure": "depth 80: exit 1, RecursionError: maximum recursion depth exceeded"
+            },
+            "built_in_limits": "none exposed (no cost budget, timeout or depth option in the API)"
+          }
+        },
+        "common-expression-language": {
+          "footprint": {
+            "version": "0.10.0",
+            "license": "Apache-2.0",
+            "requires_python": ">=3.11",
+            "dependency_closure": {
+              "annotated-doc": "0.0.5",
+              "common-expression-language": "0.10.0",
+              "markdown-it-py": "4.2.0",
+              "mdurl": "0.1.2",
+              "prompt-toolkit": "3.0.53",
+              "pygments": "2.21.0",
+              "rich": "15.0.0",
+              "shellingham": "1.5.4",
+              "typer": "0.28.0",
+              "wcwidth": "0.9.4"
+            },
+            "native_distributions": [
+              {
+                "distribution": "common-expression-language",
+                "extension_modules": [
+                  "cel/cel.cpython-313-aarch64-linux-gnu.so"
+                ]
+              },
+              {
+                "distribution": "wcwidth",
+                "extension_modules": [
+                  "wcwidth/_wcwidth_c.abi3.so"
+                ]
+              }
+            ]
+          },
+          "cases": [
+            {
+              "id": "int_gt_above",
+              "expression": "args.amount > 500",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "int_gt_below",
+              "expression": "args.amount > 500",
+              "expected": false,
+              "observed": false,
+              "detail": "False",
+              "matches_spec": true
+            },
+            {
+              "id": "int_gt_equal",
+              "expression": "args.amount > 500",
+              "expected": false,
+              "observed": false,
+              "detail": "False",
+              "matches_spec": true
+            },
+            {
+              "id": "double_arg_int_literal",
+              "expression": "args.amount > 500",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "int_arg_double_literal",
+              "expression": "args.amount > 500.0",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "le_double",
+              "expression": "args.amount <= 99.99",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "or_currency",
+              "expression": "args.amount > 500 || args.currency != 'EUR'",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "or_currency_false",
+              "expression": "args.amount > 500 || args.currency != 'EUR'",
+              "expected": false,
+              "observed": false,
+              "detail": "False",
+              "matches_spec": true
+            },
+            {
+              "id": "nested_field",
+              "expression": "args.order.total >= 1000",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "in_list",
+              "expression": "args.env in ['prod', 'staging']",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "exists_macro",
+              "expression": "args.tags.exists(t, t == 'prod')",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "has_missing",
+              "expression": "has(args.missing)",
+              "expected": false,
+              "observed": false,
+              "detail": "False",
+              "matches_spec": true
+            },
+            {
+              "id": "operation_and_ns",
+              "expression": "operation == 'payments.create' && ns == 'acme'",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "reserved_namespace_identifier",
+              "expression": "namespace == 'acme'",
+              "expected": "error",
+              "observed": "error",
+              "detail": "ValueError: Failed to parse expression 'namespace == 'acme'': ERROR: <input>:1:1: reserved identifier: namespace",
+              "matches_spec": true
+            },
+            {
+              "id": "null_compare",
+              "expression": "args.note == null",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "bool_not_int",
+              "expression": "args.flag == 1",
+              "expected": false,
+              "observed": false,
+              "detail": "False",
+              "matches_spec": true
+            },
+            {
+              "id": "bool_ne_int",
+              "expression": "args.flag != 1",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "string_size",
+              "expression": "size(args.memo) > 3",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_field",
+              "expression": "args.missing > 500",
+              "expected": "error",
+              "observed": "error",
+              "detail": "KeyError: 'missing'",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_nested",
+              "expression": "args.order.total > 5",
+              "expected": "error",
+              "observed": "error",
+              "detail": "KeyError: 'total'",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_absorbed_by_or",
+              "expression": "args.missing > 500 || true",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_in_or_false",
+              "expression": "args.missing > 500 || args.currency != 'EUR'",
+              "expected": "error",
+              "observed": "error",
+              "detail": "KeyError: 'missing'",
+              "matches_spec": true
+            },
+            {
+              "id": "type_mismatch_string",
+              "expression": "args.amount > 'x'",
+              "expected": "error",
+              "observed": "error",
+              "detail": "TypeError: No such overload: the operation is not defined for the given operand types. CEL does not coerce between types, so common",
+              "matches_spec": true
+            },
+            {
+              "id": "type_mismatch_arg",
+              "expression": "args.amount > 500",
+              "expected": "error",
+              "observed": "error",
+              "detail": "TypeError: No such overload: the operation is not defined for the given operand types. CEL does not coerce between types, so common",
+              "matches_spec": true
+            },
+            {
+              "id": "int_overflow",
+              "expression": "args.amount * 9223372036854775807 > 0",
+              "expected": "error",
+              "observed": "error",
+              "detail": "OverflowError: Arithmetic overflow in 'mul' on 2 and 9223372036854775807.",
+              "matches_spec": true
+            },
+            {
+              "id": "divide_by_zero",
+              "expression": "args.amount / 0 > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "ZeroDivisionError: division by zero in CEL expression",
+              "matches_spec": true
+            },
+            {
+              "id": "non_bool_result",
+              "expression": "args.amount",
+              "expected": "error",
+              "observed": "non-bool",
+              "detail": "int: 1",
+              "matches_spec": true
+            },
+            {
+              "id": "syntax_error",
+              "expression": "args.amount >",
+              "expected": "error",
+              "observed": "error",
+              "detail": "ValueError: Failed to parse expression 'args.amount >': ERROR: <input>:1:14: Syntax error: mismatched input '<EOF>' expecting {'[', ",
+              "matches_spec": true
+            },
+            {
+              "id": "no_time_function",
+              "expression": "now() > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "RuntimeError: Undefined variable or function: 'now'. Check that the variable is defined in the context or that the function name is sp",
+              "matches_spec": true
+            },
+            {
+              "id": "no_ambient_variable",
+              "expression": "request.time > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "RuntimeError: Undefined variable or function: 'request'. Check that the variable is defined in the context or that the function name i",
+              "matches_spec": true
+            },
+            {
+              "id": "no_env_variable",
+              "expression": "env.HOME == ''",
+              "expected": "error",
+              "observed": "error",
+              "detail": "RuntimeError: Undefined variable or function: 'env'. Check that the variable is defined in the context or that the function name is sp",
+              "matches_spec": true
+            }
+          ],
+          "spec_mismatches": [],
+          "cost": {
+            "argument_bytes": 65897,
+            "exists_linear_11000": {
+              "seconds": 0.0038,
+              "result": false,
+              "detail": "False"
+            },
+            "map_filter_1000": {
+              "seconds": 0.0565,
+              "result": true,
+              "detail": "True"
+            },
+            "map_filter_2000": {
+              "seconds": 0.2117,
+              "result": true,
+              "detail": "True"
+            },
+            "exists_in_list_2000": {
+              "seconds": 0.0991,
+              "result": false,
+              "detail": "False"
+            },
+            "no_comprehension_60_concat_11000": {
+              "expression_chars": 543,
+              "seconds": 0.6167,
+              "result": false,
+              "detail": "False"
+            },
+            "no_comprehension_60_list_eq_11000": {
+              "seconds": 0.0365,
+              "result": true,
+              "detail": "True"
+            },
+            "nesting": {
+              "deepest_ok": 80,
+              "first_failure": "depth 96: exit 1, | ................................................................................................^"
+            },
+            "built_in_limits": "none exposed (no cost budget, timeout or depth option in the API)"
+          }
+        }
+      }
+    },
+    {
+      "environment": {
+        "os": "Debian GNU/Linux 13 (trixie)",
+        "machine": "x86_64",
+        "python": "3.12.12",
+        "note": "linux/amd64 debian:13 container emulated on an arm64 host; timings not native"
+      },
+      "candidates": {
+        "cel-python": {
+          "footprint": {
+            "version": "0.5.0",
+            "license": "",
+            "requires_python": ">=3.10",
+            "dependency_closure": {
+              "cel-python": "0.5.0",
+              "google-re2": "1.1.20251105",
+              "jmespath": "1.1.0",
+              "lark": "1.3.1",
+              "pendulum": "3.3.0",
+              "python-dateutil": "4.0.0",
+              "pyyaml": "6.0.3",
+              "tzdata": "2026.6"
+            },
+            "native_distributions": [
+              {
+                "distribution": "google-re2",
+                "extension_modules": [
+                  "re2/_re2.cpython-312-x86_64-linux-gnu.so"
+                ]
+              },
+              {
+                "distribution": "pendulum",
+                "extension_modules": [
+                  "pendulum/_pendulum.cpython-312-x86_64-linux-gnu.so"
+                ]
+              },
+              {
+                "distribution": "pyyaml",
+                "extension_modules": [
+                  "yaml/_yaml.cpython-312-x86_64-linux-gnu.so"
+                ]
+              }
+            ]
+          },
+          "cases": [
+            {
+              "id": "int_gt_above",
+              "expression": "args.amount > 500",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "int_gt_below",
+              "expression": "args.amount > 500",
+              "expected": false,
+              "observed": false,
+              "detail": "BoolType(False)",
+              "matches_spec": true
+            },
+            {
+              "id": "int_gt_equal",
+              "expression": "args.amount > 500",
+              "expected": false,
+              "observed": false,
+              "detail": "BoolType(False)",
+              "matches_spec": true
+            },
+            {
+              "id": "double_arg_int_literal",
+              "expression": "args.amount > 500",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "int_arg_double_literal",
+              "expression": "args.amount > 500.0",
+              "expected": true,
+              "observed": "error",
+              "detail": "CELEvalError: (\"found no matching overload for Token('RULE', 'relation_gt') applied to '(<class 'celpy.celtypes.IntType'>, <class 'cel",
+              "matches_spec": false
+            },
+            {
+              "id": "le_double",
+              "expression": "args.amount <= 99.99",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "or_currency",
+              "expression": "args.amount > 500 || args.currency != 'EUR'",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "or_currency_false",
+              "expression": "args.amount > 500 || args.currency != 'EUR'",
+              "expected": false,
+              "observed": false,
+              "detail": "BoolType(False)",
+              "matches_spec": true
+            },
+            {
+              "id": "nested_field",
+              "expression": "args.order.total >= 1000",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "in_list",
+              "expression": "args.env in ['prod', 'staging']",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "exists_macro",
+              "expression": "args.tags.exists(t, t == 'prod')",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "has_missing",
+              "expression": "has(args.missing)",
+              "expected": false,
+              "observed": false,
+              "detail": "BoolType(False)",
+              "matches_spec": true
+            },
+            {
+              "id": "operation_and_ns",
+              "expression": "operation == 'payments.create' && ns == 'acme'",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "reserved_namespace_identifier",
+              "expression": "namespace == 'acme'",
+              "expected": "error",
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": false
+            },
+            {
+              "id": "null_compare",
+              "expression": "args.note == null",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "bool_not_int",
+              "expression": "args.flag == 1",
+              "expected": false,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": false
+            },
+            {
+              "id": "bool_ne_int",
+              "expression": "args.flag != 1",
+              "expected": true,
+              "observed": false,
+              "detail": "BoolType(False)",
+              "matches_spec": false
+            },
+            {
+              "id": "string_size",
+              "expression": "size(args.memo) > 3",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_field",
+              "expression": "args.missing > 500",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"no such member in mapping: 'missing'\", <class 'KeyError'>, None)",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_nested",
+              "expression": "args.order.total > 5",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"no such member in mapping: 'total'\", <class 'KeyError'>, None)",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_absorbed_by_or",
+              "expression": "args.missing > 500 || true",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_in_or_false",
+              "expression": "args.missing > 500 || args.currency != 'EUR'",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"no such member in mapping: 'missing'\", <class 'KeyError'>, None)",
+              "matches_spec": true
+            },
+            {
+              "id": "type_mismatch_string",
+              "expression": "args.amount > 'x'",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"found no matching overload for Token('RULE', 'relation_gt') applied to '(<class 'celpy.celtypes.IntType'>, <class 'cel",
+              "matches_spec": true
+            },
+            {
+              "id": "type_mismatch_arg",
+              "expression": "args.amount > 500",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"found no matching overload for Token('RULE', 'relation_gt') applied to '(<class 'celpy.celtypes.StringType'>, <class '",
+              "matches_spec": true
+            },
+            {
+              "id": "int_overflow",
+              "expression": "args.amount * 9223372036854775807 > 0",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: ('return error for overflow', <class 'ValueError'>, ('overflow',))",
+              "matches_spec": true
+            },
+            {
+              "id": "divide_by_zero",
+              "expression": "args.amount / 0 > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: ('modulus or divide by zero', <class 'ZeroDivisionError'>, ('integer division or modulo by zero',))",
+              "matches_spec": true
+            },
+            {
+              "id": "non_bool_result",
+              "expression": "args.amount",
+              "expected": "error",
+              "observed": "non-bool",
+              "detail": "IntType: IntType(1)",
+              "matches_spec": true
+            },
+            {
+              "id": "syntax_error",
+              "expression": "args.amount >",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELParseError: args.amount >",
+              "matches_spec": true
+            },
+            {
+              "id": "no_time_function",
+              "expression": "now() > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"undeclared reference to 'now' (in activation 'Activation(annotations=None, package=None, vars=NameContainer({'google':",
+              "matches_spec": true
+            },
+            {
+              "id": "no_ambient_variable",
+              "expression": "request.time > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"undeclared reference to 'request' (in activation 'Activation(annotations=None, package=None, vars=NameContainer({'goog",
+              "matches_spec": true
+            },
+            {
+              "id": "no_env_variable",
+              "expression": "env.HOME == ''",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"undeclared reference to 'env' (in activation 'Activation(annotations=None, package=None, vars=NameContainer({'google':",
+              "matches_spec": true
+            }
+          ],
+          "spec_mismatches": [
+            "int_arg_double_literal",
+            "reserved_namespace_identifier",
+            "bool_not_int",
+            "bool_ne_int"
+          ],
+          "cost": {
+            "argument_bytes": 65897,
+            "exists_linear_11000": {
+              "seconds": 0.8648,
+              "result": false,
+              "detail": "BoolType(False)"
+            },
+            "map_filter_1000": {
+              "seconds": 0.1769,
+              "result": true,
+              "detail": "BoolType(True)"
+            },
+            "map_filter_2000": {
+              "seconds": 0.3534,
+              "result": true,
+              "detail": "BoolType(True)"
+            },
+            "exists_in_list_2000": {
+              "seconds": 0.6986,
+              "result": false,
+              "detail": "BoolType(False)"
+            },
+            "no_comprehension_60_concat_11000": {
+              "expression_chars": 543,
+              "seconds": 0.1638,
+              "result": false,
+              "detail": "BoolType(False)"
+            },
+            "no_comprehension_60_list_eq_11000": {
+              "seconds": 0.7596,
+              "result": true,
+              "detail": "BoolType(True)"
+            },
+            "nesting": {
+              "deepest_ok": 64,
+              "first_failure": "depth 80: exit 1, RecursionError: maximum recursion depth exceeded"
+            },
+            "built_in_limits": "none exposed (no cost budget, timeout or depth option in the API)"
+          }
+        },
+        "common-expression-language": {
+          "footprint": {
+            "version": "0.10.0",
+            "license": "Apache-2.0",
+            "requires_python": ">=3.11",
+            "dependency_closure": {
+              "annotated-doc": "0.0.5",
+              "common-expression-language": "0.10.0",
+              "markdown-it-py": "4.2.0",
+              "mdurl": "0.1.2",
+              "prompt-toolkit": "3.0.53",
+              "pygments": "2.21.0",
+              "rich": "15.0.0",
+              "shellingham": "1.5.4",
+              "typer": "0.28.0",
+              "wcwidth": "0.9.4"
+            },
+            "native_distributions": [
+              {
+                "distribution": "common-expression-language",
+                "extension_modules": [
+                  "cel/cel.cpython-312-x86_64-linux-gnu.so"
+                ]
+              },
+              {
+                "distribution": "wcwidth",
+                "extension_modules": [
+                  "wcwidth/_wcwidth_c.abi3.so"
+                ]
+              }
+            ]
+          },
+          "cases": [
+            {
+              "id": "int_gt_above",
+              "expression": "args.amount > 500",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "int_gt_below",
+              "expression": "args.amount > 500",
+              "expected": false,
+              "observed": false,
+              "detail": "False",
+              "matches_spec": true
+            },
+            {
+              "id": "int_gt_equal",
+              "expression": "args.amount > 500",
+              "expected": false,
+              "observed": false,
+              "detail": "False",
+              "matches_spec": true
+            },
+            {
+              "id": "double_arg_int_literal",
+              "expression": "args.amount > 500",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "int_arg_double_literal",
+              "expression": "args.amount > 500.0",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "le_double",
+              "expression": "args.amount <= 99.99",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "or_currency",
+              "expression": "args.amount > 500 || args.currency != 'EUR'",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "or_currency_false",
+              "expression": "args.amount > 500 || args.currency != 'EUR'",
+              "expected": false,
+              "observed": false,
+              "detail": "False",
+              "matches_spec": true
+            },
+            {
+              "id": "nested_field",
+              "expression": "args.order.total >= 1000",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "in_list",
+              "expression": "args.env in ['prod', 'staging']",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "exists_macro",
+              "expression": "args.tags.exists(t, t == 'prod')",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "has_missing",
+              "expression": "has(args.missing)",
+              "expected": false,
+              "observed": false,
+              "detail": "False",
+              "matches_spec": true
+            },
+            {
+              "id": "operation_and_ns",
+              "expression": "operation == 'payments.create' && ns == 'acme'",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "reserved_namespace_identifier",
+              "expression": "namespace == 'acme'",
+              "expected": "error",
+              "observed": "error",
+              "detail": "ValueError: Failed to parse expression 'namespace == 'acme'': ERROR: <input>:1:1: reserved identifier: namespace",
+              "matches_spec": true
+            },
+            {
+              "id": "null_compare",
+              "expression": "args.note == null",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "bool_not_int",
+              "expression": "args.flag == 1",
+              "expected": false,
+              "observed": false,
+              "detail": "False",
+              "matches_spec": true
+            },
+            {
+              "id": "bool_ne_int",
+              "expression": "args.flag != 1",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "string_size",
+              "expression": "size(args.memo) > 3",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_field",
+              "expression": "args.missing > 500",
+              "expected": "error",
+              "observed": "error",
+              "detail": "KeyError: 'missing'",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_nested",
+              "expression": "args.order.total > 5",
+              "expected": "error",
+              "observed": "error",
+              "detail": "KeyError: 'total'",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_absorbed_by_or",
+              "expression": "args.missing > 500 || true",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_in_or_false",
+              "expression": "args.missing > 500 || args.currency != 'EUR'",
+              "expected": "error",
+              "observed": "error",
+              "detail": "KeyError: 'missing'",
+              "matches_spec": true
+            },
+            {
+              "id": "type_mismatch_string",
+              "expression": "args.amount > 'x'",
+              "expected": "error",
+              "observed": "error",
+              "detail": "TypeError: No such overload: the operation is not defined for the given operand types. CEL does not coerce between types, so common",
+              "matches_spec": true
+            },
+            {
+              "id": "type_mismatch_arg",
+              "expression": "args.amount > 500",
+              "expected": "error",
+              "observed": "error",
+              "detail": "TypeError: No such overload: the operation is not defined for the given operand types. CEL does not coerce between types, so common",
+              "matches_spec": true
+            },
+            {
+              "id": "int_overflow",
+              "expression": "args.amount * 9223372036854775807 > 0",
+              "expected": "error",
+              "observed": "error",
+              "detail": "OverflowError: Arithmetic overflow in 'mul' on 2 and 9223372036854775807.",
+              "matches_spec": true
+            },
+            {
+              "id": "divide_by_zero",
+              "expression": "args.amount / 0 > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "ZeroDivisionError: division by zero in CEL expression",
+              "matches_spec": true
+            },
+            {
+              "id": "non_bool_result",
+              "expression": "args.amount",
+              "expected": "error",
+              "observed": "non-bool",
+              "detail": "int: 1",
+              "matches_spec": true
+            },
+            {
+              "id": "syntax_error",
+              "expression": "args.amount >",
+              "expected": "error",
+              "observed": "error",
+              "detail": "ValueError: Failed to parse expression 'args.amount >': ERROR: <input>:1:14: Syntax error: mismatched input '<EOF>' expecting {'[', ",
+              "matches_spec": true
+            },
+            {
+              "id": "no_time_function",
+              "expression": "now() > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "RuntimeError: Undefined variable or function: 'now'. Check that the variable is defined in the context or that the function name is sp",
+              "matches_spec": true
+            },
+            {
+              "id": "no_ambient_variable",
+              "expression": "request.time > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "RuntimeError: Undefined variable or function: 'request'. Check that the variable is defined in the context or that the function name i",
+              "matches_spec": true
+            },
+            {
+              "id": "no_env_variable",
+              "expression": "env.HOME == ''",
+              "expected": "error",
+              "observed": "error",
+              "detail": "RuntimeError: Undefined variable or function: 'env'. Check that the variable is defined in the context or that the function name is sp",
+              "matches_spec": true
+            }
+          ],
+          "spec_mismatches": [],
+          "cost": {
+            "argument_bytes": 65897,
+            "exists_linear_11000": {
+              "seconds": 0.0061,
+              "result": false,
+              "detail": "False"
+            },
+            "map_filter_1000": {
+              "seconds": 0.0873,
+              "result": true,
+              "detail": "True"
+            },
+            "map_filter_2000": {
+              "seconds": 0.3413,
+              "result": true,
+              "detail": "True"
+            },
+            "exists_in_list_2000": {
+              "seconds": 0.1772,
+              "result": false,
+              "detail": "False"
+            },
+            "no_comprehension_60_concat_11000": {
+              "expression_chars": 543,
+              "seconds": 0.954,
+              "result": false,
+              "detail": "False"
+            },
+            "no_comprehension_60_list_eq_11000": {
+              "seconds": 0.0613,
+              "result": true,
+              "detail": "True"
+            },
+            "nesting": {
+              "deepest_ok": 80,
+              "first_failure": "depth 96: exit 1, | ................................................................................................^"
+            },
+            "built_in_limits": "none exposed (no cost budget, timeout or depth option in the API)"
+          }
+        }
+      }
+    },
+    {
+      "environment": {
+        "os": "Debian GNU/Linux 13 (trixie)",
+        "machine": "x86_64",
+        "python": "3.13.5",
+        "note": "linux/amd64 debian:13 container emulated on an arm64 host; timings not native"
+      },
+      "candidates": {
+        "cel-python": {
+          "footprint": {
+            "version": "0.5.0",
+            "license": "",
+            "requires_python": ">=3.10",
+            "dependency_closure": {
+              "cel-python": "0.5.0",
+              "google-re2": "1.1.20251105",
+              "jmespath": "1.1.0",
+              "lark": "1.3.1",
+              "pendulum": "3.3.0",
+              "python-dateutil": "4.0.0",
+              "pyyaml": "6.0.3",
+              "tzdata": "2026.6"
+            },
+            "native_distributions": [
+              {
+                "distribution": "google-re2",
+                "extension_modules": [
+                  "re2/_re2.cpython-313-x86_64-linux-gnu.so"
+                ]
+              },
+              {
+                "distribution": "pendulum",
+                "extension_modules": [
+                  "pendulum/_pendulum.cpython-313-x86_64-linux-gnu.so"
+                ]
+              },
+              {
+                "distribution": "pyyaml",
+                "extension_modules": [
+                  "yaml/_yaml.cpython-313-x86_64-linux-gnu.so"
+                ]
+              }
+            ]
+          },
+          "cases": [
+            {
+              "id": "int_gt_above",
+              "expression": "args.amount > 500",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "int_gt_below",
+              "expression": "args.amount > 500",
+              "expected": false,
+              "observed": false,
+              "detail": "BoolType(False)",
+              "matches_spec": true
+            },
+            {
+              "id": "int_gt_equal",
+              "expression": "args.amount > 500",
+              "expected": false,
+              "observed": false,
+              "detail": "BoolType(False)",
+              "matches_spec": true
+            },
+            {
+              "id": "double_arg_int_literal",
+              "expression": "args.amount > 500",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "int_arg_double_literal",
+              "expression": "args.amount > 500.0",
+              "expected": true,
+              "observed": "error",
+              "detail": "CELEvalError: (\"found no matching overload for Token('RULE', 'relation_gt') applied to '(<class 'celpy.celtypes.IntType'>, <class 'cel",
+              "matches_spec": false
+            },
+            {
+              "id": "le_double",
+              "expression": "args.amount <= 99.99",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "or_currency",
+              "expression": "args.amount > 500 || args.currency != 'EUR'",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "or_currency_false",
+              "expression": "args.amount > 500 || args.currency != 'EUR'",
+              "expected": false,
+              "observed": false,
+              "detail": "BoolType(False)",
+              "matches_spec": true
+            },
+            {
+              "id": "nested_field",
+              "expression": "args.order.total >= 1000",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "in_list",
+              "expression": "args.env in ['prod', 'staging']",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "exists_macro",
+              "expression": "args.tags.exists(t, t == 'prod')",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "has_missing",
+              "expression": "has(args.missing)",
+              "expected": false,
+              "observed": false,
+              "detail": "BoolType(False)",
+              "matches_spec": true
+            },
+            {
+              "id": "operation_and_ns",
+              "expression": "operation == 'payments.create' && ns == 'acme'",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "reserved_namespace_identifier",
+              "expression": "namespace == 'acme'",
+              "expected": "error",
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": false
+            },
+            {
+              "id": "null_compare",
+              "expression": "args.note == null",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "bool_not_int",
+              "expression": "args.flag == 1",
+              "expected": false,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": false
+            },
+            {
+              "id": "bool_ne_int",
+              "expression": "args.flag != 1",
+              "expected": true,
+              "observed": false,
+              "detail": "BoolType(False)",
+              "matches_spec": false
+            },
+            {
+              "id": "string_size",
+              "expression": "size(args.memo) > 3",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_field",
+              "expression": "args.missing > 500",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"no such member in mapping: 'missing'\", <class 'KeyError'>, None)",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_nested",
+              "expression": "args.order.total > 5",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"no such member in mapping: 'total'\", <class 'KeyError'>, None)",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_absorbed_by_or",
+              "expression": "args.missing > 500 || true",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_in_or_false",
+              "expression": "args.missing > 500 || args.currency != 'EUR'",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"no such member in mapping: 'missing'\", <class 'KeyError'>, None)",
+              "matches_spec": true
+            },
+            {
+              "id": "type_mismatch_string",
+              "expression": "args.amount > 'x'",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"found no matching overload for Token('RULE', 'relation_gt') applied to '(<class 'celpy.celtypes.IntType'>, <class 'cel",
+              "matches_spec": true
+            },
+            {
+              "id": "type_mismatch_arg",
+              "expression": "args.amount > 500",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"found no matching overload for Token('RULE', 'relation_gt') applied to '(<class 'celpy.celtypes.StringType'>, <class '",
+              "matches_spec": true
+            },
+            {
+              "id": "int_overflow",
+              "expression": "args.amount * 9223372036854775807 > 0",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: ('return error for overflow', <class 'ValueError'>, ('overflow',))",
+              "matches_spec": true
+            },
+            {
+              "id": "divide_by_zero",
+              "expression": "args.amount / 0 > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: ('modulus or divide by zero', <class 'ZeroDivisionError'>, ('integer division or modulo by zero',))",
+              "matches_spec": true
+            },
+            {
+              "id": "non_bool_result",
+              "expression": "args.amount",
+              "expected": "error",
+              "observed": "non-bool",
+              "detail": "IntType: IntType(1)",
+              "matches_spec": true
+            },
+            {
+              "id": "syntax_error",
+              "expression": "args.amount >",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELParseError: args.amount >",
+              "matches_spec": true
+            },
+            {
+              "id": "no_time_function",
+              "expression": "now() > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"undeclared reference to 'now' (in activation 'Activation(annotations=None, package=None, vars=NameContainer({'google':",
+              "matches_spec": true
+            },
+            {
+              "id": "no_ambient_variable",
+              "expression": "request.time > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"undeclared reference to 'request' (in activation 'Activation(annotations=None, package=None, vars=NameContainer({'goog",
+              "matches_spec": true
+            },
+            {
+              "id": "no_env_variable",
+              "expression": "env.HOME == ''",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"undeclared reference to 'env' (in activation 'Activation(annotations=None, package=None, vars=NameContainer({'google':",
+              "matches_spec": true
+            }
+          ],
+          "spec_mismatches": [
+            "int_arg_double_literal",
+            "reserved_namespace_identifier",
+            "bool_not_int",
+            "bool_ne_int"
+          ],
+          "cost": {
+            "argument_bytes": 65897,
+            "exists_linear_11000": {
+              "seconds": 0.7543,
+              "result": false,
+              "detail": "BoolType(False)"
+            },
+            "map_filter_1000": {
+              "seconds": 0.1587,
+              "result": true,
+              "detail": "BoolType(True)"
+            },
+            "map_filter_2000": {
+              "seconds": 0.3196,
+              "result": true,
+              "detail": "BoolType(True)"
+            },
+            "exists_in_list_2000": {
+              "seconds": 0.6797,
+              "result": false,
+              "detail": "BoolType(False)"
+            },
+            "no_comprehension_60_concat_11000": {
+              "expression_chars": 543,
+              "seconds": 0.1419,
+              "result": false,
+              "detail": "BoolType(False)"
+            },
+            "no_comprehension_60_list_eq_11000": {
+              "seconds": 0.8122,
+              "result": true,
+              "detail": "BoolType(True)"
+            },
+            "nesting": {
+              "deepest_ok": 64,
+              "first_failure": "depth 80: exit 1, RecursionError: maximum recursion depth exceeded"
+            },
+            "built_in_limits": "none exposed (no cost budget, timeout or depth option in the API)"
+          }
+        },
+        "common-expression-language": {
+          "footprint": {
+            "version": "0.10.0",
+            "license": "Apache-2.0",
+            "requires_python": ">=3.11",
+            "dependency_closure": {
+              "annotated-doc": "0.0.5",
+              "common-expression-language": "0.10.0",
+              "markdown-it-py": "4.2.0",
+              "mdurl": "0.1.2",
+              "prompt-toolkit": "3.0.53",
+              "pygments": "2.21.0",
+              "rich": "15.0.0",
+              "shellingham": "1.5.4",
+              "typer": "0.28.0",
+              "wcwidth": "0.9.4"
+            },
+            "native_distributions": [
+              {
+                "distribution": "common-expression-language",
+                "extension_modules": [
+                  "cel/cel.cpython-313-x86_64-linux-gnu.so"
+                ]
+              },
+              {
+                "distribution": "wcwidth",
+                "extension_modules": [
+                  "wcwidth/_wcwidth_c.abi3.so"
+                ]
+              }
+            ]
+          },
+          "cases": [
+            {
+              "id": "int_gt_above",
+              "expression": "args.amount > 500",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "int_gt_below",
+              "expression": "args.amount > 500",
+              "expected": false,
+              "observed": false,
+              "detail": "False",
+              "matches_spec": true
+            },
+            {
+              "id": "int_gt_equal",
+              "expression": "args.amount > 500",
+              "expected": false,
+              "observed": false,
+              "detail": "False",
+              "matches_spec": true
+            },
+            {
+              "id": "double_arg_int_literal",
+              "expression": "args.amount > 500",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "int_arg_double_literal",
+              "expression": "args.amount > 500.0",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "le_double",
+              "expression": "args.amount <= 99.99",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "or_currency",
+              "expression": "args.amount > 500 || args.currency != 'EUR'",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "or_currency_false",
+              "expression": "args.amount > 500 || args.currency != 'EUR'",
+              "expected": false,
+              "observed": false,
+              "detail": "False",
+              "matches_spec": true
+            },
+            {
+              "id": "nested_field",
+              "expression": "args.order.total >= 1000",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "in_list",
+              "expression": "args.env in ['prod', 'staging']",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "exists_macro",
+              "expression": "args.tags.exists(t, t == 'prod')",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "has_missing",
+              "expression": "has(args.missing)",
+              "expected": false,
+              "observed": false,
+              "detail": "False",
+              "matches_spec": true
+            },
+            {
+              "id": "operation_and_ns",
+              "expression": "operation == 'payments.create' && ns == 'acme'",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "reserved_namespace_identifier",
+              "expression": "namespace == 'acme'",
+              "expected": "error",
+              "observed": "error",
+              "detail": "ValueError: Failed to parse expression 'namespace == 'acme'': ERROR: <input>:1:1: reserved identifier: namespace",
+              "matches_spec": true
+            },
+            {
+              "id": "null_compare",
+              "expression": "args.note == null",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "bool_not_int",
+              "expression": "args.flag == 1",
+              "expected": false,
+              "observed": false,
+              "detail": "False",
+              "matches_spec": true
+            },
+            {
+              "id": "bool_ne_int",
+              "expression": "args.flag != 1",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "string_size",
+              "expression": "size(args.memo) > 3",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_field",
+              "expression": "args.missing > 500",
+              "expected": "error",
+              "observed": "error",
+              "detail": "KeyError: 'missing'",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_nested",
+              "expression": "args.order.total > 5",
+              "expected": "error",
+              "observed": "error",
+              "detail": "KeyError: 'total'",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_absorbed_by_or",
+              "expression": "args.missing > 500 || true",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_in_or_false",
+              "expression": "args.missing > 500 || args.currency != 'EUR'",
+              "expected": "error",
+              "observed": "error",
+              "detail": "KeyError: 'missing'",
+              "matches_spec": true
+            },
+            {
+              "id": "type_mismatch_string",
+              "expression": "args.amount > 'x'",
+              "expected": "error",
+              "observed": "error",
+              "detail": "TypeError: No such overload: the operation is not defined for the given operand types. CEL does not coerce between types, so common",
+              "matches_spec": true
+            },
+            {
+              "id": "type_mismatch_arg",
+              "expression": "args.amount > 500",
+              "expected": "error",
+              "observed": "error",
+              "detail": "TypeError: No such overload: the operation is not defined for the given operand types. CEL does not coerce between types, so common",
+              "matches_spec": true
+            },
+            {
+              "id": "int_overflow",
+              "expression": "args.amount * 9223372036854775807 > 0",
+              "expected": "error",
+              "observed": "error",
+              "detail": "OverflowError: Arithmetic overflow in 'mul' on 2 and 9223372036854775807.",
+              "matches_spec": true
+            },
+            {
+              "id": "divide_by_zero",
+              "expression": "args.amount / 0 > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "ZeroDivisionError: division by zero in CEL expression",
+              "matches_spec": true
+            },
+            {
+              "id": "non_bool_result",
+              "expression": "args.amount",
+              "expected": "error",
+              "observed": "non-bool",
+              "detail": "int: 1",
+              "matches_spec": true
+            },
+            {
+              "id": "syntax_error",
+              "expression": "args.amount >",
+              "expected": "error",
+              "observed": "error",
+              "detail": "ValueError: Failed to parse expression 'args.amount >': ERROR: <input>:1:14: Syntax error: mismatched input '<EOF>' expecting {'[', ",
+              "matches_spec": true
+            },
+            {
+              "id": "no_time_function",
+              "expression": "now() > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "RuntimeError: Undefined variable or function: 'now'. Check that the variable is defined in the context or that the function name is sp",
+              "matches_spec": true
+            },
+            {
+              "id": "no_ambient_variable",
+              "expression": "request.time > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "RuntimeError: Undefined variable or function: 'request'. Check that the variable is defined in the context or that the function name i",
+              "matches_spec": true
+            },
+            {
+              "id": "no_env_variable",
+              "expression": "env.HOME == ''",
+              "expected": "error",
+              "observed": "error",
+              "detail": "RuntimeError: Undefined variable or function: 'env'. Check that the variable is defined in the context or that the function name is sp",
+              "matches_spec": true
+            }
+          ],
+          "spec_mismatches": [],
+          "cost": {
+            "argument_bytes": 65897,
+            "exists_linear_11000": {
+              "seconds": 0.0067,
+              "result": false,
+              "detail": "False"
+            },
+            "map_filter_1000": {
+              "seconds": 0.0967,
+              "result": true,
+              "detail": "True"
+            },
+            "map_filter_2000": {
+              "seconds": 0.3689,
+              "result": true,
+              "detail": "True"
+            },
+            "exists_in_list_2000": {
+              "seconds": 0.1944,
+              "result": false,
+              "detail": "False"
+            },
+            "no_comprehension_60_concat_11000": {
+              "expression_chars": 543,
+              "seconds": 0.9858,
+              "result": false,
+              "detail": "False"
+            },
+            "no_comprehension_60_list_eq_11000": {
+              "seconds": 0.0664,
+              "result": true,
+              "detail": "True"
+            },
+            "nesting": {
+              "deepest_ok": 80,
+              "first_failure": "depth 96: exit 1, | ................................................................................................^"
+            },
+            "built_in_limits": "none exposed (no cost budget, timeout or depth option in the API)"
+          }
+        }
+      }
+    },
+    {
+      "environment": {
+        "os": "Darwin 26.6.2",
+        "machine": "arm64",
+        "python": "3.12.0"
+      },
+      "candidates": {
+        "cel-python": {
+          "footprint": {
+            "version": "0.5.0",
+            "license": "",
+            "requires_python": ">=3.10",
+            "dependency_closure": {
+              "cel-python": "0.5.0",
+              "google-re2": "1.1.20251105",
+              "jmespath": "1.1.0",
+              "lark": "1.3.1",
+              "pendulum": "3.3.0",
+              "python-dateutil": "4.0.0",
+              "pyyaml": "6.0.3",
+              "tzdata": "2026.6"
+            },
+            "native_distributions": [
+              {
+                "distribution": "google-re2",
+                "extension_modules": [
+                  "re2/_re2.cpython-312-darwin.so"
+                ]
+              },
+              {
+                "distribution": "pendulum",
+                "extension_modules": [
+                  "pendulum/_pendulum.cpython-312-darwin.so"
+                ]
+              },
+              {
+                "distribution": "pyyaml",
+                "extension_modules": [
+                  "yaml/_yaml.cpython-312-darwin.so"
+                ]
+              }
+            ]
+          },
+          "cases": [
+            {
+              "id": "int_gt_above",
+              "expression": "args.amount > 500",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "int_gt_below",
+              "expression": "args.amount > 500",
+              "expected": false,
+              "observed": false,
+              "detail": "BoolType(False)",
+              "matches_spec": true
+            },
+            {
+              "id": "int_gt_equal",
+              "expression": "args.amount > 500",
+              "expected": false,
+              "observed": false,
+              "detail": "BoolType(False)",
+              "matches_spec": true
+            },
+            {
+              "id": "double_arg_int_literal",
+              "expression": "args.amount > 500",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "int_arg_double_literal",
+              "expression": "args.amount > 500.0",
+              "expected": true,
+              "observed": "error",
+              "detail": "CELEvalError: (\"found no matching overload for Token('RULE', 'relation_gt') applied to '(<class 'celpy.celtypes.IntType'>, <class 'cel",
+              "matches_spec": false
+            },
+            {
+              "id": "le_double",
+              "expression": "args.amount <= 99.99",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "or_currency",
+              "expression": "args.amount > 500 || args.currency != 'EUR'",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "or_currency_false",
+              "expression": "args.amount > 500 || args.currency != 'EUR'",
+              "expected": false,
+              "observed": false,
+              "detail": "BoolType(False)",
+              "matches_spec": true
+            },
+            {
+              "id": "nested_field",
+              "expression": "args.order.total >= 1000",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "in_list",
+              "expression": "args.env in ['prod', 'staging']",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "exists_macro",
+              "expression": "args.tags.exists(t, t == 'prod')",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "has_missing",
+              "expression": "has(args.missing)",
+              "expected": false,
+              "observed": false,
+              "detail": "BoolType(False)",
+              "matches_spec": true
+            },
+            {
+              "id": "operation_and_ns",
+              "expression": "operation == 'payments.create' && ns == 'acme'",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "reserved_namespace_identifier",
+              "expression": "namespace == 'acme'",
+              "expected": "error",
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": false
+            },
+            {
+              "id": "null_compare",
+              "expression": "args.note == null",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "bool_not_int",
+              "expression": "args.flag == 1",
+              "expected": false,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": false
+            },
+            {
+              "id": "bool_ne_int",
+              "expression": "args.flag != 1",
+              "expected": true,
+              "observed": false,
+              "detail": "BoolType(False)",
+              "matches_spec": false
+            },
+            {
+              "id": "string_size",
+              "expression": "size(args.memo) > 3",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_field",
+              "expression": "args.missing > 500",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"no such member in mapping: 'missing'\", <class 'KeyError'>, None)",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_nested",
+              "expression": "args.order.total > 5",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"no such member in mapping: 'total'\", <class 'KeyError'>, None)",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_absorbed_by_or",
+              "expression": "args.missing > 500 || true",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_in_or_false",
+              "expression": "args.missing > 500 || args.currency != 'EUR'",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"no such member in mapping: 'missing'\", <class 'KeyError'>, None)",
+              "matches_spec": true
+            },
+            {
+              "id": "type_mismatch_string",
+              "expression": "args.amount > 'x'",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"found no matching overload for Token('RULE', 'relation_gt') applied to '(<class 'celpy.celtypes.IntType'>, <class 'cel",
+              "matches_spec": true
+            },
+            {
+              "id": "type_mismatch_arg",
+              "expression": "args.amount > 500",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"found no matching overload for Token('RULE', 'relation_gt') applied to '(<class 'celpy.celtypes.StringType'>, <class '",
+              "matches_spec": true
+            },
+            {
+              "id": "int_overflow",
+              "expression": "args.amount * 9223372036854775807 > 0",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: ('return error for overflow', <class 'ValueError'>, ('overflow',))",
+              "matches_spec": true
+            },
+            {
+              "id": "divide_by_zero",
+              "expression": "args.amount / 0 > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: ('modulus or divide by zero', <class 'ZeroDivisionError'>, ('integer division or modulo by zero',))",
+              "matches_spec": true
+            },
+            {
+              "id": "non_bool_result",
+              "expression": "args.amount",
+              "expected": "error",
+              "observed": "non-bool",
+              "detail": "IntType: IntType(1)",
+              "matches_spec": true
+            },
+            {
+              "id": "syntax_error",
+              "expression": "args.amount >",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELParseError: args.amount >",
+              "matches_spec": true
+            },
+            {
+              "id": "no_time_function",
+              "expression": "now() > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"undeclared reference to 'now' (in activation 'Activation(annotations=None, package=None, vars=NameContainer({'google':",
+              "matches_spec": true
+            },
+            {
+              "id": "no_ambient_variable",
+              "expression": "request.time > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"undeclared reference to 'request' (in activation 'Activation(annotations=None, package=None, vars=NameContainer({'goog",
+              "matches_spec": true
+            },
+            {
+              "id": "no_env_variable",
+              "expression": "env.HOME == ''",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"undeclared reference to 'env' (in activation 'Activation(annotations=None, package=None, vars=NameContainer({'google':",
+              "matches_spec": true
+            }
+          ],
+          "spec_mismatches": [
+            "int_arg_double_literal",
+            "reserved_namespace_identifier",
+            "bool_not_int",
+            "bool_ne_int"
+          ],
+          "cost": {
+            "argument_bytes": 65897,
+            "exists_linear_11000": {
+              "seconds": 0.6242,
+              "result": false,
+              "detail": "BoolType(False)"
+            },
+            "map_filter_1000": {
+              "seconds": 0.1285,
+              "result": true,
+              "detail": "BoolType(True)"
+            },
+            "map_filter_2000": {
+              "seconds": 0.2566,
+              "result": true,
+              "detail": "BoolType(True)"
+            },
+            "exists_in_list_2000": {
+              "seconds": 0.5057,
+              "result": false,
+              "detail": "BoolType(False)"
+            },
+            "no_comprehension_60_concat_11000": {
+              "expression_chars": 543,
+              "seconds": 0.1249,
+              "result": false,
+              "detail": "BoolType(False)"
+            },
+            "no_comprehension_60_list_eq_11000": {
+              "seconds": 0.582,
+              "result": true,
+              "detail": "BoolType(True)"
+            },
+            "nesting": {
+              "deepest_ok": 64,
+              "first_failure": "depth 80: exit 1, RecursionError: maximum recursion depth exceeded"
+            },
+            "built_in_limits": "none exposed (no cost budget, timeout or depth option in the API)"
+          }
+        },
+        "common-expression-language": {
+          "footprint": {
+            "version": "0.10.0",
+            "license": "Apache-2.0",
+            "requires_python": ">=3.11",
+            "dependency_closure": {
+              "annotated-doc": "0.0.5",
+              "common-expression-language": "0.10.0",
+              "markdown-it-py": "4.2.0",
+              "mdurl": "0.1.2",
+              "prompt-toolkit": "3.0.53",
+              "pygments": "2.21.0",
+              "rich": "15.0.0",
+              "shellingham": "1.5.4",
+              "typer": "0.28.0",
+              "wcwidth": "0.9.4"
+            },
+            "native_distributions": [
+              {
+                "distribution": "common-expression-language",
+                "extension_modules": [
+                  "cel/cel.cpython-312-darwin.so"
+                ]
+              },
+              {
+                "distribution": "wcwidth",
+                "extension_modules": [
+                  "wcwidth/_wcwidth_c.abi3.so"
+                ]
+              }
+            ]
+          },
+          "cases": [
+            {
+              "id": "int_gt_above",
+              "expression": "args.amount > 500",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "int_gt_below",
+              "expression": "args.amount > 500",
+              "expected": false,
+              "observed": false,
+              "detail": "False",
+              "matches_spec": true
+            },
+            {
+              "id": "int_gt_equal",
+              "expression": "args.amount > 500",
+              "expected": false,
+              "observed": false,
+              "detail": "False",
+              "matches_spec": true
+            },
+            {
+              "id": "double_arg_int_literal",
+              "expression": "args.amount > 500",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "int_arg_double_literal",
+              "expression": "args.amount > 500.0",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "le_double",
+              "expression": "args.amount <= 99.99",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "or_currency",
+              "expression": "args.amount > 500 || args.currency != 'EUR'",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "or_currency_false",
+              "expression": "args.amount > 500 || args.currency != 'EUR'",
+              "expected": false,
+              "observed": false,
+              "detail": "False",
+              "matches_spec": true
+            },
+            {
+              "id": "nested_field",
+              "expression": "args.order.total >= 1000",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "in_list",
+              "expression": "args.env in ['prod', 'staging']",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "exists_macro",
+              "expression": "args.tags.exists(t, t == 'prod')",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "has_missing",
+              "expression": "has(args.missing)",
+              "expected": false,
+              "observed": false,
+              "detail": "False",
+              "matches_spec": true
+            },
+            {
+              "id": "operation_and_ns",
+              "expression": "operation == 'payments.create' && ns == 'acme'",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "reserved_namespace_identifier",
+              "expression": "namespace == 'acme'",
+              "expected": "error",
+              "observed": "error",
+              "detail": "ValueError: Failed to parse expression 'namespace == 'acme'': ERROR: <input>:1:1: reserved identifier: namespace",
+              "matches_spec": true
+            },
+            {
+              "id": "null_compare",
+              "expression": "args.note == null",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "bool_not_int",
+              "expression": "args.flag == 1",
+              "expected": false,
+              "observed": false,
+              "detail": "False",
+              "matches_spec": true
+            },
+            {
+              "id": "bool_ne_int",
+              "expression": "args.flag != 1",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "string_size",
+              "expression": "size(args.memo) > 3",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_field",
+              "expression": "args.missing > 500",
+              "expected": "error",
+              "observed": "error",
+              "detail": "KeyError: 'missing'",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_nested",
+              "expression": "args.order.total > 5",
+              "expected": "error",
+              "observed": "error",
+              "detail": "KeyError: 'total'",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_absorbed_by_or",
+              "expression": "args.missing > 500 || true",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_in_or_false",
+              "expression": "args.missing > 500 || args.currency != 'EUR'",
+              "expected": "error",
+              "observed": "error",
+              "detail": "KeyError: 'missing'",
+              "matches_spec": true
+            },
+            {
+              "id": "type_mismatch_string",
+              "expression": "args.amount > 'x'",
+              "expected": "error",
+              "observed": "error",
+              "detail": "TypeError: No such overload: the operation is not defined for the given operand types. CEL does not coerce between types, so common",
+              "matches_spec": true
+            },
+            {
+              "id": "type_mismatch_arg",
+              "expression": "args.amount > 500",
+              "expected": "error",
+              "observed": "error",
+              "detail": "TypeError: No such overload: the operation is not defined for the given operand types. CEL does not coerce between types, so common",
+              "matches_spec": true
+            },
+            {
+              "id": "int_overflow",
+              "expression": "args.amount * 9223372036854775807 > 0",
+              "expected": "error",
+              "observed": "error",
+              "detail": "OverflowError: Arithmetic overflow in 'mul' on 2 and 9223372036854775807.",
+              "matches_spec": true
+            },
+            {
+              "id": "divide_by_zero",
+              "expression": "args.amount / 0 > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "ZeroDivisionError: division by zero in CEL expression",
+              "matches_spec": true
+            },
+            {
+              "id": "non_bool_result",
+              "expression": "args.amount",
+              "expected": "error",
+              "observed": "non-bool",
+              "detail": "int: 1",
+              "matches_spec": true
+            },
+            {
+              "id": "syntax_error",
+              "expression": "args.amount >",
+              "expected": "error",
+              "observed": "error",
+              "detail": "ValueError: Failed to parse expression 'args.amount >': ERROR: <input>:1:14: Syntax error: mismatched input '<EOF>' expecting {'[', ",
+              "matches_spec": true
+            },
+            {
+              "id": "no_time_function",
+              "expression": "now() > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "RuntimeError: Undefined variable or function: 'now'. Check that the variable is defined in the context or that the function name is sp",
+              "matches_spec": true
+            },
+            {
+              "id": "no_ambient_variable",
+              "expression": "request.time > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "RuntimeError: Undefined variable or function: 'request'. Check that the variable is defined in the context or that the function name i",
+              "matches_spec": true
+            },
+            {
+              "id": "no_env_variable",
+              "expression": "env.HOME == ''",
+              "expected": "error",
+              "observed": "error",
+              "detail": "RuntimeError: Undefined variable or function: 'env'. Check that the variable is defined in the context or that the function name is sp",
+              "matches_spec": true
+            }
+          ],
+          "spec_mismatches": [],
+          "cost": {
+            "argument_bytes": 65897,
+            "exists_linear_11000": {
+              "seconds": 0.004,
+              "result": false,
+              "detail": "False"
+            },
+            "map_filter_1000": {
+              "seconds": 0.0429,
+              "result": true,
+              "detail": "True"
+            },
+            "map_filter_2000": {
+              "seconds": 0.1597,
+              "result": true,
+              "detail": "True"
+            },
+            "exists_in_list_2000": {
+              "seconds": 0.082,
+              "result": false,
+              "detail": "False"
+            },
+            "no_comprehension_60_concat_11000": {
+              "expression_chars": 543,
+              "seconds": 0.6003,
+              "result": false,
+              "detail": "False"
+            },
+            "no_comprehension_60_list_eq_11000": {
+              "seconds": 0.0347,
+              "result": true,
+              "detail": "True"
+            },
+            "nesting": {
+              "deepest_ok": 80,
+              "first_failure": "depth 96: exit 1, | ................................................................................................^"
+            },
+            "built_in_limits": "none exposed (no cost budget, timeout or depth option in the API)"
+          }
+        }
+      }
+    },
+    {
+      "environment": {
+        "os": "Darwin 26.6.2",
+        "machine": "arm64",
+        "python": "3.13.14"
+      },
+      "candidates": {
+        "cel-python": {
+          "footprint": {
+            "version": "0.5.0",
+            "license": "",
+            "requires_python": ">=3.10",
+            "dependency_closure": {
+              "cel-python": "0.5.0",
+              "google-re2": "1.1.20251105",
+              "jmespath": "1.1.0",
+              "lark": "1.3.1",
+              "pendulum": "3.3.0",
+              "python-dateutil": "4.0.0",
+              "pyyaml": "6.0.3",
+              "tzdata": "2026.6"
+            },
+            "native_distributions": [
+              {
+                "distribution": "google-re2",
+                "extension_modules": [
+                  "re2/_re2.cpython-313-darwin.so"
+                ]
+              },
+              {
+                "distribution": "pendulum",
+                "extension_modules": [
+                  "pendulum/_pendulum.cpython-313-darwin.so"
+                ]
+              },
+              {
+                "distribution": "pyyaml",
+                "extension_modules": [
+                  "yaml/_yaml.cpython-313-darwin.so"
+                ]
+              }
+            ]
+          },
+          "cases": [
+            {
+              "id": "int_gt_above",
+              "expression": "args.amount > 500",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "int_gt_below",
+              "expression": "args.amount > 500",
+              "expected": false,
+              "observed": false,
+              "detail": "BoolType(False)",
+              "matches_spec": true
+            },
+            {
+              "id": "int_gt_equal",
+              "expression": "args.amount > 500",
+              "expected": false,
+              "observed": false,
+              "detail": "BoolType(False)",
+              "matches_spec": true
+            },
+            {
+              "id": "double_arg_int_literal",
+              "expression": "args.amount > 500",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "int_arg_double_literal",
+              "expression": "args.amount > 500.0",
+              "expected": true,
+              "observed": "error",
+              "detail": "CELEvalError: (\"found no matching overload for Token('RULE', 'relation_gt') applied to '(<class 'celpy.celtypes.IntType'>, <class 'cel",
+              "matches_spec": false
+            },
+            {
+              "id": "le_double",
+              "expression": "args.amount <= 99.99",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "or_currency",
+              "expression": "args.amount > 500 || args.currency != 'EUR'",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "or_currency_false",
+              "expression": "args.amount > 500 || args.currency != 'EUR'",
+              "expected": false,
+              "observed": false,
+              "detail": "BoolType(False)",
+              "matches_spec": true
+            },
+            {
+              "id": "nested_field",
+              "expression": "args.order.total >= 1000",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "in_list",
+              "expression": "args.env in ['prod', 'staging']",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "exists_macro",
+              "expression": "args.tags.exists(t, t == 'prod')",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "has_missing",
+              "expression": "has(args.missing)",
+              "expected": false,
+              "observed": false,
+              "detail": "BoolType(False)",
+              "matches_spec": true
+            },
+            {
+              "id": "operation_and_ns",
+              "expression": "operation == 'payments.create' && ns == 'acme'",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "reserved_namespace_identifier",
+              "expression": "namespace == 'acme'",
+              "expected": "error",
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": false
+            },
+            {
+              "id": "null_compare",
+              "expression": "args.note == null",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "bool_not_int",
+              "expression": "args.flag == 1",
+              "expected": false,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": false
+            },
+            {
+              "id": "bool_ne_int",
+              "expression": "args.flag != 1",
+              "expected": true,
+              "observed": false,
+              "detail": "BoolType(False)",
+              "matches_spec": false
+            },
+            {
+              "id": "string_size",
+              "expression": "size(args.memo) > 3",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_field",
+              "expression": "args.missing > 500",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"no such member in mapping: 'missing'\", <class 'KeyError'>, None)",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_nested",
+              "expression": "args.order.total > 5",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"no such member in mapping: 'total'\", <class 'KeyError'>, None)",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_absorbed_by_or",
+              "expression": "args.missing > 500 || true",
+              "expected": true,
+              "observed": true,
+              "detail": "BoolType(True)",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_in_or_false",
+              "expression": "args.missing > 500 || args.currency != 'EUR'",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"no such member in mapping: 'missing'\", <class 'KeyError'>, None)",
+              "matches_spec": true
+            },
+            {
+              "id": "type_mismatch_string",
+              "expression": "args.amount > 'x'",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"found no matching overload for Token('RULE', 'relation_gt') applied to '(<class 'celpy.celtypes.IntType'>, <class 'cel",
+              "matches_spec": true
+            },
+            {
+              "id": "type_mismatch_arg",
+              "expression": "args.amount > 500",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"found no matching overload for Token('RULE', 'relation_gt') applied to '(<class 'celpy.celtypes.StringType'>, <class '",
+              "matches_spec": true
+            },
+            {
+              "id": "int_overflow",
+              "expression": "args.amount * 9223372036854775807 > 0",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: ('return error for overflow', <class 'ValueError'>, ('overflow',))",
+              "matches_spec": true
+            },
+            {
+              "id": "divide_by_zero",
+              "expression": "args.amount / 0 > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: ('modulus or divide by zero', <class 'ZeroDivisionError'>, ('integer division or modulo by zero',))",
+              "matches_spec": true
+            },
+            {
+              "id": "non_bool_result",
+              "expression": "args.amount",
+              "expected": "error",
+              "observed": "non-bool",
+              "detail": "IntType: IntType(1)",
+              "matches_spec": true
+            },
+            {
+              "id": "syntax_error",
+              "expression": "args.amount >",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELParseError: args.amount >",
+              "matches_spec": true
+            },
+            {
+              "id": "no_time_function",
+              "expression": "now() > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"undeclared reference to 'now' (in activation 'Activation(annotations=None, package=None, vars=NameContainer({'google':",
+              "matches_spec": true
+            },
+            {
+              "id": "no_ambient_variable",
+              "expression": "request.time > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"undeclared reference to 'request' (in activation 'Activation(annotations=None, package=None, vars=NameContainer({'goog",
+              "matches_spec": true
+            },
+            {
+              "id": "no_env_variable",
+              "expression": "env.HOME == ''",
+              "expected": "error",
+              "observed": "error",
+              "detail": "CELEvalError: (\"undeclared reference to 'env' (in activation 'Activation(annotations=None, package=None, vars=NameContainer({'google':",
+              "matches_spec": true
+            }
+          ],
+          "spec_mismatches": [
+            "int_arg_double_literal",
+            "reserved_namespace_identifier",
+            "bool_not_int",
+            "bool_ne_int"
+          ],
+          "cost": {
+            "argument_bytes": 65897,
+            "exists_linear_11000": {
+              "seconds": 0.4641,
+              "result": false,
+              "detail": "BoolType(False)"
+            },
+            "map_filter_1000": {
+              "seconds": 0.0844,
+              "result": true,
+              "detail": "BoolType(True)"
+            },
+            "map_filter_2000": {
+              "seconds": 0.1733,
+              "result": true,
+              "detail": "BoolType(True)"
+            },
+            "exists_in_list_2000": {
+              "seconds": 0.4591,
+              "result": false,
+              "detail": "BoolType(False)"
+            },
+            "no_comprehension_60_concat_11000": {
+              "expression_chars": 543,
+              "seconds": 0.1036,
+              "result": false,
+              "detail": "BoolType(False)"
+            },
+            "no_comprehension_60_list_eq_11000": {
+              "seconds": 0.418,
+              "result": true,
+              "detail": "BoolType(True)"
+            },
+            "nesting": {
+              "deepest_ok": 64,
+              "first_failure": "depth 80: exit 1, RecursionError: maximum recursion depth exceeded"
+            },
+            "built_in_limits": "none exposed (no cost budget, timeout or depth option in the API)"
+          }
+        },
+        "common-expression-language": {
+          "footprint": {
+            "version": "0.10.0",
+            "license": "Apache-2.0",
+            "requires_python": ">=3.11",
+            "dependency_closure": {
+              "annotated-doc": "0.0.5",
+              "common-expression-language": "0.10.0",
+              "markdown-it-py": "4.2.0",
+              "mdurl": "0.1.2",
+              "prompt-toolkit": "3.0.53",
+              "pygments": "2.21.0",
+              "rich": "15.0.0",
+              "shellingham": "1.5.4",
+              "typer": "0.28.0",
+              "wcwidth": "0.9.4"
+            },
+            "native_distributions": [
+              {
+                "distribution": "common-expression-language",
+                "extension_modules": [
+                  "cel/cel.cpython-313-darwin.so"
+                ]
+              },
+              {
+                "distribution": "wcwidth",
+                "extension_modules": [
+                  "wcwidth/_wcwidth_c.abi3.so"
+                ]
+              }
+            ]
+          },
+          "cases": [
+            {
+              "id": "int_gt_above",
+              "expression": "args.amount > 500",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "int_gt_below",
+              "expression": "args.amount > 500",
+              "expected": false,
+              "observed": false,
+              "detail": "False",
+              "matches_spec": true
+            },
+            {
+              "id": "int_gt_equal",
+              "expression": "args.amount > 500",
+              "expected": false,
+              "observed": false,
+              "detail": "False",
+              "matches_spec": true
+            },
+            {
+              "id": "double_arg_int_literal",
+              "expression": "args.amount > 500",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "int_arg_double_literal",
+              "expression": "args.amount > 500.0",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "le_double",
+              "expression": "args.amount <= 99.99",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "or_currency",
+              "expression": "args.amount > 500 || args.currency != 'EUR'",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "or_currency_false",
+              "expression": "args.amount > 500 || args.currency != 'EUR'",
+              "expected": false,
+              "observed": false,
+              "detail": "False",
+              "matches_spec": true
+            },
+            {
+              "id": "nested_field",
+              "expression": "args.order.total >= 1000",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "in_list",
+              "expression": "args.env in ['prod', 'staging']",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "exists_macro",
+              "expression": "args.tags.exists(t, t == 'prod')",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "has_missing",
+              "expression": "has(args.missing)",
+              "expected": false,
+              "observed": false,
+              "detail": "False",
+              "matches_spec": true
+            },
+            {
+              "id": "operation_and_ns",
+              "expression": "operation == 'payments.create' && ns == 'acme'",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "reserved_namespace_identifier",
+              "expression": "namespace == 'acme'",
+              "expected": "error",
+              "observed": "error",
+              "detail": "ValueError: Failed to parse expression 'namespace == 'acme'': ERROR: <input>:1:1: reserved identifier: namespace",
+              "matches_spec": true
+            },
+            {
+              "id": "null_compare",
+              "expression": "args.note == null",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "bool_not_int",
+              "expression": "args.flag == 1",
+              "expected": false,
+              "observed": false,
+              "detail": "False",
+              "matches_spec": true
+            },
+            {
+              "id": "bool_ne_int",
+              "expression": "args.flag != 1",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "string_size",
+              "expression": "size(args.memo) > 3",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_field",
+              "expression": "args.missing > 500",
+              "expected": "error",
+              "observed": "error",
+              "detail": "KeyError: 'missing'",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_nested",
+              "expression": "args.order.total > 5",
+              "expected": "error",
+              "observed": "error",
+              "detail": "KeyError: 'total'",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_absorbed_by_or",
+              "expression": "args.missing > 500 || true",
+              "expected": true,
+              "observed": true,
+              "detail": "True",
+              "matches_spec": true
+            },
+            {
+              "id": "missing_in_or_false",
+              "expression": "args.missing > 500 || args.currency != 'EUR'",
+              "expected": "error",
+              "observed": "error",
+              "detail": "KeyError: 'missing'",
+              "matches_spec": true
+            },
+            {
+              "id": "type_mismatch_string",
+              "expression": "args.amount > 'x'",
+              "expected": "error",
+              "observed": "error",
+              "detail": "TypeError: No such overload: the operation is not defined for the given operand types. CEL does not coerce between types, so common",
+              "matches_spec": true
+            },
+            {
+              "id": "type_mismatch_arg",
+              "expression": "args.amount > 500",
+              "expected": "error",
+              "observed": "error",
+              "detail": "TypeError: No such overload: the operation is not defined for the given operand types. CEL does not coerce between types, so common",
+              "matches_spec": true
+            },
+            {
+              "id": "int_overflow",
+              "expression": "args.amount * 9223372036854775807 > 0",
+              "expected": "error",
+              "observed": "error",
+              "detail": "OverflowError: Arithmetic overflow in 'mul' on 2 and 9223372036854775807.",
+              "matches_spec": true
+            },
+            {
+              "id": "divide_by_zero",
+              "expression": "args.amount / 0 > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "ZeroDivisionError: division by zero in CEL expression",
+              "matches_spec": true
+            },
+            {
+              "id": "non_bool_result",
+              "expression": "args.amount",
+              "expected": "error",
+              "observed": "non-bool",
+              "detail": "int: 1",
+              "matches_spec": true
+            },
+            {
+              "id": "syntax_error",
+              "expression": "args.amount >",
+              "expected": "error",
+              "observed": "error",
+              "detail": "ValueError: Failed to parse expression 'args.amount >': ERROR: <input>:1:14: Syntax error: mismatched input '<EOF>' expecting {'[', ",
+              "matches_spec": true
+            },
+            {
+              "id": "no_time_function",
+              "expression": "now() > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "RuntimeError: Undefined variable or function: 'now'. Check that the variable is defined in the context or that the function name is sp",
+              "matches_spec": true
+            },
+            {
+              "id": "no_ambient_variable",
+              "expression": "request.time > 1",
+              "expected": "error",
+              "observed": "error",
+              "detail": "RuntimeError: Undefined variable or function: 'request'. Check that the variable is defined in the context or that the function name i",
+              "matches_spec": true
+            },
+            {
+              "id": "no_env_variable",
+              "expression": "env.HOME == ''",
+              "expected": "error",
+              "observed": "error",
+              "detail": "RuntimeError: Undefined variable or function: 'env'. Check that the variable is defined in the context or that the function name is sp",
+              "matches_spec": true
+            }
+          ],
+          "spec_mismatches": [],
+          "cost": {
+            "argument_bytes": 65897,
+            "exists_linear_11000": {
+              "seconds": 0.0039,
+              "result": false,
+              "detail": "False"
+            },
+            "map_filter_1000": {
+              "seconds": 0.0368,
+              "result": true,
+              "detail": "True"
+            },
+            "map_filter_2000": {
+              "seconds": 0.1465,
+              "result": true,
+              "detail": "True"
+            },
+            "exists_in_list_2000": {
+              "seconds": 0.0756,
+              "result": false,
+              "detail": "False"
+            },
+            "no_comprehension_60_concat_11000": {
+              "expression_chars": 543,
+              "seconds": 0.487,
+              "result": false,
+              "detail": "False"
+            },
+            "no_comprehension_60_list_eq_11000": {
+              "seconds": 0.0276,
+              "result": true,
+              "detail": "True"
+            },
+            "nesting": {
+              "deepest_ok": 80,
+              "first_failure": "depth 96: exit 1, | ................................................................................................^"
+            },
+            "built_in_limits": "none exposed (no cost budget, timeout or depth option in the API)"
+          }
+        }
+      }
+    }
+  ]
+}
