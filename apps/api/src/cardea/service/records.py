@@ -618,7 +618,7 @@ def expire(
             namespace=str(row["namespace"]),
             event_type="record.claim_expired",
             producer_id=actor,
-            correlation_id=f"{row['collection']}/{row['record_id']}.{row['claim_epoch']}",
+            correlation_id=claim_context(str(row["record_id"]), int(row["claim_epoch"])),
             at=at,
             payload={
                 "collection": row["collection"],

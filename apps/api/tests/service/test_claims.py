@@ -154,3 +154,91 @@ def test_claim_grant_is_required(items: Kernel) -> None:
         grants=records_test.RECORD_GRANTS,
     )
     assert (state, code) == ("failed", "task_grant_denied")
+
+
+# Fencing and expiry
+
+
+def test_an_expired_claim_returns_to_the_pool_and_fences_the_old_holder(items: Kernel) -> None:
+    record = created(items)
+    claim(items, record)
+    ends = lease(items, record["record_id"])
+    # A crashed holder renews nothing: the first tick after the lease releases the record.
+    Scheduler(items, lambda: ends - timedelta(seconds=1)).tick()
+    assert row(items, record["record_id"])["holder"] == "a1"
+    Scheduler(items, lambda: ends + timedelta(seconds=60)).tick()
+    stored = row(items, record["record_id"])
+    assert stored["holder"] is None and stored["lease_expires_at"] is None
+    assert stored["claim_epoch"] == 2
+    assert [e[0] for e in events(items, record["record_id"])][-1] == "claim_expired"
+    assert journal(items, "record.claim_expired")[-1]["reason"] == "lease_expired"
+    # The old holder is fenced at its next holder-only call.
+    assert call(items, "records.release", record, claim_epoch=1)[2] == "claim_lost"
+    fenced = call(
+        items, "records.update", record, expected_version=3, claim_epoch=1, data={"title": "x"}
+    )
+    assert fenced[2] == "claim_lost"
+    assert row(items, record["record_id"])["version"] == 3
+    # A new holder proceeds with a new epoch.
+    _, output, _ = claim(items, record, agent="a2")
+    assert output["claim"]["claim_epoch"] == 3
+
+
+def test_holder_writes_release_and_reclaim(items: Kernel) -> None:
+    record = created(items)
+    claim(items, record)
+    held = call(
+        items, "records.update", record, expected_version=2, claim_epoch=1, data={"title": "mine"}
+    )
+    assert held[0] == "succeeded"
+    assert call(items, "records.release", record, agent="a2", claim_epoch=1)[2] == "claim_lost"
+    _, released, _ = call(items, "records.release", record, claim_epoch=1)
+    assert released["record"]["holder"] is None
+    assert [e[0] for e in events(items, record["record_id"])] == [
+        "created",
+        "claimed",
+        "updated",
+        "released",
+    ]
+    _, again, _ = claim(items, record, agent="a2")
+    assert again["claim"]["claim_epoch"] == 2
+
+
+def test_an_unswept_lapsed_claim_can_be_taken(items: Kernel) -> None:
+    record = created(items)
+    claim(items, record)
+    with items.database.engine.begin() as conn:
+        conn.exec_driver_sql(
+            "UPDATE records SET lease_expires_at=? WHERE record_id=?",
+            (claims.stamp(now() - timedelta(seconds=1)), record["record_id"]),
+        )
+    _, output, _ = claim(items, record, agent="a2")
+    assert output["claim"]["claim_epoch"] == 3
+    kinds = [e[0] for e in events(items, record["record_id"])]
+    assert kinds[-2:] == ["claim_expired", "claimed"]
+
+
+# Renewal only on evidence the holder is alive
+
+
+def test_renewal_by_reclaim_attempt_start_and_success(items: Kernel) -> None:
+    record = created(items)
+    claim(items, record)
+    first = lease(items, record["record_id"])
+    _, again, _ = claim(items, record)
+    assert again["claim"]["claim_epoch"] == 1 and lease(items, record["record_id"]) >= first
+    assert [e[0] for e in events(items, record["record_id"])] == ["created", "claimed"]
+    with items.database.engine.begin() as conn:
+        conn.exec_driver_sql(
+            "UPDATE records SET lease_expires_at=? WHERE record_id=?",
+            (claims.stamp(now() + timedelta(seconds=30)), record["record_id"]),
+        )
+        deadline = now() + timedelta(seconds=600)
+        assert claims.renew_for_attempt(conn, "a1", deadline) == 1
+        assert claims.renew_for_attempt(conn, "a2", deadline) == 0
+    assert lease(items, record["record_id"]) == deadline + timedelta(seconds=120)
+    with items.database.engine.begin() as conn:
+        at = now()
+        claims.renew_for_success(conn, "a1", at)
+    assert lease(items, record["record_id"]) == at + timedelta(seconds=3600)
+    assert row(items, record["record_id"])["claim_epoch"] == 1
