@@ -28,7 +28,6 @@ import sqlalchemy as sa
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 from pydantic import (
-    AfterValidator,
     ConfigDict,
     Field,
     JsonValue,
@@ -38,7 +37,7 @@ from pydantic import (
 )
 
 from cardea.kernel.models import Identifier
-from cardea.service.approvals import compile_condition, execute_condition
+from cardea.service.approvals import execute_condition
 from cardea.service.database import Database, Fault, borrow
 from cardea.service.models import (
     COLLECTION_NAME,
@@ -58,9 +57,20 @@ from cardea.service.operations import (
     Reconciliation,
 )
 from cardea.service.policy import Policy
+from cardea.service.record_states import (
+    GUARD_VARIABLES,
+    MAX_STATES,
+    MAX_TRANSITIONS,
+    GuardSource,
+    StateMigration,
+    StateName,
+    Transition,
+    approval_rule,
+    check_table,
+    claiming_grants,
+)
 
 API_VERSION = "cardea/v1alpha1"
-GUARD_VARIABLES = frozenset({"record", "args", "caller"})
 MAX_LABELS = 16
 MAX_LINKS = 32
 DEFAULT_RECORD_BYTES = 16384
@@ -72,14 +82,6 @@ FIELD = r"^[A-Za-z_][A-Za-z0-9_]{0,63}$"
 
 Label = Annotated[str, Field(strict=True, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/=-]{0,63}$")]
 Text = Annotated[str, Field(strict=True, min_length=1, max_length=256)]
-
-
-def _guard(source: str) -> str:
-    compile_condition(source, GUARD_VARIABLES)
-    return source
-
-
-GuardSource = Annotated[str, Field(strict=True), AfterValidator(_guard)]
 
 
 class Guards(Record):
@@ -124,12 +126,15 @@ def lease_bound(attempts: int, timeout_seconds: int) -> int:
     return 2 * attempts * timeout_seconds + LEASE_BOUND_MARGIN_SECONDS
 
 
-def check_lease(collection: str, claims: "ClaimsConfig | None", pools: Iterable[GroupPool]) -> None:
-    """Refuse a lease shorter than `lease_bound` for any pool granted `record:<C>/claim`."""
+def check_lease(collection: str, spec: "CollectionSpec", pools: Iterable[GroupPool]) -> None:
+    """Refuse a lease shorter than `lease_bound` for any pool that may hold a record: one
+    granted `record:<C>/claim` or an acquiring transition."""
+    claims = spec.claims
     if claims is None:
         return
+    claiming = claiming_grants(collection, spec.transitions)
     for pool in pools:
-        if record_grant(collection, "claim") not in pool.grants:
+        if not claiming & set(pool.grants):
             continue
         bound = lease_bound(pool.run.bounds.attempts, pool.run.bounds.timeout_seconds)
         if claims.lease_seconds < bound:
@@ -164,6 +169,33 @@ class CollectionSpec(Record):
     )
     guards: Guards = Guards()
     claims: ClaimsConfig | None = None
+    # A flat state machine (decision 3); absent means plain records.
+    states: Annotated[tuple[StateName, ...], Field(min_length=1, max_length=MAX_STATES)] | None = (
+        None
+    )
+    initial: StateName | None = None
+    terminal: Annotated[tuple[StateName, ...], Field(max_length=MAX_STATES)] = ()
+    transitions: Annotated[tuple[Transition, ...], Field(max_length=MAX_TRANSITIONS)] = ()
+    # Where records in states this generation removes go (decision 3.3).
+    migrate: Annotated[tuple[StateMigration, ...], Field(max_length=MAX_STATES)] = ()
+
+    def transition(self, name: str) -> Transition | None:
+        return next((t for t in self.transitions if t.name == name), None)
+
+    @model_validator(mode="after")
+    def valid_table(self) -> Self:
+        check_table(
+            self.states,
+            self.initial,
+            self.terminal,
+            self.transitions,
+            self.migrate,
+            self.claims is not None,
+        )
+        for transition in self.transitions:
+            # Compiles the gate's rule now, so its CEL limits are checked at apply.
+            approval_rule("c", transition)
+        return self
 
     @model_validator(mode="after")
     def valid_schema(self) -> Self:
@@ -182,7 +214,7 @@ class CollectionMetadata(Record):
 
 
 class CollectionDocument(Record):
-    """`kind: Collection` (ADR-034 decision 2). State machines are slice 3."""
+    """`kind: Collection` (ADR-034 decisions 2 and 3)."""
 
     apiVersion: Literal["cardea/v1alpha1"] = "cardea/v1alpha1"  # noqa: N815 - Kubernetes shape
     kind: Literal["Collection"] = "Collection"
@@ -204,6 +236,9 @@ class CollectionDocument(Record):
         for action in ("claim", "release"):
             if guards.get(action) is None:
                 guards.pop(action, None)
+        for key in ("states", "initial", "terminal", "transitions", "migrate"):
+            if spec.get(key) in (None, []):
+                spec.pop(key, None)
         return spec
 
     @property
@@ -280,7 +315,7 @@ def apply_collection(
         raise Fault("collection_supervisor", "The collection belongs to another supervisor")
     # A shorter lease must still fit every group pool that may claim (decision 2.4).
     for group in referencing_groups(conn, namespace, name):
-        check_lease(name, document.spec.claims, group.pools)
+        check_lease(name, document.spec, group.pools)
     if existing is None:
         change, generation = "created", 1
     elif existing["spec_digest"] == digest:
