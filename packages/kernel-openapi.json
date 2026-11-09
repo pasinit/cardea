@@ -2296,7 +2296,7 @@
       },
       "GroupEventMatch": {
         "additionalProperties": false,
-        "description": "Kernel-journal events that wake a member (ADR-034 decision 6; ADR-034 slice 7).\n\nParsed so a manifest is complete, and refused at apply until slice 7 lands.",
+        "description": "Kernel-journal events that wake a member (ADR-034 decision 6, slice 7).\n\nEach member gets its own journal trigger. `source`, when given, must be the group's\nown journal `cardea://<namespace>`; inbound HTTP sources stay host-owned (ADR-035).\nIn `subjects`, `$member`, `$pool` and `$group` stand for the member's principal ID,\nits pool address `<group>.<pool>` and its group, so one entry serves every replica.",
         "properties": {
           "filters": {
             "default": [],
@@ -2306,6 +2306,11 @@
             "maxItems": 8,
             "title": "Filters",
             "type": "array"
+          },
+          "include_own": {
+            "default": false,
+            "title": "Include Own",
+            "type": "boolean"
           },
           "source": {
             "anyOf": [
@@ -2319,6 +2324,17 @@
               }
             ],
             "title": "Source"
+          },
+          "subjects": {
+            "default": [],
+            "items": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Subjects",
+            "type": "array"
           },
           "types": {
             "items": {
@@ -3463,6 +3479,53 @@
           "type"
         ],
         "title": "InboundEvent",
+        "type": "object"
+      },
+      "JournalMatch": {
+        "additionalProperties": false,
+        "description": "Which kernel journal events of the trigger's own namespace start its template\n(ADR-034 decision 6): an internal ADR-035 source, `cardea://<namespace>`.\n\nThe kernel is the sender, so there is no signature. Matching is ADR-035's: the exact\n`type`, every filter, and, when given, a `subject` among `subjects`. The `actor`\nattribute is the principal whose action produced the event; events whose actor is the\ntemplate's own agent are ignored unless `include_own`, so a run cannot wake itself.",
+        "properties": {
+          "filters": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/EventFilter"
+            },
+            "maxItems": 8,
+            "title": "Filters",
+            "type": "array"
+          },
+          "include_own": {
+            "default": false,
+            "title": "Include Own",
+            "type": "boolean"
+          },
+          "subjects": {
+            "default": [],
+            "items": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Subjects",
+            "type": "array"
+          },
+          "types": {
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Types",
+            "type": "array"
+          }
+        },
+        "required": [
+          "types"
+        ],
+        "title": "JournalMatch",
         "type": "object"
       },
       "JsonValue": {},
@@ -6207,7 +6270,7 @@
       },
       "TriggerSpec": {
         "additionalProperties": false,
-        "description": "An installed trigger. A time trigger admits one task per scheduled slot (ADR-024);\nan event trigger admits one task per matching inbound event (ADR-035).",
+        "description": "An installed trigger. A time trigger admits one task per scheduled slot (ADR-024);\nan event trigger admits one task per matching inbound event (ADR-035); a journal\ntrigger admits one per matching kernel journal event of its namespace (ADR-034).",
         "properties": {
           "enabled": {
             "default": true,
@@ -6236,6 +6299,16 @@
               }
             ],
             "title": "Grace Seconds"
+          },
+          "journal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JournalMatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "misfire": {
             "anyOf": [
