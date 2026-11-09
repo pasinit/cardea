@@ -83,9 +83,7 @@ def test_expiry_fails_the_task_and_a_later_decision_is_refused(
     created = datetime.fromisoformat(row["created_at"])
     assert datetime.fromisoformat(row["expires_at"]) == created + timedelta(seconds=60)
     assert approval_requests.expire_due(kernel) == {}  # not due yet
-    assert approval_requests.expire_due(kernel, after_expiry(row)) == {
-        row["request_id"]: "expired"
-    }
+    assert approval_requests.expire_due(kernel, after_expiry(row)) == {row["request_id"]: "expired"}
     assert request_row(kernel, task_id)["state"] == "expired"
     assert state(kernel, task_id) is TaskState.FAILED
     assert failure(kernel, task_id).code == "approval_expired"
@@ -145,9 +143,7 @@ def test_pending_request_of_an_ended_task(kernel: Kernel, handler: Handler) -> N
         tx.change_task(task_id, TaskState.CANCELLED, expected_revision=task.revision, at=now())
     response = decide(TestClient(create_app(kernel)), "approver", row)
     assert response.status_code == 409 and response.json()["code"] == "task_terminal"
-    assert approval_requests.expire_due(kernel, after_expiry(row)) == {
-        row["request_id"]: "expired"
-    }
+    assert approval_requests.expire_due(kernel, after_expiry(row)) == {row["request_id"]: "expired"}
     assert state(kernel, task_id) is TaskState.CANCELLED
 
 
