@@ -12,4 +12,4 @@
 
 **Status.** Complete for the bounded profile; portable, real Debian and matched load acceptance pass. Up to four one-level installed host children, zero model calls. Arbitrary remote peers, nested coordinator plans, streaming/push, arbitrary mailbox traffic and general multi-agent execution are outside this profile. See [usage](../../experiments/m4/README.md).
 
-**Teams (proposed).** [ADR-034](../decisions/034-agent-teams.md) proposes durable team messages addressed to a role, an instance or a team, delivered as bounded context on the recipient's next run. It reuses A2A's message body, not a second A2A task store.
+**Mailboxes (proposed).** [ADR-034](../decisions/034-agent-groups-and-shared-records.md) proposes durable mailboxes between principals (instance, pool or group address), committed with the sender's receipt and delivered as context. They reuse A2A's message body; A2A remains the delegation wire.

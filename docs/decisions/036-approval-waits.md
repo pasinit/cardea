@@ -1,6 +1,6 @@
 # ADR-036: Approval Waits and Per-Operation Autonomy
 
-- **Date / owner / milestones:** 2026-11-08; kernel and runtime maintainers. Affects the operation registry (ADR-023), the invocation core and effect scopes (ADR-026), agent runs (ADR-027, ADR-031), triggers (ADR-024, ADR-029) and policy provisioning (ADR-010). Related proposals written in parallel: ADR-034 (agent teams: roles, work items, messaging) and ADR-035 (event triggers). This record does not design either.
+- **Date / owner / milestones:** 2026-11-08; kernel and runtime maintainers. Affects the operation registry (ADR-023), the invocation core and effect scopes (ADR-026), agent runs (ADR-027, ADR-031), triggers (ADR-024, ADR-029) and policy provisioning (ADR-010). Related proposals written in parallel: ADR-034 (agent groups, shared records, state machines and mailboxes) and ADR-035 (event triggers). This record does not design either.
 - **Status:** selected (design), 2026-11-08, by the lead reviewer; the project owner may veto. Implementation is pending: nothing below is implemented, and no fit test in this record has run. The CEL implementation is chosen by the fit test in slice 1. The open questions are settled under [Decisions settled in review](#decisions-settled-in-review-2026-11-08).
 - **Requirement:** some effects must not run until an authorised principal has approved that exact effect. Examples: an agent proposes an order, a payment, a deployment or a merge, and a principal holding approval authority approves or rejects it. A reviewer role can block a change. Small effects inside tighter limits run without approval.
   - Whether approval is needed is configuration per operation and per grant, never code in the kernel.
@@ -194,7 +194,7 @@ A deployment routes these events to people or agents with what it already has:
 
 - a client long-polling `events.wait`;
 - an ADR-035 event trigger on `approval.requested` that runs an installed operation (for example a chat or mail operation with an ADR-026 idempotency scope keyed on `request_id`, so each request notifies once);
-- an ADR-034 work item addressed to a reviewer role.
+- an ADR-034 mailbox message addressed to a reviewer agent pool.
 
 Cardea builds no notification service, channel routing or reminders. A reminder is a further trigger.
 

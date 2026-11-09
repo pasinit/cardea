@@ -10,4 +10,4 @@
 
 **Status.** The M3 profile passes portable tests and six real Debian recovery/denial scenarios with a deterministic provider fixture. Live `z-ai/glm-4.7` restart/new-input acceptance and matched load comparison also pass; M3 is complete for this profile. This is a fixed two-round application, not arbitrary agent code, remote MCP server admission or a general reasoning loop. Native SDK stdio interoperability is tested separately; optional MCP Tasks are deferred. The separate M4 installed deterministic coordinator uses native A2A to delegate bounded host work; see [delegation](delegation-messaging.md). See [M3 usage](../../experiments/m3/README.md).
 
-**Teams (proposed).** [ADR-034](../decisions/034-agent-teams.md) proposes kernel-assembled team context blocks (claims, inbox, recent runs, team state, decisions) in the ADR-031 format, with per-section budgets.
+**Group context (proposed).** [ADR-034](../decisions/034-agent-groups-and-shared-records.md) proposes built-in ADR-031 context sources (claims, inbox, recent runs, record summaries) with byte budgets.
