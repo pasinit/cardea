@@ -380,3 +380,187 @@ def test_wait_fields_bound_the_run_and_keep_old_digests(kernel: Kernel) -> None:
     longer = task_of(kernel, submit(kernel, request_id="longer", approval_wait_seconds=86400))
     extra = longer.limits.deadline - base.limits.deadline
     assert timedelta(hours=23, minutes=59) < extra < timedelta(hours=24, minutes=1)
+
+
+# 5. Crash while parked; 8. lease loss after proposing
+
+
+def test_restart_while_parked_keeps_the_wait(
+    kernel: Kernel, tools: Tools, session: FakeSession
+) -> None:
+    setup(kernel)
+
+    async def resumed(client: ClientSession, request: SessionRequest) -> SessionResult:
+        return SessionResult(text="Sent after approval.", is_error=False)
+
+    session.scripts = [proposes, resumed]
+    task_id = submit(kernel)
+    assert AgentRunRuntime(kernel).execute(task_id) == "waiting"
+    # A recovered agent-run workflow finds the run parked and starts nothing.
+    assert AgentRunRuntime(kernel).execute(task_id) == "waiting"
+    assert len(session.requests) == 1
+    kernel.database.close()
+    database = runs.Database(kernel.database.directory)
+    kernel.database = database
+    assert task_of(kernel, task_id).state is TaskState.WAITING
+    decide(kernel, held_row(kernel, task_id))
+    assert AgentRunRuntime(kernel).execute(task_id) == "succeeded"
+    assert len(tools.sent) == 1
+
+
+class Lost(Exception):
+    pass
+
+
+def test_lease_loss_after_proposing_parks_without_a_session(
+    kernel: Kernel, tools: Tools, session: FakeSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(agent_run_runtime, "attempt_lease_seconds", lambda request: 3.0)
+    monkeypatch.setattr(agent_run_runtime, "LEASE_MARGIN", 1.0)
+    setup(kernel)
+
+    def dies(stage: str) -> None:
+        if stage == "agent_run.before_finish":
+            raise Lost
+
+    session.scripts = [proposes]
+    task_id = submit(kernel, max_attempts=1)
+    kernel.fault = dies
+    with pytest.raises(Lost):
+        AgentRunRuntime(kernel).execute(task_id)
+    kernel.fault = lambda stage: None
+    assert task_of(kernel, task_id).state is TaskState.RUNNING
+    # Recovery fences the lost attempt; the request survives and the run parks on it
+    # without a new session and without using an attempt (max_attempts=1).
+    assert AgentRunRuntime(kernel).execute(task_id) == "waiting"
+    assert len(session.requests) == 1
+    task = task_of(kernel, task_id)
+    assert task.state is TaskState.WAITING
+    assert task.checkpoint.state["attempt"] == 1
+    assert held_row(kernel, task_id)["state"] == "pending"
+
+
+def test_cancel_withdraws_a_parked_run(
+    kernel: Kernel, tools: Tools, session: FakeSession
+) -> None:
+    setup(kernel)
+    session.scripts = [proposes]
+    task_id = submit(kernel)
+    assert AgentRunRuntime(kernel).execute(task_id) == "waiting"
+    kernel.control(kernel.auth.validate("supervisor"), task_id, Signal(request_id="stop"), "cancel")
+    assert task_of(kernel, task_id).state is TaskState.CANCELLED
+    row = held_row(kernel, task_id)
+    assert row["state"] == "withdrawn"
+    with pytest.raises(Fault) as closed:
+        decide(kernel, row)
+    assert closed.value.code == "approval_closed"
+
+
+# 13. Agent approvers decide from inside their own task
+
+
+def reviewer_request(**changes: Any) -> AgentRunRequest:
+    return AgentRunRequest.model_validate(
+        {
+            "request_id": "review-1",
+            "agent_id": "reviewer",
+            "namespace": "test",
+            "objective": "Review pending mail",
+            "instructions": "Decide the pending request.",
+            "operations": ["approvals.decide"],
+            "grants": [*RIGHTS, "models.invoke", "approve:mail.send"],
+            "attempt_timeout_seconds": 30,
+            **changes,
+        }
+    )
+
+
+def reviewing(row: dict[str, Any], outcomes: list[types.CallToolResult]) -> Any:
+    async def review(client: ClientSession, request: SessionRequest) -> SessionResult:
+        listed = await client.list_tools()
+        assert [t.name for t in listed.tools] == ["approvals-decide"]
+        outcomes.append(
+            await call(
+                client,
+                "approvals-decide",
+                request_id=row["request_id"],
+                decision="approve",
+                intent_digest=row["intent_digest"],
+                reason="Checked the recap",
+            )
+        )
+        return SessionResult(text="Reviewed.", is_error=False)
+
+    return review
+
+
+def test_reviewer_agent_approves_within_its_ceiling(
+    kernel: Kernel, tools: Tools, session: FakeSession
+) -> None:
+    recorder = setup(kernel)
+    session.scripts = [proposes]
+    task_id = submit(kernel)
+    assert AgentRunRuntime(kernel).execute(task_id) == "waiting"
+    row = held_row(kernel, task_id)
+    outcomes: list[types.CallToolResult] = []
+    session.scripts = [reviewing(row, outcomes)]
+    supervisor = kernel.auth.validate("supervisor")
+    review = kernel.submit(supervisor, reviewer_request()).task.task_id
+    assert AgentRunRuntime(kernel).execute(review) == "succeeded"
+    (outcome,) = outcomes
+    assert not outcome.is_error, outcome.content
+    assert outcome.structured_content and outcome.structured_content["state"] == "approved"
+    assert held_row(kernel, task_id)["state"] == "approved"
+    with kernel.database.read() as conn:
+        decision = approval_requests.decision_for(conn, row["request_id"])
+    assert decision is not None and decision["approver_id"] == "reviewer"
+    assert task_of(kernel, task_id).state is TaskState.QUEUED
+    assert len(recorder.continuations()) == 1
+    (receipt,) = calls(kernel, review)
+    assert receipt.request.name == "approvals.decide" and receipt.state is OperationState.SUCCEEDED
+
+
+@pytest.mark.parametrize("case", ["no_grant", "supervisor_lost_approve", "requester"])
+def test_agent_approver_refusals(
+    kernel: Kernel, tools: Tools, session: FakeSession, case: str
+) -> None:
+    setup(kernel)
+    session.scripts = [proposes]
+    task_id = submit(kernel)
+    assert AgentRunRuntime(kernel).execute(task_id) == "waiting"
+    row = held_row(kernel, task_id)
+    outcomes: list[types.CallToolResult] = []
+    session.scripts = [reviewing(row, outcomes)]
+    changes: dict[str, Any] = {}
+    if case == "no_grant":
+        changes = {"grants": [*RIGHTS, "models.invoke"]}
+    if case == "requester":
+        changes = {"agent_id": "agent"}
+    review = kernel.submit(kernel.auth.validate("supervisor"), reviewer_request(**changes))
+    if case == "supervisor_lost_approve":
+        setup(kernel, supervisor_approves=False)
+    assert AgentRunRuntime(kernel).execute(review.task.task_id) == "succeeded"
+    (outcome,) = outcomes
+    assert outcome.is_error
+    expected = "self_approval" if case == "requester" else "approver_denied"
+    assert expected in text(outcome), outcome.content
+    assert held_row(kernel, task_id)["state"] == "pending"
+    with kernel.database.read() as conn:
+        assert conn.exec_driver_sql("SELECT COUNT(*) FROM approval_decisions").scalar_one() == 0
+
+
+def test_event_payloads_carry_no_arguments(
+    kernel: Kernel, tools: Tools, session: FakeSession
+) -> None:
+    setup(kernel)
+    session.scripts = [proposes]
+    task_id = submit(kernel)
+    AgentRunRuntime(kernel).execute(task_id)
+    decide(kernel, held_row(kernel, task_id), "reject")
+    with kernel.database.read() as conn:
+        rows = conn.exec_driver_sql(
+            "SELECT event_type,payload FROM events WHERE event_type LIKE 'approval.%'"
+        ).all()
+    assert {r[0] for r in rows} >= {"approval.requested", "approval.decided"}
+    for _, payload in rows:
+        assert "arguments" not in json.loads(payload) and "user@example" not in payload
