@@ -309,3 +309,140 @@ def test_transitions_are_history_and_cloudevents(work: Kernel) -> None:
     assert event["source"] == "cardea://test"
     data = event["data"]
     assert (data["from"], data["to"], data["transition"]) == ("open", "ready", "triage")
+
+
+# Claim effects
+
+
+def ready(kernel: Kernel, key: str = "k1") -> dict[str, Any]:
+    record = create(kernel, key)
+    assert move(kernel, record, "triage", args={"priority": 1})[0] == "succeeded"
+    return record
+
+
+def opened_change(kernel: Kernel, record_id: str, agent: str = "a1") -> str:
+    request = OperationTaskRequest.model_validate(
+        {
+            "request_id": f"change-{record_id[-6:]}-{agent}-{time.monotonic_ns()}",
+            "agent_id": agent,
+            "namespace": "test",
+            "objective": "Open a change",
+            "operation": "vcs.open_change",
+            "arguments": {"record_id": record_id, "title": "fix"},
+            "grants": ["objects.read", "objects.write", "vcs.open_change"],
+        }
+    )
+    task_id = kernel.submit(kernel.auth.validate("supervisor"), request).task.task_id
+    assert OperationRuntime(kernel).execute(task_id) == "succeeded"
+    with kernel.database.read() as conn, borrow(conn) as tx:
+        return tx.get_operation(task_id, "execute").receipt_id
+
+
+def test_acquire_holder_and_release_effects(work: Kernel) -> None:
+    record = ready(work)
+    _, started, _ = move(work, record, "start")
+    assert started is not None
+    assert started["record"]["holder"] == "a1" and started["claim"]["claim_epoch"] == 1
+    assert stored(work, record["record_id"])["claim_transition"] == "start"
+    other = ready(work, "k2")
+    assert move(work, other, "start", agent="a1")[2] == "claim_limit"  # max_per_holder 1
+    receipt = opened_change(work, record["record_id"])
+    # claim: holder needs the holder and its current epoch.
+    assert move(work, record, "submit", agent="a2", receipt_id=receipt)[2] == "claim_lost"
+    assert move(work, record, "submit", receipt_id=receipt)[2] == "claim_lost"
+    _, submitted, _ = move(work, record, "submit", claim_epoch=1, receipt_id=receipt)
+    assert submitted is not None and submitted["record"]["state"] == "review"
+    # The holder cannot approve its own work (guard); a reviewer releases the claim.
+    assert move(work, record, "approve", claim_epoch=1)[2] == "guard_refused"
+    _, done, _ = move(work, record, "approve", agent="a2")
+    assert done is not None and done["record"]["state"] == "done"
+    assert done["record"]["holder"] is None and "claim" not in done
+    kinds = [e[0] for e in events(work, record["record_id"])]
+    assert kinds == ["created", "transitioned", "transitioned", "transitioned", "transitioned"]
+
+
+def test_an_expired_acquired_claim_returns_to_on_claim_expiry(work: Kernel) -> None:
+    record = ready(work)
+    move(work, record, "start")
+    lease = stored(work, record["record_id"])["lease_expires_at"]
+    from datetime import datetime
+
+    after = datetime.fromisoformat(lease) + timedelta(seconds=60)
+    Scheduler(work, lambda: after).tick()
+    row = stored(work, record["record_id"])
+    assert (row["state"], row["holder"], row["claim_epoch"]) == ("ready", None, 2)
+    expired = journal(work, "claim_expired")[-1]
+    assert expired["data"]["from"] == "doing" and expired["data"]["to"] == "ready"
+    # The old holder is fenced; the next one starts a new epoch.
+    assert move(work, record, "submit", claim_epoch=1)[2] == "transition_not_allowed"
+    _, again, _ = move(work, record, "start", agent="a2")
+    assert again is not None and again["claim"]["claim_epoch"] == 3
+
+
+# Receipt evidence
+
+
+def test_submit_needs_a_receipt_for_this_record_by_the_caller(work: Kernel) -> None:
+    record = ready(work)
+    move(work, record, "start")
+    assert move(work, record, "submit", claim_epoch=1)[2] == "receipt_required"
+    elsewhere = ready(work, "k2")
+    wrong_record = opened_change(work, elsewhere["record_id"])
+    assert move(work, record, "submit", claim_epoch=1, receipt_id=wrong_record)[2] == (
+        "receipt_invalid"
+    )
+    by_other = opened_change(work, record["record_id"], agent="a2")
+    assert move(work, record, "submit", claim_epoch=1, receipt_id=by_other)[2] == (
+        "receipt_invalid"
+    )
+    not_vcs = create(work, "k3")  # a records.create receipt is not a vcs.open_change one
+    with work.database.read() as conn:
+        create_receipt = conn.exec_driver_sql(
+            "SELECT receipt_id FROM record_events WHERE record_id=?", (not_vcs["record_id"],)
+        ).scalar_one()
+    assert move(work, record, "submit", claim_epoch=1, receipt_id=create_receipt)[2] == (
+        "receipt_invalid"
+    )
+    mine = opened_change(work, record["record_id"])
+    assert move(work, record, "submit", claim_epoch=1, receipt_id=mine)[0] == "succeeded"
+
+
+# Changing the table
+
+
+def test_removing_an_occupied_state_needs_migrate(work: Kernel) -> None:
+    record = ready(work)
+    renamed = {
+        **WORK_SPEC,
+        "states": ["open", "queued", "doing", "review", "done"],
+        "transitions": [
+            {"name": "triage", "from": ["open"], "to": "queued", "guard": "args.priority > 0"},
+            {"name": "start", "from": ["queued"], "to": "doing", "claim": "acquire",
+             "on_claim_expiry": "queued"},
+        ],
+    }
+    refused = apply(work, "work", renamed)
+    assert refused.status_code == 409 and refused.json()["code"] == "state_occupied"
+    migrating = {**renamed, "migrate": [{"from": "ready", "to": "queued"}]}
+    plan = apply(work, "work", migrating, dry_run=True).json()["plan"]
+    assert plan["migrated"] == [{"from": "ready", "to": "queued", "records": 1}]
+    assert stored(work, record["record_id"])["state"] == "ready"
+    applied = apply(work, "work", migrating).json()
+    assert applied["metadata"]["generation"] == 2
+    row = stored(work, record["record_id"])
+    assert row["state"] == "queued"
+    assert [e[0] for e in events(work, record["record_id"])][-1] == "migrated"
+    assert journal(work, "migrated")[-1]["data"]["to"] == "queued"
+    assert move(work, record, "start")[0] == "succeeded"
+
+
+def test_a_collection_that_gains_states_adopts_its_records(kernel: Kernel) -> None:
+    plain = {"supervisor": "supervisor", "schema": {"type": "object"}}
+    apply(kernel, "work", plain)
+    record = create(kernel)
+    assert record["state"] is None
+    applied = apply(kernel, "work", WORK_SPEC).json()
+    assert applied["plan"]["migrated"] == [{"from": None, "to": "open", "records": 1}]
+    assert stored(kernel, record["record_id"])["state"] == "open"
+    refused = apply(kernel, "work", plain)
+    assert refused.json()["code"] == "state_occupied"
