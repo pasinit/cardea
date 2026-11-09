@@ -261,7 +261,7 @@ def recipients(
             raise Fault("unknown_recipient", "Mail goes to agents of this kernel", 422)
         return [(to.instance, None)]
     if to.pool is not None:
-        # Any one active member: the row is bound to the first member that leases it.
+        # Any one active member: a member holding it is bound to it until it is released.
         found = conn.exec_driver_sql(
             "SELECT 1 FROM group_members WHERE namespace=? AND group_name || '.' || pool = ? "
             "AND state='active' LIMIT 1",
@@ -292,6 +292,38 @@ def member_pool(conn: sa.Connection, namespace: str, principal: str) -> str | No
         (principal, namespace),
     ).first()
     return str(row[0]) if row else None
+
+
+def check_group_addresses(
+    conn: sa.Connection, namespace: str, group: str, pools: list[str]
+) -> None:
+    """A group's mail addresses must be unambiguous (`mail:<address>` is one string).
+
+    Neither `<group>` nor any `<group>.<pool>` may equal an existing principal ID. Group
+    names have no dot, so a group address never equals another group's pool address.
+    """
+    for address in (group, *(f"{group}.{pool}" for pool in pools)):
+        taken = conn.exec_driver_sql(
+            "SELECT 1 FROM principals WHERE principal_id=?", (address,)
+        ).first()
+        if taken is not None:
+            raise Fault(
+                "principal_conflict",
+                f"Address {address} is already a principal ID",
+                409,
+            )
+
+
+def is_group_address(conn: sa.Connection, principal_id: str) -> bool:
+    """Whether a principal ID equals a group or pool address in any namespace."""
+    return (
+        conn.exec_driver_sql(
+            "SELECT 1 FROM agent_groups WHERE name=? UNION SELECT 1 FROM group_members "
+            "WHERE group_name || '.' || pool = ? LIMIT 1",
+            (principal_id, principal_id),
+        ).first()
+        is not None
+    )
 
 
 def _digest(**fields: JsonValue) -> str:
@@ -702,10 +734,13 @@ def settle(
             )
             continue
         dead = row["deliveries"] >= row["max_deliveries"]
+        # A released pool delivery is unbound, so another active member can take it; its
+        # count keeps accumulating toward max_deliveries across members.
         conn.exec_driver_sql(
-            "UPDATE mailbox_deliveries SET state=?,task_id=NULL,attempt=NULL,updated_at=? "
-            "WHERE delivery_id=?",
-            ("dead" if dead else "pending", at.isoformat(), delivery_id),
+            "UPDATE mailbox_deliveries SET state=?,task_id=NULL,attempt=NULL,updated_at=?,"
+            "recipient_id=CASE WHEN pool IS NOT NULL AND ?='pending' THEN NULL "
+            "ELSE recipient_id END WHERE delivery_id=?",
+            ("dead" if dead else "pending", at.isoformat(), "dead" if dead else "pending", delivery_id),
         )
         _history(conn, delivery_id, "dead" if dead else "released", at, task_id)
         if dead:

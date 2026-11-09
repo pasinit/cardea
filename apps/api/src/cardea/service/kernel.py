@@ -20,6 +20,7 @@ from cardea.service.confined import ConfinedAgentSession, Workers, confined_hand
 from cardea.service.database import Database, Fault, borrow
 from cardea.service.harnesses import Catalog, Harnesses, check_harness_grants
 from cardea.service.mailbox import BUILTIN
+from cardea.service.mailbox import is_group_address as mailbox_address
 from cardea.service.models import (
     DEFAULT_MAX_TASK_REQUEST_BYTES,
     AgentRunRequest,
@@ -142,6 +143,12 @@ def provision(
                     .mappings()
                     .first()
                 )
+                if old is None and mailbox_address(conn, principal.principal_id):
+                    raise Fault(
+                        "principal_conflict",
+                        "Principal ID equals an agent group or pool mail address",
+                        409,
+                    )
                 immutable = ("kind", "auth_kind", "issuer", "subject", "runtime_id")
                 if old and any(old[key] != getattr(principal, key) for key in immutable):
                     raise Fault(

@@ -553,21 +553,21 @@ def test_mailbox_operations_are_built_in_and_reserved(kernel: Kernel) -> None:
 # Pool and group addresses (ADR-034 slice 4 groups)
 
 
-def team(kernel: Kernel) -> None:
+def team(kernel: Kernel, name: str = "team", pool: str = "dev") -> None:
     apply(
         kernel,
         kernel.auth.validate("supervisor"),
-        "team",
+        name,
         AgentGroup.model_validate(
             {
                 "apiVersion": "cardea/v1alpha1",
                 "kind": "AgentGroup",
-                "metadata": {"name": "team", "namespace": "test"},
+                "metadata": {"name": name, "namespace": "test"},
                 "spec": {
                     "supervisor": "supervisor",
                     "pools": [
                         {
-                            "name": "dev",
+                            "name": pool,
                             "replicas": 2,
                             "grants": list(GRANTS),
                             "run": {
@@ -647,3 +647,49 @@ def test_a_pool_grant_does_not_cover_its_instances(
     assert AgentRunRuntime(kernel).execute(task_id) == "succeeded"
     (row,) = mail_rows(kernel)
     assert row["recipient_id"] is None and row["state"] == "pending"
+
+
+def test_a_released_pool_delivery_goes_back_to_the_pool(
+    kernel: Kernel, session: runs.FakeSession
+) -> None:
+    team(kernel)
+    supervisor_send(kernel, to={"pool": "team.dev"})
+    session.scripts = [fails, succeeds]
+    broken = run(kernel, "team.dev.0", "pool-fail", context=INBOX)
+    assert AgentRunRuntime(kernel).execute(broken) == "failed"
+    (row,) = mail_rows(kernel)
+    assert (row["recipient_id"], row["state"], row["deliveries"]) == (None, "pending", 1)
+    healthy = run(kernel, "team.dev.1", "pool-ok", context=INBOX)
+    assert AgentRunRuntime(kernel).execute(healthy) == "succeeded"
+    (entry,) = inbox_block(session.requests[1])["messages"]
+    assert entry["delivery"] == 2
+    (row,) = mail_rows(kernel)
+    assert (row["recipient_id"], row["state"], row["deliveries"]) == ("team.dev.1", "consumed", 2)
+
+
+def test_group_addresses_cannot_equal_principals(kernel: Kernel) -> None:
+    # An existing principal named like the group or one of its pools is refused.
+    for name, pool in (("bob", "dev"), ("team", "dev")):
+        if name == "team":
+            with kernel.database.engine.begin() as conn:
+                conn.exec_driver_sql(
+                    "INSERT INTO principals VALUES ('team.dev','agent',0,NULL,'','','runtime')"
+                )
+        with pytest.raises(Fault) as refused:
+            team(kernel, name, pool)
+        assert refused.value.code == "principal_conflict"
+
+
+def test_principals_cannot_take_a_group_address(kernel: Kernel) -> None:
+    team(kernel)
+    for taken in ("team", "team.dev"):
+        with pytest.raises(Fault) as refused:
+            provision(
+                kernel.database,
+                Provisioning(
+                    principals=(Principal(principal_id=taken, kind="agent", runtime_id="runtime"),),
+                    permissions=(),
+                    platform=(),
+                ),
+            )
+        assert refused.value.code == "principal_conflict"
