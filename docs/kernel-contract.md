@@ -48,6 +48,8 @@ Required invariant. The trusted v0.1 store does not authenticate callers; the M1
 
 [ADR-019](decisions/019-m5-operational-recovery.md) adds a snapshot-recovery fence to the authenticated service: restore disables old principals, clears policy, fails unfinished historical tasks conservatively and seals old execution namespaces. Current-store reboot preserves normal wait semantics. Fresh execution after snapshot restore requires the `new_namespace_prefix` exposed by `/v0.2/system`, fresh scoped budgets and the same live ceiling below. Historical reads still require current supervisor/ancestor/platform rights.
 
+[ADR-034](decisions/034-agent-groups-and-shared-records.md) slice 4 adds agent groups. With `groups.manage`, a supervisor may create runtime-bound member principals `<group>.<pool>.<n>`, which have no external identity. Their pool grants are delegated permissions. They are checked against the supervisor's `allow` and `delegate` modes and platform policy at apply, at every admission and at every tool call. A member's run is an ordinary root run of its group's supervisor; no other supervisor may admit one. A manifest cannot raise a member above that ceiling.
+
 Every task has one accountable supervisor principal, established through authenticated submission and persisted with grant provenance. For any operation/resource/context at time `t`:
 
 ```text

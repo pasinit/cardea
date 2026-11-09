@@ -8,6 +8,7 @@ from typing import Any
 from cardea.service.approval_requests import DecisionRequest
 from cardea.service.harnesses import Catalog, HarnessFile
 from cardea.service.models import (
+    AgentGroup,
     AgentRunRequest,
     InboundEvent,
     OperationTaskRequest,
@@ -26,8 +27,9 @@ def examples() -> list[dict[str, Any]]:
 
 def test_every_example_validates() -> None:
     (single, run, trigger, on_event, event, effect, held, decision, *rest) = examples()
-    confined, research, registry = rest
+    confined, research, registry, group = rest
     OperationTaskRequest.model_validate(single)
+    assert AgentGroup.model_validate(group).spec.pools[0].replicas == 2
     AgentRunRequest.model_validate(run)
     assert TriggerSpec.model_validate(trigger).request("daily-recap.20261020T063000Z")
     spec = TriggerSpec.model_validate(on_event)

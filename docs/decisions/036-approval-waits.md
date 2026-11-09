@@ -146,7 +146,7 @@ POST /v0.2/approvals/{request_id}/decision
 
   This is the same pattern `tasks.cancel` already uses with `control_requests` and `send_in_transaction`. A crash before commit leaves nothing; a crash after commit leaves a committed decision with an enqueued continuation that DBOS recovers.
 - **Idempotency:** `decision_id` is the idempotency key. Replaying the same `decision_id` with the same body returns the recorded decision. The same `decision_id` with a different body is `409 decision_conflict`. Any other decision on a request that is no longer pending is `409 approval_closed` and carries the current state, so a client that lost a response can learn the outcome. Two approvers racing: the first commit wins, the second gets `approval_closed`.
-- **Refusals** (`403 approver_denied`, `403 self_approval`, `409 approval_expired`, `409 intent_mismatch`) write nothing.
+- **Refusals** (`403 approver_denied`, `403 self_approval`, `403 four_eyes_required`, `409 approval_expired`, `409 intent_mismatch`) write nothing.
 - **Reason text** is bounded to one printable line of 200 characters, like ADR-026 failure summaries. It is shown to the agent, marked as untrusted data.
 
 ### 6. Execution and the receipt
@@ -238,6 +238,15 @@ Decided by the lead on 2026-11-09 for [ADR-034](034-agent-groups-and-shared-reco
 - **What does not change.** The requester exclusion, `distinct_from_supervisor`, the frozen intent and its digest, the durable wait, expiry, idempotent decisions and execution are all unchanged. A resource-qualified `approve` row grants no other right, and it can never raise a task above its supervisor's live ceiling.
 - **Tests (to write).** A principal holding `approve` on `record:orders/approve` can decide that transition's request and is refused with `403 approver_denied` for `record:work/approve`. An operation-level `approve` row on `records.transition` does not satisfy a resource-qualified request.
 
+### Slice 2 review (2026-11-09)
+
+The lead reviewer settled these on 2026-11-09; the project owner may veto any of them.
+
+1. **Platform term of `approve`.** Approving requires a `platform` row in mode `approve` for the namespace and operation, not only a platform `allow` row: least privilege, and consistent with every other right.
+2. **Four-eyes refusal code.** The `distinct_from_supervisor` refusal is `403 four_eyes_required`. `self_approval` stays for the requesting agent and runtime and those of ancestor tasks.
+3. **Voiding at decision.** When the task's live ceiling or the descriptor version fails at decision time, the request becomes `void`, the task is woken and failed with `approval_void`, and the caller gets `409 approval_void`. This is the item-2 rule ("if it fails at decision or execution, the request becomes void"), not a refusal.
+4. **Next slice.** Slice 3 (expiry on the minute schedule and withdrawal on cancel) is next.
+
 ## Integration
 
 - **Authority:** the ceiling formula is unchanged. Approval adds a conjunct for selected effects. The live ceiling is checked at proposal, decision and execution, and the approver's `approve` right at decision and execution. Supervisor revocation or disablement while a task waits voids its request at the next decision, expiry or execution check. Snapshot restore (ADR-019) seals old namespaces: pending requests in a sealed namespace are voided by the restore fence.
@@ -325,9 +334,9 @@ Slice 2 (2026-11-09), portable tests on macOS with the DBOS client replaced by a
 
 Implementation notes for slice 2:
 
-- **Tables.** Migration `m6_005` adds `approval_rules` (host rules), `approval_requests` (the frozen intent; intent columns immutable by trigger; at most one open request per task by a partial unique index; expiry columns exist but nothing expires them yet) and `approval_decisions` (append-only, one per request).
+- **Tables.** Migration `m9_approvals` (after `m8_groups`) adds `approval_rules` (host rules), `approval_requests` (the frozen intent; intent columns immutable by trigger; at most one open request per task by a partial unique index; expiry columns exist but nothing expires them yet) and `approval_decisions` (append-only, one per request).
 - **Platform term.** Approving needs a `platform` row in mode `approve` for the namespace and operation, as every right needs its platform row.
-- **Four-eyes refusal code.** A supervisor refused under `distinct_from_supervisor` gets `403 self_approval`, the same code as the requester.
+- **Four-eyes refusal code.** A supervisor refused under `distinct_from_supervisor` gets `403 four_eyes_required`; `self_approval` stays for the requester and runtimes.
 - **Void at decision.** When the task's live ceiling or the descriptor version fails at decision time, the decision transaction voids the request, wakes the task and enqueues the continuation (which fails the task with `approval_void`), and answers `409 approval_void` with the `reason`. No decision row is written.
 - **Error bodies.** `approval_closed` carries the request's current `state`, `approval_void` its `reason`, as extra fields of the error body.
 - **Deadline.** Without an `expires_after_seconds` rule, `expires_at` is the task deadline. A decision after it is refused with `approval_expired`; the request itself stays `pending` until slice 3 adds the expiry step.

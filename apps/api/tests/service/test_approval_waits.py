@@ -530,7 +530,7 @@ def test_four_eyes_host_rule_refuses_the_supervisor(kernel: Kernel, handler: Han
     assert [r["rule_id"] for r in json.loads(row["rules_json"])] == ["four-eyes"]
     client = TestClient(create_app(kernel))
     refused = decide(client, "supervisor", row)
-    assert refused.status_code == 403 and refused.json()["code"] == "self_approval"
+    assert refused.status_code == 403 and refused.json()["code"] == "four_eyes_required"
     assert decide(client, "approver", row).status_code == 200
     assert OperationRuntime(kernel).execute(task_id, approval=row["request_id"]) == "succeeded"
     assert len(handler.calls) == 1

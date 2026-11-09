@@ -299,7 +299,9 @@ def check_approver(policy: Policy, approver: str, row: sa.RowMapping) -> None:
     if approver in _requesters(policy, str(row["task_id"])):
         raise Fault("self_approval", "The requesting agent or runtime cannot approve", 403)
     if row["distinct_from_supervisor"] and approver == row["supervisor_id"]:
-        raise Fault("self_approval", "This request needs an approver other than the supervisor")
+        raise Fault(
+            "four_eyes_required", "This request needs an approver other than the supervisor"
+        )
     if not holds_approve(policy, approver, row):
         raise Fault("approver_denied", "Current authority does not permit this approval", 403)
 
