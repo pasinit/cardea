@@ -25,7 +25,7 @@ Right = Literal[
     "models.invoke",
     "tasks.delegate",
     "tasks.schedule",
-    # Supervisor-managed collections (and, in later slices, agent groups) (ADR-034).
+    # Supervisor-managed agent groups and collections (ADR-034).
     "groups.manage",
 ]
 
@@ -653,3 +653,148 @@ class Provisioning(Record):
     host_budgets: Annotated[tuple[HostBudget, ...], Field(max_length=1000)] = ()
     # The complete trigger set; a trigger absent from a later document is removed (ADR-024).
     triggers: Annotated[tuple[TriggerSpec, ...], Field(max_length=1000)] = ()
+
+
+# Agent groups (ADR-034 decision 1). A Kubernetes-shaped manifest: the kernel reuses the
+# apiVersion/kind/metadata/spec/status shape and generation semantics, not an API server.
+GroupName = Annotated[str, Field(strict=True, pattern=r"^[a-z][a-z0-9-]{0,39}$")]
+PoolName = Annotated[str, Field(strict=True, pattern=r"^[a-z][a-z0-9-]{0,31}$")]
+# Largest replicas per pool, pools per group, members per group and triggers per pool.
+MAX_REPLICAS, MAX_POOLS, MAX_MEMBERS, MAX_POOL_TRIGGERS = 32, 16, 64, 8
+
+
+class GroupMetadata(Record):
+    name: GroupName
+    namespace: Identifier
+    # Server-assigned; accepted and ignored so a `GET` body can be applied again.
+    generation: Annotated[int, Field(strict=True, ge=0)] | None = None
+    created_at: Annotated[str, Field(max_length=64)] | None = None
+    updated_at: Annotated[str, Field(max_length=64)] | None = None
+
+
+class GroupSchedule(Record):
+    """A time trigger of every member of a pool (ADR-024 semantics)."""
+
+    cron: Annotated[str, Field(strict=True, min_length=9, max_length=128)]
+    timezone: Annotated[str, Field(strict=True, min_length=1, max_length=64)]
+    misfire: Literal["skip", "run_once_late", "grace"]
+    grace_seconds: Annotated[int, Field(strict=True, ge=60, le=86400)] | None = None
+
+    @model_validator(mode="after")
+    def coherent(self) -> Self:
+        validate_schedule(self.cron, self.timezone)
+        if (self.misfire == "grace") != (self.grace_seconds is not None):
+            raise ValueError("grace_seconds is required for, and only for, the grace policy")
+        return self
+
+
+class GroupEventMatch(Record):
+    """Kernel-journal events that wake a member (ADR-034 decision 6; ADR-034 slice 7).
+
+    Parsed so a manifest is complete, and refused at apply until slice 7 lands."""
+
+    types: Annotated[tuple[EventType, ...], Field(min_length=1, max_length=16)]
+    source: EventText | None = None
+    filters: Annotated[tuple[EventFilter, ...], Field(max_length=8)] = ()
+
+
+class GroupTrigger(Record):
+    schedule: GroupSchedule | None = None
+    event: GroupEventMatch | None = None
+
+    @model_validator(mode="after")
+    def one_kind(self) -> Self:
+        if (self.schedule is None) == (self.event is None):
+            raise ValueError("A group trigger has exactly one of schedule or event")
+        return self
+
+
+class RunBounds(Record):
+    """A run template's bounds; `timeout_seconds` is per attempt, as in ADR-034's
+    apply-time lease bound."""
+
+    max_turns: Annotated[int, Field(strict=True, ge=1, le=200)] = 40
+    max_tool_calls: Annotated[int, Field(strict=True, ge=1, le=500)] = 100
+    max_cost_usd: Annotated[float, Field(strict=True, gt=0, le=50)] = 2.0
+    attempts: Annotated[int, Field(strict=True, ge=1, le=3)] = 2
+    timeout_seconds: Annotated[int, Field(strict=True, ge=30, le=3600)] = 900
+    run_timeout_seconds: Annotated[int, Field(strict=True, ge=60, le=3600)] = 1800
+
+
+class RunTemplate(Record):
+    """A pool's ADR-027 agent-run template; the kernel fills in the member, namespace,
+    grants and per-slot identity."""
+
+    objective: Annotated[str, Field(strict=True, min_length=1, max_length=1024)] | None = None
+    instructions: Annotated[str, Field(strict=True, min_length=1, max_length=65536)]
+    operations: Annotated[tuple[OperationName, ...], Field(min_length=1, max_length=32)]
+    context: Annotated[tuple[ContextCall, ...], Field(max_length=4)] = ()
+    harness: HarnessID | None = None
+    model: ModelID | None = None
+    bounds: RunBounds = RunBounds()
+    expect: Annotated[tuple[Expectation, ...], Field(max_length=16)] = ()
+
+
+class GroupSpend(Record):
+    """A spend account (ADR-034 decision 5.3; slice 9). Refused at apply until then."""
+
+    usd: Annotated[float, Field(strict=True, gt=0, le=100000)]
+    window: Literal["day", "week"]
+    timezone: Annotated[str, Field(strict=True, min_length=1, max_length=64)] = "UTC"
+
+
+class WindowExpectation(Record):
+    """A windowed pool expectation (ADR-034 decision 5.4; slice 9). Refused until then."""
+
+    operation: OperationName
+    transition: Identifier | None = None
+    min: Annotated[int, Field(strict=True, ge=0, le=100000)] | None = None
+    max: Annotated[int, Field(strict=True, ge=0, le=100000)] | None = None
+    window: Literal["day", "week"]
+
+
+class GroupPool(Record):
+    name: PoolName
+    replicas: Annotated[int, Field(strict=True, ge=1, le=MAX_REPLICAS)]
+    # Delegated from the supervisor: the grants of every member run.
+    grants: Annotated[tuple[Grant, ...], Field(min_length=1, max_length=48)]
+    run: RunTemplate
+    triggers: Annotated[tuple[GroupTrigger, ...], Field(max_length=MAX_POOL_TRIGGERS)] = ()
+    spend: GroupSpend | None = None
+    expect_window: Annotated[tuple[WindowExpectation, ...], Field(max_length=16)] = ()
+    drain_timeout_seconds: Annotated[int, Field(strict=True, ge=0, le=86400)] = 1800
+
+    @model_validator(mode="after")
+    def distinct_grants(self) -> Self:
+        if len(set(self.grants)) != len(self.grants):
+            raise ValueError("A pool repeats a grant")
+        return self
+
+
+class GroupSpec(Record):
+    supervisor: Identifier
+    # Collection documents this group uses (ADR-034 decision 2.1).
+    collections: Annotated[tuple[Identifier, ...], Field(max_length=32)] = ()
+    spend: GroupSpend | None = None
+    pools: Annotated[tuple[GroupPool, ...], Field(min_length=1, max_length=MAX_POOLS)]
+
+    @model_validator(mode="after")
+    def bounded(self) -> Self:
+        if len({p.name for p in self.pools}) != len(self.pools):
+            raise ValueError("Pool names must be distinct")
+        if len(set(self.collections)) != len(self.collections):
+            raise ValueError("Collections must be distinct")
+        if sum(p.replicas for p in self.pools) > MAX_MEMBERS:
+            raise ValueError(f"A group has at most {MAX_MEMBERS} members")
+        return self
+
+
+class AgentGroup(Wire):
+    """`PUT /v0.2/groups/{name}`: a declarative set of agent principals (ADR-034 P1)."""
+
+    apiVersion: Literal["cardea/v1alpha1"]  # The Kubernetes field name.
+    kind: Literal["AgentGroup"]
+    metadata: GroupMetadata
+    spec: GroupSpec
+    # Server-owned; accepted and ignored so a `GET` body can be applied again.
+    status: dict[str, JsonValue] | None = None

@@ -7,8 +7,8 @@ further migration of these tables. Groups and mailboxes add their own tables.
 
 from alembic import op
 
-revision = "m6_005"
-down_revision = "m6_004"
+revision = "m8_records"
+down_revision = "m8_groups"
 branch_labels = None
 depends_on = None
 

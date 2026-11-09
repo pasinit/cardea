@@ -40,6 +40,15 @@ from cardea.service.schedule import Decision, decide, slot_key
 if TYPE_CHECKING:
     from cardea.service.kernel import Kernel
 
+
+class MemberBusy(Fault):
+    """A group member already has an unfinished run (ADR-034 decision 1.4)."""
+
+    def __init__(self, task_id: str) -> None:
+        super().__init__("member_busy", "The member's previous run is unfinished", 409)
+        self.task_id = task_id
+
+
 log = logging.getLogger(__name__)
 
 
@@ -287,6 +296,24 @@ class Scheduler:
                     outcome = "admitted"
                 self._advance(conn, trigger_id, decision.slot)
                 self.kernel.fault("trigger.before_commit")
+        except MemberBusy as busy:
+            # One run per group member at a time (ADR-034 decision 1.4): the slot is
+            # recorded against the unfinished run and closed, not admitted.
+            with self.kernel.database.engine.begin() as conn:
+                if not self._current(conn, trigger_id, expected):
+                    return "stale"
+                self._record_missed(conn, trigger_id, decision, at)
+                _event(
+                    conn,
+                    trigger_id,
+                    "coalesced",
+                    at,
+                    slot=decision.slot,
+                    task_id=busy.task_id,
+                    code=busy.code,
+                )
+                self._advance(conn, trigger_id, decision.slot)
+            return "coalesced"
         except (Fault, ValidationError, StoreError, ContractError) as error:
             code = (
                 error.code

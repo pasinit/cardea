@@ -305,10 +305,13 @@ def test_m1_restore_migrates_charges_without_rewriting_receipt(
         before = conn.exec_driver_sql(
             "SELECT snapshot FROM operations WHERE task_id=?", (task,)
         ).scalar_one()
+        conn.exec_driver_sql("DROP INDEX task_bindings_by_agent")
         for table in (
             "record_events",
             "records",
             "collections",
+            "group_members",
+            "agent_groups",
             "recovery_epochs",
             "trigger_deliveries",
             "trigger_events",
@@ -352,10 +355,13 @@ def test_failed_m2_migration_is_atomic(kernel: Kernel) -> None:
     import sqlalchemy as sa
 
     with kernel.database.engine.begin() as conn:
+        conn.exec_driver_sql("DROP INDEX task_bindings_by_agent")
         for table in (
             "record_events",
             "records",
             "collections",
+            "group_members",
+            "agent_groups",
             "recovery_epochs",
             "trigger_deliveries",
             "trigger_events",

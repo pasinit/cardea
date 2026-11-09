@@ -18,7 +18,7 @@ Setup (install, identity, provisioning) is covered by the [M1 quickstart](m1-qui
 
 Every request below is JSON sent to the kernel API, over its Unix socket or its TLS listener. Each carries `Authorization: Bearer <token>` and `X-Cardea-Auth: spiffe|oidc`. From Python, use `cardea.service.client.KernelClient`. From the shell, `python -m cardea.service submit-agent-run --socket … request.json`. The examples assume a supervisor with permission for the listed grants in namespace `team`, and an agent principal `agent-1`.
 
-Every task needs `objects.read` and `objects.write`. Agent runs also need `models.invoke`, every exposed operation (except the built-in `records.*` operations, which `record:<collection>/<action>` grants authorize; see use case 7), and the harness grant (`harness:<id>`) when a harness registry is installed.
+Every task needs `objects.read` and `objects.write`. Agent runs also need `models.invoke`, every exposed operation (except the built-in `records.*` operations, which `record:<collection>/<action>` grants authorize; see use case 8), and the harness grant (`harness:<id>`) when a harness registry is installed.
 
 ## 1. Run one operation
 
@@ -249,7 +249,36 @@ Errors:
 - A model it does not allow is `422 model_not_allowed`.
 - A missing grant is `403 harness_not_granted`.
 
-## 7. A shared collection of records
+## 7. A group of agents from one manifest
+
+An agent group ([ADR-034](decisions/034-agent-groups-and-shared-records.md), slice 4) is a set of agent principals that a supervisor declares in one document. Each pool's members share delegated grants, a run template and time triggers. The supervisor needs `groups.manage` in the namespace, and it must be able to delegate every pool grant. Send the manifest with `PUT /v0.2/groups/desk`, and add `?dry_run=true` to see the plan without changing anything:
+
+```json
+{
+  "apiVersion": "cardea/v1alpha1",
+  "kind": "AgentGroup",
+  "metadata": {"name": "desk", "namespace": "team"},
+  "spec": {
+    "supervisor": "sup-1",
+    "pools": [
+      {"name": "analyst", "replicas": 2,
+       "grants": ["objects.read", "objects.write", "models.invoke", "listings.search"],
+       "run": {"instructions": "Review new listings and record what changed.",
+               "operations": ["listings.search"],
+               "bounds": {"max_cost_usd": 0.5, "attempts": 2, "timeout_seconds": 600}},
+       "triggers": [{"schedule": {"cron": "0 9 * * 1-5", "timezone": "UTC", "misfire": "skip"}}]}
+    ]
+  }
+}
+```
+
+A pool's `grants` are its runs' complete grants, and nothing is added. An agent run needs `objects.read`, `objects.write`, `models.invoke` and a grant for every exposed or context operation (for `records.*`, the record grants of use case 8).
+
+**You get:** two principals, `desk.analyst.0` and `desk.analyst.1`. They are bound to the kernel's runtime and have no external identity. Each has one trigger, `desk.analyst.<n>.t0`. Every slot runs full admission under the supervisor's live ceiling. A member runs one task at a time: a slot that arrives while its previous run is unfinished is recorded as `coalesced`. `GET /v0.2/groups/desk?namespace=team` returns the manifest with `status.members`.
+
+To restructure the group, change the manifest and apply it again. For example, set `replicas` to 3 or pick another `model`; no code change is needed. Until ADR-034 slice 8 lands, scaling down, removing a pool and deleting the group are refused with `409 group_drain_unsupported`. Until their slices land, `spend`, `expect_window` and `event` triggers are refused with 422.
+
+## 8. A shared collection of records
 
 A supervisor holding `groups.manage` in the namespace defines a collection ([ADR-034](decisions/034-agent-groups-and-shared-records.md), slice 1). `PUT /v0.2/collections/work` (add `?dry_run=true` to see the plan without applying it):
 

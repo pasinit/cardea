@@ -13,7 +13,7 @@ installed operation (ADR-023, ADR-026). Each call needs the resource-qualified g
 that reads or writes the record. Guards reuse ADR-036's CEL compilation and limits.
 
 Claims, state machines, groups and mailboxes are later slices; the table columns they need
-already exist (migration ``m6_005``).
+already exist (migration ``m8_records``).
 """
 
 import json

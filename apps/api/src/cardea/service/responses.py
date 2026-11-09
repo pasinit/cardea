@@ -11,7 +11,7 @@ from typing import Literal
 from pydantic import Field, JsonValue
 
 from cardea.kernel.models import KernelFailure, ObjectVersion, OperationReceipt
-from cardea.service.models import Record, Wire
+from cardea.service.models import GroupSpec, Record, Wire
 
 # System
 
@@ -165,6 +165,69 @@ class TriggerList(Wire):
 
     triggers: list[TriggerEntry]
     next: str | None = Field(description="Pass as `after` for the next page; null on the last.")
+
+
+# Agent groups (ADR-034)
+
+
+class GroupMember(Record):
+    principal_id: str = Field(description="The member principal `<group>.<pool>.<n>`.")
+    pool: str
+    ordinal: int
+    state: Literal["active", "draining", "removed"]
+    disabled: bool = Field(description="The principal is disabled; its runs are refused.")
+    active_task_id: str | None = Field(description="The member's unfinished run, if any.")
+    triggers: list[str] = Field(description="The member's compiled ADR-029 triggers.")
+
+
+class GroupStatus(Record):
+    observedGeneration: int = Field(  # The Kubernetes field name.
+        description="The newest generation the reconciler converged."
+    )
+    members: list[GroupMember]
+
+
+class GroupMetadataView(Record):
+    name: str
+    namespace: str
+    generation: int = Field(description="Incremented by every apply that changes `spec`.")
+    created_at: str
+    updated_at: str
+
+
+class GroupView(Wire):
+    """`GET /v0.2/groups/{name}`: the applied manifest and its status."""
+
+    apiVersion: Literal["cardea/v1alpha1"]  # The Kubernetes field name.
+    kind: Literal["AgentGroup"]
+    metadata: GroupMetadataView
+    spec: GroupSpec
+    status: GroupStatus
+
+
+class GroupPlan(Record):
+    members_added: list[str]
+    triggers_installed: list[str]
+    triggers_updated: list[str]
+    triggers_removed: list[str]
+
+
+class GroupApplied(Wire):
+    """`PUT /v0.2/groups/{name}`: what the apply changed (or, with `dry_run`, would change)."""
+
+    dry_run: bool = Field(description="True: nothing was committed; `group` is the projection.")
+    change: Literal["created", "updated", "unchanged"]
+    generation: int
+    plan: GroupPlan
+    group: GroupView
+
+
+class GroupDeleted(Wire):
+    """`DELETE /v0.2/groups/{name}`: the drained group (ADR-034 slice 8; refused until then)."""
+
+    name: str
+    namespace: str
+    change: Literal["removed"]
 
 
 # Runs

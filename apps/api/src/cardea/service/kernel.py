@@ -399,7 +399,12 @@ class Kernel:
             if row is None or row["supervisor_id"] != principal:
                 raise Fault("trigger_not_found", "No accessible trigger", 404)
             if row["managed_by"] != "supervisor":
-                raise Fault("trigger_owner", "Host-owned triggers change only by provisioning", 409)
+                raise Fault(
+                    "trigger_owner",
+                    "Host- and group-owned triggers change only through provisioning or "
+                    "their group manifest",
+                    409,
+                )
             if not row["removed"]:
                 remove(conn, trigger_id, now())
         return {"trigger_id": trigger_id, "change": "removed"}
@@ -592,6 +597,9 @@ class Kernel:
             else:
                 raise Fault("invalid_provenance", "Ancestor chain exceeds the supported bound")
         policy.admission(supervisor, request, self.runtime_id)
+        from cardea.service.groups import check_member
+
+        check_member(conn, supervisor, request)
         if profile.reserves_host_budget:
             host_budget.available(conn, supervisor, request.namespace, reserve=True)
         if (

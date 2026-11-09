@@ -42,6 +42,7 @@ RESERVED_PREFIXES = (
     "models.",
     "tools.",
     "inputs.",
+    "groups.",
     # Built-in record operations (ADR-034); installed only by the kernel itself.
     "records.",
 )

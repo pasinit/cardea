@@ -104,7 +104,7 @@ An event trigger starts its agent-run template once per signed inbound CloudEven
 
 ## Collections and records
 
-Collections are shared, versioned records with a JSON Schema ([ADR-034](decisions/034-agent-groups-and-shared-records.md), slice 1; worked example in [getting started](getting-started.md#7-a-shared-collection-of-records)). Migration `m6_005` adds the `collections`, `records` and `record_events` tables.
+Collections are shared, versioned records with a JSON Schema ([ADR-034](decisions/034-agent-groups-and-shared-records.md), slice 1; worked example in [getting started](getting-started.md#8-a-shared-collection-of-records)). Migration `m8_records` adds the `collections`, `records` and `record_events` tables.
 
 - **Who manages them.** A supervisor applies its own collections with `PUT /v0.2/collections/{name}`. It needs the right `groups.manage` in the namespace, with a matching `platform` row, as for every right. The host owner grants that right by provisioning; there is no host-owner collection file.
 - **Grants.** The built-in operations `records.create`, `records.get`, `records.query` and `records.update` are always installed. They are authorized by resource-qualified grants `record:<collection>/<action>` (`create`, `read`, `update`), provisioned like any other right (`"operation": "record:work/update"`, with `delegate` for supervisors). Revoking one stops the next call of every task that relies on it.

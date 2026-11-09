@@ -7,6 +7,7 @@ from typing import Any
 
 from cardea.service.harnesses import Catalog, HarnessFile
 from cardea.service.models import (
+    AgentGroup,
     AgentRunRequest,
     InboundEvent,
     OperationTaskRequest,
@@ -35,6 +36,7 @@ def test_every_example_validates() -> None:
         confined,
         research,
         registry,
+        group,
         collection,
         create,
         update,
@@ -45,6 +47,7 @@ def test_every_example_validates() -> None:
     for request in (create, update):
         Registry().validate_arguments(request["operation"], request["arguments"])
     OperationTaskRequest.model_validate(single)
+    assert AgentGroup.model_validate(group).spec.pools[0].replicas == 2
     AgentRunRequest.model_validate(run)
     assert TriggerSpec.model_validate(trigger).request("daily-recap.20261020T063000Z")
     spec = TriggerSpec.model_validate(on_event)
