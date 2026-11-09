@@ -603,3 +603,33 @@ def test_agent_runs_use_record_grants_on_the_tool_endpoint(items: Kernel) -> Non
     assert receipts["call-0003"].failure.code == "task_grant_denied"
     record_id = cast(dict[str, Any], made.structured_content)["record"]["record_id"]
     assert events(items, record_id)[0][3] == receipts["call-0001"].receipt_id
+
+
+def test_record_writes_are_kernel_journal_events(items: Kernel) -> None:
+    """Each write is also a CloudEvents-shaped journal event (ADR-034 decision 6)."""
+    from cardea.service import journal
+
+    record = created(items)
+    assert update(items, record, 1, data={"title": "second"})[0] == "succeeded"
+    with items.database.read() as conn:
+        rows = (
+            conn.exec_driver_sql(
+                "SELECT * FROM events WHERE event_type LIKE 'cardea.record.%' ORDER BY cursor"
+            )
+            .mappings()
+            .all()
+        )
+        adapted = [journal.adapt(conn, row, items.runtime_id) for row in rows]
+    subject = f"items/{record['record_id']}"
+    assert [(a[0].type, a[0].subject, a[1]["actor"]) for a in adapted if a] == [
+        ("cardea.record.created", subject, "a1"),
+        ("cardea.record.updated", subject, "a1"),
+    ]
+    first = adapted[0]
+    assert first is not None and first[0].source == "cardea://test"
+    assert first[0].data == {
+        "collection": "items",
+        "record_id": record["record_id"],
+        "version": 1,
+        "actor": "a1",
+    }
