@@ -23,7 +23,18 @@ from cardea.service.database import SCHEMA_HEAD, Fault, service_lock
 from cardea.service.models import ServiceConfig
 from cardea.service.profiles import runtime_ids
 
-SCHEMAS = {"m1_001", "m2_001", "m3_001", "m4_001", "m5_001", "m6_001", "m6_002", "m6_003", "m6_004"}
+SCHEMAS = {
+    "m1_001",
+    "m2_001",
+    "m3_001",
+    "m4_001",
+    "m5_001",
+    "m6_001",
+    "m6_002",
+    "m6_003",
+    "m6_004",
+    "m8_groups",
+}
 RUNTIME = "dbos=3.0.0;workflow=cardea-m1-v1"
 HOST_INPUT_RUNTIMES = runtime_ids(lambda p: p.host_inputs)
 GENERATED_BACKUP = re.compile(r"before-(?:migration|runtime|restore)-[0-9a-f]{32}\.sqlite3")

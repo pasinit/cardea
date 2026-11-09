@@ -27,7 +27,16 @@ from cardea.service.models import Record, Right
 ENTRY_POINT_GROUP = "cardea.operations"
 KERNEL_RIGHTS: frozenset[str] = frozenset(get_args(Right))
 # Prefixes owned by kernel rights and fixed installed profiles.
-RESERVED_PREFIXES = ("objects.", "tasks.", "events.", "host.", "models.", "tools.", "inputs.")
+RESERVED_PREFIXES = (
+    "objects.",
+    "tasks.",
+    "events.",
+    "host.",
+    "models.",
+    "tools.",
+    "inputs.",
+    "groups.",
+)
 # Room in a receipt's 64 KiB result document for the output and its wrapper keys.
 MAX_RECORDED_OUTPUT_BYTES = MAX_DOCUMENT_BYTES - 64
 _NAME = TypeAdapter(OperationName)
