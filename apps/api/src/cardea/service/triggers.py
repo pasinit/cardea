@@ -57,6 +57,9 @@ def digest(spec: TriggerSpec) -> str:
     # Time triggers keep the digest they had before event triggers existed (ADR-035).
     if document.get("event") is None:
         document.pop("event", None)
+    # Earlier triggers keep their digest: it omits a null `journal` (ADR-034 slice 7).
+    if document.get("journal") is None:
+        document.pop("journal", None)
     return sha256(rfc8785.dumps(document)).hexdigest()
 
 
@@ -178,6 +181,8 @@ def upsert(
             ),
         )
         _event(conn, spec.trigger_id, "installed", at, detail={"sha256": checksum})
+        if spec.journal is not None:
+            _restart_cursor(conn, spec.trigger_id, at)
         return "installed"
     if old["managed_by"] != managed_by:
         raise Fault("trigger_owner", "Trigger is managed by another owner", 409)
@@ -207,7 +212,21 @@ def upsert(
         "enabled" if restarted else "disabled" if old["enabled"] and not spec.enabled else "updated"
     )
     _event(conn, spec.trigger_id, kind, at, detail={"sha256": checksum})
+    if spec.journal is not None and restarted:
+        # Like a re-enabled time trigger's anchor: events while it was off are not replayed.
+        _restart_cursor(conn, spec.trigger_id, at)
     return kind
+
+
+def _restart_cursor(conn: sa.Connection, trigger_id: str, at: datetime) -> None:
+    """Start a journal trigger at the journal's current end (ADR-034 slice 7)."""
+    end = conn.exec_driver_sql("SELECT COALESCE(MAX(cursor),0) FROM events").scalar_one()
+    conn.exec_driver_sql(
+        "INSERT INTO journal_trigger_cursors(trigger_id,cursor,pending_cursor,updated_at) "
+        "VALUES (?,?,NULL,?) ON CONFLICT(trigger_id) DO UPDATE SET cursor=MAX(cursor,"
+        "excluded.cursor),pending_cursor=NULL,updated_at=excluded.updated_at",
+        (trigger_id, int(end), at.isoformat()),
+    )
 
 
 def remove(conn: sa.Connection, trigger_id: str, at: datetime) -> None:

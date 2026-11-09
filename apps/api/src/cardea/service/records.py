@@ -39,7 +39,7 @@ from pydantic import (
 
 from cardea.kernel.models import Identifier
 from cardea.service.approvals import compile_condition, execute_condition
-from cardea.service.database import Database, Fault
+from cardea.service.database import Database, Fault, borrow
 from cardea.service.models import (
     COLLECTION_NAME,
     CollectionName,
@@ -483,6 +483,32 @@ class Records:
                 new["updated_at"],
             ),
         )
+        # The same change as a kernel journal event, in this transaction (ADR-034
+        # decision 6): CloudEvents-shaped, no record data, so it can wake a journal trigger.
+        subject = f"{new['collection']}/{new['record_id']}"
+        with borrow(conn) as tx:
+            tx.append_event(
+                namespace=context.namespace,
+                event_type=f"cardea.record.{kind}",
+                producer_id=caller,
+                correlation_id=str(new["record_id"]),
+                task_id=context.task_id,
+                at=datetime.fromisoformat(str(new["updated_at"])),
+                payload={
+                    "specversion": "1.0",
+                    "id": f"{subject}.{new['version']}",
+                    "source": f"cardea://{context.namespace}",
+                    "type": f"cardea.record.{kind}",
+                    "subject": subject,
+                    "time": str(new["updated_at"]),
+                    "data": {
+                        "collection": new["collection"],
+                        "record_id": new["record_id"],
+                        "version": new["version"],
+                        "actor": caller,
+                    },
+                },
+            )
 
     # Operations
 

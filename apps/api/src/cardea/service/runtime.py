@@ -26,7 +26,7 @@ from cardea.kernel.models import (
     VerificationRecord,
 )
 from cardea.kernel.store import KernelTransaction
-from cardea.service import approval_requests
+from cardea.service import approval_requests, journal
 from cardea.service.agent_run_runtime import AgentRunRuntime
 from cardea.service.database import Fault, borrow
 from cardea.service.delegation_runtime import DelegationRuntime
@@ -149,6 +149,10 @@ class Runtime:
         def trigger_tick() -> dict[str, str]:
             return Scheduler(kernel).tick()
 
+        @DBOS.step(name="cardea.m6.journal_triggers.tick", retries_allowed=False)
+        def journal_tick() -> dict[str, str]:
+            return journal.Dispatcher(kernel).tick()
+
         @DBOS.step(name="cardea.m6.approvals.expire", retries_allowed=False)
         def approval_expiry() -> dict[str, str]:
             return approval_requests.expire_due(kernel)
@@ -161,7 +165,11 @@ class Runtime:
             try:
                 trigger_tick()
             finally:
-                approval_expiry()
+                try:
+                    # Kernel journal events admit their triggers on the same tick (ADR-034).
+                    journal_tick()
+                finally:
+                    approval_expiry()
 
         self.tick_triggers = tick_triggers
 
