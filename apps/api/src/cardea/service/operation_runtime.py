@@ -362,9 +362,7 @@ class OperationRuntime:
             )
             timeout = float(self.kernel.operations.get(name).cardea.timeout_seconds)
         if reconciler is not None:
-            observed = asyncio.run(
-                asyncio.wait_for(reconciler(dict(arguments), context), timeout)
-            )
+            observed = asyncio.run(asyncio.wait_for(reconciler(dict(arguments), context), timeout))
         assert observed is not None
         with self.kernel.database.engine.begin() as conn, borrow(conn) as tx:
             receipt = tx.get_operation(task_id, operation_id)

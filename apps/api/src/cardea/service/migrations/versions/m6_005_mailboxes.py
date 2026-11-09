@@ -41,7 +41,10 @@ def upgrade() -> None:
         "CREATE UNIQUE INDEX mailbox_sender_receipt ON mailbox_messages(sender_receipt_id) "
         "WHERE sender_receipt_id IS NOT NULL"
     )
-    op.execute("CREATE INDEX mailbox_messages_by_namespace ON mailbox_messages(namespace, created_at, message_id)")
+    op.execute(
+        "CREATE INDEX mailbox_messages_by_namespace "
+        "ON mailbox_messages(namespace, created_at, message_id)"
+    )
     # One row per recipient. An instance or group message names its principal; a pool
     # message names the pool and is bound to the first member that leases it.
     op.execute("""CREATE TABLE mailbox_deliveries (
@@ -67,9 +70,7 @@ def upgrade() -> None:
         "delivery_id) WHERE pool IS NOT NULL"
     )
     op.execute("CREATE INDEX mailbox_by_task ON mailbox_deliveries(task_id, state)")
-    op.execute(
-        "CREATE INDEX mailbox_leased ON mailbox_deliveries(task_id) WHERE state='leased'"
-    )
+    op.execute("CREATE INDEX mailbox_leased ON mailbox_deliveries(task_id) WHERE state='leased'")
     op.execute("CREATE INDEX mailbox_by_message ON mailbox_deliveries(message_id, delivery_id)")
     # Every change of a delivery's state, in order: its delivery history.
     op.execute("""CREATE TABLE mailbox_delivery_events (

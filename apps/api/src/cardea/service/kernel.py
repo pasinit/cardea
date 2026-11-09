@@ -17,8 +17,8 @@ from cardea.service import host_budget
 from cardea.service.auth import IdentityProvider, Proof
 from cardea.service.confined import ConfinedAgentSession, Workers, confined_handler, job_id
 from cardea.service.database import Database, Fault, borrow
-from cardea.service.mailbox import BUILTIN
 from cardea.service.harnesses import Catalog, Harnesses, check_harness_grants
+from cardea.service.mailbox import BUILTIN
 from cardea.service.models import (
     DEFAULT_MAX_TASK_REQUEST_BYTES,
     AgentRunRequest,

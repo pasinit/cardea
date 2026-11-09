@@ -18,7 +18,7 @@ from cardea.kernel.lifecycle import ContractError
 from cardea.kernel.models import KernelEvent, ResourceRef
 from cardea.kernel.store import StoreError
 from cardea.service import events as intake
-from cardea.service import host_budget, host_operations, pages
+from cardea.service import host_budget, host_operations, mailbox, pages
 from cardea.service.auth import Proof
 from cardea.service.database import Fault, borrow
 from cardea.service.kernel import Kernel
@@ -34,6 +34,7 @@ from cardea.service.models import (
     TaskRequest,
     TaskView,
     TriggerSpec,
+    now,
 )
 from cardea.service.pages import MAX_RESPONSE_BYTES
 from cardea.service.policy import Policy
@@ -44,6 +45,9 @@ from cardea.service.responses import (
     ContentChunk,
     EventDelivered,
     HostBudgetView,
+    MailboxMessage,
+    MailboxPage,
+    MessageSent,
     OperationCatalog,
     OperationView,
     ReconcileResult,
@@ -438,6 +442,89 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
     def unschedule(trigger_id: TriggerPath, proof: Credential) -> dict[str, Any]:
         return {"schema_version": "0.2", **kernel.unschedule(proof, trigger_id)}
 
+    @app.post("/v0.2/mailbox", response_model=MessageSent, status_code=201)
+    def send_mail(message: mailbox.SendMessage, proof: Credential) -> dict[str, Any]:
+        """A supervisor sends one message (ADR-034 decision 4.2). The caller and the
+        platform must allow `mail:<address>` in the namespace; the client key makes a
+        repeat return the message already sent."""
+        with kernel.database.engine.begin() as conn, borrow(conn) as tx:
+            principal = proof.resolve(conn)
+            policy = Policy(conn)
+            policy.principal(principal)
+            mailbox.authorize_supervisor(policy, principal, message.namespace, message.to)
+            sent = mailbox.send(
+                conn,
+                tx,
+                namespace=message.namespace,
+                sender_id=principal,
+                supervisor_id=principal,
+                to=message.to,
+                parts=message.parts,
+                runtime_id=kernel.runtime_id,
+                at=now(),
+                record=message.record,
+                max_deliveries=message.max_deliveries,
+                client_key=message.client_key,
+            )
+        return {"schema_version": "0.2", **sent}
+
+    @app.get("/v0.2/mailbox", response_model=MailboxPage)
+    def list_mail(
+        namespace: Namespace,
+        proof: Credential,
+        after: Annotated[str, Query(max_length=64)] = "",
+        limit: Annotated[int, Query(ge=1, le=50)] = 20,
+    ) -> dict[str, Any]:
+        """Messages of a namespace the caller sent, supervises or receives, oldest first,
+        each with every delivery and its history; one size-bounded page."""
+        with kernel.database.read() as conn:
+            principal = proof.resolve(conn)
+            Policy(conn).principal(principal)
+            start = ("", "")
+            if after:
+                row = conn.exec_driver_sql(
+                    "SELECT created_at,message_id FROM mailbox_messages "
+                    "WHERE message_id=? AND namespace=?",
+                    (after, namespace),
+                ).first()
+                if row is None:
+                    raise Fault("invalid_cursor", "Cursor does not name a message", 400)
+                start = (str(row[0]), str(row[1]))
+            rows = (
+                conn.exec_driver_sql(
+                    "SELECT m.* FROM mailbox_messages m WHERE m.namespace=? "
+                    "AND (m.created_at,m.message_id) > (?,?) AND (m.sender_id=? "
+                    "OR m.supervisor_id=? OR EXISTS (SELECT 1 FROM mailbox_deliveries d "
+                    "WHERE d.message_id=m.message_id AND d.recipient_id=?)) "
+                    "ORDER BY m.created_at,m.message_id LIMIT ?",
+                    (namespace, *start, principal, principal, principal, limit + 1),
+                )
+                .mappings()
+                .all()
+            )
+            envelope = {"schema_version": "0.2", "next": ""}
+            listed, cursor = pages.page(
+                rows[:limit],
+                lambda r: str(r["message_id"]),
+                lambda r: mailbox.view(conn, r),
+                envelope,
+                limit,
+            )
+        if cursor is None and len(rows) > limit:
+            cursor = str(rows[limit - 1]["message_id"])
+        return {"schema_version": "0.2", "messages": listed, "next": cursor}
+
+    @app.get("/v0.2/mailbox/{message_id}", response_model=MailboxMessage)
+    def read_mail(
+        message_id: Annotated[str, Path(pattern=r"^[0-9a-f-]{36}$")], proof: Credential
+    ) -> dict[str, Any]:
+        """One message the caller sent, supervises or receives, with delivery history."""
+        with kernel.database.read() as conn:
+            principal = proof.resolve(conn)
+            Policy(conn).principal(principal)
+            found = mailbox.message(conn, principal, message_id)
+        return {"schema_version": "0.2", "message": found}
+
     @app.get("/v0.2/tasks/{task_id}/run", response_model=RunView)
     def run_view(
         task_id: TaskID,
@@ -462,6 +549,7 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
                 except StoreError:
                     document = None
                 documents[suffix], truncated[suffix] = pages.bounded_document(document)
+            consumed = mailbox.consumed_by(conn, task_id)
             # In the order they were made: an agent run's context calls come first.
             receipts = sorted(
                 tx.list_operations(task_id), key=lambda r: (r.created_at, r.request.operation_id)
@@ -474,6 +562,7 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
             "created_at": task.created_at.isoformat(),
             "updated_at": task.updated_at.isoformat(),
             "attempt": task.checkpoint.state.get("attempt") if task.checkpoint else None,
+            "messages_consumed": consumed,
             "output": documents["output"],
             "output_truncated": truncated["output"],
             "verification": documents["verification"],

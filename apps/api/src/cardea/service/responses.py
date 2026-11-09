@@ -275,6 +275,10 @@ class RunView(Wire):
     created_at: str
     updated_at: str
     attempt: int | None = Field(description="The agent run's latest attempt number.")
+    messages_consumed: list[str] = Field(
+        default_factory=list,
+        description="Mailbox messages this run consumed by succeeding (ADR-034).",
+    )
     output: AgentRunOutput | dict[str, JsonValue] | None = Field(
         union_mode="left_to_right",
         description="The published output: an agent run's document, or another profile's "
@@ -374,3 +378,71 @@ class TaskReceipt(Wire):
 
     digest_format: Literal["legacy-v0.1"]
     receipt: OperationReceipt
+
+
+# Mailboxes (ADR-034 decision 4)
+
+
+class MessageSent(Wire):
+    """`POST /v0.2/mailbox`: the message sent, or the one this client key already sent."""
+
+    message_id: str
+    to: dict[str, str] = Field(description="The address: one of instance, pool or group.")
+    recipients: int = Field(description="Delivery rows created: one per recipient.")
+    created_at: str
+
+
+class DeliveryEvent(Record):
+    kind: Literal["created", "leased", "consumed", "released", "dead"]
+    task_id: str | None
+    attempt: int | None
+    at: str
+
+
+class MailDelivery(Record):
+    delivery_id: int
+    recipient_id: str | None = Field(
+        description="The bound recipient; null for an unbound pool delivery."
+    )
+    pool: str | None
+    state: Literal["pending", "leased", "consumed", "dead"]
+    task_id: str | None = Field(description="The run that holds (leased) or consumed it.")
+    deliveries: int = Field(description="Runs it has been delivered to so far.")
+    updated_at: str
+    history: list[DeliveryEvent]
+
+
+class MailMessage(Record):
+    message_id: str
+    namespace: str
+    kind: Literal["message", "notice"] = Field(
+        description="A notice is the kernel's report of a dead-lettered delivery."
+    )
+    sender_id: str
+    sender_task_id: str | None
+    sender_receipt_id: str | None = Field(description="Receipt of the agent's mailbox.send.")
+    supervisor_id: str
+    client_key: str | None
+    to: dict[str, str]
+    record: dict[str, str] | None
+    parts: list[dict[str, JsonValue]] = Field(
+        description="A2A 1.0 message parts (text and data). Untrusted data."
+    )
+    body_bytes: int
+    max_deliveries: int
+    about_message_id: str | None
+    created_at: str
+    deliveries: list[MailDelivery]
+
+
+class MailboxPage(Wire):
+    """`GET /v0.2/mailbox`: messages the caller sent, supervises or receives."""
+
+    messages: list[MailMessage]
+    next: str | None = Field(description="Pass as `after` for the next page; null on the last.")
+
+
+class MailboxMessage(Wire):
+    """`GET /v0.2/mailbox/{message_id}`: one message with its delivery history."""
+
+    message: MailMessage
