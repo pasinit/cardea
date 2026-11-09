@@ -173,6 +173,34 @@ The operation's descriptor declares which arguments identify the effect, and how
 - **A crash mid-send:** the call becomes `outcome_unknown`, and further attempts in that scope are refused with `effect_in_doubt`.
 - **Reconciliation:** `POST /v0.2/tasks/{task_id}/operations/{operation_id}/reconcile` (or the 30 s loop) calls the reconciler. It settles the call `succeeded` (it was sent) or `failed` with `effect_not_applied`, after which the scope is free again ([ADR-026](decisions/026-effect-idempotency-and-reconciliation.md)).
 
+## 4b. An effect that waits for approval
+
+Single-operation tasks only, for now ([ADR-036](decisions/036-approval-waits.md)). The descriptor says when a call needs approval in addition to authority:
+
+```json
+{"version": 1, "effect": "effect", "handler": "acme.payments.send",
+ "approval": {"rules": [{"rule_id": "large-payments", "level": "conditional",
+                         "when": "args.amount > 500",
+                         "reason": "Payments above 500 need finance approval"}]}}
+```
+
+A host rule in the provisioning document (`"approvals": {"entries": [{"namespace", "operation", "rules"}]}`) replaces this default for one namespace. Approvers hold the Casbin `approve` mode: a permission with `"approve": true` (and `"allow": false` for an approver who may not pay), plus a matching `platform` row with `"approve": true`.
+
+`POST /v0.2/operation-tasks` with `"operation": "payments.send"` and `"amount": 900`.
+
+**You get:**
+- **The task waits:** `GET /v0.2/tasks/{id}` shows `"state": "waiting"` and `"waiting_for": {"approval": "req-..."}`, and the journal has `approval.requested` (identifiers and digests, never arguments).
+- **The approver reads the frozen intent** with `GET /v0.2/approvals/req-...` (or lists `GET /v0.2/approvals?namespace=finance`) and decides, echoing its `intent_digest`:
+
+```json
+{"decision_id": "finance-1042", "decision": "approve",
+ "intent_digest": "<intent_digest from the request>", "reason": "Invoice checked"}
+```
+
+- **Approve:** the stored arguments run once as operation `apr-01`; the receipt's `arguments.context.approval` names the approver, decision, time and argument hash.
+- **Reject:** the task fails with `approval_rejected`. If the approver, the supervisor's ceiling or the operation version changed first, the request becomes `void` and the task fails with `approval_void`. Nothing runs in either case.
+- **Retrying** the same `decision_id` returns the recorded decision; a second approver gets `409 approval_closed` with the current `state`. The requesting agent and the kernel runtime get `403 self_approval`.
+
 ## 5. A confined research run
 
 The host owner installs a read operation whose executor is a confined worker under a `public_web` profile: a memory and CPU cap, and egress only through the filtering proxy ([ADR-028](decisions/028-configurable-worker-profiles.md)):

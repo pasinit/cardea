@@ -1,7 +1,7 @@
 # ADR-036: Approval Waits and Per-Operation Autonomy
 
 - **Date / owner / milestones:** 2026-11-08; kernel and runtime maintainers. Affects the operation registry (ADR-023), the invocation core and effect scopes (ADR-026), agent runs (ADR-027, ADR-031), triggers (ADR-024, ADR-029) and policy provisioning (ADR-010). Related proposals written in parallel: ADR-034 (agent groups, shared records, state machines and mailboxes) and ADR-035 (event triggers). This record does not design either.
-- **Status:** selected (design), 2026-11-08, by the lead reviewer; the project owner may veto. Slice 1 is implemented (2026-11-08): the CEL fit test ran and selected `common-expression-language` 0.10.0 (see [Fit evidence](#fit-evidence-slice-1-2026-11-08)), and the rule schema and fail-closed evaluator exist as a library with unit tests. They are not wired into the runtime: no call waits for approval yet. Slices 2–6 are pending, and nothing in this record is verified on Debian with a real approver. The open questions are settled under [Decisions settled in review](#decisions-settled-in-review-2026-11-08).
+- **Status:** selected (design), 2026-11-08, by the lead reviewer; the project owner may veto. Slice 1 is implemented (2026-11-08): the CEL fit test ran and selected `common-expression-language` 0.10.0 (see [Fit evidence](#fit-evidence-slice-1-2026-11-08)), and the rule schema and fail-closed evaluator exist as a library with unit tests. Slice 2 is implemented (2026-11-09) for single-operation tasks: requests and decisions, the `approve` policy mode, host rules, the descriptor default, the wait, the three endpoints and execution as `apr-01`, with portable tests (see [Verification](#verification)). Agent runs refuse a call that a rule holds (`approval_unsupported`) until slice 4. Slices 3–6 are pending, and nothing in this record is verified on Debian with a real approver. The open questions are settled under [Decisions settled in review](#decisions-settled-in-review-2026-11-08).
 - **Requirement:** some effects must not run until an authorised principal has approved that exact effect. Examples: an agent proposes an order, a payment, a deployment or a merge, and a principal holding approval authority approves or rejects it. A reviewer role can block a change. Small effects inside tighter limits run without approval.
   - Whether approval is needed is configuration per operation and per grant, never code in the kernel.
   - The wait is durable. It survives daemon restarts and the loss of any lease, and it has a deadline with a defined outcome.
@@ -146,7 +146,7 @@ POST /v0.2/approvals/{request_id}/decision
 
   This is the same pattern `tasks.cancel` already uses with `control_requests` and `send_in_transaction`. A crash before commit leaves nothing; a crash after commit leaves a committed decision with an enqueued continuation that DBOS recovers.
 - **Idempotency:** `decision_id` is the idempotency key. Replaying the same `decision_id` with the same body returns the recorded decision. The same `decision_id` with a different body is `409 decision_conflict`. Any other decision on a request that is no longer pending is `409 approval_closed` and carries the current state, so a client that lost a response can learn the outcome. Two approvers racing: the first commit wins, the second gets `approval_closed`.
-- **Refusals** (`403 approver_denied`, `403 self_approval`, `409 approval_expired`, `409 intent_mismatch`) write nothing.
+- **Refusals** (`403 approver_denied`, `403 self_approval`, `403 four_eyes_required`, `409 approval_expired`, `409 intent_mismatch`) write nothing.
 - **Reason text** is bounded to one printable line of 200 characters, like ADR-026 failure summaries. It is shown to the agent, marked as untrusted data.
 
 ### 6. Execution and the receipt
@@ -238,6 +238,15 @@ Decided by the lead on 2026-11-09 for [ADR-034](034-agent-groups-and-shared-reco
 - **What does not change.** The requester exclusion, `distinct_from_supervisor`, the frozen intent and its digest, the durable wait, expiry, idempotent decisions and execution are all unchanged. A resource-qualified `approve` row grants no other right, and it can never raise a task above its supervisor's live ceiling.
 - **Tests (to write).** A principal holding `approve` on `record:orders/approve` can decide that transition's request and is refused with `403 approver_denied` for `record:work/approve`. An operation-level `approve` row on `records.transition` does not satisfy a resource-qualified request.
 
+### Slice 2 review (2026-11-09)
+
+The lead reviewer settled these on 2026-11-09; the project owner may veto any of them.
+
+1. **Platform term of `approve`.** Approving requires a `platform` row in mode `approve` for the namespace and operation, not only a platform `allow` row: least privilege, and consistent with every other right.
+2. **Four-eyes refusal code.** The `distinct_from_supervisor` refusal is `403 four_eyes_required`. `self_approval` stays for the requesting agent and runtime and those of ancestor tasks.
+3. **Voiding at decision.** When the task's live ceiling or the descriptor version fails at decision time, the request becomes `void`, the task is woken and failed with `approval_void`, and the caller gets `409 approval_void`. This is the item-2 rule ("if it fails at decision or execution, the request becomes void"), not a refusal.
+4. **Next slice.** Slice 3 (expiry on the minute schedule and withdrawal on cancel) is next.
+
 ## Integration
 
 - **Authority:** the ceiling formula is unchanged. Approval adds a conjunct for selected effects. The live ceiling is checked at proposal, decision and execution, and the approver's `approve` right at decision and execution. Supervisor revocation or disablement while a task waits voids its request at the next decision, expiry or execution check. Snapshot restore (ADR-019) seals old namespaces: pending requests in a sealed namespace are voided by the restore fence.
@@ -320,6 +329,18 @@ Slice 1 adds `common-expression-language==0.10.0` to the API dependencies throug
 ## Verification
 
 Slice 1 (2026-11-08): the CEL fit test above, and unit tests for the rule schema and evaluator (`apps/api/tests/service/test_approvals.py`): condition values, fail-closed errors, refused conditions, level and expiry validation, host replacement of the descriptor default, per-grant rules only adding requirements, the strictest combination of expiry, `on_expiry` and separation, and the rule-set digest. This covers the condition-error and per-grant-tightening parts of acceptance test 14. Every other acceptance test above is unrun.
+
+Slice 2 (2026-11-09), portable tests on macOS with the DBOS client replaced by a recorder and the operation and continuation steps run directly (`apps/api/tests/service/test_approval_waits.py`, plus one agent-run case in `test_agent_runs.py`). For single-operation tasks they cover acceptance tests 1 (approve: one `apr-01` effect, the receipt's approval block, the deterministic continuation ID), 2 (below threshold), 3 (reject), 5 in part (a new kernel instance on the same store finds the task waiting and the request pending, and a decision then completes it; the expiry half is slice 3), 9 (approver revoked → `void (approver_authority_lost)`), 10 (supervisor revoked → the decision voids the request, no effect), 11 in part (forged `intent_digest` → `intent_mismatch` with nothing written; new descriptor version → `void (operation_changed)`; the `approval_pending` cases are agent-run only), 12 (replayed `decision_id`, `decision_conflict`, two racing approvers commit one decision), 13 for human approvers (requester agent and runtime refused with `self_approval`, supervisor allowed by default and refused under `distinct_from_supervisor`, a principal without `approve` refused, an approve-only principal holds no `allow`), 14 in part (condition error requires approval, ungranted operation denied with no request; per-grant rules are slice 5) and 15 (events committed with their state changes, no arguments in payloads, the read rule of `GET /approvals/{id}`). Not run: a real DBOS daemon killed with SIGKILL while a task waits, the reviewer-agent half of test 13, and every Debian acceptance check.
+
+Implementation notes for slice 2:
+
+- **Tables.** Migration `m9_approvals` (after `m8_groups`) adds `approval_rules` (host rules), `approval_requests` (the frozen intent; intent columns immutable by trigger; at most one open request per task by a partial unique index; expiry columns exist but nothing expires them yet) and `approval_decisions` (append-only, one per request).
+- **Platform term.** Approving needs a `platform` row in mode `approve` for the namespace and operation, as every right needs its platform row.
+- **Four-eyes refusal code.** A supervisor refused under `distinct_from_supervisor` gets `403 four_eyes_required`; `self_approval` stays for the requester and runtimes.
+- **Void at decision.** When the task's live ceiling or the descriptor version fails at decision time, the decision transaction voids the request, wakes the task and enqueues the continuation (which fails the task with `approval_void`), and answers `409 approval_void` with the `reason`. No decision row is written.
+- **Error bodies.** `approval_closed` carries the request's current `state`, `approval_void` its `reason`, as extra fields of the error body.
+- **Deadline.** Without an `expires_after_seconds` rule, `expires_at` is the task deadline. A decision after it is refused with `approval_expired`; the request itself stays `pending` until slice 3 adds the expiry step.
+- **Task receipt.** `GET /tasks/{id}/receipt` of an operation task now returns its one operation, `execute` or `apr-01`.
 
 ## Revisit
 
