@@ -225,6 +225,18 @@ The lead reviewer decided these open questions on 2026-11-08. The project owner 
 7. **Reason text.** Shown to the agent, bounded to 200 characters and marked untrusted.
 8. **Bounds.** A maximum expiry of 30 days and a default of 4 approval waits per run (`max_approval_waits`, at most 16).
 
+## Amendment (2026-11-09): resource-qualified approve
+
+Decided by the lead on 2026-11-09 for [ADR-034](034-agent-groups-and-shared-records.md); the owner may veto. Not implemented.
+
+- **Why.** ADR-034 routes every record state transition through one built-in operation, `records.transition`. An `approve` row on `(namespace, records.transition)` would let its holder approve every transition of every collection. Approvers must instead be scoped to one transition of one collection: approving `orders/approve` must not also approve `work/approve`.
+- **What changes.** The `approve` mode (item 2) may also be granted on a resource-qualified grant of the form `<kind>:<resource>`, written like ADR-033's `harness:<id>`. The row `(P, namespace, record:orders/approve, approve)` means "P may decide approval requests for the `approve` transition of collection `orders` in this namespace". It needs a matching `platform` row, as every right does.
+- **Which grant a request needs.** An approval request records the *approval resource* that its requiring rule names. For a rule that ADR-034 compiles from a transition's `approval`, that resource is `record:<collection>/<transition>`. For every other rule it is the operation name, exactly as today.
+  - The decision-time check (item 2) looks up the `approve` row on that resource.
+  - The ceiling check (`policy.ceiling`) also applies to that resource: the requesting task must hold the resource-qualified grant itself.
+- **What does not change.** The requester exclusion, `distinct_from_supervisor`, the frozen intent and its digest, the durable wait, expiry, idempotent decisions and execution are all unchanged. A resource-qualified `approve` row grants no other right, and it can never raise a task above its supervisor's live ceiling.
+- **Tests (to write).** A principal holding `approve` on `record:orders/approve` can decide that transition's request and is refused with `403 approver_denied` for `record:work/approve`. An operation-level `approve` row on `records.transition` does not satisfy a resource-qualified request.
+
 ## Integration
 
 - **Authority:** the ceiling formula is unchanged. Approval adds a conjunct for selected effects. The live ceiling is checked at proposal, decision and execution, and the approver's `approve` right at decision and execution. Supervisor revocation or disablement while a task waits voids its request at the next decision, expiry or execution check. Snapshot restore (ADR-019) seals old namespaces: pending requests in a sealed namespace are voided by the restore fence.

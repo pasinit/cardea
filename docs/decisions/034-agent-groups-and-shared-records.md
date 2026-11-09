@@ -1,7 +1,7 @@
 # ADR-034: Agent Groups, Shared Records, State Machines and Mailboxes
 
 - **Date / owner / milestones:** 2026-11-08; runtime and API maintainers. Builds on [ADR-023](023-installed-operation-registry.md) (installed operations), [ADR-024](024-time-triggers.md) (time triggers), [ADR-026](026-effect-idempotency-and-reconciliation.md) (effect scopes), [ADR-027](027-agent-runs.md) (agent runs), [ADR-029](029-supervisor-schedules-expectations-and-run-evidence.md) (supervisor-managed triggers, expectations), [ADR-031](031-agent-run-context-operations.md) (context operations), [ADR-033](033-pluggable-agent-harnesses.md) (harnesses), [ADR-035](035-event-triggers.md) (event triggers, selected, slice 1 implemented) and [ADR-036](036-approval-waits.md) (approval waits, selected, implementation pending). Relates to roadmap M8.
-- **Status:** proposed, reworked 2026-11-08 at the lead's and owner's direction. The first version made "team" a kernel concept, with roles, role relations and a fixed work-item lifecycle. That baked one workflow into the kernel and is withdrawn. This version proposes only generic primitives. It carries forward the lead decisions from the first review that still apply (see [Carried decisions](#carried-decisions)). Nothing is implemented, and no fit test below has run.
+- **Status:** selected (design); not implemented. The lead approved this design on 2026-11-09, and the owner may veto. It was reworked on 2026-11-08 at the lead's and owner's direction. The first version made "team" a kernel concept, with roles, role relations and a fixed work-item lifecycle; that baked one workflow into the kernel and is withdrawn. This version has only generic primitives. Review decisions are recorded under [Carried decisions](#carried-decisions) and [Decisions settled in review (2026-11-09)](#decisions-settled-in-review-2026-11-09). No fit test below has run.
 - **Affected components:** [tasks and scheduler](../components/tasks-scheduler.md), [delegation and messaging](../components/delegation-messaging.md), [events and inputs](../components/events-inputs.md), [identity and capabilities](../components/identity-capabilities.md), [resource budgets](../components/resource-budgets.md), [agent runtime](../components/agent-runtime.md).
 
 ## Requirement
@@ -110,6 +110,7 @@ kind: AgentGroup
 metadata: {name: g1, namespace: ns-a}
 spec:
   supervisor: sup-1                   # immutable; must equal the caller
+  collections: [items]                # separate Collection documents this group uses (decision 2.1)
   spend: {usd: 50, window: day, timezone: UTC}
   pools:
     - name: worker                    # principals g1.worker.0 .. g1.worker.2
@@ -170,7 +171,10 @@ spec:
   transitions: [...]
 ```
 
-1. **Collections** are supervisor-managed with `PUT /v0.2/collections/{name}`, under the same `groups.manage` right, `generation` and dry-run rules. A collection belongs to one namespace and one supervisor. Several groups under that supervisor may share it.
+1. **Collections** are supervisor-managed with `PUT /v0.2/collections/{name}`, under the same `groups.manage` right, `generation` and dry-run rules. A collection belongs to one namespace and one supervisor.
+   - **It is its own document, not part of a group.** Several groups under that supervisor may share it.
+   - A group lists the collections it uses in `spec.collections`. Apply checks that each one exists in the namespace and has the same supervisor.
+   - Removing a collection that a group still references is refused.
 2. **Records.** A record holds:
    - `record_id` and `data`, validated against the schema;
    - `labels` (at most 16) and `links` (at most 32, each `{rel, url, external_id, observed_state, observed_at}` with free-form `rel`);
@@ -192,6 +196,12 @@ spec:
    | `records.claimed` | read: the caller's claims | `record:C/read` |
 
    A collection may add a CEL **write guard** per action, over `record`, `args` and `caller` (`id`, `group`, `pool`). One example is a per-record check that a member may update only records it holds: `record.holder == caller.id`. The guard can only narrow what the grant allows.
+   - **CEL limits.** Guards use the same CEL evaluator and the same static limits as ADR-036 slice 1:
+     - no comprehension macros;
+     - at most 512 characters;
+     - a fixed function list;
+     - compiled and checked when the collection is applied.
+   - **Fail closed.** A guard that is false, or that errors at evaluation, refuses the call or transition.
 4. **Claims.** A claim sets `holder` to the calling principal.
    - It is atomic. One `BEGIN IMMEDIATE` transaction re-reads the record, checks it is unclaimed, the guard and the holder's limit, then sets the holder, increments `claim_epoch`, sets the lease and appends the event. SQLite's single writer means exactly one of several concurrent claims succeeds. The others get `record_claimed` (409).
    - **It belongs to a principal, not to a run,** so it survives across runs.
@@ -201,7 +211,7 @@ spec:
      - The follow-up uses the holder's first trigger template, with request ID `<holder>.claim.<record_id>.<epoch>.<n>`, and pays from its budgets.
      - At most `max_followups` follow-ups are admitted per epoch unless the holder records a new event on the record. After that the claim lapses, and the supervisor gets a mailbox message.
      - **Apply-time check:** `lease_seconds ≥ 2 × attempts × timeout_seconds + 240` for every pool granted `claim` on the collection. A manifest that fails it is refused with `claim_lease_too_short`.
-   - **Expiry.** The tick releases expired claims: holder cleared, epoch incremented, a `claim_expired` event, and the state set to the transition's `on_expiry` target (decision 3). A holder that stops renewing loses the record at most one lease plus one tick after its last renewal.
+   - **Expiry.** The tick releases expired claims: holder cleared, epoch incremented, a `claim_expired` event, and the state set to the acquiring transition's `on_claim_expiry` target (decision 3). A holder that stops renewing loses the record at most one lease plus one tick after its last renewal.
 5. **External trackers are mirrors.** GitHub and Gitea lack an atomic claim, so they cannot own records. An operations package may provide three things:
    - **mirror out:** installed effect operations, with an ADR-026 scope on the record, write an external issue per record and store it as a link;
    - **import in:** an ADR-035 trigger runs an agent that calls `records.create`;
@@ -231,7 +241,7 @@ transitions:
 1. **Semantics.** `records.transition` runs in one transaction. The kernel checks:
    - the caller's live grant `record:C/<transition>`;
    - that `state ∈ from`;
-   - the guard, which **fails closed**: an evaluation error refuses the transition;
+   - the guard, under the CEL limits of decision 2.3. A failing guard (false or an evaluation error) **refuses the transition** with `guard_refused`;
    - the claim rule. `acquire` claims the record as in decision 2.4. `holder` requires the current holder and epoch. `release` requires them and then clears the claim.
    - the evidence, when `requires_receipt` is set: the call must cite a receipt ID of a successful (or reconciled-applied) call of that operation, made by the caller's task, under an idempotency context that names this record.
 
@@ -243,7 +253,7 @@ transitions:
    - an approver holding the `approve` mode on `record:C/t1` decides;
    - the frozen transition is executed once and re-checked against the live ceiling.
 
-   Self-approval is refused by ADR-036's requester exclusion. This needs ADR-036's `approve` mode to accept resource-qualified grants (open question 2).
+   Self-approval is refused by ADR-036's requester exclusion. An approver for `record:C/t1` needs the `approve` mode on that resource-qualified grant. ADR-036 owns approvals, so this is defined there, in [ADR-036, Amendment (2026-11-09): resource-qualified approve](036-approval-waits.md#amendment-2026-11-09-resource-qualified-approve).
 3. **Changing the table.** A new collection generation may add states and transitions freely. Removing a state that records still occupy is refused, unless the manifest gives `migrate: {from: old, to: new}`. The reconciler then applies that move as recorded `migrated` events. Records keep their history.
 4. **No state machine** means plain records with compare-and-set updates and, if `standalone: true`, standalone claims.
 
@@ -258,12 +268,14 @@ transitions:
    - `created_at`.
 
    `mailbox_deliveries` has one row per recipient, with `state` (`pending`, `leased`, `consumed` or `dead`), `task_id`, `attempt` and `deliveries`.
-2. **Sending.** Agents send with `mailbox.send` (grant `mail:<address>`, ADR-026 scope on `/client_key`). The supervisor sends with `POST /v0.2/mailbox`. The message and its delivery rows commit in the sender's receipt transaction, so a message exists exactly when its send succeeded. Recipients must be principals in the namespace.
+2. **Sending.** Agents send with `mailbox.send` (grant `mail:<address>`, ADR-026 scope on `/client_key`). The supervisor sends with `POST /v0.2/mailbox`. The message and its delivery rows commit in the sender's receipt transaction, so a message exists exactly when its send succeeded.
+   - **Least privilege.** An agent may send only to addresses it holds a `mail:<address>` grant for: an instance, a pool or a group, each in the namespace. There is no implicit mail between any two principals of a namespace.
+   - A grant for a pool or group address does not cover its individual instances.
 3. **Delivery as context.** At attempt start, the built-in context source `mailbox.inbox` leases pending deliveries, oldest first and up to its byte budget. The lease is recorded in the attempt checkpoint transaction, and a pool delivery is bound to the first member that leases it.
    - A retried attempt sees the same deliveries.
    - When the run succeeds they become `consumed`. When it fails or is cancelled they return to `pending`, with `deliveries` incremented.
    - At `max_deliveries` (default 3) a delivery becomes `dead`, and the sender and the supervisor are notified. Redeliveries notify no one (carried decision 6).
-4. **Events.** Every send and every delivery-state change appends a kernel journal event with a CloudEvents shape: `cardea.mailbox.sent`, `cardea.mailbox.delivered`, `cardea.mailbox.dead`, with `subject` set to the recipient. Group triggers use them to wake the recipient (decision 7).
+4. **Events.** Every send and every delivery-state change appends a kernel journal event with a CloudEvents shape: `cardea.mailbox.sent`, `cardea.mailbox.delivered`, `cardea.mailbox.dead`, with `subject` set to the recipient. Group triggers use them to wake the recipient (decision 6).
 5. **Relation to A2A.** A2A remains the wire for delegation to a running agent (ADR-017), with a reply expected. A mailbox is store-and-forward between principals that may not be running. It reuses A2A's message body, so a future adapter could accept A2A `message/send` into a mailbox address. That adapter is not designed here.
 6. **Audit.** Messages and deliveries are append-only to agents. The run view lists the messages each run consumed, and `GET /v0.2/mailbox` pages messages with their delivery history.
 
@@ -292,7 +304,7 @@ transitions:
 
 ### 6. Kernel events as trigger sources
 
-Record transitions (`cardea.record.transitioned`, `subject` = `<collection>/<record_id>`, data `{from, to, transition}`), claim expiry and the mailbox events are appended to the kernel journal in the same transaction as the change. A group trigger with `event:` compiles to an ADR-035 trigger whose source is the kernel journal (`source = cardea://<namespace>`) instead of an HTTP sender. No signature is needed, because the kernel is the producer. It uses the same matching, the same dedupe on (trigger, source, id), the same admission, and the same `trigger_event` data block. This is a small extension of ADR-035: an internal source beside the HTTP endpoint.
+Record transitions (`cardea.record.transitioned`, `subject` = `<collection>/<record_id>`, data `{from, to, transition}`), claim expiry and the mailbox events are appended to the kernel journal in the same transaction as the change. A group trigger with `event:` compiles to an ADR-035 trigger whose source is the kernel journal (`source = cardea://<namespace>`) instead of an HTTP sender. No signature is needed, because the kernel is the producer. It uses the same matching, the same dedupe on (trigger, source, id), the same admission, and the same `trigger_event` data block. This is a small extension of ADR-035: an internal source beside the HTTP endpoint. **The source is namespace-local.** A trigger matches only journal events of its own namespace, and cross-namespace triggering is a revisit item.
 
 ## Integration
 
@@ -343,6 +355,7 @@ kind: AgentGroup
 metadata: {name: eng-team, namespace: eng}
 spec:
   supervisor: sup-eng
+  collections: [work, decisions]
   spend: {usd: 40, window: day}
   pools:
     - name: principal              # reviews architecture and changes, records decisions, can block
@@ -410,6 +423,7 @@ kind: AgentGroup
 metadata: {name: desk, namespace: desk}
 spec:
   supervisor: sup-desk
+  collections: [orders]
   spend: {usd: 20, window: day}
   pools:
     - name: analyst                # proposes orders
@@ -463,7 +477,8 @@ Portable tests go in `apps/api/tests/service/`. Before the record is called veri
 
 ## Implementation plan (PR-sized slices, dependency order)
 
-1. **Collections and records:** the migration, the `Collection` model, `PUT/GET` of collections, `records.create/get/query/update` with compare-and-set and write guards (CEL, from ADR-036 slice 1), and history.
+1. **Collections and records:** the migration, the `Collection` model, `PUT/GET` of collections, `records.create/get/query/update` with compare-and-set, write guards and history.
+   - Guard evaluation reuses the CEL compilation in `cardea.service.approvals` (ADR-036 slice 1, PR #32) once that merges. There is no second copy of the evaluator or its limits.
 2. **Claims:** standalone claim and release, epoch fencing at the tool endpoint, renewal, the expiry sweep, follow-up wakes and the apply-time lease check. Tests 3, 4.
 3. **State machines:** `records.transition`, guards, claim effects, `requires_receipt`, and generations with `migrate`. Test 7.
 4. **Agent groups:** `AgentGroup` apply and plan, `groups.manage`, member principals, delegated grants, compiled time triggers, one run per member. Test 6.
@@ -472,7 +487,7 @@ Portable tests go in `apps/api/tests/service/`. Before the record is called veri
 7. **Kernel events as ADR-035 sources:** the journal source, group event triggers and coalescing. Test 10.
 8. **Change application:** drain, re-addressing, `observedGeneration`, deletion. Test 1.
 9. **Spend accounts and windowed expectations.** Test 8.
-10. **Approval-gated transitions** (after ADR-036 slices 2–4): transition `approval` compiled to ADR-036 rules, and `approve` on resource-qualified grants. Test 2.
+10. **Approval-gated transitions** (after ADR-036 slices 2–4 and its 2026-11-09 amendment): transition `approval` compiled to ADR-036 rules. Test 2.
 11. **Reference operations packages and examples:** fake `vcs.*` and `broker.*` operations for the tests, and both examples as getting-started material.
 
 ## Verification
@@ -495,7 +510,8 @@ Revisit if:
 - DBOS or A2A gains durable store-and-forward to a logical recipient;
 - groups must span hosts, which breaks the single-writer claim argument;
 - runs need more than 64 KiB of context, or retrieval instead of recency;
-- approver sets need relationships that grants cannot express, in which case evaluate OpenFGA (as ADR-036 says).
+- approver sets need relationships that grants cannot express, in which case evaluate OpenFGA (as ADR-036 says);
+- a deployment needs kernel journal events in one namespace to trigger groups in another (decision 6 keeps them namespace-local).
 
 ## Carried decisions
 
@@ -508,10 +524,18 @@ The lead decided these on 2026-11-08 for the first version, and they still apply
 5. Defaults: a 4 h claim lease with follow-up wakes and the apply-time check, and a 24 KiB context budget.
 6. Only a dead letter notifies the sender; redelivery does not.
 
-## Open questions for the owner
+## Decisions settled in review (2026-11-09)
 
-1. Should groups and collections be separate documents (as proposed), or should a collection be declared inside a group manifest?
-2. ADR-036's `approve` mode is defined on `(namespace, operation)`. Approval-gated transitions need it on resource-qualified grants such as `record:orders/approve`. Should that be amended in ADR-036 or here?
-3. Is CEL acceptable for guards (one language with ADR-036), or should guards be limited to a fixed set of comparisons?
-4. Should `mail:<address>` grants exist, or may any member mail any principal in its namespace?
-5. Should kernel journal events (transitions, mail) be able to trigger runs in other namespaces' groups, or stay namespace-local (as proposed)?
+The lead decided these on 2026-11-09; the owner may veto any of them.
+
+1. **Collections are separate documents.** They can be shared across groups, and a group references the ones it uses (decision 2.1).
+2. **Resource-qualified `approve`** (for example `record:orders/approve`) is an amendment to ADR-036, because ADR-036 owns approvals. See [ADR-036, Amendment (2026-11-09)](036-approval-waits.md#amendment-2026-11-09-resource-qualified-approve) and decision 3.2.
+3. **CEL guards** use the same evaluator and the same static limits as ADR-036 slice 1:
+   - no comprehension macros;
+   - a 512-character cap;
+   - a fixed function list;
+   - fail closed.
+
+   A failing guard refuses the transition (decisions 2.3 and 3.1).
+4. **Mail requires `mail:<address>` grants.** There is no implicit any-to-any mail within a namespace (decision 4.2).
+5. **Kernel journal events stay namespace-local** for now. Cross-namespace triggering is a revisit item (decision 6).
