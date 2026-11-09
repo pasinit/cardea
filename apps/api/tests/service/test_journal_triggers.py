@@ -349,3 +349,57 @@ def test_approval_events_are_exposed_and_large_data_is_bounded(kernel: Kernel) -
     data = exposed[1][0].data
     assert isinstance(data, dict) and data["truncated"] is True
     assert isinstance(data["bytes"], int) and data["bytes"] > journal.MAX_DATA_BYTES
+
+
+def test_a_supervisor_installs_a_journal_trigger(kernel: Kernel) -> None:
+    granted = tuple(
+        Permission(
+            principal_id="supervisor",
+            namespace="test",
+            operation=right,
+            delegate=True,
+            expires_at=now() + timedelta(hours=1),
+        )
+        for right in (*GRANTS, "groups.manage", "tasks.schedule")
+    )
+    provision(
+        kernel.database,
+        Provisioning(
+            principals=(
+                Principal(
+                    principal_id="supervisor",
+                    kind="human",
+                    auth_kind="spiffe",
+                    issuer="test",
+                    subject="supervisor",
+                ),
+            ),
+            permissions=granted,
+            platform=tuple(p.model_copy(update={"principal_id": "platform"}) for p in granted),
+        ),
+    )
+    post(kernel, {"instance": "bob"})  # before installation: never replayed
+    spec = TriggerSpec.model_validate(
+        {
+            "trigger_id": "bob-mail",
+            "supervisor_id": "supervisor",
+            "journal": {"types": ["cardea.mailbox.sent"], "subjects": ["bob"]},
+            "template_kind": "agent-run",
+            "template": {
+                "agent_id": "bob",
+                "namespace": "test",
+                "objective": "Read mail",
+                "instructions": "Handle your mail.",
+                "operations": ["mailbox.send"],
+                "context": INBOX,
+                "grants": list(GRANTS),
+            },
+        }
+    )
+    assert kernel.schedule(kernel.auth.validate("supervisor"), spec)["change"] == "installed"
+    tick(kernel)
+    assert admitted(kernel, "bob") == []
+    post(kernel, {"instance": "bob"})
+    tick(kernel)
+    assert len(admitted(kernel, "bob")) == 1
+    assert deliveries(kernel, "bob-mail") == [("admitted", None)]
