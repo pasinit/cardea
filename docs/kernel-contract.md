@@ -94,7 +94,7 @@ The 2026-09-22 [standards-first decision](standards-first.md) revises the earlie
 
 - `queued`: accepted and durably recorded; waiting for admission.
 - `running`: admitted under a bounded dispatch lease; may execute model/tool steps.
-- `waiting`: checkpointed with an event cursor, timer, dependency, or authority request. [ADR-036](decisions/036-approval-waits.md) selects approval waits: an exact, argument-bound effect waits for an authorised approver, as an extra condition inside the live ceiling. Implemented for single-operation tasks only (slice 2, portable tests); agent runs, expiry and withdrawal are pending, and nothing is verified on Debian with a real approver.
+- `waiting`: checkpointed with an event cursor, timer, dependency, or authority request. [ADR-036](decisions/036-approval-waits.md) selects approval waits: an exact, argument-bound effect waits for an authorised approver, as an extra condition inside the live ceiling. Implemented for single-operation tasks only, including expiry on the minute schedule and withdrawal on cancel (slices 2 and 3, portable tests); agent runs are pending, and nothing is verified on Debian with a real approver.
 - `suspended`: explicit supervisor pause at a durable boundary; not native memory suspension.
 - `succeeded`: independent result checks passed and outputs are committed.
 - `failed`: terminal error with a structured reason and evidence.
