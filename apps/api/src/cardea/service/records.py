@@ -693,6 +693,33 @@ def check_condition(
         raise OperationRejected(f"{label} guard refused this call", "guard_refused")
 
 
+def _names_record(receipt: OperationReceipt, record_id: str) -> bool:
+    """A call was made for a record: its `record_id` argument, or a claim idempotency
+    context `<record_id>.<epoch>`."""
+    recorded = receipt.request.arguments
+    called = recorded.get("arguments")
+    provenance = recorded.get("context")
+    return (isinstance(called, dict) and called.get("record_id") == record_id) or (
+        isinstance(provenance, dict)
+        and str(provenance.get("idempotency_context") or "").startswith(f"{record_id}.")
+    )
+
+
+def _latest_receipt(
+    conn: sa.Connection, task_id: str, operation: str, record_id: str
+) -> str | None:
+    rows = conn.exec_driver_sql(
+        "SELECT snapshot FROM operations WHERE task_id=? AND state='succeeded' "
+        "AND json_extract(snapshot,'$.request.name')=? ORDER BY rowid DESC",
+        (task_id, operation),
+    ).fetchall()
+    for (snapshot,) in rows:
+        receipt = OperationReceipt.model_validate_json(snapshot)
+        if _names_record(receipt, record_id):
+            return receipt.receipt_id
+    return None
+
+
 def check_receipt(
     conn: sa.Connection,
     need: ReceiptRequirement,
@@ -703,8 +730,14 @@ def check_receipt(
 ) -> str:
     """The evidence a transition needs (decision 3.1): the cited receipt is a successful,
     or reconciled-applied, call of the named operation, made by the caller's task (or, for
-    `same_caller`, by the caller within the window), for this record."""
+    `same_caller`, by the caller within the window), for this record.
+
+    An agent sees operation outputs, not receipt IDs, so with `same_task` an omitted
+    `receipt_id` cites the task's latest successful call of the operation for this record.
+    """
     receipt_id = arguments.get("receipt_id")
+    if receipt_id is None and need.within == "same_task":
+        receipt_id = _latest_receipt(conn, context.task_id, need.operation, record_id)
     if not isinstance(receipt_id, str):
         raise OperationRejected(
             f"This transition needs receipt_id of a {need.operation} call", "receipt_required"
@@ -728,14 +761,7 @@ def check_receipt(
             raise OperationRejected("The cited call was made by someone else", "receipt_invalid")
         if receipt.updated_at < now() - timedelta(seconds=need.window_seconds):
             raise OperationRejected("The cited call is outside the window", "receipt_invalid")
-    recorded = receipt.request.arguments
-    called = recorded.get("arguments")
-    provenance = recorded.get("context")
-    names_record = (isinstance(called, dict) and called.get("record_id") == record_id) or (
-        isinstance(provenance, dict)
-        and str(provenance.get("idempotency_context") or "").startswith(f"{record_id}.")
-    )
-    if not names_record:
+    if not _names_record(receipt, record_id):
         raise OperationRejected("The cited call was not made for this record", "receipt_invalid")
     return receipt_id
 
