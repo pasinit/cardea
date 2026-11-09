@@ -76,7 +76,8 @@ class _Void(Exception):
         self.reason = reason
 
 
-def _void_reason(fault: Fault) -> str:
+def void_reason_for(fault: Fault) -> str:
+    """Why an approved intent cannot run, from the refusal that stopped it."""
     if fault.code in approval_requests.VOID_REASONS:
         return approval_requests.VOID_REASONS[fault.code]
     return "authority_lost" if fault.code in AUTHORITY_CODES else fault.code
@@ -350,7 +351,7 @@ class OperationRuntime:
                 except Fault as error:
                     # Raising rolls back the lease and intent: nothing was dispatched.
                     if row is not None:
-                        raise _Void(_void_reason(error)) from None
+                        raise _Void(void_reason_for(error)) from None
                     raise _Refused(error) from None
                 timeout = invocation.timeout_for(
                     self.kernel.operations, request.operation, expires, SETTLE_MARGIN, queue

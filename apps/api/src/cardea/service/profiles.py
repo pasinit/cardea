@@ -23,6 +23,8 @@ AGENT_RUN_WORKFLOW = "cardea.m6.agent_run"
 AGENT_RUN_QUEUE = "cardea-agent-runs"
 # Continuation of a single-operation task after an approval decision (ADR-036).
 APPROVAL_WORKFLOW = "cardea.m6.approval"
+# Continuation attempt of an agent run after its approval request closed (ADR-036 slice 4).
+AGENT_APPROVAL_WORKFLOW = "cardea.m6.agent_run.approval"
 
 
 @dataclass(frozen=True)

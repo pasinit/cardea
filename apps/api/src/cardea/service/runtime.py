@@ -46,7 +46,7 @@ from cardea.service.kernel import (
 from cardea.service.models import TaskRequest, now
 from cardea.service.operation_runtime import OperationRuntime
 from cardea.service.policy import Policy
-from cardea.service.profiles import APPROVAL_WORKFLOW
+from cardea.service.profiles import AGENT_APPROVAL_WORKFLOW, APPROVAL_WORKFLOW
 from cardea.service.triggers import Scheduler
 
 TRIGGER_WORKFLOW = "cardea.m6.triggers"
@@ -173,6 +173,13 @@ class Runtime:
         def execute_agent_run(task_id: str, wait: bool, deadline: float) -> str:
             return agent_run_attempts(task_id)
 
+        # Enqueued under `<task>.approval.<request>` when a request of a waiting (or still
+        # running) run closes (ADR-036 slice 4): the continuation attempt of the same task.
+        @DBOS.workflow(name=AGENT_APPROVAL_WORKFLOW)
+        def continue_agent_run(task_id: str, request_id: str) -> str:
+            return agent_run_attempts(task_id)
+
+        self.continue_agent_run = continue_agent_run
         self.execute_agent_run = execute_agent_run
         self.execute_operation = execute_operation
         self.execute_delegation = execute_delegation
