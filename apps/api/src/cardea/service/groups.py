@@ -44,8 +44,8 @@ from cardea.service.models import (
     now,
 )
 from cardea.service.policy import Policy
-from cardea.service.schedule import slot_key
 from cardea.service.records import CollectionSpec, check_lease
+from cardea.service.schedule import slot_key
 from cardea.service.triggers import MemberBusy, remove, upsert
 
 if TYPE_CHECKING:

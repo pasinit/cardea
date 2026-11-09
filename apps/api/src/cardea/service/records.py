@@ -18,7 +18,7 @@ already exist (migration ``m10_records``).
 
 import json
 from collections.abc import Iterable, Mapping
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from typing import Annotated, Any, Literal, Self
 from uuid import uuid4
@@ -39,7 +39,7 @@ from pydantic import (
 
 from cardea.kernel.models import Identifier
 from cardea.service.approvals import compile_condition, execute_condition
-from cardea.service.database import Database, Fault
+from cardea.service.database import Database, Fault, borrow
 from cardea.service.models import (
     COLLECTION_NAME,
     CollectionName,
@@ -485,6 +485,152 @@ def check_guard(
         raise OperationRejected(f"{action} guard refused this call", "guard_refused")
 
 
+# Claims (ADR-034 decision 2.4)
+
+# Built-in operations that change a record; their reconciler reads the history.
+WRITES = frozenset({"records.create", "records.update", "records.claim", "records.release"})
+
+
+def stamp(at: datetime) -> str:
+    """Lease times in one fixed format, so SQL string comparison orders them."""
+    return at.astimezone(UTC).isoformat(timespec="microseconds")
+
+
+def caller_of(conn: sa.Connection, principal: str) -> dict[str, JsonValue]:
+    """The guard's `caller`: the principal, and its group and pool when it is a member."""
+    member = conn.exec_driver_sql(
+        "SELECT group_name,pool FROM group_members WHERE principal_id=?", (principal,)
+    ).first()
+    return {
+        "id": principal,
+        "group": str(member[0]) if member else None,
+        "pool": f"{member[0]}.{member[1]}" if member else None,
+    }
+
+
+def claim_context(record_id: str, epoch: int) -> str:
+    """The ADR-026 idempotency context for effects taken for one claim epoch."""
+    return f"{record_id}.{epoch}"
+
+
+def claim_view(record: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
+    epoch = record["claim_epoch"]
+    assert isinstance(epoch, int)
+    return {
+        "collection": record["collection"],
+        "record_id": record["record_id"],
+        "claim_epoch": epoch,
+        "lease_expires_at": record["lease_expires_at"],
+        "idempotency_context": claim_context(str(record["record_id"]), epoch),
+    }
+
+
+def standalone(spec: CollectionSpec) -> ClaimsConfig:
+    if spec.claims is None:
+        raise OperationRejected("This collection has no claims", "claims_disabled")
+    if not spec.claims.standalone:
+        raise OperationRejected(
+            "Claims on this collection are taken by state transitions, not records.claim",
+            "claims_not_standalone",
+        )
+    return spec.claims
+
+
+def expired(row: sa.RowMapping, at: datetime) -> bool:
+    lease = row["lease_expires_at"]
+    return lease is not None and datetime.fromisoformat(str(lease)) <= at
+
+
+def check_holder(row: sa.RowMapping, caller: Mapping[str, JsonValue], epoch: object) -> None:
+    """Fencing: only the current holder, at the current epoch, before its lease ends."""
+    if row["holder"] != caller["id"] or row["claim_epoch"] != epoch or expired(row, now()):
+        raise OperationRejected(
+            f"This claim is no longer held at epoch {epoch}; the record is at epoch "
+            f"{row['claim_epoch']}",
+            "claim_lost",
+        )
+
+
+def write_claim(conn: sa.Connection, row: sa.RowMapping, new: Mapping[str, JsonValue]) -> None:
+    """Store a claim change; any holder event restarts the follow-up count."""
+    changed = conn.exec_driver_sql(
+        "UPDATE records SET holder=?,claim_epoch=?,lease_expires_at=?,followups=0,version=?,"
+        "updated_at=? WHERE seq=? AND version=?",
+        (
+            new["holder"],
+            new["claim_epoch"],
+            new["lease_expires_at"],
+            new["version"],
+            new["updated_at"],
+            row["seq"],
+            row["version"],
+        ),
+    ).rowcount
+    assert changed == 1
+
+
+def reset_followups(conn: sa.Connection, row: sa.RowMapping) -> None:
+    conn.exec_driver_sql("UPDATE records SET followups=0 WHERE seq=?", (row["seq"],))
+
+
+def renew(conn: sa.Connection, row: sa.RowMapping, until: datetime) -> dict[str, JsonValue]:
+    """Extend a live claim to at least `until`. A renewal changes no version or history."""
+    lease = max(datetime.fromisoformat(str(row["lease_expires_at"])), until)
+    conn.exec_driver_sql(
+        "UPDATE records SET lease_expires_at=?,followups=0 WHERE seq=?", (stamp(lease), row["seq"])
+    )
+    return {**record_view(row), "lease_expires_at": stamp(lease)}
+
+
+def expire(
+    conn: sa.Connection, row: sa.RowMapping, at: datetime, *, actor: str, reason: str
+) -> None:
+    """Return a lapsed claim to the pool: holder cleared, epoch incremented, history and a
+    kernel journal event appended, all in the caller's transaction."""
+    old = record_view(row)
+    new: dict[str, JsonValue] = {
+        **old,
+        "holder": None,
+        "lease_expires_at": None,
+        "claim_epoch": int(row["claim_epoch"]) + 1,
+        # TODO(ADR-034 slice 3): set `state` to the acquiring transition's on_claim_expiry.
+        "version": int(row["version"]) + 1,
+        "updated_at": at.isoformat(),
+    }
+    write_claim(conn, row, new)
+    conn.exec_driver_sql(
+        "INSERT INTO record_events(namespace,collection,record_id,version,kind,actor,"
+        "task_id,receipt_id,old_json,new_json,at) "
+        "VALUES (?,?,?,?,'claim_expired',?,NULL,NULL,?,?,?)",
+        (
+            row["namespace"],
+            row["collection"],
+            row["record_id"],
+            new["version"],
+            actor,
+            json.dumps(old),
+            json.dumps(new),
+            new["updated_at"],
+        ),
+    )
+    with borrow(conn) as tx:
+        tx.append_event(
+            namespace=str(row["namespace"]),
+            event_type="record.claim_expired",
+            producer_id=actor,
+            correlation_id=f"{row['collection']}/{row['record_id']}.{row['claim_epoch']}",
+            at=at,
+            payload={
+                "collection": row["collection"],
+                "record_id": row["record_id"],
+                "holder": row["holder"],
+                "claim_epoch": row["claim_epoch"],
+                "followups": row["followups"],
+                "reason": reason,
+            },
+        )
+
+
 class Records:
     """The built-in record operations, bound to the service database."""
 
@@ -495,6 +641,9 @@ class Records:
             "records.get": self.get,
             "records.query": self.query,
             "records.update": self.update,
+            "records.claim": self.claim,
+            "records.release": self.release,
+            "records.claimed": self.claimed,
         }
 
     def handler(self, name: str) -> Handler:
@@ -507,8 +656,8 @@ class Records:
     ) -> tuple[CollectionSpec, dict[str, JsonValue]]:
         """Live ceiling on `record:<collection>/<action>`, then the collection document.
 
-        Returns the spec and the guard's `caller`. Group and pool are null until agent
-        groups exist (slice 4).
+        Returns the spec and the guard's `caller`; `group` and `pool` are null unless the
+        caller is an agent-group member.
         """
         policy = Policy(conn)
         try:
@@ -519,8 +668,7 @@ class Records:
         if row is None:
             raise OperationRejected("No such collection in this namespace", "collection_not_found")
         spec = CollectionSpec.model_validate_json(row["spec_json"])
-        caller: dict[str, JsonValue] = {"id": binding["agent_id"], "group": None, "pool": None}
-        return spec, caller
+        return spec, caller_of(conn, str(binding["agent_id"]))
 
     @staticmethod
     def _fence(conn: sa.Connection, context: OperationContext) -> None:
@@ -687,6 +835,8 @@ class Records:
                     f"expected version {expected}, record is at version {row['version']}",
                     "version_conflict",
                 )
+            if "claim_epoch" in arguments:
+                check_holder(row, caller, arguments["claim_epoch"])
             check_guard(spec, "update", old, arguments, caller)
             new: dict[str, JsonValue] = {
                 **old,
@@ -714,8 +864,118 @@ class Records:
             ).rowcount
             # BEGIN IMMEDIATE holds the write lock, so the version cannot move under us.
             assert changed == 1
+            if row["holder"] == caller["id"]:
+                # The holder touched its record: follow-up wakes start counting again.
+                reset_followups(conn, row)
             self._event(conn, context, str(caller["id"]), "updated", old, new)
         return {"record": new}
+
+    async def claim(
+        self, arguments: dict[str, JsonValue], context: OperationContext
+    ) -> dict[str, JsonValue]:
+        """Atomic standalone claim (decision 2.4). One BEGIN IMMEDIATE transaction re-reads
+        the record and checks it is free, the guard and the holder's limit, then takes it;
+        SQLite's single writer lets exactly one of several concurrent claims win."""
+        collection = str(arguments["collection"])
+        record_id = str(arguments["record_id"])
+        with self.database.engine.begin() as conn:
+            spec, caller = self._authorize(conn, context, collection, "claim")
+            claims = standalone(spec)
+            row = _record_row(conn, context.namespace, collection, record_id)
+            if row is None:
+                raise OperationRejected("No such record", "record_not_found")
+            at = now()
+            holder = str(caller["id"])
+            self._fence(conn, context)
+            if row["holder"] is not None and expired(row, at):
+                # A lapsed claim the sweep has not reached yet is released first.
+                expire(conn, row, at, actor=holder, reason="lease_expired")
+                row = _record_row(conn, context.namespace, collection, record_id)
+                assert row is not None
+            if row["holder"] == holder:
+                # An idempotent re-claim is evidence the holder is alive: it renews.
+                renewed = renew(conn, row, at + timedelta(seconds=claims.lease_seconds))
+                return {"record": renewed, "claim": claim_view(renewed)}
+            if row["holder"] is not None:
+                raise OperationRejected("Another principal holds this record", "record_claimed")
+            old = record_view(row)
+            check_guard(spec, "claim", old, arguments, caller)
+            held = conn.exec_driver_sql(
+                "SELECT COUNT(*) FROM records WHERE namespace=? AND collection=? AND holder=? "
+                "AND lease_expires_at>?",
+                (context.namespace, collection, holder, stamp(at)),
+            ).scalar_one()
+            if held >= claims.max_per_holder:
+                raise OperationRejected(
+                    f"The holder already has {held} claim(s); the collection allows "
+                    f"{claims.max_per_holder}",
+                    "claim_limit",
+                )
+            new: dict[str, JsonValue] = {
+                **old,
+                "holder": holder,
+                "claim_epoch": int(row["claim_epoch"]) + 1,
+                "lease_expires_at": stamp(at + timedelta(seconds=claims.lease_seconds)),
+                "version": int(row["version"]) + 1,
+                "updated_at": at.isoformat(),
+            }
+            write_claim(conn, row, new)
+            self._event(conn, context, holder, "claimed", old, new)
+        return {"record": new, "claim": claim_view(new)}
+
+    async def release(
+        self, arguments: dict[str, JsonValue], context: OperationContext
+    ) -> dict[str, JsonValue]:
+        """The holder gives the record back; a stale holder is refused with `claim_lost`."""
+        collection = str(arguments["collection"])
+        record_id = str(arguments["record_id"])
+        with self.database.engine.begin() as conn:
+            spec, caller = self._authorize(conn, context, collection, "claim")
+            standalone(spec)
+            row = _record_row(conn, context.namespace, collection, record_id)
+            if row is None:
+                raise OperationRejected("No such record", "record_not_found")
+            check_holder(row, caller, arguments["claim_epoch"])
+            old = record_view(row)
+            check_guard(spec, "release", old, arguments, caller)
+            new: dict[str, JsonValue] = {
+                **old,
+                "holder": None,
+                "lease_expires_at": None,
+                "version": int(row["version"]) + 1,
+                "updated_at": now().isoformat(),
+            }
+            self._fence(conn, context)
+            write_claim(conn, row, new)
+            self._event(conn, context, str(caller["id"]), "released", old, new)
+        return {"record": new}
+
+    async def claimed(
+        self, arguments: dict[str, JsonValue], context: OperationContext
+    ) -> dict[str, JsonValue]:
+        """The caller's live claims in one collection, with fencing epoch and the
+        idempotency context to use for effects taken for each record."""
+        collection = str(arguments["collection"])
+        with self.database.read() as conn:
+            _, caller = self._authorize(conn, context, collection, "read")
+            rows = (
+                conn.exec_driver_sql(
+                    "SELECT * FROM records WHERE namespace=? AND collection=? AND holder=? "
+                    "AND lease_expires_at>? ORDER BY seq LIMIT 64",
+                    (context.namespace, collection, caller["id"], stamp(now())),
+                )
+                .mappings()
+                .all()
+            )
+        claims: list[JsonValue] = []
+        size = 0
+        for row in rows:
+            view = record_view(row)
+            size += len(rfc8785.dumps(view)) + 256
+            if size > MAX_PAGE_BYTES and claims:
+                break
+            claims.append({**claim_view(view), "record": view})
+        return {"claims": claims}
 
     async def reconcile(
         self, arguments: dict[str, JsonValue], context: OperationContext
@@ -730,7 +990,7 @@ class Records:
         return Reconciliation(applied=True, output={"record": json.loads(row[0])})
 
     def reconciler(self, name: str) -> Reconciler | None:
-        return self.reconcile if name in {"records.create", "records.update"} else None
+        return self.reconcile if name in WRITES else None
 
 
 # Built-in descriptors
@@ -776,6 +1036,18 @@ _RECORD: dict[str, JsonValue] = {
         "updated_at": {"type": "string"},
     },
     "required": ["collection", "record_id", "data", "labels", "links", "version"],
+}
+_EPOCH: dict[str, JsonValue] = {"type": "integer", "minimum": 1}
+_CLAIM: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "collection": {"type": "string"},
+        "record_id": {"type": "string"},
+        "claim_epoch": {"type": "integer", "minimum": 1},
+        "lease_expires_at": {"type": "string"},
+        "idempotency_context": {"type": "string"},
+    },
+    "required": ["collection", "record_id", "claim_epoch", "lease_expires_at"],
 }
 _ONE: dict[str, JsonValue] = {
     "type": "object",
@@ -883,9 +1155,56 @@ DESCRIPTORS: tuple[OperationDescriptor, ...] = (
             "data": {"type": "object"},
             "labels": _LABELS_SCHEMA,
             "links": _LINKS_SCHEMA,
+            # Optional fencing: refuse with claim_lost unless the caller still holds the
+            # record at this epoch.
+            "claim_epoch": _EPOCH,
         },
         ["record_id", "expected_version"],
         _ONE,
         reconciler="cardea.records.reconcile",
+    ),
+    _descriptor(
+        "records.claim",
+        "Claim a record for the caller, or renew the caller's claim "
+        "(grant action: claim; collections with standalone claims)",
+        "effect",
+        {"record_id": _RECORD_ID},
+        ["record_id"],
+        {
+            "type": "object",
+            "properties": {"record": _RECORD, "claim": _CLAIM},
+            "required": ["record", "claim"],
+        },
+        reconciler="cardea.records.reconcile",
+    ),
+    _descriptor(
+        "records.release",
+        "Give back a record the caller holds at claim_epoch (grant action: claim)",
+        "effect",
+        {"record_id": _RECORD_ID, "claim_epoch": _EPOCH},
+        ["record_id", "claim_epoch"],
+        _ONE,
+        reconciler="cardea.records.reconcile",
+    ),
+    _descriptor(
+        "records.claimed",
+        "List the caller's live claims in a collection, with epoch, lease and the "
+        "idempotency context for effects (grant action: read)",
+        "read",
+        {},
+        [],
+        {
+            "type": "object",
+            "properties": {
+                "claims": {
+                    "type": "array",
+                    "items": {
+                        **_CLAIM,
+                        "properties": {**_CLAIM["properties"], "record": _RECORD},
+                    },
+                }
+            },
+            "required": ["claims"],
+        },
     ),
 )
