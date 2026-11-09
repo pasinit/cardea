@@ -14,7 +14,7 @@ from cardea.kernel.models import BudgetLimits, Task, TaskState
 from cardea.kernel.store import KernelTransaction
 from cardea.runtime.agent_session import AgentSession
 from cardea.service import host_budget
-from cardea.service.approval_requests import waiting_for
+from cardea.service.approval_requests import waiting_for, withdraw
 from cardea.service.auth import IdentityProvider, Proof
 from cardea.service.confined import ConfinedAgentSession, Workers, confined_handler, job_id
 from cardea.service.database import Database, Fault, borrow
@@ -758,6 +758,9 @@ class Kernel:
                 topic="control",
                 idempotency_key=f"control:{task_id}:{signal.request_id}",
             )
+            if kind == "cancel":
+                # ADR-036: a cancelled task's pending approval request is withdrawn.
+                withdraw(conn, tx, task_id, principal, at)
             if kind == "cancel" and profile.owns_children:
                 from cardea.service.delegation import cancel_children
 

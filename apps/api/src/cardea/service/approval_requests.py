@@ -10,9 +10,15 @@ ceiling, the approver's right and the descriptor version before the stored inten
 
 Approval only narrows: an operation outside the task's live ceiling is refused before any
 request exists, and the ceiling is checked again at decision and at execution.
+
+Slice 3: the existing DBOS minute schedule (ADR-024) also runs ``expire_due``, which ends
+overdue pending requests with a conditional update. It is idempotent, at most about a minute
+late, and the first tick after a restart applies every expiry missed during downtime.
+Cancelling a task withdraws its pending request (``withdraw``).
 """
 
 import json
+import logging
 from collections.abc import Mapping
 from datetime import datetime, timedelta
 from hashlib import sha256
@@ -24,7 +30,7 @@ import sqlalchemy as sa
 from dbos import EnqueueOptions
 from pydantic import Field, JsonValue
 
-from cardea.kernel.models import Identifier, Task, TaskState
+from cardea.kernel.models import Identifier, KernelFailure, Task, TaskState
 from cardea.kernel.store import KernelTransaction
 from cardea.service.approvals import (
     ApprovalRequirement,
@@ -38,11 +44,12 @@ from cardea.service.database import Fault, borrow
 from cardea.service.models import OperationTaskRequest, Wire, now
 from cardea.service.operations import Registry
 from cardea.service.policy import Policy
-from cardea.service.profiles import APPROVAL_WORKFLOW, QUEUE
+from cardea.service.profiles import AGENT_RUN_WORKFLOW, APPROVAL_WORKFLOW, QUEUE, for_runtime
 
 if TYPE_CHECKING:
     from cardea.service.kernel import Kernel
 
+log = logging.getLogger(__name__)
 TERMINAL_TASK = {TaskState.SUCCEEDED, TaskState.FAILED, TaskState.CANCELLED}
 OPEN = ("pending", "approved")
 # Why an approved or pending request became void; nothing ran.
@@ -533,6 +540,8 @@ def decide(
                 )
             return _decided(conn, request_id)
         check_approver(policy, approver, row)
+        if row["state"] == "expired":
+            raise Fault("approval_expired", "Approval request has expired", 409)
         if row["state"] != "pending":
             raise Fault(
                 "approval_closed",
@@ -610,3 +619,157 @@ def receipt_block(conn: sa.Connection, row: sa.RowMapping) -> dict[str, JsonValu
         "rule_ids": [rule["rule_id"] for rule in json.loads(row["rules_json"])],
         "rules_digest": row["rules_digest"],
     }
+
+
+# Expiry and withdrawal (slice 3)
+
+
+def _closing_events(
+    tx: KernelTransaction,
+    row: sa.RowMapping,
+    event_type: str,
+    state: str,
+    producer: str,
+    at: datetime,
+    **extra: JsonValue,
+) -> None:
+    """`approval.<event>` and the per-request `approval.<id>`; never the arguments."""
+    request_id = str(row["request_id"])
+    for kind, payload in (
+        (event_type, _payload(row, **extra)),
+        (f"approval.{request_id}", _payload(row, state=state)),
+    ):
+        tx.append_event(
+            namespace=str(row["namespace"]),
+            event_type=kind,
+            producer_id=producer,
+            correlation_id=request_id,
+            task_id=str(row["task_id"]),
+            at=at,
+            payload=payload,
+        )
+
+
+def resumes_on_expiry(task: Task, row: sa.RowMapping) -> bool:
+    """Only an agent run with `on_expiry: resume` continues; operation tasks always fail."""
+    if row["on_expiry"] != "resume":
+        return False
+    return for_runtime(task.runtime_id).workflow == AGENT_RUN_WORKFLOW
+
+
+def expire(kernel: "Kernel", request_id: str, at: datetime) -> str:
+    """End one overdue pending request in one transaction; returns the request's state.
+
+    The update is conditional (`state='pending' AND expires_at <= at`), so a tick racing a
+    decision, a cancellation or another tick changes nothing once one of them has committed.
+    Expiry is also a live-ceiling check: a request that could no longer run becomes `void`.
+    """
+    with kernel.database.engine.begin() as conn, borrow(conn) as tx:
+        row = get(conn, request_id)
+        if row["state"] != "pending" or at < datetime.fromisoformat(row["expires_at"]):
+            return str(row["state"])
+        producer = kernel.runtime_id
+        task = tx.get_task(str(row["task_id"]))
+        reason = None
+        if task.state not in TERMINAL_TASK:
+            reason = void_reason(Policy(conn), kernel.operations, row)
+        if reason is not None:
+            mark_void(tx, conn, row, reason, producer, at)
+            tx.append_event(
+                namespace=str(row["namespace"]),
+                event_type=f"approval.{request_id}",
+                producer_id=producer,
+                correlation_id=request_id,
+                task_id=task.task_id,
+                at=at,
+                payload=_payload(row, state="void"),
+            )
+            state, code, details = "void", "approval_void", {"reason": reason}
+        else:
+            conn.exec_driver_sql(
+                "UPDATE approval_requests SET state='expired',updated_at=? "
+                "WHERE request_id=? AND state='pending' AND expires_at<=?",
+                (at.isoformat(), request_id, at.isoformat()),
+            )
+            _closing_events(
+                tx, row, "approval.expired", "expired", producer, at, on_expiry=row["on_expiry"]
+            )
+            state, code, details = "expired", "approval_expired", {}
+        # An agent run that resumes stays WAITING with its outcome recorded in the request and
+        # in `approval.<id>`; slice 4 wakes it and enqueues the continuation attempt.
+        if task.state is TaskState.WAITING and not (
+            state == "expired" and resumes_on_expiry(task, row)
+        ):
+            tx.change_task(
+                task.task_id,
+                TaskState.FAILED,
+                expected_revision=task.revision,
+                at=at,
+                failure=KernelFailure(
+                    code=code,
+                    message="Approval did not allow the operation to run",
+                    details={"request_id": request_id, **details},
+                ),
+            )
+        kernel.fault("approval.expiry_before_commit")
+    kernel.fault("approval.expiry_after_commit")
+    return state
+
+
+def expire_due(kernel: "Kernel", at: datetime | None = None, limit: int = 500) -> dict[str, str]:
+    """The expiry step of the minute tick: every pending request whose `expires_at` passed.
+
+    One query over the partial index of open requests, so its cost follows the open requests
+    rather than the history. A request that fails to expire is retried on the next tick.
+    Stored times are UTC ISO 8601, which sort as text.
+    """
+    at = at or now()
+    with kernel.database.read() as conn:
+        due = [
+            str(found[0])
+            for found in conn.exec_driver_sql(
+                "SELECT request_id FROM approval_requests INDEXED BY approval_open_per_task "
+                "WHERE state IN ('pending','approved') AND state='pending' AND expires_at<=? "
+                "ORDER BY expires_at, request_id LIMIT ?",
+                (at.isoformat(), limit),
+            )
+        ]
+    outcomes: dict[str, str] = {}
+    for request_id in due:
+        try:
+            outcomes[request_id] = expire(kernel, request_id, at)
+        except Exception:
+            # One broken request must not stop the others; the next tick retries it.
+            log.exception("approval expiry failed", extra={"code": request_id})
+            outcomes[request_id] = "error"
+    return outcomes
+
+
+def withdraw(
+    conn: sa.Connection, tx: KernelTransaction, task_id: str, producer: str, at: datetime
+) -> None:
+    """Called by `tasks.cancel` in its transaction: a pending request becomes `withdrawn`.
+
+    An approved request whose task the cancellation has already ended will never run, so it
+    becomes `void (task_cancelled)`. One whose effect is running is left to its runtime.
+    """
+    row = (
+        conn.exec_driver_sql(
+            "SELECT * FROM approval_requests WHERE task_id=? AND state IN ('pending','approved')",
+            (task_id,),
+        )
+        .mappings()
+        .first()
+    )
+    if row is None:
+        return
+    if row["state"] == "approved":
+        if tx.get_task(task_id).state is TaskState.CANCELLED:
+            mark_void(tx, conn, row, "task_cancelled", producer, at)
+        return
+    conn.exec_driver_sql(
+        "UPDATE approval_requests SET state='withdrawn',updated_at=? "
+        "WHERE request_id=? AND state='pending'",
+        (at.isoformat(), row["request_id"]),
+    )
+    _closing_events(tx, row, "approval.withdrawn", "withdrawn", producer, at)
