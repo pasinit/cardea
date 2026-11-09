@@ -1,7 +1,7 @@
 # ADR-031: Agent-Run Context Operations
 
 - **Date / owner / milestones:** 2026-10-20; runtime maintainers; extends ADR-027 and ADR-029.
-- **Status:** selected and implemented for portable execution. A live Claude session has not run with context blocks.
+- **Status:** selected and implemented for portable execution. A live Claude session has not run with context blocks. Amended by [ADR-034](034-agent-groups-and-shared-records.md) slice 5 (2026-11-09): the built-in `mailbox.inbox` is the one context source that writes, and only kernel bookkeeping. Its delivery leases are taken in the attempt-checkpoint transaction and settled by the run's terminal transition. Its byte budget is its `max_bytes` argument (default 6 KiB) until slice 6 adds the general `max_bytes` and `context_max_bytes`.
 - **Requirement:** a recurring agent run often needs current state before it starts, such as what earlier runs delivered or what a memory service holds for this agent.
   - That state must be fetched at run time under the run's own live authority, not baked into a static template.
   - Every fetch must be receipted like any other call.
