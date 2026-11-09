@@ -522,3 +522,49 @@ def test_the_fencing_default_keeps_the_digest(kernel: Kernel) -> None:
     changed = put(kernel, collection(claims={**CLAIMS, "fence_writes": False})).json()
     assert changed["plan"]["change"] == "updated"
     assert changed["spec"]["claims"]["fence_writes"] is False
+
+
+def test_an_event_only_holder_keeps_its_claim_through_follow_ups(
+    desk: tuple[Kernel, Any],
+) -> None:
+    """Follow-ups use the member's first trigger of either kind (ADR-034 slice 7)."""
+    import test_groups as groups_test
+
+    from cardea.runtime.agent_session import SessionResult
+    from cardea.service.agent_run_runtime import AgentRunRuntime
+
+    kernel, session = desk
+    apply_items(kernel)
+    body = groups_test.manifest(
+        groups_test.pool(
+            replicas=1,
+            grants=[*groups_test.RUN_GRANTS, "record:items/claim", "record:items/read"],
+            run={
+                "instructions": "Work on the item you hold.",
+                "operations": ["records.claimed", "mail.send"],
+                "model": "model-a",
+                "bounds": {"timeout_seconds": 60, "attempts": 1},
+            },
+            triggers=[{"event": {"types": ["cardea.mailbox.sent"], "subjects": ["$member"]}}],
+        )
+    )
+    body["spec"]["collections"] = ["items"]
+    assert groups_test.put(kernel, body)["change"] == "created"
+    record_id = held_record(kernel, now() + timedelta(seconds=3600))
+
+    async def idle(client: Any, request: Any) -> SessionResult:
+        return SessionResult(text="Still working.", is_error=False, cost_usd=0.0, turns=1)
+
+    clock = now() + timedelta(seconds=1900)
+    Scheduler(kernel, lambda: clock).tick()
+    (request,) = member_tasks(kernel)
+    assert request == f"{MEMBER}.claim.{record_id}.1.1"
+    with kernel.database.read() as conn:
+        task_id = conn.exec_driver_sql(
+            "SELECT task_id FROM task_bindings WHERE request_id=?", (request,)
+        ).scalar_one()
+    session.scripts = [idle]
+    assert AgentRunRuntime(kernel).execute(task_id) == "succeeded"
+    stored = row(kernel, record_id)
+    assert stored["holder"] == MEMBER and stored["claim_epoch"] == 1
+    assert lease(kernel, record_id) > now() + timedelta(seconds=3500)

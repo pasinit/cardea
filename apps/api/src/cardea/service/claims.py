@@ -199,12 +199,14 @@ def _followup(kernel: "Kernel", row: sa.RowMapping, holder: str) -> str | None:
             ).first()
             trigger = conn.exec_driver_sql(
                 "SELECT definition_json FROM triggers WHERE trigger_id LIKE ? AND removed=0 "
-                "AND kind='time' ORDER BY length(trigger_id), trigger_id LIMIT 1",
+                "AND kind IN ('time','journal') ORDER BY length(trigger_id), trigger_id "
+                "LIMIT 1",
                 (f"{holder}.t%",),
             ).first()
             if busy is not None or trigger is None:
-                # A running holder renews its own claim; a member without a time trigger
-                # has no template to wake with.
+                # A running holder renews its own claim. The template is the member's
+                # first trigger, time or journal (ADR-034 slice 7); a member without one
+                # has nothing to wake with.
                 return None
             changed = conn.exec_driver_sql(
                 "UPDATE records SET followups=followups+1 "
