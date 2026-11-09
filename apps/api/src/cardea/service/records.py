@@ -17,7 +17,7 @@ already exist (migration ``m10_records``).
 """
 
 import json
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from datetime import datetime
 from hashlib import sha256
 from typing import Annotated, Any, Literal, Self
@@ -43,6 +43,8 @@ from cardea.service.database import Database, Fault
 from cardea.service.models import (
     COLLECTION_NAME,
     CollectionName,
+    GroupPool,
+    GroupSpec,
     Record,
     now,
     record_grant,
@@ -85,6 +87,66 @@ class Guards(Record):
 
     create: GuardSource | None = None
     update: GuardSource | None = None
+    # Standalone claims (ADR-034 slice 2); state-machine transitions guard themselves.
+    claim: GuardSource | None = None
+    release: GuardSource | None = None
+
+
+DEFAULT_LEASE_SECONDS = 14400  # carried decision 5: four hours
+MIN_LEASE_SECONDS = 300
+MAX_LEASE_SECONDS = 30 * 24 * 3600
+# A holder whose runs show it is alive keeps its claim at least this long past an attempt.
+ATTEMPT_RENEWAL_MARGIN_SECONDS = 120
+# The apply-time bound adds this to 2 x attempts x attempt timeout (decision 2.4).
+LEASE_BOUND_MARGIN_SECONDS = 240
+
+
+class ClaimsConfig(Record):
+    """Claims on a collection's records (ADR-034 decision 2.4).
+
+    A claim belongs to a principal, not a run. Without a state machine (slice 3) claims are
+    taken and dropped with `records.claim` and `records.release`, which need `standalone`.
+    """
+
+    lease_seconds: Annotated[
+        int, Field(strict=True, ge=MIN_LEASE_SECONDS, le=MAX_LEASE_SECONDS)
+    ] = DEFAULT_LEASE_SECONDS
+    max_per_holder: Annotated[int, Field(strict=True, ge=1, le=64)] = 1
+    max_followups: Annotated[int, Field(strict=True, ge=0, le=100)] = 6
+    standalone: Annotated[bool, Field(strict=True)] = False
+
+
+def lease_bound(attempts: int, timeout_seconds: int) -> int:
+    """The shortest lease a pool that may claim needs: two full runs plus margin."""
+    return 2 * attempts * timeout_seconds + LEASE_BOUND_MARGIN_SECONDS
+
+
+def check_lease(collection: str, claims: "ClaimsConfig | None", pools: Iterable[GroupPool]) -> None:
+    """Refuse a lease shorter than `lease_bound` for any pool granted `record:<C>/claim`."""
+    if claims is None:
+        return
+    for pool in pools:
+        if record_grant(collection, "claim") not in pool.grants:
+            continue
+        bound = lease_bound(pool.run.bounds.attempts, pool.run.bounds.timeout_seconds)
+        if claims.lease_seconds < bound:
+            raise Fault(
+                "claim_lease_too_short",
+                f"Pool {pool.name}: collection {collection} has a {claims.lease_seconds} s "
+                f"claim lease, below {bound} s (2 x attempts x attempt timeout + 240)",
+                422,
+            )
+
+
+def referencing_groups(conn: sa.Connection, namespace: str, name: str) -> list[GroupSpec]:
+    """The specs of every group in the namespace that lists this collection."""
+    specs = [
+        GroupSpec.model_validate_json(row[0])
+        for row in conn.exec_driver_sql(
+            "SELECT spec_json FROM agent_groups WHERE namespace=?", (namespace,)
+        )
+    ]
+    return [spec for spec in specs if name in spec.collections]
 
 
 class CollectionSpec(Record):
@@ -98,6 +160,7 @@ class CollectionSpec(Record):
         DEFAULT_RECORD_BYTES
     )
     guards: Guards = Guards()
+    claims: ClaimsConfig | None = None
 
     @model_validator(mode="after")
     def valid_schema(self) -> Self:
@@ -116,16 +179,29 @@ class CollectionMetadata(Record):
 
 
 class CollectionDocument(Record):
-    """`kind: Collection` (ADR-034 decision 2). Claims and states are later slices."""
+    """`kind: Collection` (ADR-034 decision 2). State machines are slice 3."""
 
     apiVersion: Literal["cardea/v1alpha1"] = "cardea/v1alpha1"  # noqa: N815 - Kubernetes shape
     kind: Literal["Collection"] = "Collection"
     metadata: CollectionMetadata
     spec: CollectionSpec
 
+    def spec_json(self) -> dict[str, JsonValue]:
+        """The stored spec. Absent later-slice fields stay absent, so a collection applied
+        before they existed keeps its digest and generation."""
+        spec = self.spec.model_dump(mode="json", by_alias=True)
+        if spec.get("claims") is None:
+            spec.pop("claims", None)
+        guards = spec["guards"]
+        assert isinstance(guards, dict)
+        for action in ("claim", "release"):
+            if guards.get(action) is None:
+                guards.pop(action, None)
+        return spec
+
     @property
     def digest(self) -> str:
-        return sha256(rfc8785.dumps(self.spec.model_dump(mode="json", by_alias=True))).hexdigest()
+        return sha256(rfc8785.dumps(self.spec_json())).hexdigest()
 
 
 class Link(Record):
@@ -190,11 +266,14 @@ def apply_collection(
     policy.require(principal, namespace, "groups.manage")
     policy.require("platform", namespace, "groups.manage")
     existing = _row(conn, namespace, name)
-    spec = document.spec.model_dump(mode="json", by_alias=True, exclude_defaults=False)
+    spec = document.spec_json()
     digest = document.digest
     if existing is not None and existing["supervisor_id"] != principal:
         # A collection belongs to one supervisor; this also hides it from other callers.
         raise Fault("collection_supervisor", "The collection belongs to another supervisor")
+    # A shorter lease must still fit every group pool that may claim (decision 2.4).
+    for group in referencing_groups(conn, namespace, name):
+        check_lease(name, document.spec.claims, group.pools)
     if existing is None:
         change, generation = "created", 1
     elif existing["spec_digest"] == digest:
