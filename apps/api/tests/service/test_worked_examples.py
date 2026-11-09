@@ -12,6 +12,7 @@ Adapted from the ADR text where later slices are missing:
   single-operation task, which waits for the human approver.
 """
 
+import json
 import time
 from collections.abc import Awaitable, Callable, Iterator
 from datetime import UTC, datetime, timedelta
@@ -30,7 +31,7 @@ from cardea.service import kernel as handlers
 from cardea.service.agent_run_runtime import AgentRunRuntime
 from cardea.service.app import create_app
 from cardea.service.auth import Authentication, Proof
-from cardea.service.database import Database, Fault, borrow
+from cardea.service.database import Database, Fault
 from cardea.service.groups import apply as apply_group
 from cardea.service.harnesses import IMPLICIT_ID, Catalog, Harnesses, ModelEntry, implicit_entry
 from cardea.service.kernel import Kernel, provision
@@ -173,18 +174,46 @@ ENG_WORK: dict[str, Any] = {
     "initial": "open",
     "terminal": ["done", "cancelled"],
     "transitions": [
-        {"name": "triage", "from": ["open"], "to": "ready",
-         "guard": "args.assignee_pool == 'eng-team.dev'"},
-        {"name": "start", "from": ["ready"], "to": "in_progress", "claim": "acquire",
-         "on_claim_expiry": "ready", "guard": "caller.pool == record.data.assignee_pool"},
-        {"name": "submit", "from": ["in_progress"], "to": "in_review", "claim": "holder",
-         "requires_receipt": {"operation": "vcs.open_change", "in": "same_task"}},
-        {"name": "request_changes", "from": ["in_review"], "to": "in_progress",
-         "guard": "caller.id != record.holder"},
-        {"name": "approve", "from": ["in_review"], "to": "done", "claim": "release",
-         "guard": "caller.id != record.holder"},
-        {"name": "cancel", "from": ["open", "ready", "in_progress", "in_review"],
-         "to": "cancelled", "claim": "release"},
+        {
+            "name": "triage",
+            "from": ["open"],
+            "to": "ready",
+            "guard": "args.assignee_pool == 'eng-team.dev'",
+        },
+        {
+            "name": "start",
+            "from": ["ready"],
+            "to": "in_progress",
+            "claim": "acquire",
+            "on_claim_expiry": "ready",
+            "guard": "caller.pool == record.data.assignee_pool",
+        },
+        {
+            "name": "submit",
+            "from": ["in_progress"],
+            "to": "in_review",
+            "claim": "holder",
+            "requires_receipt": {"operation": "vcs.open_change", "in": "same_task"},
+        },
+        {
+            "name": "request_changes",
+            "from": ["in_review"],
+            "to": "in_progress",
+            "guard": "caller.id != record.holder",
+        },
+        {
+            "name": "approve",
+            "from": ["in_review"],
+            "to": "done",
+            "claim": "release",
+            "guard": "caller.id != record.holder",
+        },
+        {
+            "name": "cancel",
+            "from": ["open", "ready", "in_progress", "in_review"],
+            "to": "cancelled",
+            "claim": "release",
+        },
     ],
 }
 ENG_DECISIONS: dict[str, Any] = {
@@ -196,14 +225,33 @@ ENG_DECISIONS: dict[str, Any] = {
     },
 }
 ENG_POOLS: dict[str, tuple[int, tuple[str, ...]]] = {
-    "principal": (1, ("record:work/read", "record:work/approve", "record:work/request_changes",
-                      "record:decisions/create", "record:decisions/read", "vcs.read_change",
-                      "vcs.comment")),
+    "principal": (
+        1,
+        (
+            "record:work/read",
+            "record:work/approve",
+            "record:work/request_changes",
+            "record:decisions/create",
+            "record:decisions/read",
+            "vcs.read_change",
+            "vcs.comment",
+        ),
+    ),
     "product": (1, ("record:work/create", "record:work/read", "ci.status")),
-    "lead": (1, ("record:work/read", "record:work/update", "record:work/triage",
-                 "record:work/cancel")),
-    "dev": (3, ("record:work/read", "record:work/start", "record:work/submit",
-                "vcs.open_change", "ci.status")),
+    "lead": (
+        1,
+        ("record:work/read", "record:work/update", "record:work/triage", "record:work/cancel"),
+    ),
+    "dev": (
+        3,
+        (
+            "record:work/read",
+            "record:work/start",
+            "record:work/submit",
+            "vcs.open_change",
+            "ci.status",
+        ),
+    ),
 }
 
 DESK_ORDERS: dict[str, Any] = {
@@ -222,39 +270,80 @@ DESK_ORDERS: dict[str, Any] = {
         },
     },
     "claims": {"lease_seconds": 3600, "max_per_holder": 4, "max_followups": 3},
-    "states": ["proposed", "approved", "placed", "filled", "reconciled", "rejected", "expired",
-               "cancelled"],
+    "states": [
+        "proposed",
+        "approved",
+        "placed",
+        "filled",
+        "reconciled",
+        "rejected",
+        "expired",
+        "cancelled",
+    ],
     "initial": "proposed",
     "terminal": ["reconciled", "rejected", "expired", "cancelled"],
     "transitions": [
-        {"name": "approve", "from": ["proposed"], "to": "approved",
-         "guard": "record.created_by != caller.id",
-         "approval": {"level": "conditional", "when": "true",
-                      "reason": "Every order needs a desk approver",
-                      "expires_after_seconds": 3600, "on_expiry": "resume",
-                      "distinct_from_supervisor": False}},
+        {
+            "name": "approve",
+            "from": ["proposed"],
+            "to": "approved",
+            "guard": "record.created_by != caller.id",
+            "approval": {
+                "level": "conditional",
+                "when": "true",
+                "reason": "Every order needs a desk approver",
+                "expires_after_seconds": 3600,
+                "on_expiry": "resume",
+                "distinct_from_supervisor": False,
+            },
+        },
         {"name": "reject", "from": ["proposed"], "to": "rejected"},
-        {"name": "place", "from": ["approved"], "to": "placed", "claim": "acquire",
-         "on_claim_expiry": "approved",
-         "requires_receipt": {"operation": "broker.place_order", "in": "same_task"}},
+        {
+            "name": "place",
+            "from": ["approved"],
+            "to": "placed",
+            "claim": "acquire",
+            "on_claim_expiry": "approved",
+            "requires_receipt": {"operation": "broker.place_order", "in": "same_task"},
+        },
         {"name": "fill", "from": ["placed"], "to": "filled", "claim": "holder"},
-        {"name": "reconcile", "from": ["filled"], "to": "reconciled", "claim": "release",
-         "requires_receipt": {"operation": "broker.fills", "in": "same_task"}},
+        {
+            "name": "reconcile",
+            "from": ["filled"],
+            "to": "reconciled",
+            "claim": "release",
+            "requires_receipt": {"operation": "broker.fills", "in": "same_task"},
+        },
         {"name": "expire", "from": ["proposed", "approved"], "to": "expired"},
     ],
 }
 DESK_POOLS: dict[str, tuple[int, tuple[str, ...]]] = {
-    "analyst": (2, ("record:orders/create", "record:orders/read", "risk.check",
-                    "market.quotes")),
-    "risk": (1, ("record:orders/read", "record:orders/approve", "record:orders/reject",
-                 "risk.check")),
-    "execution": (1, ("record:orders/read", "record:orders/place", "record:orders/fill",
-                      "record:orders/reconcile", "broker.place_order", "broker.fills")),
+    "analyst": (2, ("record:orders/create", "record:orders/read", "risk.check", "market.quotes")),
+    "risk": (
+        1,
+        ("record:orders/read", "record:orders/approve", "record:orders/reject", "risk.check"),
+    ),
+    "execution": (
+        1,
+        (
+            "record:orders/read",
+            "record:orders/place",
+            "record:orders/fill",
+            "record:orders/reconcile",
+            "broker.place_order",
+            "broker.fills",
+        ),
+    ),
 }
 
 
-def manifest(group: str, namespace: str, supervisor: str, collections: list[str],
-             pools: dict[str, tuple[int, tuple[str, ...]]]) -> AgentGroup:
+def manifest(
+    group: str,
+    namespace: str,
+    supervisor: str,
+    collections: list[str],
+    pools: dict[str, tuple[int, tuple[str, ...]]],
+) -> AgentGroup:
     return AgentGroup.model_validate(
         {
             "apiVersion": "cardea/v1alpha1",
@@ -274,8 +363,15 @@ def manifest(group: str, namespace: str, supervisor: str, collections: list[str]
                             "model": "model-a",
                             "bounds": {"timeout_seconds": 60, "attempts": 2},
                         },
-                        "triggers": [{"schedule": {"cron": "0 9 29 2 *", "timezone": "UTC",
-                                                   "misfire": "skip"}}],
+                        "triggers": [
+                            {
+                                "schedule": {
+                                    "cron": "0 9 29 2 *",
+                                    "timezone": "UTC",
+                                    "misfire": "skip",
+                                }
+                            }
+                        ],
                     }
                     for name, (replicas, grants) in pools.items()
                 ],
@@ -287,8 +383,13 @@ def manifest(group: str, namespace: str, supervisor: str, collections: list[str]
 def provisioning() -> Provisioning:
     expires = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
     principals = [
-        {"principal_id": p, "kind": "service" if p == "runtime" else "human",
-         "auth_kind": "spiffe", "issuer": "test", "subject": p}
+        {
+            "principal_id": p,
+            "kind": "service" if p == "runtime" else "human",
+            "auth_kind": "spiffe",
+            "issuer": "test",
+            "subject": p,
+        }
         for p in sorted(TOKENS)
     ] + [{"principal_id": "risk-desk", "kind": "agent", "runtime_id": "runtime"}]
     permissions: list[dict[str, Any]] = []
@@ -305,8 +406,14 @@ def provisioning() -> Provisioning:
             platform.append({"principal_id": "platform", "approve": approve, **grant})
     # A human desk approver may decide the `approve` transition of `orders` and nothing else.
     permissions.append(
-        {"principal_id": "desk-approver", "namespace": "desk", "allow": False, "approve": True,
-         "operation": "record:orders/approve", "expires_at": expires}
+        {
+            "principal_id": "desk-approver",
+            "namespace": "desk",
+            "allow": False,
+            "approve": True,
+            "operation": "record:orders/approve",
+            "expires_at": expires,
+        }
     )
     return Provisioning.model_validate(
         {"principals": principals, "permissions": permissions, "platform": platform}
@@ -335,8 +442,9 @@ def setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[Ker
         db.close()
 
 
-def configure(kernel: Kernel, namespace: str, supervisor: str, collections: dict[str, Any],
-              group: AgentGroup) -> None:
+def configure(
+    kernel: Kernel, namespace: str, supervisor: str, collections: dict[str, Any], group: AgentGroup
+) -> None:
     for name, spec in collections.items():
         document = CollectionDocument.model_validate(
             {"metadata": {"name": name, "namespace": namespace}, "spec": spec}
@@ -485,9 +593,10 @@ def test_software_team_review_gate(setup: tuple[Kernel, Any, Package]) -> None:
             args={"assignee_pool": "eng-team.dev"},
         )
 
-    assert step("eng-team.lead.0", ["records.update", "records.transition"], assign)[
-        "record"
-    ]["state"] == "ready"
+    assert (
+        step("eng-team.lead.0", ["records.update", "records.transition"], assign)["record"]["state"]
+        == "ready"
+    )
 
     # Only the dev pool may start it, and only one developer holds it.
     refused = step("eng-team.lead.0", ["records.transition"], transition(rid, "start"))
@@ -525,9 +634,10 @@ def test_software_team_review_gate(setup: tuple[Kernel, Any, Package]) -> None:
         "in_review"
     )
     # The holder cannot approve its own work; the principal requests changes.
-    assert "task_grant_denied" in step(
-        "eng-team.dev.0", ["records.transition"], transition(rid, "approve")
-    )["error"]
+    assert (
+        "task_grant_denied"
+        in step("eng-team.dev.0", ["records.transition"], transition(rid, "approve"))["error"]
+    )
     back = step("eng-team.principal.0", ["records.transition"], transition(rid, "request_changes"))
     assert back["record"]["state"] == "in_progress"
     assert back["record"]["holder"] == "eng-team.dev.0"  # the developer keeps the work
@@ -548,14 +658,164 @@ def test_software_team_review_gate(setup: tuple[Kernel, Any, Package]) -> None:
     assert step("eng-team.principal.0", ["records.create"], decide)["record"]["version"] == 1
     with kernel.database.read() as conn:
         path = [
-            json_detail["to"]
-            for (json_detail,) in (
-                (__import__("json").loads(r[0]),)
-                for r in conn.exec_driver_sql(
-                    "SELECT detail_json FROM record_events WHERE record_id=? "
-                    "AND kind='transitioned' ORDER BY event_id",
-                    (rid,),
-                )
+            json.loads(r[0])["to"]
+            for r in conn.exec_driver_sql(
+                "SELECT detail_json FROM record_events WHERE record_id=? "
+                "AND kind='transitioned' ORDER BY event_id",
+                (rid,),
             )
         ]
     assert path == ["ready", "in_progress", "in_review", "in_progress", "in_review", "done"]
+
+
+# B. Trading desk: propose, approve (human), place, fill, reconcile
+
+
+def test_trading_desk_order_flow(setup: tuple[Kernel, Any, Package]) -> None:
+    kernel, session, package = setup
+    group = manifest("desk", "desk", "sup-desk", ["orders"], DESK_POOLS)
+    configure(kernel, "desk", "sup-desk", {"orders": DESK_ORDERS}, group)
+
+    def step(member: str, operations: list[str], script: Script, attempts: int = 1) -> Any:
+        pool = member.split(".")[1]
+        state, result = act(
+            kernel,
+            session,
+            namespace="desk",
+            supervisor="sup-desk",
+            member=member,
+            grants=DESK_POOLS[pool][1],
+            operations=operations,
+            script=script,
+            attempts=attempts,
+        )
+        assert state == "succeeded", (member, result)
+        return result
+
+    def transition(record_id: str, name: str, **extra: Any) -> Script:
+        async def script(client: ClientSession) -> Any:
+            return await tool(
+                client,
+                "records-transition",
+                collection="orders",
+                record_id=record_id,
+                transition=name,
+                **extra,
+            )
+
+        return script
+
+    def propose(key: str, qty: float) -> str:
+        async def script(client: ClientSession) -> Any:
+            await tool(client, "risk-check")
+            return await tool(
+                client,
+                "records-create",
+                collection="orders",
+                client_key=key,
+                data={
+                    "instrument": "XYZ",
+                    "side": "buy",
+                    "qty": qty,
+                    "limit_price": 10.5,
+                    "rationale": "Mean reversion",
+                },
+            )
+
+        made = step("desk.analyst.0", ["records.create", "risk.check"], script)
+        return str(made["record"]["record_id"])
+
+    # 1. An analyst proposes; the risk agent rejects one proposal outright.
+    rejected = propose("o-reject", 5)
+    out = step("desk.risk.0", ["records.transition"], transition(rejected, "reject"))
+    assert out["record"]["state"] == "rejected"
+    order = propose("o-1", 10)
+
+    # 2. Approval needs a human desk approver. Inside an agent run the gated call is
+    # refused until ADR-036 slice 4; nothing runs.
+    held = step("desk.risk.0", ["records.transition"], transition(order, "approve"))
+    assert "approval_unsupported" in held["error"]
+    assert state_of(kernel, order)[0] == "proposed"
+    # As a single-operation task it waits for the approver (the risk desk's own principal).
+    request = OperationTaskRequest.model_validate(
+        {
+            "request_id": "approve-o-1",
+            "agent_id": "risk-desk",
+            "namespace": "desk",
+            "objective": "Approve order o-1",
+            "operation": "records.transition",
+            "arguments": {"collection": "orders", "record_id": order, "transition": "approve"},
+            "grants": ["objects.read", "objects.write", "record:orders/approve"],
+        }
+    )
+    task_id = kernel.submit(kernel.auth.validate("sup-desk"), request).task.task_id
+    assert OperationRuntime(kernel).execute(task_id) == "waiting"
+    with kernel.database.read() as conn:
+        pending = conn.exec_driver_sql(
+            "SELECT request_id,intent_digest,approval_resource FROM approval_requests "
+            "WHERE task_id=?",
+            (task_id,),
+        ).one()
+    assert pending[2] == "record:orders/approve"
+    decided = TestClient(create_app(kernel)).post(
+        f"/v0.2/approvals/{pending[0]}/decision",
+        json={"decision_id": "d-1", "decision": "approve", "intent_digest": pending[1]},
+        headers={"Authorization": "Bearer desk-approver", "X-Cardea-Auth": "spiffe"},
+    )
+    assert decided.status_code == 200, decided.json()
+    assert OperationRuntime(kernel).execute(task_id, approval=pending[0]) == "succeeded"
+    assert state_of(kernel, order)[0] == "approved"
+
+    # 3. Execution places it. The first attempt crashes after placing; the retry's
+    # placement is deduplicated by its effect scope and the order is placed once.
+    attempt = iter(range(3))
+
+    async def place(client: ClientSession) -> Any:
+        placed = await tool(client, "broker-place_order", order_ref=order, record_id=order, qty=10)
+        if next(attempt) == 0:
+            raise ConnectionError("harness died after placing")
+        assert placed["broker_order_id"].startswith("B-")
+        return await tool(
+            client,
+            "records-transition",
+            collection="orders",
+            record_id=order,
+            transition="place",
+        )
+
+    out = step("desk.execution.0", ["broker.place_order", "records.transition"], place, 2)
+    assert package.placements == 1
+    epoch = out["claim"]["claim_epoch"]
+    assert state_of(kernel, order) == ("placed", "desk.execution.0", epoch)
+
+    # 4. A fill arrives (an ADR-035 webhook in the ADR); the holder records it.
+    filled = step(
+        "desk.execution.0",
+        ["records.transition"],
+        transition(order, "fill", claim_epoch=epoch),
+    )
+    assert filled["record"]["state"] == "filled"
+
+    # 5. Reconciliation needs the broker's fills read in the same run, and releases.
+    async def reconcile(client: ClientSession) -> Any:
+        await tool(client, "broker-fills", order_ref=order, record_id=order)
+        return await tool(
+            client,
+            "records-transition",
+            collection="orders",
+            record_id=order,
+            transition="reconcile",
+            claim_epoch=epoch,
+        )
+
+    done = step("desk.execution.0", ["broker.fills", "records.transition"], reconcile)
+    assert done["record"]["state"] == "reconciled" and done["record"]["holder"] is None
+
+    # A risk-limit breach is refused by the broker operation itself.
+    big = propose("o-big", 5000)
+
+    async def too_big(client: ClientSession) -> Any:
+        return await tool(client, "broker-place_order", order_ref=big, record_id=big, qty=5000)
+
+    refused = step("desk.execution.0", ["broker.place_order"], too_big)
+    assert "risk_limit" in refused["error"]

@@ -82,21 +82,40 @@ def document(supervisor: tuple[str, ...] = SUPERVISOR) -> Provisioning:
         for r in supervisor
     ] + [
         # Approve-only on one transition of one collection (ADR-036 amendment).
-        {"principal_id": "approver", "operation": "record:orders/approve", "allow": False,
-         "approve": True, **grant},
+        {
+            "principal_id": "approver",
+            "operation": "record:orders/approve",
+            "allow": False,
+            "approve": True,
+            **grant,
+        },
         # Operation-level approve on records.transition: must not satisfy a transition gate.
-        {"principal_id": "operator", "operation": "records.transition", "allow": False,
-         "approve": True, **grant},
+        {
+            "principal_id": "operator",
+            "operation": "records.transition",
+            "allow": False,
+            "approve": True,
+            **grant,
+        },
     ]
     platform = [
         {"principal_id": "platform", "operation": r, **grant}
         for r in supervisor
         if r != "record:orders/approve"
     ] + [
-        {"principal_id": "platform", "operation": "record:orders/approve", "approve": True,
-         **grant},
-        {"principal_id": "platform", "operation": "records.transition", "allow": False,
-         "approve": True, **grant},
+        {
+            "principal_id": "platform",
+            "operation": "record:orders/approve",
+            "approve": True,
+            **grant,
+        },
+        {
+            "principal_id": "platform",
+            "operation": "records.transition",
+            "allow": False,
+            "approve": True,
+            **grant,
+        },
     ]
     return Provisioning.model_validate(
         {"principals": principals, "permissions": permissions, "platform": platform}
@@ -130,15 +149,37 @@ WORK_SPEC: dict[str, Any] = {
     "transitions": [
         {"name": "triage", "from": ["open"], "to": "ready", "guard": "args.priority > 0"},
         {"name": "broken", "from": ["open"], "to": "ready", "guard": "record.data.nope == 1"},
-        {"name": "start", "from": ["ready"], "to": "doing", "claim": "acquire",
-         "on_claim_expiry": "ready"},
-        {"name": "submit", "from": ["doing"], "to": "review", "claim": "holder",
-         "requires_receipt": {"operation": "vcs.open_change", "in": "same_caller",
-                              "window_seconds": 3600}},
-        {"name": "rework", "from": ["review"], "to": "doing",
-         "guard": "caller.id != record.created_by"},
-        {"name": "approve", "from": ["review"], "to": "done", "claim": "release",
-         "guard": "caller.id != record.holder"},
+        {
+            "name": "start",
+            "from": ["ready"],
+            "to": "doing",
+            "claim": "acquire",
+            "on_claim_expiry": "ready",
+        },
+        {
+            "name": "submit",
+            "from": ["doing"],
+            "to": "review",
+            "claim": "holder",
+            "requires_receipt": {
+                "operation": "vcs.open_change",
+                "in": "same_caller",
+                "window_seconds": 3600,
+            },
+        },
+        {
+            "name": "rework",
+            "from": ["review"],
+            "to": "doing",
+            "guard": "caller.id != record.created_by",
+        },
+        {
+            "name": "approve",
+            "from": ["review"],
+            "to": "done",
+            "claim": "release",
+            "guard": "caller.id != record.holder",
+        },
     ],
 }
 
@@ -230,12 +271,22 @@ def journal(kernel: Kernel, kind: str) -> list[dict[str, Any]]:
         {"transitions": [{"name": "x", "from": ["open"], "to": "nowhere"}]},
         {"transitions": [{"name": "update", "from": ["open"], "to": "ready"}]},  # reserved
         {"transitions": [{"name": "x", "from": ["open"], "to": "ready"}] * 2},
-        {"transitions": [{"name": "x", "from": ["open"], "to": "ready",
-                          "on_claim_expiry": "open"}]},  # needs acquire
+        {
+            "transitions": [
+                {"name": "x", "from": ["open"], "to": "ready", "on_claim_expiry": "open"}
+            ]
+        },  # needs acquire
         {"transitions": [{"name": "x", "from": ["open"], "to": "ready", "guard": "ns == 1"}]},
-        {"transitions": [{"name": "x", "from": ["open"], "to": "ready",
-                          "approval": {"level": "conditional", "when": "a" * 520,
-                                       "reason": "too long"}}]},
+        {
+            "transitions": [
+                {
+                    "name": "x",
+                    "from": ["open"],
+                    "to": "ready",
+                    "approval": {"level": "conditional", "when": "a" * 520, "reason": "too long"},
+                }
+            ]
+        },
         {"claims": None},  # claim effects need claims
         {"states": None},
         {"migrate": [{"from": "open", "to": "ready"}]},  # open is still declared
@@ -255,9 +306,7 @@ def test_records_start_in_the_initial_state(work: Kernel) -> None:
     record = create(work)
     assert record["state"] == "open"
     _, found, _ = run(work, "records.query", {"collection": "work", "state": "open"}, grants=ALL)
-    assert found is not None and [r["record_id"] for r in found["records"]] == [
-        record["record_id"]
-    ]
+    assert found is not None and [r["record_id"] for r in found["records"]] == [record["record_id"]]
 
 
 # Permissions, from states and guards
@@ -417,8 +466,13 @@ def test_removing_an_occupied_state_needs_migrate(work: Kernel) -> None:
         "states": ["open", "queued", "doing", "review", "done"],
         "transitions": [
             {"name": "triage", "from": ["open"], "to": "queued", "guard": "args.priority > 0"},
-            {"name": "start", "from": ["queued"], "to": "doing", "claim": "acquire",
-             "on_claim_expiry": "queued"},
+            {
+                "name": "start",
+                "from": ["queued"],
+                "to": "doing",
+                "claim": "acquire",
+                "on_claim_expiry": "queued",
+            },
         ],
     }
     refused = apply(work, "work", renamed)
@@ -510,8 +564,11 @@ def pending(kernel: Kernel, task_id: str) -> dict[str, Any]:
 def decide(kernel: Kernel, token: str, row: dict[str, Any]) -> Any:
     return TestClient(create_app(kernel)).post(
         f"/v0.2/approvals/{row['request_id']}/decision",
-        json={"decision_id": f"{token}-1", "decision": "approve",
-              "intent_digest": row["intent_digest"]},
+        json={
+            "decision_id": f"{token}-1",
+            "decision": "approve",
+            "intent_digest": row["intent_digest"],
+        },
         headers={"Authorization": f"Bearer {token}", "X-Cardea-Auth": "spiffe"},
     )
 
@@ -544,7 +601,7 @@ def test_approve_on_one_collection_does_not_decide_another(kernel: Kernel) -> No
     from cardea.service.policy import Policy
 
     with kernel.database.read() as conn:
-        assert holds_approve(Policy(conn), "approver", row)
+        assert holds_approve(Policy(conn), "approver", cast(Any, row))
         assert not holds_approve(Policy(conn), "approver", cast(Any, forged))
 
 
