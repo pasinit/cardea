@@ -45,6 +45,56 @@
         "title": "Address",
         "type": "object"
       },
+      "AgentGroup": {
+        "additionalProperties": false,
+        "description": "`PUT /v0.2/groups/{name}`: a declarative set of agent principals (ADR-034 P1).",
+        "properties": {
+          "apiVersion": {
+            "const": "cardea/v1alpha1",
+            "title": "Apiversion",
+            "type": "string"
+          },
+          "kind": {
+            "const": "AgentGroup",
+            "title": "Kind",
+            "type": "string"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/GroupMetadata"
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/GroupSpec-Input"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          }
+        },
+        "required": [
+          "apiVersion",
+          "kind",
+          "metadata",
+          "spec"
+        ],
+        "title": "AgentGroup",
+        "type": "object"
+      },
       "AgentReceipts": {
         "additionalProperties": false,
         "description": "`GET /v0.2/tasks/{task_id}/agent-receipts`: full receipts of an agent's calls.",
@@ -215,7 +265,8 @@
                     "host.copy",
                     "models.invoke",
                     "tasks.delegate",
-                    "tasks.schedule"
+                    "tasks.schedule",
+                    "groups.manage"
                   ],
                   "type": "string"
                 },
@@ -819,7 +870,8 @@
                 "host.copy",
                 "models.invoke",
                 "tasks.delegate",
-                "tasks.schedule"
+                "tasks.schedule",
+                "groups.manage"
               ],
               "type": "string"
             },
@@ -1303,6 +1355,816 @@
         "title": "FailureDetails",
         "type": "object"
       },
+      "GroupApplied": {
+        "additionalProperties": false,
+        "description": "`PUT /v0.2/groups/{name}`: what the apply changed (or, with `dry_run`, would change).",
+        "properties": {
+          "change": {
+            "enum": [
+              "created",
+              "updated",
+              "unchanged"
+            ],
+            "title": "Change",
+            "type": "string"
+          },
+          "dry_run": {
+            "description": "True: nothing was committed; `group` is the projection.",
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "generation": {
+            "title": "Generation",
+            "type": "integer"
+          },
+          "group": {
+            "$ref": "#/components/schemas/GroupView"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/GroupPlan"
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dry_run",
+          "change",
+          "generation",
+          "plan",
+          "group"
+        ],
+        "title": "GroupApplied",
+        "type": "object"
+      },
+      "GroupDeleted": {
+        "additionalProperties": false,
+        "description": "`DELETE /v0.2/groups/{name}`: the drained group (ADR-034 slice 8; refused until then).",
+        "properties": {
+          "change": {
+            "const": "removed",
+            "title": "Change",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "namespace",
+          "change"
+        ],
+        "title": "GroupDeleted",
+        "type": "object"
+      },
+      "GroupEventMatch": {
+        "additionalProperties": false,
+        "description": "Kernel-journal events that wake a member (ADR-034 decision 6; ADR-034 slice 7).\n\nParsed so a manifest is complete, and refused at apply until slice 7 lands.",
+        "properties": {
+          "filters": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/EventFilter"
+            },
+            "maxItems": 8,
+            "title": "Filters",
+            "type": "array"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "types": {
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Types",
+            "type": "array"
+          }
+        },
+        "required": [
+          "types"
+        ],
+        "title": "GroupEventMatch",
+        "type": "object"
+      },
+      "GroupMember": {
+        "additionalProperties": false,
+        "properties": {
+          "active_task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The member's unfinished run, if any.",
+            "title": "Active Task Id"
+          },
+          "disabled": {
+            "description": "The principal is disabled; its runs are refused.",
+            "title": "Disabled",
+            "type": "boolean"
+          },
+          "ordinal": {
+            "title": "Ordinal",
+            "type": "integer"
+          },
+          "pool": {
+            "title": "Pool",
+            "type": "string"
+          },
+          "principal_id": {
+            "description": "The member principal `<group>.<pool>.<n>`.",
+            "title": "Principal Id",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "active",
+              "draining",
+              "removed"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "triggers": {
+            "description": "The member's compiled ADR-029 triggers.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Triggers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "principal_id",
+          "pool",
+          "ordinal",
+          "state",
+          "disabled",
+          "active_task_id",
+          "triggers"
+        ],
+        "title": "GroupMember",
+        "type": "object"
+      },
+      "GroupMetadata": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "generation": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generation"
+          },
+          "name": {
+            "pattern": "^[a-z][a-z0-9-]{0,39}$",
+            "title": "Name",
+            "type": "string"
+          },
+          "namespace": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "title": "Namespace",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "name",
+          "namespace"
+        ],
+        "title": "GroupMetadata",
+        "type": "object"
+      },
+      "GroupMetadataView": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "generation": {
+            "description": "Incremented by every apply that changes `spec`.",
+            "title": "Generation",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "namespace",
+          "generation",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "GroupMetadataView",
+        "type": "object"
+      },
+      "GroupPlan": {
+        "additionalProperties": false,
+        "properties": {
+          "members_added": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Members Added",
+            "type": "array"
+          },
+          "triggers_installed": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Triggers Installed",
+            "type": "array"
+          },
+          "triggers_removed": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Triggers Removed",
+            "type": "array"
+          },
+          "triggers_updated": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Triggers Updated",
+            "type": "array"
+          }
+        },
+        "required": [
+          "members_added",
+          "triggers_installed",
+          "triggers_updated",
+          "triggers_removed"
+        ],
+        "title": "GroupPlan",
+        "type": "object"
+      },
+      "GroupPool-Input": {
+        "additionalProperties": false,
+        "properties": {
+          "drain_timeout_seconds": {
+            "default": 1800,
+            "maximum": 86400.0,
+            "minimum": 0.0,
+            "title": "Drain Timeout Seconds",
+            "type": "integer"
+          },
+          "expect_window": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/WindowExpectation"
+            },
+            "maxItems": 16,
+            "title": "Expect Window",
+            "type": "array"
+          },
+          "grants": {
+            "items": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "objects.read",
+                    "objects.write",
+                    "tasks.inspect",
+                    "tasks.cancel",
+                    "tasks.resume",
+                    "events.read",
+                    "tasks.submit",
+                    "host.sha256",
+                    "host.copy",
+                    "models.invoke",
+                    "tasks.delegate",
+                    "tasks.schedule",
+                    "groups.manage"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "maxLength": 128,
+                  "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+                  "type": "string"
+                },
+                {
+                  "pattern": "^harness:[a-z][a-z0-9-]{0,31}$",
+                  "type": "string"
+                },
+                {
+                  "pattern": "^mail:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                  "type": "string"
+                }
+              ]
+            },
+            "maxItems": 48,
+            "minItems": 1,
+            "title": "Grants",
+            "type": "array"
+          },
+          "name": {
+            "pattern": "^[a-z][a-z0-9-]{0,31}$",
+            "title": "Name",
+            "type": "string"
+          },
+          "replicas": {
+            "maximum": 32.0,
+            "minimum": 1.0,
+            "title": "Replicas",
+            "type": "integer"
+          },
+          "run": {
+            "$ref": "#/components/schemas/RunTemplate-Input"
+          },
+          "spend": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GroupSpend"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "triggers": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/GroupTrigger-Input"
+            },
+            "maxItems": 8,
+            "title": "Triggers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "replicas",
+          "grants",
+          "run"
+        ],
+        "title": "GroupPool",
+        "type": "object"
+      },
+      "GroupPool-Output": {
+        "additionalProperties": false,
+        "properties": {
+          "drain_timeout_seconds": {
+            "default": 1800,
+            "maximum": 86400.0,
+            "minimum": 0.0,
+            "title": "Drain Timeout Seconds",
+            "type": "integer"
+          },
+          "expect_window": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/WindowExpectation"
+            },
+            "maxItems": 16,
+            "title": "Expect Window",
+            "type": "array"
+          },
+          "grants": {
+            "items": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "objects.read",
+                    "objects.write",
+                    "tasks.inspect",
+                    "tasks.cancel",
+                    "tasks.resume",
+                    "events.read",
+                    "tasks.submit",
+                    "host.sha256",
+                    "host.copy",
+                    "models.invoke",
+                    "tasks.delegate",
+                    "tasks.schedule",
+                    "groups.manage"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "maxLength": 128,
+                  "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+                  "type": "string"
+                },
+                {
+                  "pattern": "^harness:[a-z][a-z0-9-]{0,31}$",
+                  "type": "string"
+                },
+                {
+                  "pattern": "^mail:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                  "type": "string"
+                }
+              ]
+            },
+            "maxItems": 48,
+            "minItems": 1,
+            "title": "Grants",
+            "type": "array"
+          },
+          "name": {
+            "pattern": "^[a-z][a-z0-9-]{0,31}$",
+            "title": "Name",
+            "type": "string"
+          },
+          "replicas": {
+            "maximum": 32.0,
+            "minimum": 1.0,
+            "title": "Replicas",
+            "type": "integer"
+          },
+          "run": {
+            "$ref": "#/components/schemas/RunTemplate-Output"
+          },
+          "spend": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GroupSpend"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "triggers": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/GroupTrigger-Output"
+            },
+            "maxItems": 8,
+            "title": "Triggers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "replicas",
+          "grants",
+          "run"
+        ],
+        "title": "GroupPool",
+        "type": "object"
+      },
+      "GroupSchedule": {
+        "additionalProperties": false,
+        "description": "A time trigger of every member of a pool (ADR-024 semantics).",
+        "properties": {
+          "cron": {
+            "maxLength": 128,
+            "minLength": 9,
+            "title": "Cron",
+            "type": "string"
+          },
+          "grace_seconds": {
+            "anyOf": [
+              {
+                "maximum": 86400.0,
+                "minimum": 60.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grace Seconds"
+          },
+          "misfire": {
+            "enum": [
+              "skip",
+              "run_once_late",
+              "grace"
+            ],
+            "title": "Misfire",
+            "type": "string"
+          },
+          "timezone": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cron",
+          "timezone",
+          "misfire"
+        ],
+        "title": "GroupSchedule",
+        "type": "object"
+      },
+      "GroupSpec-Input": {
+        "additionalProperties": false,
+        "properties": {
+          "collections": {
+            "default": [],
+            "items": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Collections",
+            "type": "array"
+          },
+          "pools": {
+            "items": {
+              "$ref": "#/components/schemas/GroupPool-Input"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Pools",
+            "type": "array"
+          },
+          "spend": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GroupSpend"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "supervisor": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "title": "Supervisor",
+            "type": "string"
+          }
+        },
+        "required": [
+          "supervisor",
+          "pools"
+        ],
+        "title": "GroupSpec",
+        "type": "object"
+      },
+      "GroupSpec-Output": {
+        "additionalProperties": false,
+        "properties": {
+          "collections": {
+            "default": [],
+            "items": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Collections",
+            "type": "array"
+          },
+          "pools": {
+            "items": {
+              "$ref": "#/components/schemas/GroupPool-Output"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Pools",
+            "type": "array"
+          },
+          "spend": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GroupSpend"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "supervisor": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "title": "Supervisor",
+            "type": "string"
+          }
+        },
+        "required": [
+          "supervisor",
+          "pools"
+        ],
+        "title": "GroupSpec",
+        "type": "object"
+      },
+      "GroupSpend": {
+        "additionalProperties": false,
+        "description": "A spend account (ADR-034 decision 5.3; slice 9). Refused at apply until then.",
+        "properties": {
+          "timezone": {
+            "default": "UTC",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Timezone",
+            "type": "string"
+          },
+          "usd": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 100000.0,
+            "title": "Usd",
+            "type": "number"
+          },
+          "window": {
+            "enum": [
+              "day",
+              "week"
+            ],
+            "title": "Window",
+            "type": "string"
+          }
+        },
+        "required": [
+          "usd",
+          "window"
+        ],
+        "title": "GroupSpend",
+        "type": "object"
+      },
+      "GroupStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/GroupMember"
+            },
+            "title": "Members",
+            "type": "array"
+          },
+          "observedGeneration": {
+            "description": "The newest generation the reconciler converged.",
+            "title": "Observedgeneration",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "observedGeneration",
+          "members"
+        ],
+        "title": "GroupStatus",
+        "type": "object"
+      },
+      "GroupTrigger-Input": {
+        "additionalProperties": false,
+        "properties": {
+          "event": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GroupEventMatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "schedule": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GroupSchedule"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "GroupTrigger",
+        "type": "object"
+      },
+      "GroupTrigger-Output": {
+        "additionalProperties": false,
+        "properties": {
+          "event": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GroupEventMatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "schedule": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GroupSchedule"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "GroupTrigger",
+        "type": "object"
+      },
+      "GroupView": {
+        "additionalProperties": false,
+        "description": "`GET /v0.2/groups/{name}`: the applied manifest and its status.",
+        "properties": {
+          "apiVersion": {
+            "const": "cardea/v1alpha1",
+            "title": "Apiversion",
+            "type": "string"
+          },
+          "kind": {
+            "const": "AgentGroup",
+            "title": "Kind",
+            "type": "string"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/GroupMetadataView"
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/GroupSpec-Output"
+          },
+          "status": {
+            "$ref": "#/components/schemas/GroupStatus"
+          }
+        },
+        "required": [
+          "apiVersion",
+          "kind",
+          "metadata",
+          "spec",
+          "status"
+        ],
+        "title": "GroupView",
+        "type": "object"
+      },
       "HostBudgetLimits": {
         "additionalProperties": false,
         "properties": {
@@ -1407,7 +2269,8 @@
                 "host.copy",
                 "models.invoke",
                 "tasks.delegate",
-                "tasks.schedule"
+                "tasks.schedule",
+                "groups.manage"
               ],
               "type": "string"
             },
@@ -1567,7 +2430,8 @@
                 "host.copy",
                 "models.invoke",
                 "tasks.delegate",
-                "tasks.schedule"
+                "tasks.schedule",
+                "groups.manage"
               ],
               "type": "string"
             },
@@ -2427,7 +3291,8 @@
                     "host.copy",
                     "models.invoke",
                     "tasks.delegate",
-                    "tasks.schedule"
+                    "tasks.schedule",
+                    "groups.manage"
                   ],
                   "type": "string"
                 },
@@ -2748,6 +3613,56 @@
         "title": "RetryClass",
         "type": "string"
       },
+      "RunBounds": {
+        "additionalProperties": false,
+        "description": "A run template's bounds; `timeout_seconds` is per attempt, as in ADR-034's\napply-time lease bound.",
+        "properties": {
+          "attempts": {
+            "default": 2,
+            "maximum": 3.0,
+            "minimum": 1.0,
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "max_cost_usd": {
+            "default": 2.0,
+            "exclusiveMinimum": 0.0,
+            "maximum": 50.0,
+            "title": "Max Cost Usd",
+            "type": "number"
+          },
+          "max_tool_calls": {
+            "default": 100,
+            "maximum": 500.0,
+            "minimum": 1.0,
+            "title": "Max Tool Calls",
+            "type": "integer"
+          },
+          "max_turns": {
+            "default": 40,
+            "maximum": 200.0,
+            "minimum": 1.0,
+            "title": "Max Turns",
+            "type": "integer"
+          },
+          "run_timeout_seconds": {
+            "default": 1800,
+            "maximum": 3600.0,
+            "minimum": 60.0,
+            "title": "Run Timeout Seconds",
+            "type": "integer"
+          },
+          "timeout_seconds": {
+            "default": 900,
+            "maximum": 3600.0,
+            "minimum": 30.0,
+            "title": "Timeout Seconds",
+            "type": "integer"
+          }
+        },
+        "title": "RunBounds",
+        "type": "object"
+      },
       "RunCall": {
         "additionalProperties": false,
         "description": "One receipted call of a run: an agent-run context (`ctx-NN`) or tool (`call-NNNN`)\ncall, or a single-operation task's `execute`.",
@@ -2977,6 +3892,200 @@
           "deduplicated"
         ],
         "title": "RunOutputCall",
+        "type": "object"
+      },
+      "RunTemplate-Input": {
+        "additionalProperties": false,
+        "description": "A pool's ADR-027 agent-run template; the kernel fills in the member, namespace,\ngrants and per-slot identity.",
+        "properties": {
+          "bounds": {
+            "$ref": "#/components/schemas/RunBounds",
+            "default": {
+              "attempts": 2,
+              "max_cost_usd": 2.0,
+              "max_tool_calls": 100,
+              "max_turns": 40,
+              "run_timeout_seconds": 1800,
+              "timeout_seconds": 900
+            }
+          },
+          "context": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ContextCall"
+            },
+            "maxItems": 4,
+            "title": "Context",
+            "type": "array"
+          },
+          "expect": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Expectation"
+            },
+            "maxItems": 16,
+            "title": "Expect",
+            "type": "array"
+          },
+          "harness": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z][a-z0-9-]{0,31}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Harness"
+          },
+          "instructions": {
+            "maxLength": 65536,
+            "minLength": 1,
+            "title": "Instructions",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@+-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "objective": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Objective"
+          },
+          "operations": {
+            "items": {
+              "maxLength": 128,
+              "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Operations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "instructions",
+          "operations"
+        ],
+        "title": "RunTemplate",
+        "type": "object"
+      },
+      "RunTemplate-Output": {
+        "additionalProperties": false,
+        "description": "A pool's ADR-027 agent-run template; the kernel fills in the member, namespace,\ngrants and per-slot identity.",
+        "properties": {
+          "bounds": {
+            "$ref": "#/components/schemas/RunBounds",
+            "default": {
+              "attempts": 2,
+              "max_cost_usd": 2.0,
+              "max_tool_calls": 100,
+              "max_turns": 40,
+              "run_timeout_seconds": 1800,
+              "timeout_seconds": 900
+            }
+          },
+          "context": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ContextCall"
+            },
+            "maxItems": 4,
+            "title": "Context",
+            "type": "array"
+          },
+          "expect": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Expectation"
+            },
+            "maxItems": 16,
+            "title": "Expect",
+            "type": "array"
+          },
+          "harness": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z][a-z0-9-]{0,31}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Harness"
+          },
+          "instructions": {
+            "maxLength": 65536,
+            "minLength": 1,
+            "title": "Instructions",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@+-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "objective": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Objective"
+          },
+          "operations": {
+            "items": {
+              "maxLength": 128,
+              "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Operations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "instructions",
+          "operations"
+        ],
+        "title": "RunTemplate",
         "type": "object"
       },
       "RunView": {
@@ -3510,7 +4619,8 @@
                     "host.copy",
                     "models.invoke",
                     "tasks.delegate",
-                    "tasks.schedule"
+                    "tasks.schedule",
+                    "groups.manage"
                   ],
                   "type": "string"
                 },
@@ -3641,7 +4751,8 @@
                     "host.copy",
                     "models.invoke",
                     "tasks.delegate",
-                    "tasks.schedule"
+                    "tasks.schedule",
+                    "groups.manage"
                   ],
                   "type": "string"
                 },
@@ -4227,6 +5338,70 @@
         ],
         "title": "VerificationRecord",
         "type": "object"
+      },
+      "WindowExpectation": {
+        "additionalProperties": false,
+        "description": "A windowed pool expectation (ADR-034 decision 5.4; slice 9). Refused until then.",
+        "properties": {
+          "max": {
+            "anyOf": [
+              {
+                "maximum": 100000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max"
+          },
+          "min": {
+            "anyOf": [
+              {
+                "maximum": 100000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min"
+          },
+          "operation": {
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+            "title": "Operation",
+            "type": "string"
+          },
+          "transition": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transition"
+          },
+          "window": {
+            "enum": [
+              "day",
+              "week"
+            ],
+            "title": "Window",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation",
+          "window"
+        ],
+        "title": "WindowExpectation",
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -4763,6 +5938,549 @@
           }
         },
         "summary": "Deliver Event"
+      }
+    },
+    "/v0.2/groups/{name}": {
+      "delete": {
+        "description": "Deleting drains every member (ADR-034 slice 8); until then it is refused with\n409 `group_drain_unsupported`.",
+        "operationId": "delete_group_v0_2_groups__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z][a-z0-9-]{0,39}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "namespace",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "Namespace",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dry_run",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Dry Run",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-cardea-auth",
+            "required": false,
+            "schema": {
+              "default": "spiffe",
+              "title": "X-Cardea-Auth",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupDeleted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Method Not Allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Group"
+      },
+      "get": {
+        "operationId": "read_group_v0_2_groups__name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z][a-z0-9-]{0,39}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "namespace",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "Namespace",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-cardea-auth",
+            "required": false,
+            "schema": {
+              "default": "spiffe",
+              "title": "X-Cardea-Auth",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Method Not Allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Group"
+      },
+      "put": {
+        "description": "Apply an AgentGroup manifest (ADR-034). The caller must be `spec.supervisor` and\nhold `groups.manage`; `dry_run=true` returns the plan and changes nothing.",
+        "operationId": "apply_group_v0_2_groups__name__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z][a-z0-9-]{0,39}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dry_run",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Dry Run",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-cardea-auth",
+            "required": false,
+            "schema": {
+              "default": "spiffe",
+              "title": "X-Cardea-Auth",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentGroup"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupApplied"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Method Not Allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Apply Group"
       }
     },
     "/v0.2/host-budget": {

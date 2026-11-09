@@ -34,7 +34,16 @@ from cardea.service.models import Record, Right
 ENTRY_POINT_GROUP = "cardea.operations"
 KERNEL_RIGHTS: frozenset[str] = frozenset(get_args(Right))
 # Prefixes owned by kernel rights and fixed installed profiles.
-RESERVED_PREFIXES = ("objects.", "tasks.", "events.", "host.", "models.", "tools.", "inputs.")
+RESERVED_PREFIXES = (
+    "objects.",
+    "tasks.",
+    "events.",
+    "host.",
+    "models.",
+    "tools.",
+    "inputs.",
+    "groups.",
+)
 # Built-in operations the kernel itself provides (ADR-034 mailboxes); never host-installed.
 BUILTIN_PREFIXES = ("mailbox.",)
 # Entry-point names of built-in handlers; they are not loaded from installed packages.

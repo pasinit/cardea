@@ -1,7 +1,7 @@
 # ADR-034: Agent Groups, Shared Records, State Machines and Mailboxes
 
 - **Date / owner / milestones:** 2026-11-08; runtime and API maintainers. Builds on [ADR-023](023-installed-operation-registry.md) (installed operations), [ADR-024](024-time-triggers.md) (time triggers), [ADR-026](026-effect-idempotency-and-reconciliation.md) (effect scopes), [ADR-027](027-agent-runs.md) (agent runs), [ADR-029](029-supervisor-schedules-expectations-and-run-evidence.md) (supervisor-managed triggers, expectations), [ADR-031](031-agent-run-context-operations.md) (context operations), [ADR-033](033-pluggable-agent-harnesses.md) (harnesses), [ADR-035](035-event-triggers.md) (event triggers, selected, slice 1 implemented) and [ADR-036](036-approval-waits.md) (approval waits, selected, implementation pending). Relates to roadmap M8.
-- **Status:** selected (design); slice 5 (mailboxes) implemented for portable execution with instance addresses only, see [Implementation status](#implementation-status); the other slices are not implemented. The lead approved this design on 2026-11-09, and the owner may veto. It was reworked on 2026-11-08 at the lead's and owner's direction. The first version made "team" a kernel concept, with roles, role relations and a fixed work-item lifecycle; that baked one workflow into the kernel and is withdrawn. This version has only generic primitives. Review decisions are recorded under [Carried decisions](#carried-decisions) and [Decisions settled in review (2026-11-09)](#decisions-settled-in-review-2026-11-09). No fit test below has run.
+- **Status:** selected (design); slices 4 (agent groups) and 5 (mailboxes) implemented portably on 2026-11-09, see [Implementation status](#implementation-status); slices 1–3 and 6–11 not implemented. The lead approved this design on 2026-11-09, and the owner may veto. It was reworked on 2026-11-08 at the lead's and owner's direction. The first version made "team" a kernel concept, with roles, role relations and a fixed work-item lifecycle; that baked one workflow into the kernel and is withdrawn. This version has only generic primitives. Review decisions are recorded under [Carried decisions](#carried-decisions) and [Decisions settled in review (2026-11-09)](#decisions-settled-in-review-2026-11-09). No fit test below has run.
 - **Affected components:** [tasks and scheduler](../components/tasks-scheduler.md), [delegation and messaging](../components/delegation-messaging.md), [events and inputs](../components/events-inputs.md), [identity and capabilities](../components/identity-capabilities.md), [resource budgets](../components/resource-budgets.md), [agent runtime](../components/agent-runtime.md).
 
 ## Requirement
@@ -115,7 +115,7 @@ spec:
   pools:
     - name: worker                    # principals g1.worker.0 .. g1.worker.2
       replicas: 3
-      grants: [models.invoke, "harness:default", "record:items/claim", ...]
+      grants: [objects.read, objects.write, models.invoke, "harness:default", "record:items/claim", ...]
       run:                            # an ADR-027 AgentRunRequest template
         instructions: "..."
         operations: [records.get, records.transition, vcs.open_change]
@@ -360,20 +360,20 @@ spec:
   pools:
     - name: principal              # reviews architecture and changes, records decisions, can block
       replicas: 1
-      grants: ["record:work/read", "record:work/approve", "record:work/request_changes",
+      grants: [objects.read, objects.write, models.invoke, "record:work/read", "record:work/approve", "record:work/request_changes",
                "record:decisions/create", "record:decisions/read", vcs.read_change, vcs.comment, ...]
       triggers: [{event: {types: [cardea.record.transitioned]}}]   # wakes on submit (and other transitions)
     - name: product                # exercises the system, files work
       replicas: 1
-      grants: ["record:work/create", "record:work/read", ci.status, ...]
+      grants: [objects.read, objects.write, models.invoke, "record:work/create", "record:work/read", ci.status, ...]
       triggers: [{schedule: {cron: "0 10 * * 1-5", timezone: UTC, misfire: skip}}]
     - name: lead                   # prioritises and assigns
       replicas: 1
-      grants: ["record:work/read", "record:work/update", "record:work/triage", "record:work/cancel", "mail:eng-team.dev"]
+      grants: [objects.read, objects.write, models.invoke, "record:work/read", "record:work/update", "record:work/triage", "record:work/cancel", "mail:eng-team.dev"]
       triggers: [{schedule: {cron: "0 9 * * 1-5", timezone: UTC, misfire: skip}}]
     - name: dev                    # implements claimed work, opens changes
       replicas: 3
-      grants: ["record:work/read", "record:work/start", "record:work/submit", vcs.open_change, ci.status, "mail:eng-team.lead"]
+      grants: [objects.read, objects.write, models.invoke, "record:work/read", "record:work/start", "record:work/submit", vcs.open_change, ci.status, "mail:eng-team.lead"]
       run: {context: [{operation: records.claimed}, {operation: mailbox.inbox}, {operation: runs.recent}]}
       triggers: [{schedule: {cron: "0 */2 * * 1-5", timezone: UTC, misfire: skip}},
                  {event: {types: [cardea.mailbox.sent]}}]
@@ -428,15 +428,15 @@ spec:
   pools:
     - name: analyst                # proposes orders
       replicas: 2
-      grants: ["record:orders/create", "record:orders/read", risk.check, market.quotes]
+      grants: [objects.read, objects.write, models.invoke, "record:orders/create", "record:orders/read", risk.check, market.quotes]
       triggers: [{schedule: {cron: "*/30 13-20 * * 1-5", timezone: UTC, misfire: skip}}]
     - name: risk                   # submits proposals for approval; may reject
       replicas: 1
-      grants: ["record:orders/read", "record:orders/approve", "record:orders/reject", risk.check]
+      grants: [objects.read, objects.write, models.invoke, "record:orders/read", "record:orders/approve", "record:orders/reject", risk.check]
       triggers: [{event: {types: [cardea.record.transitioned]}}]
     - name: execution              # places approved orders and reconciles fills
       replicas: 1
-      grants: ["record:orders/read", "record:orders/place", "record:orders/fill", "record:orders/reconcile",
+      grants: [objects.read, objects.write, models.invoke, "record:orders/read", "record:orders/place", "record:orders/fill", "record:orders/reconcile",
                broker.place_order, broker.fills]
       triggers: [{event: {types: [cardea.record.transitioned]}}, {event: {source: "broker", types: [fill]}}]
 ```
@@ -492,9 +492,28 @@ Portable tests go in `apps/api/tests/service/`. Before the record is called veri
 
 ## Implementation status
 
-**Slice 5, mailboxes (2026-11-09).** Implemented for portable execution; not run on Debian.
+### Slice 4: agent groups (implemented 2026-11-09, portable tests only)
 
-- **State.** Migration `m6_005` (`m6_005_mailboxes.py`) adds `mailbox_messages`, `mailbox_deliveries` and `mailbox_delivery_events`. The third table is the append-only delivery history (`created`, `leased`, `consumed`, `released`, `dead`, with task and attempt). Messages and history rows cannot be updated or deleted, and a consumed or dead delivery is final. A pool delivery row has `pool` set and `recipient_id` null until a member leases it, so pool and group fan-out need no schema change.
+- **Migration `m8_groups`** (`down_revision = "m6_004"`): `agent_groups` (primary key `(namespace, name)`, `generation`, `observed_generation`, spec and digest) and `group_members` (one row per member principal, state `active`, `draining` or `removed`); both refuse deletes. `triggers.managed_by` gains `group`. `trigger_events` gains the kind `coalesced`, which carries the slot and the unfinished run that absorbed it. An index `task_bindings(agent_id)` serves the one-run-per-member check. Only the group tables are added here; collections, records, mailboxes and spend accounts come with their slices.
+- **Manifest.** `AgentGroup` (`apiVersion: cardea/v1alpha1`, `kind`, `metadata {name, namespace}`, `spec`, `status`) is validated by Pydantic and sent as JSON. Server-owned fields (`metadata.generation`, timestamps, `status`, `schema_version`) are accepted and ignored, so a `GET` body applies again unchanged. A pool's `run` is the ADR-027 request without its per-slot fields: `objective` (defaulted), `instructions`, `operations`, `context`, `harness`, `model`, `expect` and `bounds {max_turns, max_tool_calls, max_cost_usd, attempts, timeout_seconds (per attempt), run_timeout_seconds}`. Bounds: 16 pools, 32 replicas per pool, 64 members, 8 triggers per pool.
+- **API.** `PUT /v0.2/groups/{name}[?dry_run=true]` returns `GroupApplied {dry_run, change (created|updated|unchanged), generation, plan {members_added, triggers_installed, triggers_updated, triggers_removed}, group}`. `GET /v0.2/groups/{name}?namespace=` returns `GroupView` with `status {observedGeneration, members[{principal_id, pool, ordinal, state, disabled, active_task_id, triggers}]}`. `DELETE /v0.2/groups/{name}?namespace=` is refused with 409 `group_drain_unsupported` until slice 8.
+- **Authority.** The caller must be `spec.supervisor` and hold `groups.manage` in the namespace, and platform policy must allow it there. `groups.manage` creates only principals `<group>.<pool>.<n>`: kind `agent`, bound to the kernel's runtime, with no external identity. An existing principal of that name that is not this group's member is refused (`principal_conflict`). Every pool grant is checked against the platform and the supervisor's `allow` and `delegate` modes; a failure names the pool and grant (`group_grant_denied`). Each compiled request then passes the same admission checks as a submitted run. Every slot re-runs full admission, and every tool call re-checks the ceiling, so revoking a grant or disabling the supervisor stops the members. A member's runs are admitted only for its group's supervisor in its namespace (`member_binding`).
+- **Compilation.** Each member gets one ADR-029 trigger `<member>.t<i>` per manifest time trigger, `managed_by = 'group'`, so `DELETE /v0.2/triggers` and provisioning cannot change it. A trigger dropped from the manifest is removed; in-flight runs keep their request.
+- **One run per member.** Admission refuses a member that has an unfinished run with 409 `member_busy`. The scheduler records such a slot as `coalesced` against that run and closes the slot. A manual submission gets the 409.
+- **Reconciler.** Create, update and scale-up converge inside the apply transaction, so `observedGeneration` equals `generation` when it commits. A dry run executes the same transaction and rolls it back, so its plan and refusals are those of the real apply. Scale-down, pool removal and deletion need drain and are refused with 409 `group_drain_unsupported` until slice 8, which also brings the DBOS reconciler keyed by (group, generation).
+- **Refused until their slices** (422, never silently ignored, because each is a bound the kernel would not yet enforce): `spend` (`group_spend_unsupported`, slice 9), `expect_window` (`group_expect_window_unsupported`, slice 9), and `event` triggers (`group_event_trigger_unsupported`, slice 7). Group event triggers compile to kernel-journal sources (decision 6), so ADR-035's rule that HTTP event triggers are host-owned does not apply to them; they wait for slice 7, not for host ownership.
+- **Explicit run grants.** A pool's `grants` are the run's complete grants; nothing is added. An ADR-027 agent run needs `objects.read`, `objects.write` and `models.invoke`, a grant for every exposed and context operation, and `harness:<id>` for a non-implicit harness. The worked examples above list the first three.
+- **Deferred check.** TODO (slice 1): `spec.collections` is accepted unchecked, because Collection documents are not on main yet. Once they are, apply must check that each one exists in the namespace with the same supervisor.
+- **Decisions in review (lead, 2026-11-09; the owner may veto).**
+  1. Member IDs stay `<group>.<pool>.<n>`. Principal IDs are global, so a group name already used in another namespace is refused with `principal_conflict`. Namespacing member IDs is a revisit item.
+  2. No grants are added automatically; explicit grants are least privilege (see above).
+  3. Every member admission also requires the group supervisor's live `groups.manage`, and platform policy's, in the namespace. Revoking it stops the members at their next slot.
+  4. The migration name `m8_groups` stands. Whichever concurrent migration merges second re-points its `down_revision`.
+- **Tests** (`apps/api/tests/service/test_groups.py`): apply creates principals, members and triggers; dry run changes nothing and refuses what apply refuses; restructure by manifest only (scale a pool up, add a pool, change the model, drop a trigger); scale-down, pool removal and deletion refused; later-slice fields refused; `groups.manage` and supervisor checks; principal conflict; HTTP routes and the `GET`→`PUT` round trip; the ceiling at apply (naming pool and grant) and at every run; a disabled supervisor stops a running member at its next call and refuses its next slot; slot coalescing and re-admission after the run ends; member binding and `member_busy`; append-only history after the migration. Acceptance test 6 is covered for time triggers. Not run on Debian.
+
+### Slice 5: mailboxes (implemented 2026-11-09, portable tests only)
+
+- **State.** Migration `m8_mailboxes` (`down_revision = "m8_groups"`) adds `mailbox_messages`, `mailbox_deliveries` and `mailbox_delivery_events`. The third table is the append-only delivery history (`created`, `leased`, `consumed`, `released`, `dead`, with task and attempt). Messages and history rows cannot be updated or deleted, and a consumed or dead delivery is final. A pool delivery row has `pool` set and `recipient_id` null until a member leases it, so pool and group fan-out need no schema change.
 - **Built-in operations.** `mailbox.send` (effect, ADR-026 scope on `/client_key`, kernel reconciler) and `mailbox.inbox` (read) are always in the operation registry. The `mailbox.` prefix is reserved: a host-owner descriptor cannot use it. Both run inside the transaction that settles their receipt, behind a savepoint, so a refusal leaves nothing behind. A crash between intent and settlement leaves the send `outcome_unknown`; the reconciler then finds no message, because none can exist without the receipt, and settles it as `effect_not_applied`. Built-ins are refused as operation tasks (`builtin_operation`).
 - **Authority.** A run needs `mailbox.send` and `mail:<address>` in its grants, and the live ceiling is checked for the address at every call. `POST /v0.2/mailbox` needs `mail:<address>` allowed for the caller and the platform in the namespace. An instance recipient must be an enabled agent principal of this kernel's runtime.
 - **Body.** One to 16 A2A 1.0 parts, each checked with the pinned SDK's `Part` message and limited to `text` or `data` (with optional `mediaType` and `metadata`). The canonical body is at most 16 KiB (`body_too_large`, 413).
@@ -508,7 +527,7 @@ Portable tests go in `apps/api/tests/service/`. Before the record is called veri
 
 ## Verification
 
-None yet. This is a design proposal. Status moves to implemented when slices 1–10 pass portably, and to verified after the Debian runs.
+Slice 4 has portable tests only (above); nothing else. This is a design proposal. Status moves to implemented when slices 1–10 pass portably, and to verified after the Debian runs.
 
 ## Limits
 
@@ -527,7 +546,8 @@ Revisit if:
 - groups must span hosts, which breaks the single-writer claim argument;
 - runs need more than 64 KiB of context, or retrieval instead of recency;
 - approver sets need relationships that grants cannot express, in which case evaluate OpenFGA (as ADR-036 says);
-- a deployment needs kernel journal events in one namespace to trigger groups in another (decision 6 keeps them namespace-local).
+- a deployment needs kernel journal events in one namespace to trigger groups in another (decision 6 keeps them namespace-local);
+- group names must repeat across namespaces, which needs namespaced member principal IDs (slice 4 refuses the clash).
 
 ## Carried decisions
 

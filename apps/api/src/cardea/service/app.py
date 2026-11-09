@@ -18,12 +18,13 @@ from cardea.kernel.lifecycle import ContractError
 from cardea.kernel.models import KernelEvent, ResourceRef
 from cardea.kernel.store import StoreError
 from cardea.service import events as intake
-from cardea.service import host_budget, host_operations, mailbox, pages
+from cardea.service import groups, host_budget, host_operations, mailbox, pages
 from cardea.service.auth import Proof
 from cardea.service.database import Fault, borrow
 from cardea.service.kernel import Kernel
 from cardea.service.models import (
     RIGHTS,
+    AgentGroup,
     AgentRunRequest,
     DelegationTaskRequest,
     ErrorBody,
@@ -44,6 +45,9 @@ from cardea.service.responses import (
     ChildrenView,
     ContentChunk,
     EventDelivered,
+    GroupApplied,
+    GroupDeleted,
+    GroupView,
     HostBudgetView,
     MailboxMessage,
     MailboxPage,
@@ -79,6 +83,7 @@ def receipt_operation(conn: sa.Connection, runtime_id: str, task_id: str) -> str
 TaskID = Annotated[str, Path(pattern=r"^task-[0-9a-f]{32}$")]
 TriggerPath = Annotated[str, Path(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,110}$")]
 OperationID = Annotated[str, Path(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")]
+GroupPath = Annotated[str, Path(pattern=r"^[a-z][a-z0-9-]{0,39}$")]
 Namespace = Annotated[str, Query(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")]
 
 
@@ -524,6 +529,26 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
             Policy(conn).principal(principal)
             found = mailbox.message(conn, principal, message_id)
         return {"schema_version": "0.2", "message": found}
+
+    @app.put("/v0.2/groups/{name}", response_model=GroupApplied)
+    def apply_group(
+        name: GroupPath, group: AgentGroup, proof: Credential, dry_run: bool = False
+    ) -> dict[str, Any]:
+        """Apply an AgentGroup manifest (ADR-034). The caller must be `spec.supervisor` and
+        hold `groups.manage`; `dry_run=true` returns the plan and changes nothing."""
+        return groups.apply(kernel, proof, name, group, dry_run)
+
+    @app.get("/v0.2/groups/{name}", response_model=GroupView)
+    def read_group(name: GroupPath, namespace: Namespace, proof: Credential) -> dict[str, Any]:
+        return groups.read(kernel, proof, namespace, name)
+
+    @app.delete("/v0.2/groups/{name}", response_model=GroupDeleted)
+    def delete_group(
+        name: GroupPath, namespace: Namespace, proof: Credential, dry_run: bool = False
+    ) -> dict[str, Any]:
+        """Deleting drains every member (ADR-034 slice 8); until then it is refused with
+        409 `group_drain_unsupported`."""
+        return groups.delete(kernel, proof, namespace, name, dry_run)
 
     @app.get("/v0.2/tasks/{task_id}/run", response_model=RunView)
     def run_view(

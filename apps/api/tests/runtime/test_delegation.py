@@ -526,6 +526,9 @@ def test_m3_upgrade_preserves_existing_host_receipt(kernel: Kernel) -> None:
         ).scalar_one()
         for table in ("mailbox_delivery_events", "mailbox_deliveries", "mailbox_messages"):
             conn.exec_driver_sql(f"DROP TABLE {table}")
+        conn.exec_driver_sql("DROP INDEX task_bindings_by_agent")
+        conn.exec_driver_sql("DROP TABLE group_members")
+        conn.exec_driver_sql("DROP TABLE agent_groups")
         conn.exec_driver_sql("DROP TABLE recovery_epochs")
         conn.exec_driver_sql("DROP TABLE trigger_deliveries")
         conn.exec_driver_sql("DROP TABLE trigger_events")
