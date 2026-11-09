@@ -21,6 +21,8 @@ from cardea.service.database import Database, Fault, borrow
 from cardea.service.harnesses import Catalog, Harnesses, check_harness_grants
 from cardea.service.models import (
     DEFAULT_MAX_TASK_REQUEST_BYTES,
+    RECORD_GRANT_PREFIX,
+    RECORD_OPERATIONS,
     AgentRunRequest,
     AgentTools,
     AttemptLogging,
@@ -38,7 +40,13 @@ from cardea.service.models import (
     TriggerSpec,
     now,
 )
-from cardea.service.operations import KERNEL_RIGHTS, Handler, Registry, check_context
+from cardea.service.operations import (
+    KERNEL_RIGHTS,
+    Handler,
+    Reconciler,
+    Registry,
+    check_context,
+)
 from cardea.service.policy import Policy, object_key
 from cardea.service.profiles import (
     AGENT_RUN_QUEUE,
@@ -54,6 +62,7 @@ from cardea.service.profiles import (
     for_runtime,
     runtime_ids,
 )
+from cardea.service.records import Records
 from cardea.service.triggers import check_size
 from cardea.service.triggers import install as install_triggers
 
@@ -115,6 +124,9 @@ def provision(
     for rule in (*document.permissions, *document.platform):
         if rule.operation.startswith("harness:"):
             check_harness_grants(harnesses, (rule.operation,), required=False)
+        elif rule.operation.startswith(RECORD_GRANT_PREFIX):
+            # Collections are supervisor documents; a grant may precede its collection.
+            continue
         elif rule.operation not in KERNEL_RIGHTS and rule.operation not in installed:
             raise Fault(
                 "operation_not_installed", "Policy names an operation that is not installed"
@@ -282,6 +294,8 @@ class Kernel:
         self.run_preview_bytes = run_preview_bytes
         self.host = host
         self.operations = operations or Registry(handlers={})
+        # Built-in record operations (ADR-034), bound to this store.
+        self.records = Records(database)
         # Installed agent harnesses (ADR-033). A lone `session` is the ADR-027 configuration,
         # served as the implicit `claude-sdk` entry so there is one code path.
         if harnesses is None and session is not None:
@@ -465,7 +479,14 @@ class Kernel:
             return 0.0
         return self.workers.queue_allowance(executor.profile)
 
+    def reconciler(self, name: str) -> Reconciler | None:
+        if name in RECORD_OPERATIONS:
+            return self.records.reconciler(name)
+        return self.operations.reconciler(name)
+
     def handler(self, name: str) -> Handler:
+        if name in RECORD_OPERATIONS:
+            return self.records.handler(name)
         descriptor = self.operations.get(name)
         executor = descriptor.cardea.executor
         if executor is None:

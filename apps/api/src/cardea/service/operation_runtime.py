@@ -34,7 +34,7 @@ from cardea.service.approvals import ApprovalRequirement
 from cardea.service.confined import WorkerFailed
 from cardea.service.database import Fault, borrow
 from cardea.service.kernel import TERMINAL, Kernel
-from cardea.service.models import OperationTaskRequest, now
+from cardea.service.models import RECORD_OPERATIONS, OperationTaskRequest, now
 from cardea.service.operations import (
     OperationContext,
     OperationDescriptor,
@@ -95,7 +95,8 @@ class OperationRuntime:
         request = OperationTaskRequest.model_validate_json(binding["request_json"])
         descriptor = self.kernel.operations.get(request.operation)
         for right in (
-            request.operation,
+            # Record operations are authorized per call by their record grant (ADR-034).
+            *(() if request.operation in RECORD_OPERATIONS else (request.operation,)),
             "objects.read",
             "objects.write",
             *descriptor.cardea.requires,
@@ -554,7 +555,7 @@ class OperationRuntime:
             if receipt.state is not OperationState.OUTCOME_UNKNOWN:
                 raise Fault("not_uncertain", "Only uncertain operations can be reconciled", 409)
             name = receipt.request.name
-            reconciler = self.kernel.operations.reconciler(name)
+            reconciler = self.kernel.reconciler(name)
             if reconciler is None:
                 raise Fault("reconciler_missing", "Operation declares no reconciler", 409)
             recorded = receipt.request.arguments
