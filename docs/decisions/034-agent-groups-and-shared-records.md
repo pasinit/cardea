@@ -72,7 +72,7 @@ Checked 2026-11-08 against specifications, API references and release metadata. 
 | [W3C SCXML 1.0](https://www.w3.org/TR/scxml/) (Recommendation, 2015) | W3C | A standard, declarative statechart format. | Hierarchy, parallel states and an executable-content language far beyond "which transitions are allowed for this record"; no maintained Python implementation found in this check. The flat subset is what is needed. |
 | [`transitions`](https://github.com/pytransitions/transitions) | 0.9.3 (2025-07-02), MIT | A maintained Python state-machine library with states, transitions and conditions. | In-memory machines bound to Python objects; conditions are Python callables. The rules here must be data, checked inside a SQLite transaction with authority. The flat table below is smaller than adapting it. Not tested. |
 | BPMN engines, Serverless Workflow (ADR-021, ADR-029) | various | Process orchestration. | Already rejected for single-step work in ADR-029. They would also add a second execution owner. A record lifecycle is not a process. |
-| [CEL](https://github.com/google/cel-spec), as selected by ADR-036 | implementation chosen by the ADR-036 slice-1 fit test | Side-effect-free, terminating expressions over JSON. ADR-036 already uses them for approval conditions. | **Reused** for guards, so Cardea has one expression language. |
+| [CEL](https://github.com/google/cel-spec), as selected by ADR-036 | `common-expression-language` 0.10.0, selected by the ADR-036 slice-1 fit test | Side-effect-free, terminating expressions over JSON. ADR-036 already uses them for approval conditions. | **Reused** for guards, so Cardea has one expression language. |
 
 ### P4 Mailboxes
 
@@ -318,7 +318,7 @@ Record transitions (`cardea.record.transitioned`, `subject` = `<collection>/<rec
   Triggers gain `managed_by = group`.
 - **Compatibility.** Without groups or collections nothing changes. ADR-031's amendments are additive.
 - **Operational cost.** No new service or scheduler. Each apply runs one DBOS workflow. The per-minute tick gains a sweep over claims and windows.
-- **Dependencies.** CEL as selected by ADR-036 slice 1. Nothing else.
+- **Dependencies.** None new: `common-expression-language` 0.10.0 is already pinned by ADR-036 slice 1.
 
 ## Worked examples (configuration only)
 
@@ -478,7 +478,7 @@ Portable tests go in `apps/api/tests/service/`. Before the record is called veri
 ## Implementation plan (PR-sized slices, dependency order)
 
 1. **Collections and records:** the migration, the `Collection` model, `PUT/GET` of collections, `records.create/get/query/update` with compare-and-set, write guards and history.
-   - Guard evaluation reuses the CEL compilation in `cardea.service.approvals` (ADR-036 slice 1, PR #32) once that merges. There is no second copy of the evaluator or its limits.
+   - Guard evaluation reuses the CEL compilation in `cardea.service.approvals` (ADR-036 slice 1, merged in PR #32). Guards add only their own variables (`record`, `args`, `caller`). There is no second copy of the evaluator or its limits.
 2. **Claims:** standalone claim and release, epoch fencing at the tool endpoint, renewal, the expiry sweep, follow-up wakes and the apply-time lease check. Tests 3, 4.
 3. **State machines:** `records.transition`, guards, claim effects, `requires_receipt`, and generations with `migrate`. Test 7.
 4. **Agent groups:** `AgentGroup` apply and plan, `groups.manage`, member principals, delegated grants, compiled time triggers, one run per member. Test 6.

@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: help install try try-test try-check test api-test kernel-test standards-test m1-test m1-demo kernel-openapi spire-fit dbos-fit dbos-integration-fit temporal-fit absurd-fit hatchet-fit kernel-schema kernel-demo lint lint-api fix-lint format typecheck typecheck-api check-uv
+.PHONY: help install try try-test try-check test api-test kernel-test standards-test m1-test m1-demo kernel-openapi spire-fit dbos-fit dbos-integration-fit temporal-fit absurd-fit hatchet-fit cel-fit kernel-schema kernel-demo lint lint-api fix-lint format typecheck typecheck-api check-uv
 
 API_DIR := apps/api
 UV ?= $(shell command -v uv 2>/dev/null || printf "%s/bin/uv" "$$(python3 -m site --user-base)")
@@ -22,6 +22,7 @@ help:
 	@printf "  make temporal-fit Run isolated Temporal recovery experiments\n"
 	@printf "  make absurd-fit   Run isolated Absurd PostgreSQL experiments\n"
 	@printf "  make hatchet-fit  Run isolated Hatchet embedded experiments\n"
+	@printf "  make cel-fit      Run the ADR-036 CEL implementation fit test\n"
 	@printf "  make kernel-schema Print versioned kernel JSON schemas\n"
 	@printf "  make kernel-demo  Run the two-process persistence demo\n"
 	@printf "  make lint         Run linters\n"
@@ -96,6 +97,11 @@ absurd-fit: check-uv
 
 hatchet-fit: check-uv
 	cd experiments/hatchet && "$(UV)" run --locked pytest
+
+cel-fit: check-uv
+	cd experiments/cel && "$(UV)" run --locked pytest
+	"$(UV)" run --locked --project $(API_DIR) ruff check --config apps/api/pyproject.toml experiments/cel
+	"$(UV)" run --locked --project $(API_DIR) ruff format --check --config apps/api/pyproject.toml experiments/cel
 
 kernel-schema: check-uv
 	@cd $(API_DIR) && PYTHONPATH=src "$(UV)" run python -m cardea.kernel.schema

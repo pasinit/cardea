@@ -38,6 +38,6 @@ Each record states the requirement, the open-source candidates considered, fit e
 | [033](033-pluggable-agent-harnesses.md) | Pluggable Agent Harnesses |
 | [034](034-agent-groups-and-shared-records.md) | Agent Groups, Shared Records, State Machines and Mailboxes (selected; not implemented) |
 | [035](035-event-triggers.md) | Event Triggers |
-| [036](036-approval-waits.md) | Approval Waits and Per-Operation Autonomy (selected; implementation pending) |
+| [036](036-approval-waits.md) | Approval Waits and Per-Operation Autonomy (selected; slice 1 implemented: CEL fit test, rule evaluator) |
 
 ADR-022, a gap analysis for a first client application, is not published. ADRs 023–030 cite its gap numbers (for example "gap #3"); each of those records restates its own requirement in full.
