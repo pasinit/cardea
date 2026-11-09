@@ -449,3 +449,76 @@ def test_the_lease_bound_is_checked_at_apply(desk: tuple[Kernel, Any]) -> None:
     with pytest.raises(Fault) as shrink:
         apply_items(kernel, lease_seconds=3600)
     assert shrink.value.code == "claim_lease_too_short"
+
+
+def test_writes_to_a_held_record_are_fenced_by_default(items: Kernel) -> None:
+    record = created(items)
+    claim(items, record)
+
+    def write(agent: str, version: int, **epoch: Any) -> Any:
+        return call(
+            items,
+            "records.update",
+            record,
+            agent,
+            expected_version=version,
+            data={"title": "one"},
+            **epoch,
+        )
+
+    assert write("a2", 2)[2] == "record_claimed"  # a non-holder
+    assert write("a2", 2, claim_epoch=1)[2] == "claim_lost"
+    assert write("a1", 2)[2] == "claim_lost"  # the holder must present its epoch
+    assert write("a1", 2, claim_epoch=1)[0] == "succeeded"
+    # The claim lapses and a2 takes the record: a1 is now a stale holder.
+    ends = lease(items, record["record_id"])
+    Scheduler(items, lambda: ends + timedelta(seconds=60)).tick()
+    claim(items, record, agent="a2")
+    assert write("a1", 5)[2] == "record_claimed"
+    assert write("a1", 5, claim_epoch=1)[2] == "claim_lost"
+    assert write("a2", 5)[2] == "claim_lost"
+    assert write("a2", 5, claim_epoch=3)[0] == "succeeded"
+
+
+def test_a_stale_holder_of_an_unswept_claim_is_refused(items: Kernel) -> None:
+    record = created(items)
+    claim(items, record)
+    with items.database.engine.begin() as conn:
+        conn.exec_driver_sql(
+            "UPDATE records SET lease_expires_at=? WHERE record_id=?",
+            (stamp(now() - timedelta(seconds=1)), record["record_id"]),
+        )
+    stale = call(items, "records.update", record, expected_version=2, data={"title": "one"})
+    assert stale[2] == "claim_lost"
+    # Anyone else may write: a lapsed claim no longer holds the record.
+    other = call(items, "records.update", record, "a2", expected_version=2, data={"title": "two"})
+    assert other[0] == "succeeded"
+
+
+def test_a_collection_may_opt_out_of_write_fencing(items: Kernel) -> None:
+    put(items, collection(claims={**CLAIMS, "fence_writes": False}))
+    record = created(items)
+    claim(items, record)
+    other = call(items, "records.update", record, "a2", expected_version=2, data={"title": "one"})
+    assert other[0] == "succeeded"
+    # An explicit epoch is still checked.
+    stale = call(
+        items,
+        "records.update",
+        record,
+        "a2",
+        expected_version=3,
+        claim_epoch=1,
+        data={"title": "two"},
+    )
+    assert stale[2] == "claim_lost"
+
+
+def test_the_fencing_default_keeps_the_digest(kernel: Kernel) -> None:
+    first = put(kernel, collection(claims=CLAIMS)).json()
+    explicit = put(kernel, collection(claims={**CLAIMS, "fence_writes": True})).json()
+    assert explicit["plan"]["change"] == "unchanged"
+    assert "fence_writes" not in first["spec"]["claims"]
+    changed = put(kernel, collection(claims={**CLAIMS, "fence_writes": False})).json()
+    assert changed["plan"]["change"] == "updated"
+    assert changed["spec"]["claims"]["fence_writes"] is False

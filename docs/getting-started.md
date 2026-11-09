@@ -367,6 +367,6 @@ and later, from version 1 of the record:
 - Exactly one of several concurrent claims wins; the others get `record_claimed`. A holder may hold `max_per_holder` records (`claim_limit` beyond that).
 - The output's `claim` carries `claim_epoch`, `lease_expires_at` and `idempotency_context` (`<record_id>.<epoch>`). Use that context for effects taken for the record, so a later holder of the same record cannot repeat them.
 - The claim belongs to the agent principal, not to one run. Each attempt of its runs keeps the lease past that attempt, a successful run renews it to the full `lease_seconds`, and claiming again renews it. Failed runs renew nothing.
-- Pass `claim_epoch` to `records.update` to write only while you still hold the record, and to `records.release` to give it back. A stale holder gets `claim_lost`.
+- While a record is held, `records.update` needs the holder's current `claim_epoch`: the holder without it, or a stale holder, gets `claim_lost`, and anyone else gets `record_claimed`. Set `"fence_writes": false` in `claims` to opt out. `records.release` with `claim_epoch` gives the record back.
 - When the lease runs out, the next minute tick releases the record with a new epoch. A group member that holds a record but has no run in progress gets a follow-up run from its first trigger once less than half the lease is left, at most `max_followups` per epoch. If its claim then lapses, the supervisor gets a message.
 - `records.claimed {"collection": "work"}` lists the caller's live claims; it also works as a context operation.

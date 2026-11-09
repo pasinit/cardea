@@ -114,6 +114,9 @@ class ClaimsConfig(Record):
     max_per_holder: Annotated[int, Field(strict=True, ge=1, le=64)] = 1
     max_followups: Annotated[int, Field(strict=True, ge=0, le=100)] = 6
     standalone: Annotated[bool, Field(strict=True)] = False
+    # While a record is held, writes need the current holder and `claim_epoch` (lead,
+    # 2026-11-09). `false` leaves held records writable by anyone the grant and guards allow.
+    fence_writes: Annotated[bool, Field(strict=True)] = True
 
 
 def lease_bound(attempts: int, timeout_seconds: int) -> int:
@@ -190,8 +193,12 @@ class CollectionDocument(Record):
         """The stored spec. Absent later-slice fields stay absent, so a collection applied
         before they existed keeps its digest and generation."""
         spec = self.spec.model_dump(mode="json", by_alias=True)
-        if spec.get("claims") is None:
+        claims = spec.get("claims")
+        if claims is None:
             spec.pop("claims", None)
+        elif isinstance(claims, dict) and claims.get("fence_writes") is True:
+            # The default is recorded by its absence, like other later-added fields.
+            claims.pop("fence_writes")
         guards = spec["guards"]
         assert isinstance(guards, dict)
         for action in ("claim", "release"):
@@ -551,6 +558,33 @@ def check_holder(row: sa.RowMapping, caller: Mapping[str, JsonValue], epoch: obj
         )
 
 
+def check_write(
+    spec: CollectionSpec,
+    row: sa.RowMapping,
+    caller: Mapping[str, JsonValue],
+    arguments: Mapping[str, JsonValue],
+) -> None:
+    """Writes to a held record (decision 2.4, lead 2026-11-09).
+
+    A `claim_epoch` in the call is always checked. While the record is held and the
+    collection fences writes (the default), only the holder writes, and only with the
+    current epoch: anyone else gets `record_claimed`, the holder without it `claim_lost`.
+    The holder of a lapsed claim the sweep has not reached yet is stale. Unheld records
+    behave as without claims.
+    """
+    if "claim_epoch" in arguments:
+        check_holder(row, caller, arguments["claim_epoch"])
+        return
+    if row["holder"] is None or spec.claims is None or not spec.claims.fence_writes:
+        return
+    if row["holder"] == caller["id"]:
+        raise OperationRejected(
+            f"Writes to a held record need claim_epoch {row['claim_epoch']}", "claim_lost"
+        )
+    if not expired(row, now()):
+        raise OperationRejected("Another principal holds this record", "record_claimed")
+
+
 def write_claim(conn: sa.Connection, row: sa.RowMapping, new: Mapping[str, JsonValue]) -> None:
     """Store a claim change; any holder event restarts the follow-up count."""
     changed = conn.exec_driver_sql(
@@ -835,8 +869,7 @@ class Records:
                     f"expected version {expected}, record is at version {row['version']}",
                     "version_conflict",
                 )
-            if "claim_epoch" in arguments:
-                check_holder(row, caller, arguments["claim_epoch"])
+            check_write(spec, row, caller, arguments)
             check_guard(spec, "update", old, arguments, caller)
             new: dict[str, JsonValue] = {
                 **old,
@@ -1155,8 +1188,9 @@ DESCRIPTORS: tuple[OperationDescriptor, ...] = (
             "data": {"type": "object"},
             "labels": _LABELS_SCHEMA,
             "links": _LINKS_SCHEMA,
-            # Optional fencing: refuse with claim_lost unless the caller still holds the
-            # record at this epoch.
+            # Fencing: required while the record is held (unless the collection sets
+            # claims.fence_writes false); refused with claim_lost unless the caller still
+            # holds the record at this epoch.
             "claim_epoch": _EPOCH,
         },
         ["record_id", "expected_version"],

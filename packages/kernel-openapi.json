@@ -1327,6 +1327,11 @@
         "additionalProperties": false,
         "description": "Claims on a collection's records (ADR-034 decision 2.4).\n\nA claim belongs to a principal, not a run. Without a state machine (slice 3) claims are\ntaken and dropped with `records.claim` and `records.release`, which need `standalone`.",
         "properties": {
+          "fence_writes": {
+            "default": true,
+            "title": "Fence Writes",
+            "type": "boolean"
+          },
           "lease_seconds": {
             "default": 14400,
             "maximum": 2592000.0,
