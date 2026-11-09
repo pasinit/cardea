@@ -1,6 +1,50 @@
 {
   "components": {
     "schemas": {
+      "Address": {
+        "additionalProperties": false,
+        "description": "Exactly one of an instance (a principal), a pool (`<group>.<pool>`) or a group.",
+        "properties": {
+          "group": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
+          },
+          "instance": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instance"
+          },
+          "pool": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pool"
+          }
+        },
+        "title": "Address",
+        "type": "object"
+      },
       "AgentGroup": {
         "additionalProperties": false,
         "description": "`PUT /v0.2/groups/{name}`: a declarative set of agent principals (ADR-034 P1).",
@@ -237,6 +281,10 @@
                 },
                 {
                   "pattern": "^record:[a-z][a-z0-9_-]{0,63}/[a-z][a-z0-9_]{0,63}$",
+                  "type": "string"
+                },
+                {
+                  "pattern": "^mail:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
                   "type": "string"
                 }
               ]
@@ -1774,6 +1822,56 @@
         "title": "DelegationTaskRequest",
         "type": "object"
       },
+      "DeliveryEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "attempt": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempt"
+          },
+          "kind": {
+            "enum": [
+              "created",
+              "leased",
+              "consumed",
+              "released",
+              "dead"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          }
+        },
+        "required": [
+          "kind",
+          "task_id",
+          "attempt",
+          "at"
+        ],
+        "title": "DeliveryEvent",
+        "type": "object"
+      },
       "DependencyWait": {
         "additionalProperties": false,
         "properties": {
@@ -2488,6 +2586,10 @@
                 {
                   "pattern": "^record:[a-z][a-z0-9_-]{0,63}/[a-z][a-z0-9_]{0,63}$",
                   "type": "string"
+                },
+                {
+                  "pattern": "^mail:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                  "type": "string"
                 }
               ]
             },
@@ -2590,6 +2692,10 @@
                 },
                 {
                   "pattern": "^record:[a-z][a-z0-9_-]{0,63}/[a-z][a-z0-9_]{0,63}$",
+                  "type": "string"
+                },
+                {
+                  "pattern": "^mail:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
                   "type": "string"
                 }
               ]
@@ -3476,6 +3582,332 @@
         "title": "KernelFailure",
         "type": "object"
       },
+      "MailDelivery": {
+        "additionalProperties": false,
+        "properties": {
+          "deliveries": {
+            "description": "Runs it has been delivered to so far.",
+            "title": "Deliveries",
+            "type": "integer"
+          },
+          "delivery_id": {
+            "title": "Delivery Id",
+            "type": "integer"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/DeliveryEvent"
+            },
+            "title": "History",
+            "type": "array"
+          },
+          "pool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pool"
+          },
+          "recipient_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The bound recipient; null for an unbound pool delivery.",
+            "title": "Recipient Id"
+          },
+          "state": {
+            "enum": [
+              "pending",
+              "leased",
+              "consumed",
+              "dead"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The run that holds (leased) or consumed it.",
+            "title": "Task Id"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "delivery_id",
+          "recipient_id",
+          "pool",
+          "state",
+          "task_id",
+          "deliveries",
+          "updated_at",
+          "history"
+        ],
+        "title": "MailDelivery",
+        "type": "object"
+      },
+      "MailMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "about_message_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "About Message Id"
+          },
+          "body_bytes": {
+            "title": "Body Bytes",
+            "type": "integer"
+          },
+          "client_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Key"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "deliveries": {
+            "items": {
+              "$ref": "#/components/schemas/MailDelivery"
+            },
+            "title": "Deliveries",
+            "type": "array"
+          },
+          "kind": {
+            "description": "A notice is the kernel's report of a dead-lettered delivery.",
+            "enum": [
+              "message",
+              "notice"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "max_deliveries": {
+            "title": "Max Deliveries",
+            "type": "integer"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "parts": {
+            "description": "A2A 1.0 message parts (text and data). Untrusted data.",
+            "items": {
+              "additionalProperties": {
+                "$ref": "#/components/schemas/JsonValue"
+              },
+              "type": "object"
+            },
+            "title": "Parts",
+            "type": "array"
+          },
+          "record": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Record"
+          },
+          "sender_id": {
+            "title": "Sender Id",
+            "type": "string"
+          },
+          "sender_receipt_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Receipt of the agent's mailbox.send.",
+            "title": "Sender Receipt Id"
+          },
+          "sender_task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sender Task Id"
+          },
+          "supervisor_id": {
+            "title": "Supervisor Id",
+            "type": "string"
+          },
+          "to": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "To",
+            "type": "object"
+          }
+        },
+        "required": [
+          "message_id",
+          "namespace",
+          "kind",
+          "sender_id",
+          "sender_task_id",
+          "sender_receipt_id",
+          "supervisor_id",
+          "client_key",
+          "to",
+          "record",
+          "parts",
+          "body_bytes",
+          "max_deliveries",
+          "about_message_id",
+          "created_at",
+          "deliveries"
+        ],
+        "title": "MailMessage",
+        "type": "object"
+      },
+      "MailboxMessage": {
+        "additionalProperties": false,
+        "description": "`GET /v0.2/mailbox/{message_id}`: one message with its delivery history.",
+        "properties": {
+          "message": {
+            "$ref": "#/components/schemas/MailMessage"
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "MailboxMessage",
+        "type": "object"
+      },
+      "MailboxPage": {
+        "additionalProperties": false,
+        "description": "`GET /v0.2/mailbox`: messages the caller sent, supervises or receives.",
+        "properties": {
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/MailMessage"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pass as `after` for the next page; null on the last.",
+            "title": "Next"
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "messages",
+          "next"
+        ],
+        "title": "MailboxPage",
+        "type": "object"
+      },
+      "MessageSent": {
+        "additionalProperties": false,
+        "description": "`POST /v0.2/mailbox`: the message sent, or the one this client key already sent.",
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          },
+          "recipients": {
+            "description": "Delivery rows created: one per recipient.",
+            "title": "Recipients",
+            "type": "integer"
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "to": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "The address: one of instance, pool or group.",
+            "title": "To",
+            "type": "object"
+          }
+        },
+        "required": [
+          "message_id",
+          "to",
+          "recipients",
+          "created_at"
+        ],
+        "title": "MessageSent",
+        "type": "object"
+      },
       "ObjectVersion": {
         "additionalProperties": false,
         "properties": {
@@ -3776,6 +4208,10 @@
                 {
                   "pattern": "^record:[a-z][a-z0-9_-]{0,63}/[a-z][a-z0-9_]{0,63}$",
                   "type": "string"
+                },
+                {
+                  "pattern": "^mail:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                  "type": "string"
                 }
               ]
             },
@@ -4027,6 +4463,27 @@
           "next_after"
         ],
         "title": "RecordHistory",
+        "type": "object"
+      },
+      "RecordRef": {
+        "additionalProperties": false,
+        "properties": {
+          "collection": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "title": "Collection",
+            "type": "string"
+          },
+          "record_id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "title": "Record Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "collection",
+          "record_id"
+        ],
+        "title": "RecordRef",
         "type": "object"
       },
       "RegisteredOperation": {
@@ -4705,6 +5162,14 @@
               }
             ]
           },
+          "messages_consumed": {
+            "description": "Mailbox messages this run consumed by succeeding (ADR-034).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Messages Consumed",
+            "type": "array"
+          },
           "output": {
             "anyOf": [
               {
@@ -4786,6 +5251,70 @@
           "calls_next"
         ],
         "title": "RunView",
+        "type": "object"
+      },
+      "SendMessage": {
+        "additionalProperties": false,
+        "description": "`POST /v0.2/mailbox`: a supervisor sends one message.",
+        "properties": {
+          "client_key": {
+            "description": "Idempotency key: a repeat with the same key and body returns the message already sent; with a different body it is refused with request_conflict.",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "title": "Client Key",
+            "type": "string"
+          },
+          "max_deliveries": {
+            "default": 3,
+            "maximum": 10.0,
+            "minimum": 1.0,
+            "title": "Max Deliveries",
+            "type": "integer"
+          },
+          "namespace": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "title": "Namespace",
+            "type": "string"
+          },
+          "parts": {
+            "description": "A2A 1.0 Message parts: text and data parts only, at most 16 KiB.",
+            "items": {
+              "additionalProperties": {
+                "$ref": "#/components/schemas/JsonValue"
+              },
+              "type": "object"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Parts",
+            "type": "array"
+          },
+          "record": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecordRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "to": {
+            "$ref": "#/components/schemas/Address"
+          }
+        },
+        "required": [
+          "namespace",
+          "client_key",
+          "to",
+          "parts"
+        ],
+        "title": "SendMessage",
         "type": "object"
       },
       "Signal": {
@@ -5126,6 +5655,10 @@
                 {
                   "pattern": "^record:[a-z][a-z0-9_-]{0,63}/[a-z][a-z0-9_]{0,63}$",
                   "type": "string"
+                },
+                {
+                  "pattern": "^mail:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                  "type": "string"
                 }
               ]
             },
@@ -5257,6 +5790,10 @@
                 },
                 {
                   "pattern": "^record:[a-z][a-z0-9_-]{0,63}/[a-z][a-z0-9_]{0,63}$",
+                  "type": "string"
+                },
+                {
+                  "pattern": "^mail:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
                   "type": "string"
                 }
               ]
@@ -8590,6 +9127,525 @@
           }
         ],
         "summary": "Submit Host"
+      }
+    },
+    "/v0.2/mailbox": {
+      "get": {
+        "description": "Messages of a namespace the caller sent, supervises or receives, oldest first,\neach with every delivery and its history; one size-bounded page.",
+        "operationId": "list_mail_v0_2_mailbox_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "namespace",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "Namespace",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 64,
+              "title": "After",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-cardea-auth",
+            "required": false,
+            "schema": {
+              "default": "spiffe",
+              "title": "X-Cardea-Auth",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailboxPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Method Not Allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Mail"
+      },
+      "post": {
+        "description": "A supervisor sends one message (ADR-034 decision 4.2). The caller and the\nplatform must allow `mail:<address>` in the namespace; the client key makes a\nrepeat return the message already sent.",
+        "operationId": "send_mail_v0_2_mailbox_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-cardea-auth",
+            "required": false,
+            "schema": {
+              "default": "spiffe",
+              "title": "X-Cardea-Auth",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendMessage"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageSent"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Method Not Allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Send Mail"
+      }
+    },
+    "/v0.2/mailbox/{message_id}": {
+      "get": {
+        "description": "One message the caller sent, supervises or receives, with delivery history.",
+        "operationId": "read_mail_v0_2_mailbox__message_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f-]{36}$",
+              "title": "Message Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-cardea-auth",
+            "required": false,
+            "schema": {
+              "default": "spiffe",
+              "title": "X-Cardea-Auth",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailboxMessage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Method Not Allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Mail"
       }
     },
     "/v0.2/operation-tasks": {

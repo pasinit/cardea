@@ -20,14 +20,15 @@ from cardea.runtime.agent_session import ClaudeAgentSession
 from cardea.runtime.harness import Harness
 from cardea.runtime.opencode import OpenCodeHarness, Price
 from cardea.service import harnesses as registry
+from cardea.service import mailbox
 from cardea.service.app import create_app
 from cardea.service.auth import Authentication, IdentityProvider
 from cardea.service.confined import ConfinedAgentSession, Workers
-from cardea.service.database import Database, Fault, private_file, service_lock
+from cardea.service.database import Database, Fault, borrow, private_file, service_lock
 from cardea.service.host_runtime import HostRuntime
 from cardea.service.kernel import Kernel
 from cardea.service.logs import configure_logging
-from cardea.service.models import NetworkListener, ServiceConfig
+from cardea.service.models import NetworkListener, ServiceConfig, now
 from cardea.service.operation_runtime import OperationRuntime
 from cardea.service.operations import Registry
 from cardea.service.runtime import Runtime
@@ -289,6 +290,9 @@ def serve(
                         # Uncertain effects settle only from observed destination state.
                         try:
                             OperationRuntime(kernel).reconcile_pending()
+                            # Leases of runs that ended on another path (ADR-034).
+                            with kernel.database.engine.begin() as conn, borrow(conn) as tx:
+                                mailbox.sweep(conn, tx, kernel.runtime_id, now())
                         except Exception:
                             log.exception("periodic reconciliation failed")
                         timer.wait(30)
