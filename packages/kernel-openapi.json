@@ -224,6 +224,19 @@
             "title": "Agent Id",
             "type": "string"
           },
+          "approval_wait_seconds": {
+            "anyOf": [
+              {
+                "maximum": 2592000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approval Wait Seconds"
+          },
           "attempt_timeout_seconds": {
             "default": 900,
             "maximum": 3600.0,
@@ -286,6 +299,11 @@
                 {
                   "pattern": "^mail:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
                   "type": "string"
+                },
+                {
+                  "maxLength": 136,
+                  "pattern": "^approve:[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+                  "type": "string"
                 }
               ]
             },
@@ -323,6 +341,19 @@
             "minLength": 1,
             "title": "Instructions",
             "type": "string"
+          },
+          "max_approval_waits": {
+            "anyOf": [
+              {
+                "maximum": 16.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Approval Waits"
           },
           "max_attempts": {
             "default": 2,
@@ -2639,6 +2670,11 @@
                 {
                   "pattern": "^mail:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
                   "type": "string"
+                },
+                {
+                  "maxLength": 136,
+                  "pattern": "^approve:[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+                  "type": "string"
                 }
               ]
             },
@@ -2745,6 +2781,11 @@
                 },
                 {
                   "pattern": "^mail:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                  "type": "string"
+                },
+                {
+                  "maxLength": 136,
+                  "pattern": "^approve:[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
                   "type": "string"
                 }
               ]
@@ -4283,6 +4324,11 @@
                 {
                   "pattern": "^mail:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
                   "type": "string"
+                },
+                {
+                  "maxLength": 136,
+                  "pattern": "^approve:[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+                  "type": "string"
                 }
               ]
             },
@@ -5730,6 +5776,11 @@
                 {
                   "pattern": "^mail:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
                   "type": "string"
+                },
+                {
+                  "maxLength": 136,
+                  "pattern": "^approve:[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+                  "type": "string"
                 }
               ]
             },
@@ -5865,6 +5916,11 @@
                 },
                 {
                   "pattern": "^mail:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                  "type": "string"
+                },
+                {
+                  "maxLength": 136,
+                  "pattern": "^approve:[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
                   "type": "string"
                 }
               ]

@@ -10,7 +10,7 @@ from casbin.model import Model  # type: ignore[import-untyped]
 
 from cardea.kernel.models import ObjectVersion
 from cardea.service.database import Fault
-from cardea.service.models import HostObjectTaskRequest, TaskRequest
+from cardea.service.models import APPROVE_GRANT_PREFIX, HostObjectTaskRequest, TaskRequest
 
 MODEL = """
 [request_definition]
@@ -145,6 +145,14 @@ class Policy:
                 raise Fault("parent_binding", "Child must retain its supervisor and namespace")
             self.ceiling(request.parent_task_id, "tasks.submit")
         for operation in request.grants:
+            if operation.startswith(APPROVE_GRANT_PREFIX):
+                # `approve:<op>` (ADR-036): the supervisor holds `approve` on the operation
+                # and may delegate it, as the platform allows; rechecked at each decision.
+                approved = operation.removeprefix(APPROVE_GRANT_PREFIX)
+                self.require("platform", request.namespace, approved, "approve")
+                self.require(supervisor, request.namespace, approved, "approve")
+                self.require(supervisor, request.namespace, approved, "delegate")
+                continue
             self.require("platform", request.namespace, operation)
             self.require(supervisor, request.namespace, operation)
             self.require(supervisor, request.namespace, operation, "delegate")

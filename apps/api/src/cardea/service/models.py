@@ -3,15 +3,28 @@
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
-from typing import Annotated, Literal, Self
+from typing import Annotated, Any, Literal, Self
 from zoneinfo import ZoneInfo
 
 import rfc8785
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, JsonValue, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+    model_validator,
+)
 
 from cardea.kernel.models import Identifier, ObjectVersion, OperationName, Task, Timestamp
 from cardea.service.approvals import HostApprovals
 from cardea.service.schedule import validate_schedule
+
+# ADR-036 bounds: approval waits per agent run, and the longest wait (30 days).
+DEFAULT_APPROVAL_WAITS = 4
+MAX_APPROVAL_WAIT = 30 * 24 * 3600
 
 Right = Literal[
     "objects.read",
@@ -71,14 +84,38 @@ def record_grant(collection: str, action: str) -> str:
     return f"{RECORD_GRANT_PREFIX}{collection}/{action}"
 
 
+# The `approve` right on one installed operation, inside a task's own ceiling, written
+# `approve:<operation>` (ADR-036 item 2): what lets an agent run, such as a reviewer, decide
+# that operation's approval requests through the built-in `approvals.decide`.
+APPROVE_GRANT_PREFIX = "approve:"
+ApproveGrant = Annotated[
+    str,
+    Field(
+        strict=True,
+        max_length=136,
+        pattern=r"^approve:[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$",
+    ),
+]
+# Built-in, in-process approval operations (ADR-036 slice 4), authorized per call by an
+# `approve:<operation>` grant for the request's operation, never by their own name.
+APPROVAL_OPERATIONS: frozenset[str] = frozenset({"approvals.decide"})
+# Built-in operations whose name is not itself a grant.
+BUILTIN_OPERATIONS: frozenset[str] = RECORD_OPERATIONS | APPROVAL_OPERATIONS
+
+
+def approve_grant(operation: str) -> str:
+    return f"{APPROVE_GRANT_PREFIX}{operation}"
+
+
 # Right to send mail to one address, written `mail:<address>` (ADR-034 decision 4.2): an
 # instance (a principal ID), a pool (`<group>.<pool>`) or a group (`<group>`).
 MailGrant = Annotated[str, Field(strict=True, pattern=r"^mail:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")]
 
 # A kernel right, the name of an installed operation (ADR-023), a harness grant, a record
-# grant or a mail grant. Installed names are checked against the live registry at
-# provisioning, admission and dispatch; harness grants against the installed harnesses.
-Grant = Right | OperationName | HarnessGrant | RecordGrant | MailGrant
+# grant, a mail grant or an approve grant. Installed names are checked against the live
+# registry at provisioning, admission and dispatch; harness grants against the installed
+# harnesses.
+Grant = Right | OperationName | HarnessGrant | RecordGrant | MailGrant | ApproveGrant
 
 RIGHTS: tuple[Right, ...] = (
     "objects.read",
@@ -220,6 +257,8 @@ class OperationTaskRequest(TaskRequest):
 
     @model_validator(mode="after")
     def operation_grant(self) -> Self:
+        if self.operation in APPROVAL_OPERATIONS:
+            raise ValueError("approvals.decide runs only as an agent-run tool call")
         if self.operation in RECORD_OPERATIONS:
             if not any(g.startswith(RECORD_GRANT_PREFIX) for g in self.grants):
                 raise ValueError("Record operations require a record:<collection>/<action> grant")
@@ -300,6 +339,26 @@ class AgentRunRequest(TaskRequest):
     model: ModelID | None = None
     # The inbound event this run serves; set by an event trigger (ADR-035).
     trigger_event: InboundEvent | None = None
+    # Approval waits (ADR-036 slice 4): how many approval requests the run may make (4 when
+    # unset), and seconds added to the deadline at admission so a wait fits (0 when unset).
+    # Unset fields are left out of the request's dump, so its digest is unchanged.
+    max_approval_waits: Annotated[int, Field(strict=True, ge=1, le=16)] | None = None
+    approval_wait_seconds: Annotated[int, Field(strict=True, ge=0, le=MAX_APPROVAL_WAIT)] | None = (
+        None
+    )
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_approval_fields(self, handler: SerializerFunctionWrapHandler) -> Any:
+        document = handler(self)
+        if isinstance(document, dict):
+            for key in ("max_approval_waits", "approval_wait_seconds"):
+                if document.get(key, 0) is None:
+                    del document[key]
+        return document
+
+    @property
+    def approval_waits(self) -> int:
+        return self.max_approval_waits or DEFAULT_APPROVAL_WAITS
 
     @model_validator(mode="after")
     def run_grants(self) -> Self:
@@ -307,10 +366,13 @@ class AgentRunRequest(TaskRequest):
             raise ValueError("Operations must be distinct")
         if any(e.operation not in self.operations for e in self.expect):
             raise ValueError("Expectations must name exposed operations")
-        # Built-in record operations are authorized per call by record grants (ADR-034).
-        named = {o for o in self.operations if o not in RECORD_OPERATIONS}
+        # Built-in record operations are authorized per call by record grants (ADR-034),
+        # `approvals.decide` by approve grants (ADR-036).
+        named = {o for o in self.operations if o not in BUILTIN_OPERATIONS}
         if not {"models.invoke", *named} <= set(self.grants):
             raise ValueError("Agent runs need model invocation and every exposed operation")
+        if any(c.operation in APPROVAL_OPERATIONS for c in self.context):
+            raise ValueError("approvals.decide cannot be a context operation")
         context = {c.operation for c in self.context if c.operation not in RECORD_OPERATIONS}
         if not context <= set(self.grants):
             raise ValueError("Context operations must be granted")
