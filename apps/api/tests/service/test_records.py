@@ -511,6 +511,95 @@ def test_an_interrupted_write_reconciles_from_history(items: Kernel) -> None:
 
     import asyncio
 
-    applied = asyncio.run(reconciler({}, context(receipt)))
+    applied = asyncio.run(items.records.reconcile({}, context(receipt)))
     assert applied.applied and applied.output == {"record": record}
-    assert not asyncio.run(reconciler({}, context("receipt-unknown"))).applied
+    assert not asyncio.run(items.records.reconcile({}, context("receipt-unknown"))).applied
+
+
+# The per-attempt tool endpoint
+
+
+class RecordSession:
+    """A scripted agent that creates, reads and tries to update a record over MCP."""
+
+    def __init__(self) -> None:
+        self.results: list[Any] = []
+
+    async def run(self, request: Any) -> Any:
+        import httpx2
+        from mcp.client.session import ClientSession
+        from mcp.client.streamable_http import streamable_http_client
+
+        from cardea.runtime.agent_session import SessionResult
+
+        headers = {"Authorization": f"Bearer {request.mcp_token}"}
+        async with (
+            httpx2.AsyncClient(headers=headers) as http,
+            streamable_http_client(request.mcp_url, http_client=http) as streams,
+            ClientSession(*streams) as session,
+        ):
+            await session.initialize()
+            listed = await session.list_tools()
+            assert {t.name for t in listed.tools} == {
+                "records-create",
+                "records-get",
+                "records-update",
+            }
+            made = await session.call_tool(
+                "records-create",
+                {"collection": "items", "client_key": "c1", "data": {"title": "from agent"}},
+            )
+            assert not made.is_error, made.content
+            assert made.structured_content is not None
+            record = made.structured_content["record"]
+            got = await session.call_tool(
+                "records-get", {"collection": "items", "record_id": record["record_id"]}
+            )
+            denied = await session.call_tool(
+                "records-update",
+                {
+                    "collection": "items",
+                    "record_id": record["record_id"],
+                    "expected_version": 1,
+                    "data": {"title": "no grant"},
+                },
+            )
+            self.results = [made, got, denied]
+        return SessionResult(text="Created one record.", is_error=False, cost_usd=0.01, turns=2)
+
+
+def test_agent_runs_use_record_grants_on_the_tool_endpoint(items: Kernel) -> None:
+    from cardea.service.agent_run_runtime import AgentRunRuntime
+    from cardea.service.models import AgentRunRequest
+
+    harness = RecordSession()
+    items.session = cast(Any, harness)
+    request = AgentRunRequest.model_validate(
+        {
+            "request_id": "records-run",
+            "agent_id": "a1",
+            "namespace": "test",
+            "objective": "File one item",
+            "instructions": "Create one item and read it back.",
+            # The built-in operation names are not grants; record grants authorize them.
+            "operations": ["records.create", "records.get", "records.update"],
+            "grants": [*RIGHTS, "models.invoke", "record:items/create", "record:items/read"],
+            "attempt_timeout_seconds": 30,
+        }
+    )
+    task_id = items.submit(items.auth.validate("supervisor"), request).task.task_id
+    assert AgentRunRuntime(items).execute(task_id) == "succeeded"
+    made, got, denied = harness.results
+    assert got.structured_content == made.structured_content
+    assert denied.is_error and "task_grant_denied" in denied.content[0].text
+    with items.database.engine.begin() as conn, borrow(conn) as tx:
+        receipts = {r.request.operation_id: r for r in tx.list_operations(task_id)}
+    assert [receipts[k].request.name for k in sorted(receipts)] == [
+        "records.create",
+        "records.get",
+        "records.update",
+    ]
+    assert receipts["call-0003"].failure is not None
+    assert receipts["call-0003"].failure.code == "task_grant_denied"
+    record_id = cast(dict[str, Any], made.structured_content)["record"]["record_id"]
+    assert events(items, record_id)[0][3] == receipts["call-0001"].receipt_id
