@@ -2,8 +2,8 @@
 
 from alembic import op
 
-revision = "m10_mailboxes"
-down_revision = "m9_approvals"
+revision = "m11_mailboxes"
+down_revision = "m10_records"
 branch_labels = None
 depends_on = None
 

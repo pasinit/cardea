@@ -530,6 +530,9 @@ def test_m3_upgrade_preserves_existing_host_receipt(kernel: Kernel) -> None:
         conn.exec_driver_sql("DROP TABLE group_members")
         conn.exec_driver_sql("DROP TABLE agent_groups")
         conn.exec_driver_sql("DROP TABLE recovery_epochs")
+        conn.exec_driver_sql("DROP TABLE record_events")
+        conn.exec_driver_sql("DROP TABLE records")
+        conn.exec_driver_sql("DROP TABLE collections")
         for table in ("approval_decisions", "approval_requests", "approval_rules"):
             conn.exec_driver_sql(f"DROP TABLE {table}")
         conn.exec_driver_sql("DROP TABLE trigger_deliveries")

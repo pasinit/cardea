@@ -229,8 +229,18 @@ def _apply(
     _unsupported(spec)
     # `mail:<address>` grants must name exactly one thing (ADR-034 slice 5 review).
     mailbox.check_group_addresses(conn, namespace, name, [p.name for p in spec.pools])
-    # TODO(ADR-034 slice 1): check each `spec.collections` entry exists in the namespace
-    # under the same supervisor once Collection documents are on main; accepted unchecked.
+    # Each collection the group uses must exist here under the same supervisor (2.1).
+    for collection in spec.collections:
+        owner = conn.exec_driver_sql(
+            "SELECT supervisor_id FROM collections WHERE namespace=? AND name=?",
+            (namespace, collection),
+        ).scalar()
+        if owner != principal:
+            raise Fault(
+                "collection_not_found",
+                f"Collection {collection} does not exist in this namespace under this supervisor",
+                422,
+            )
     at = now()
     old = (
         conn.exec_driver_sql(

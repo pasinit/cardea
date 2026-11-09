@@ -26,6 +26,7 @@ Right = Literal[
     "models.invoke",
     "tasks.delegate",
     "tasks.schedule",
+    # Supervisor-managed agent groups and collections (ADR-034).
     "groups.manage",
 ]
 
@@ -38,14 +39,38 @@ ModelID = Annotated[
 # Right `harness.use` on one harness, written `harness:<id>` (ADR-033).
 HarnessGrant = Annotated[str, Field(strict=True, pattern=r"^harness:[a-z][a-z0-9-]{0,31}$")]
 
+# A collection name (ADR-034) and an action on its records: `create`, `read`, `update`,
+# and in later slices `claim` and transition names.
+COLLECTION_NAME = r"[a-z][a-z0-9_-]{0,63}"
+RECORD_ACTION = r"[a-z][a-z0-9_]{0,63}"
+CollectionName = Annotated[str, Field(strict=True, pattern=f"^{COLLECTION_NAME}$")]
+# One action on the records of one collection, written `record:<collection>/<action>`
+# like `harness:<id>` (ADR-034 decision 2.3). It authorizes the built-in `records.*`
+# operations; the collection itself may not exist yet when the grant is written.
+RecordGrant = Annotated[
+    str, Field(strict=True, pattern=f"^record:{COLLECTION_NAME}/{RECORD_ACTION}$")
+]
+RECORD_GRANT_PREFIX = "record:"
+# Built-in, in-process record operations (ADR-034). Their authority is the resource-
+# qualified grant for the collection and action each call names, checked under the live
+# ceiling at every call; the operation name itself is not a grant.
+RECORD_OPERATIONS: frozenset[str] = frozenset(
+    {"records.create", "records.get", "records.query", "records.update"}
+)
+
+
+def record_grant(collection: str, action: str) -> str:
+    return f"{RECORD_GRANT_PREFIX}{collection}/{action}"
+
+
 # Right to send mail to one address, written `mail:<address>` (ADR-034 decision 4.2): an
 # instance (a principal ID), a pool (`<group>.<pool>`) or a group (`<group>`).
 MailGrant = Annotated[str, Field(strict=True, pattern=r"^mail:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")]
 
-# A kernel right, the name of an installed operation (ADR-023), a harness grant or a mail
-# grant. Installed names are checked against the live registry at provisioning, admission
-# and dispatch; harness grants against the installed harnesses.
-Grant = Right | OperationName | HarnessGrant | MailGrant
+# A kernel right, the name of an installed operation (ADR-023), a harness grant, a record
+# grant or a mail grant. Installed names are checked against the live registry at
+# provisioning, admission and dispatch; harness grants against the installed harnesses.
+Grant = Right | OperationName | HarnessGrant | RecordGrant | MailGrant
 
 RIGHTS: tuple[Right, ...] = (
     "objects.read",
@@ -187,7 +212,10 @@ class OperationTaskRequest(TaskRequest):
 
     @model_validator(mode="after")
     def operation_grant(self) -> Self:
-        if self.operation not in self.grants:
+        if self.operation in RECORD_OPERATIONS:
+            if not any(g.startswith(RECORD_GRANT_PREFIX) for g in self.grants):
+                raise ValueError("Record operations require a record:<collection>/<action> grant")
+        elif self.operation not in self.grants:
             raise ValueError("Installed operation requires an explicit grant")
         return self
 
@@ -271,9 +299,12 @@ class AgentRunRequest(TaskRequest):
             raise ValueError("Operations must be distinct")
         if any(e.operation not in self.operations for e in self.expect):
             raise ValueError("Expectations must name exposed operations")
-        if not {"models.invoke", *self.operations} <= set(self.grants):
+        # Built-in record operations are authorized per call by record grants (ADR-034).
+        named = {o for o in self.operations if o not in RECORD_OPERATIONS}
+        if not {"models.invoke", *named} <= set(self.grants):
             raise ValueError("Agent runs need model invocation and every exposed operation")
-        if not {c.operation for c in self.context} <= set(self.grants):
+        context = {c.operation for c in self.context if c.operation not in RECORD_OPERATIONS}
+        if not context <= set(self.grants):
             raise ValueError("Context operations must be granted")
         return self
 

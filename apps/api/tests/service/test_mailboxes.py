@@ -520,7 +520,7 @@ def test_messages_page_in_order(kernel: Kernel) -> None:
 
 def test_mailbox_operations_are_built_in_and_reserved(kernel: Kernel) -> None:
     assert {"mailbox.send", "mailbox.inbox"} <= set(Registry().descriptors)
-    with pytest.raises(ValueError, match="reserved for built-in"):
+    with pytest.raises(ValueError, match="reserved"):
         OperationDescriptor.model_validate(
             {
                 "tool": {

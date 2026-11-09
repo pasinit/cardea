@@ -734,13 +734,14 @@ def settle(
             )
             continue
         dead = row["deliveries"] >= row["max_deliveries"]
+        state_after = "dead" if dead else "pending"
         # A released pool delivery is unbound, so another active member can take it; its
         # count keeps accumulating toward max_deliveries across members.
         conn.exec_driver_sql(
             "UPDATE mailbox_deliveries SET state=?,task_id=NULL,attempt=NULL,updated_at=?,"
             "recipient_id=CASE WHEN pool IS NOT NULL AND ?='pending' THEN NULL "
             "ELSE recipient_id END WHERE delivery_id=?",
-            ("dead" if dead else "pending", at.isoformat(), "dead" if dead else "pending", delivery_id),
+            (state_after, at.isoformat(), state_after, delivery_id),
         )
         _history(conn, delivery_id, "dead" if dead else "released", at, task_id)
         if dead:

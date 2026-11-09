@@ -280,6 +280,10 @@
                   "type": "string"
                 },
                 {
+                  "pattern": "^record:[a-z][a-z0-9_-]{0,63}/[a-z][a-z0-9_]{0,63}$",
+                  "type": "string"
+                },
+                {
                   "pattern": "^mail:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
                   "type": "string"
                 }
@@ -1319,6 +1323,252 @@
         "title": "ChildrenView",
         "type": "object"
       },
+      "CollectionApplied": {
+        "additionalProperties": false,
+        "description": "`PUT /v0.2/collections/{name}`: the document and what the request changed, or\nwould change with `?dry_run=true`.",
+        "properties": {
+          "apiVersion": {
+            "const": "cardea/v1alpha1",
+            "title": "Apiversion",
+            "type": "string"
+          },
+          "kind": {
+            "const": "Collection",
+            "title": "Kind",
+            "type": "string"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/CollectionMeta"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/CollectionPlan"
+          },
+          "spec": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Spec",
+            "type": "object"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CollectionStatus"
+          }
+        },
+        "required": [
+          "apiVersion",
+          "kind",
+          "metadata",
+          "spec",
+          "status",
+          "plan"
+        ],
+        "title": "CollectionApplied",
+        "type": "object"
+      },
+      "CollectionDocument": {
+        "additionalProperties": false,
+        "description": "`kind: Collection` (ADR-034 decision 2). Claims and states are later slices.",
+        "properties": {
+          "apiVersion": {
+            "const": "cardea/v1alpha1",
+            "default": "cardea/v1alpha1",
+            "title": "Apiversion",
+            "type": "string"
+          },
+          "kind": {
+            "const": "Collection",
+            "default": "Collection",
+            "title": "Kind",
+            "type": "string"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/CollectionMetadata"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/CollectionSpec"
+          }
+        },
+        "required": [
+          "metadata",
+          "spec"
+        ],
+        "title": "CollectionDocument",
+        "type": "object"
+      },
+      "CollectionMeta": {
+        "additionalProperties": false,
+        "properties": {
+          "generation": {
+            "description": "Incremented by every PUT that changes the spec.",
+            "title": "Generation",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "namespace",
+          "generation"
+        ],
+        "title": "CollectionMeta",
+        "type": "object"
+      },
+      "CollectionMetadata": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+            "title": "Name",
+            "type": "string"
+          },
+          "namespace": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "title": "Namespace",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "namespace"
+        ],
+        "title": "CollectionMetadata",
+        "type": "object"
+      },
+      "CollectionPlan": {
+        "additionalProperties": false,
+        "properties": {
+          "change": {
+            "enum": [
+              "created",
+              "updated",
+              "unchanged"
+            ],
+            "title": "Change",
+            "type": "string"
+          },
+          "dry_run": {
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "generation": {
+            "title": "Generation",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "change",
+          "generation",
+          "dry_run"
+        ],
+        "title": "CollectionPlan",
+        "type": "object"
+      },
+      "CollectionSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "guards": {
+            "$ref": "#/components/schemas/Guards",
+            "default": {}
+          },
+          "max_record_bytes": {
+            "default": 16384,
+            "maximum": 49152.0,
+            "minimum": 64.0,
+            "title": "Max Record Bytes",
+            "type": "integer"
+          },
+          "schema": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Schema",
+            "type": "object"
+          },
+          "supervisor": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "title": "Supervisor",
+            "type": "string"
+          }
+        },
+        "required": [
+          "supervisor",
+          "schema"
+        ],
+        "title": "CollectionSpec",
+        "type": "object"
+      },
+      "CollectionStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "observedGeneration": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The applied generation; a collection applies in its PUT transaction.",
+            "title": "Observedgeneration"
+          },
+          "records": {
+            "title": "Records",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "observedGeneration",
+          "records"
+        ],
+        "title": "CollectionStatus",
+        "type": "object"
+      },
+      "CollectionView": {
+        "additionalProperties": false,
+        "description": "`GET /v0.2/collections/{name}`: the Collection document with its status.",
+        "properties": {
+          "apiVersion": {
+            "const": "cardea/v1alpha1",
+            "title": "Apiversion",
+            "type": "string"
+          },
+          "kind": {
+            "const": "Collection",
+            "title": "Kind",
+            "type": "string"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/CollectionMeta"
+          },
+          "spec": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Spec",
+            "type": "object"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CollectionStatus"
+          }
+        },
+        "required": [
+          "apiVersion",
+          "kind",
+          "metadata",
+          "spec",
+          "status"
+        ],
+        "title": "CollectionView",
+        "type": "object"
+      },
       "ContentChunk": {
         "additionalProperties": false,
         "description": "One base64 chunk of a stored document's canonical bytes; follow next_offset.",
@@ -2334,6 +2584,10 @@
                   "type": "string"
                 },
                 {
+                  "pattern": "^record:[a-z][a-z0-9_-]{0,63}/[a-z][a-z0-9_]{0,63}$",
+                  "type": "string"
+                },
+                {
                   "pattern": "^mail:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
                   "type": "string"
                 }
@@ -2434,6 +2688,10 @@
                 },
                 {
                   "pattern": "^harness:[a-z][a-z0-9-]{0,31}$",
+                  "type": "string"
+                },
+                {
+                  "pattern": "^record:[a-z][a-z0-9_-]{0,63}/[a-z][a-z0-9_]{0,63}$",
                   "type": "string"
                 },
                 {
@@ -2775,6 +3033,36 @@
           "status"
         ],
         "title": "GroupView",
+        "type": "object"
+      },
+      "Guards": {
+        "additionalProperties": false,
+        "description": "Optional CEL write guards over ``record``, ``args`` and ``caller``; they only narrow.",
+        "properties": {
+          "create": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Create"
+          },
+          "update": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Update"
+          }
+        },
+        "title": "Guards",
         "type": "object"
       },
       "HostBudgetLimits": {
@@ -3918,6 +4206,10 @@
                   "type": "string"
                 },
                 {
+                  "pattern": "^record:[a-z][a-z0-9_-]{0,63}/[a-z][a-z0-9_]{0,63}$",
+                  "type": "string"
+                },
+                {
                   "pattern": "^mail:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
                   "type": "string"
                 }
@@ -4056,6 +4348,121 @@
           "state"
         ],
         "title": "ReconcileResult",
+        "type": "object"
+      },
+      "RecordEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "description": "The principal whose call made the change.",
+            "title": "Actor",
+            "type": "string"
+          },
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "integer"
+          },
+          "kind": {
+            "description": "created or updated; later slices add claims and transitions.",
+            "title": "Kind",
+            "type": "string"
+          },
+          "new": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "New",
+            "type": "object"
+          },
+          "old": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Old"
+          },
+          "receipt_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Receipt of the call that made the change.",
+            "title": "Receipt Id"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "event_id",
+          "version",
+          "kind",
+          "actor",
+          "task_id",
+          "receipt_id",
+          "old",
+          "new",
+          "at"
+        ],
+        "title": "RecordEvent",
+        "type": "object"
+      },
+      "RecordHistory": {
+        "additionalProperties": false,
+        "description": "`GET /v0.2/collections/{name}/records/{record_id}/events`: append-only history.",
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/RecordEvent"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "next_after": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pass as `after` for the next page.",
+            "title": "Next After"
+          }
+        },
+        "required": [
+          "events",
+          "next_after"
+        ],
+        "title": "RecordHistory",
         "type": "object"
       },
       "RecordRef": {
@@ -5246,6 +5653,10 @@
                   "type": "string"
                 },
                 {
+                  "pattern": "^record:[a-z][a-z0-9_-]{0,63}/[a-z][a-z0-9_]{0,63}$",
+                  "type": "string"
+                },
+                {
                   "pattern": "^mail:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
                   "type": "string"
                 }
@@ -5375,6 +5786,10 @@
                 },
                 {
                   "pattern": "^harness:[a-z][a-z0-9-]{0,31}$",
+                  "type": "string"
+                },
+                {
+                  "pattern": "^record:[a-z][a-z0-9_-]{0,63}/[a-z][a-z0-9_]{0,63}$",
                   "type": "string"
                 },
                 {
@@ -6748,6 +7163,574 @@
           }
         ],
         "summary": "Decide"
+      }
+    },
+    "/v0.2/collections/{name}": {
+      "get": {
+        "operationId": "get_collection_v0_2_collections__name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "namespace",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "Namespace",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-cardea-auth",
+            "required": false,
+            "schema": {
+              "default": "spiffe",
+              "title": "X-Cardea-Auth",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Method Not Allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Collection"
+      },
+      "put": {
+        "description": "Apply a supervisor-managed Collection (ADR-034). The caller must be\n`spec.supervisor` and hold `groups.manage` in the namespace.",
+        "operationId": "apply_collection_v0_2_collections__name__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dry_run",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Dry Run",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-cardea-auth",
+            "required": false,
+            "schema": {
+              "default": "spiffe",
+              "title": "X-Cardea-Auth",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CollectionDocument"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionApplied"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Method Not Allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Apply Collection"
+      }
+    },
+    "/v0.2/collections/{name}/records/{record_id}/events": {
+      "get": {
+        "description": "A record's append-only history; the supervisor or a `record:<name>/read` holder.",
+        "operationId": "record_history_v0_2_collections__name__records__record_id__events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "record_id",
+            "required": true,
+            "schema": {
+              "pattern": "^rec-[0-9a-f]{32}$",
+              "title": "Record Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "namespace",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "Namespace",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "After",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-cardea-auth",
+            "required": false,
+            "schema": {
+              "default": "spiffe",
+              "title": "X-Cardea-Auth",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordHistory"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Method Not Allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Record History"
       }
     },
     "/v0.2/delegation-tasks": {

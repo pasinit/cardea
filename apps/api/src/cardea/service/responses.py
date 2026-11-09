@@ -443,6 +443,64 @@ class TaskReceipt(Wire):
     receipt: OperationReceipt
 
 
+# Collections and records (ADR-034)
+
+
+class CollectionMeta(Record):
+    name: str
+    namespace: str
+    generation: int = Field(description="Incremented by every PUT that changes the spec.")
+
+
+class CollectionStatus(Record):
+    observedGeneration: int | None = Field(  # noqa: N815 - Kubernetes shape
+        description="The applied generation; a collection applies in its PUT transaction."
+    )
+    records: int
+
+
+class CollectionPlan(Record):
+    change: Literal["created", "updated", "unchanged"]
+    generation: int
+    dry_run: bool
+
+
+class CollectionView(Record):
+    """`GET /v0.2/collections/{name}`: the Collection document with its status."""
+
+    apiVersion: Literal["cardea/v1alpha1"]  # noqa: N815 - Kubernetes shape
+    kind: Literal["Collection"]
+    metadata: CollectionMeta
+    spec: dict[str, JsonValue]
+    status: CollectionStatus
+
+
+class CollectionApplied(CollectionView):
+    """`PUT /v0.2/collections/{name}`: the document and what the request changed, or
+    would change with `?dry_run=true`."""
+
+    plan: CollectionPlan
+
+
+class RecordEvent(Record):
+    event_id: int
+    version: int
+    kind: str = Field(description="created or updated; later slices add claims and transitions.")
+    actor: str = Field(description="The principal whose call made the change.")
+    task_id: str | None
+    receipt_id: str | None = Field(description="Receipt of the call that made the change.")
+    old: dict[str, JsonValue] | None
+    new: dict[str, JsonValue]
+    at: str
+
+
+class RecordHistory(Record):
+    """`GET /v0.2/collections/{name}/records/{record_id}/events`: append-only history."""
+
+    events: list[RecordEvent]
+    next_after: int | None = Field(description="Pass as `after` for the next page.")
+
+
 # Approvals (ADR-036)
 
 

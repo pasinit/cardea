@@ -41,7 +41,7 @@ from cardea.service.confined import ConfinedAgentSession, WorkerFailed
 from cardea.service.database import Fault, borrow
 from cardea.service.kernel import TERMINAL, Kernel
 from cardea.service.logs import ATTEMPT_LOGS, attempt_log_file
-from cardea.service.models import AgentRunRequest, InboundEvent, now
+from cardea.service.models import RECORD_OPERATIONS, AgentRunRequest, InboundEvent, now
 from cardea.service.operations import Handler, OperationContext, OperationRejected
 from cardea.service.policy import Policy
 from cardea.service.tool_endpoint import ToolEndpoint, operation_name, tool_name
@@ -185,6 +185,9 @@ class AgentRunRuntime:
         for right in ("models.invoke", "objects.read", "objects.write"):
             policy.ceiling(task.task_id, right)
         for name in (*request.operations, *(c.operation for c in request.context)):
+            if name in RECORD_OPERATIONS:
+                # Authorized per call by `record:<collection>/<action>` (ADR-034).
+                continue
             policy.ceiling(task.task_id, name)
             for required in self.kernel.operations.get(name).cardea.requires:
                 policy.ceiling(task.task_id, required)

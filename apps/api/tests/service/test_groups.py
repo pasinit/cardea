@@ -501,3 +501,43 @@ def test_history_and_members_stay_append_only(kernel: Kernel) -> None:
         conn.exec_driver_sql("UPDATE trigger_events SET code='x'")
     with pytest.raises(Exception, match="never deleted"), kernel.database.engine.begin() as conn:
         conn.exec_driver_sql("DELETE FROM group_members")
+
+
+def test_groups_reference_existing_collections_of_their_supervisor(kernel: Kernel) -> None:
+    from cardea.service.records import CollectionDocument, apply_collection
+
+    body = manifest()
+    body["spec"]["collections"] = ["items"]
+    with pytest.raises(Fault) as missing:
+        put(kernel, body)
+    assert missing.value.code == "collection_not_found"
+
+    def collection(supervisor: str) -> None:
+        document = CollectionDocument.model_validate(
+            {
+                "metadata": {"name": "items", "namespace": "test"},
+                "spec": {"supervisor": supervisor, "schema": {"type": "object"}},
+            }
+        )
+        with kernel.database.engine.begin() as conn:
+            apply_collection(conn, supervisor, document, dry_run=False)
+
+    collection("outsider")
+    with pytest.raises(Fault) as foreign:
+        put(kernel, body)
+    assert foreign.value.code == "collection_not_found"
+    other = manifest(name="desk2")
+    other["spec"]["collections"] = ["mine"]
+    with kernel.database.engine.begin() as conn:
+        apply_collection(
+            conn,
+            "supervisor",
+            CollectionDocument.model_validate(
+                {
+                    "metadata": {"name": "mine", "namespace": "test"},
+                    "spec": {"supervisor": "supervisor", "schema": {"type": "object"}},
+                }
+            ),
+            dry_run=False,
+        )
+    assert put(kernel, other)["change"] == "created"

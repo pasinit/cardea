@@ -30,7 +30,7 @@ from pydantic import (
 from cardea.kernel.models import MAX_DOCUMENT_BYTES, OperationName, canonical_json
 from cardea.service.approvals import OperationApproval
 from cardea.service.database import Fault, private_file
-from cardea.service.models import Record, Right
+from cardea.service.models import RECORD_GRANT_PREFIX, RECORD_OPERATIONS, Record, Right
 
 ENTRY_POINT_GROUP = "cardea.operations"
 KERNEL_RIGHTS: frozenset[str] = frozenset(get_args(Right))
@@ -44,18 +44,27 @@ RESERVED_PREFIXES = (
     "tools.",
     "inputs.",
     "groups.",
+    # Built-in record operations (ADR-034); installed only by the kernel itself.
+    "records.",
+    # Built-in mailbox operations (ADR-034); they run inside their settle transaction.
+    "mailbox.",
 )
-# Built-in operations the kernel itself provides (ADR-034 mailboxes); never host-installed.
 BUILTIN_PREFIXES = ("mailbox.",)
-# Entry-point names of built-in handlers; they are not loaded from installed packages.
-BUILTIN_HANDLER = "cardea.builtin."
 # Room in a receipt's 64 KiB result document for the output and its wrapper keys.
 MAX_RECORDED_OUTPUT_BYTES = MAX_DOCUMENT_BYTES - 64
 _NAME = TypeAdapter(OperationName)
 
 
 class OperationRejected(Exception):
-    """Raised by a handler that is certain no external effect happened."""
+    """Raised by a handler that is certain no external effect happened.
+
+    ``code`` becomes the receipt's failure code; built-in operations use specific codes
+    such as ``version_conflict`` (ADR-034), installed ones normally keep the default.
+    """
+
+    def __init__(self, message: str = "", code: str = "operation_rejected") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 def http_status(error: BaseException) -> int | None:
@@ -163,11 +172,10 @@ class OperationDescriptor(Record):
         except ValidationError as error:
             raise ValueError("Descriptor tool is not a valid MCP Tool") from error
         _NAME.validate_python(tool.name)
-        if tool.name in KERNEL_RIGHTS or tool.name.startswith(RESERVED_PREFIXES):
-            raise ValueError("Operation name is reserved for kernel rights")
+        # Only the kernel's own built-in descriptors may use a reserved name.
         builtin = bool(info.context and info.context.get("builtin"))
-        if tool.name.startswith(BUILTIN_PREFIXES) != builtin:
-            raise ValueError("Operation name is reserved for built-in operations")
+        if not builtin and (tool.name in KERNEL_RIGHTS or tool.name.startswith(RESERVED_PREFIXES)):
+            raise ValueError("Operation name is reserved for kernel rights")
         if tool.output_schema is None:
             raise ValueError("Installed operations require an output schema for verification")
         for schema in (tool.input_schema, tool.output_schema):
@@ -215,8 +223,11 @@ class Registry:
         handlers: Mapping[str, Handler | Reconciler] | None = None,
     ) -> None:
         from cardea.service import mailbox
+        from cardea.service.records import DESCRIPTORS
 
-        self.descriptors: dict[str, OperationDescriptor] = {}
+        # Built-in record operations (ADR-034) are always installed; the kernel binds
+        # their handlers, so they are not entry points.
+        self.descriptors: dict[str, OperationDescriptor] = {d.name: d for d in DESCRIPTORS}
         for descriptor in descriptors:
             if descriptor.name in self.descriptors:
                 raise Fault("operation_duplicate", "Operation is installed twice", 500)
@@ -233,7 +244,7 @@ class Registry:
     def entry_points(self) -> set[str]:
         names = set()
         for descriptor in self.descriptors.values():
-            if descriptor.name.startswith(BUILTIN_PREFIXES):
+            if descriptor.name in RECORD_OPERATIONS or descriptor.name.startswith(BUILTIN_PREFIXES):
                 continue
             if descriptor.cardea.handler:
                 names.add(descriptor.cardea.handler)
@@ -316,9 +327,12 @@ class Registry:
 
     def check_grants(self, grants: Iterable[str]) -> None:
         for grant in grants:
-            # Harness grants (ADR-033) are checked against the installed harnesses.
-            # Mail grants (ADR-034) name addresses, resolved when mail is sent.
-            if grant not in KERNEL_RIGHTS and not grant.startswith(("harness:", "mail:")):
+            # Harness grants (ADR-033) are checked against the installed harnesses. Record
+            # grants (ADR-034) name collections, which are documents checked at each call;
+            # mail grants name addresses, resolved when mail is sent.
+            if grant not in KERNEL_RIGHTS and not grant.startswith(
+                ("harness:", "mail:", RECORD_GRANT_PREFIX)
+            ):
                 self.get(grant)
 
     def validate_arguments(self, name: str, arguments: Mapping[str, JsonValue]) -> None:

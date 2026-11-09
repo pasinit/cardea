@@ -1,7 +1,7 @@
 # ADR-034: Agent Groups, Shared Records, State Machines and Mailboxes
 
 - **Date / owner / milestones:** 2026-11-08; runtime and API maintainers. Builds on [ADR-023](023-installed-operation-registry.md) (installed operations), [ADR-024](024-time-triggers.md) (time triggers), [ADR-026](026-effect-idempotency-and-reconciliation.md) (effect scopes), [ADR-027](027-agent-runs.md) (agent runs), [ADR-029](029-supervisor-schedules-expectations-and-run-evidence.md) (supervisor-managed triggers, expectations), [ADR-031](031-agent-run-context-operations.md) (context operations), [ADR-033](033-pluggable-agent-harnesses.md) (harnesses), [ADR-035](035-event-triggers.md) (event triggers, selected, slice 1 implemented) and [ADR-036](036-approval-waits.md) (approval waits, selected, implementation pending). Relates to roadmap M8.
-- **Status:** selected (design); slices 4 (agent groups) and 5 (mailboxes) implemented portably on 2026-11-09, see [Implementation status](#implementation-status); slices 1–3 and 6–11 not implemented. The lead approved this design on 2026-11-09, and the owner may veto. It was reworked on 2026-11-08 at the lead's and owner's direction. The first version made "team" a kernel concept, with roles, role relations and a fixed work-item lifecycle; that baked one workflow into the kernel and is withdrawn. This version has only generic primitives. Review decisions are recorded under [Carried decisions](#carried-decisions) and [Decisions settled in review (2026-11-09)](#decisions-settled-in-review-2026-11-09). No fit test below has run.
+- **Status:** selected (design); slices 1 (collections and records), 4 (agent groups) and 5 (mailboxes) implemented portably on 2026-11-09, see [Implementation status](#implementation-status) and [Verification](#verification); slices 2–3 and 6–11 not implemented; nothing verified on Debian. The lead approved this design on 2026-11-09, and the owner may veto. It was reworked on 2026-11-08 at the lead's and owner's direction. The first version made "team" a kernel concept, with roles, role relations and a fixed work-item lifecycle; that baked one workflow into the kernel and is withdrawn. This version has only generic primitives. Review decisions are recorded under [Carried decisions](#carried-decisions) and [Decisions settled in review (2026-11-09)](#decisions-settled-in-review-2026-11-09). No fit test below has run.
 - **Affected components:** [tasks and scheduler](../components/tasks-scheduler.md), [delegation and messaging](../components/delegation-messaging.md), [events and inputs](../components/events-inputs.md), [identity and capabilities](../components/identity-capabilities.md), [resource budgets](../components/resource-budgets.md), [agent runtime](../components/agent-runtime.md).
 
 ## Requirement
@@ -188,12 +188,14 @@ spec:
 
    | Operation | Effect | Grant |
    |---|---|---|
-   | `records.create` | creates a record in the collection's initial state; ADR-026 scope on `/client_key` | `record:C/create` |
+   | `records.create` | creates a record in the collection's initial state; ADR-026 scope on `/collection` and `/client_key` (the collection is part of the scope so one key cannot dedupe across collections) | `record:C/create` |
    | `records.get`, `records.query` (filter by state, label, holder, field equality; paged) | read | `record:C/read` |
    | `records.update` (data, labels, links; compare-and-set) | effect | `record:C/update` |
    | `records.transition` (decision 3) | effect | `record:C/<transition>` |
    | `records.claim`, `records.release` (only when `standalone: true`) | effect | `record:C/claim` |
    | `records.claimed` | read: the caller's claims | `record:C/read` |
+
+   The operation names themselves are not grants. A run lists `records.*` in `operations`, and its record grants authorize each call, checked under the live ceiling inside the transaction that reads or writes the record (implemented in slice 1).
 
    A collection may add a CEL **write guard** per action, over `record`, `args` and `caller` (`id`, `group`, `pool`). One example is a per-record check that a member may update only records it holds: `record.holder == caller.id`. The guard can only narrow what the grant allows.
    - **CEL limits.** Guards use the same CEL evaluator and the same static limits as ADR-036 slice 1:
@@ -316,6 +318,8 @@ Record transitions (`cardea.record.transitioned`, `subject` = `<collection>/<rec
   - `spend_accounts`.
 
   Triggers gain `managed_by = group`.
+
+  *Slice 1 (2026-11-09):* because groups and mailboxes are built in parallel, each slice adds its own migration. Migration `m10_records` adds `collections`, `records` and `record_events`, including the claim columns (`holder`, `claim_epoch`, `lease_expires_at`, `followups`), the `state` column and the claim, transition and migration event kinds, so slices 2 and 3 need no further change to these tables.
 - **Compatibility.** Without groups or collections nothing changes. ADR-031's amendments are additive.
 - **Operational cost.** No new service or scheduler. Each apply runs one DBOS workflow. The per-minute tick gains a sweep over claims and windows.
 - **Dependencies.** None new: `common-expression-language` 0.10.0 is already pinned by ADR-036 slice 1.
@@ -503,7 +507,7 @@ Portable tests go in `apps/api/tests/service/`. Before the record is called veri
 - **Reconciler.** Create, update and scale-up converge inside the apply transaction, so `observedGeneration` equals `generation` when it commits. A dry run executes the same transaction and rolls it back, so its plan and refusals are those of the real apply. Scale-down, pool removal and deletion need drain and are refused with 409 `group_drain_unsupported` until slice 8, which also brings the DBOS reconciler keyed by (group, generation).
 - **Refused until their slices** (422, never silently ignored, because each is a bound the kernel would not yet enforce): `spend` (`group_spend_unsupported`, slice 9), `expect_window` (`group_expect_window_unsupported`, slice 9), and `event` triggers (`group_event_trigger_unsupported`, slice 7). Group event triggers compile to kernel-journal sources (decision 6), so ADR-035's rule that HTTP event triggers are host-owned does not apply to them; they wait for slice 7, not for host ownership.
 - **Explicit run grants.** A pool's `grants` are the run's complete grants; nothing is added. An ADR-027 agent run needs `objects.read`, `objects.write` and `models.invoke`, a grant for every exposed and context operation, and `harness:<id>` for a non-implicit harness. The worked examples above list the first three.
-- **Deferred check.** TODO (slice 1): `spec.collections` is accepted unchecked, because Collection documents are not on main yet. Once they are, apply must check that each one exists in the namespace with the same supervisor.
+- **Collection check** (added with slice 1). Apply refuses a `spec.collections` entry that does not exist in the namespace under the group's supervisor, with `422 collection_not_found`. Refusing to remove a referenced collection waits for collection deletion, which no slice has yet.
 - **Decisions in review (lead, 2026-11-09; the owner may veto).**
   1. Member IDs stay `<group>.<pool>.<n>`. Principal IDs are global, so a group name already used in another namespace is refused with `principal_conflict`. Namespacing member IDs is a revisit item.
   2. No grants are added automatically; explicit grants are least privilege (see above).
@@ -513,7 +517,7 @@ Portable tests go in `apps/api/tests/service/`. Before the record is called veri
 
 ### Slice 5: mailboxes (implemented 2026-11-09, portable tests only)
 
-- **State.** Migration `m10_mailboxes` (`down_revision = "m9_approvals"`) adds `mailbox_messages`, `mailbox_deliveries` and `mailbox_delivery_events`. The third table is the append-only delivery history (`created`, `leased`, `consumed`, `released`, `dead`, with task and attempt). Messages and history rows cannot be updated or deleted, and a consumed or dead delivery is final. A pool delivery row has `pool` set and `recipient_id` null until a member leases it, so pool and group fan-out need no schema change.
+- **State.** Migration `m11_mailboxes` (`down_revision = "m10_records"`) adds `mailbox_messages`, `mailbox_deliveries` and `mailbox_delivery_events`. The third table is the append-only delivery history (`created`, `leased`, `consumed`, `released`, `dead`, with task and attempt). Messages and history rows cannot be updated or deleted, and a consumed or dead delivery is final. A pool delivery row has `pool` set and `recipient_id` null until a member leases it, so pool and group fan-out need no schema change.
 - **Built-in operations.** `mailbox.send` (effect, ADR-026 scope on `/client_key`, kernel reconciler) and `mailbox.inbox` (read) are always in the operation registry. The `mailbox.` prefix is reserved: a host-owner descriptor cannot use it. Both run inside the transaction that settles their receipt, behind a savepoint, so a refusal leaves nothing behind. A crash between intent and settlement leaves the send `outcome_unknown`; the reconciler then finds no message, because none can exist without the receipt, and settles it as `effect_not_applied`. Built-ins are refused as operation tasks (`builtin_operation`).
 - **Authority.** A run needs `mailbox.send` and `mail:<address>` in its grants, and the live ceiling is checked for the address at every call. `POST /v0.2/mailbox` needs `mail:<address>` allowed for the caller and the platform in the namespace. An instance recipient must be an enabled agent principal of this kernel's runtime. A pool address `<group>.<pool>` needs at least one active member and creates one unbound delivery. An active member that leases it holds it; a release (failure or cancellation) unbinds it, so any active member can take it next, and its `deliveries` count keeps accumulating across members toward `max_deliveries`. A group address creates one delivery per active member. A grant for a pool or a group does not cover its instances. Addresses are unambiguous: group apply refuses (`principal_conflict`) a `<group>` or `<group>.<pool>` equal to an existing principal ID, and provisioning refuses a new principal ID equal to a group or pool address.
 - **Body.** One to 16 A2A 1.0 parts, each checked with the pinned SDK's `Part` message and limited to `text` or `data` (with optional `mediaType` and `metadata`). The canonical body is at most 16 KiB (`body_too_large`, 413).
@@ -535,7 +539,12 @@ Portable tests go in `apps/api/tests/service/`. Before the record is called veri
 
 ## Verification
 
-Slice 4 has portable tests only (above); nothing else. This is a design proposal. Status moves to implemented when slices 1–10 pass portably, and to verified after the Debian runs.
+Slice 4 has portable tests only (above). Status moves to implemented when slices 1–10 pass portably, and to verified after the Debian runs.
+
+**Slice 1 (2026-11-09), implemented, portable only.**
+- *Implemented:* migration `m10_records` (`down_revision = "m9_approvals"`); `Collection` documents with `PUT /v0.2/collections/{name}` (`groups.manage`, generation, `?dry_run=true`) and `GET`; JSON-Schema-validated records with labels and links; built-in `records.create`, `records.get`, `records.query` and `records.update` as in-process operations on the per-attempt tool endpoint and as operation tasks, receipted by the invocation core with an ADR-026 scope on create and a history-based reconciler for interrupted writes; compare-and-set on `version`; CEL write guards for `create` and `update` through `cardea.service.approvals.compile_condition` with the guard variables, failing closed; append-only `record_events` with `GET /v0.2/collections/{name}/records/{id}/events`; `record:<collection>/<action>` grants under the live ceiling.
+- *Tests* (`apps/api/tests/service/test_records.py`, 25 tests): compare-and-set conflict; schema and size validation; guard refusal and fail-closed evaluation errors; history immutability (`UPDATE`/`DELETE` refused by SQLite triggers); per-call grant checks, another collection's grant, undelegable grants and revocation between admission and dispatch; an idempotent retried create in one idempotency context; reconciliation from history; and an agent run that uses record grants over the real per-attempt MCP endpoint.
+- *Not yet:* claims, state machines, transition guards, groups, mailboxes, context sources, spend; collection deletion; host-owner provisioning of collections. No acceptance test from the list above runs end to end yet, because each needs later slices.
 
 ## Limits
 
