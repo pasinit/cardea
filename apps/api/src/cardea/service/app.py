@@ -18,11 +18,12 @@ from cardea.kernel.lifecycle import ContractError
 from cardea.kernel.models import KernelEvent, ResourceRef
 from cardea.kernel.store import StoreError
 from cardea.service import events as intake
-from cardea.service import host_budget, host_operations, pages
+from cardea.service import host_budget, host_operations, pages, records
 from cardea.service.auth import Proof
 from cardea.service.database import Fault, borrow
 from cardea.service.kernel import Kernel
 from cardea.service.models import (
+    COLLECTION_NAME,
     RIGHTS,
     AgentRunRequest,
     DelegationTaskRequest,
@@ -41,12 +42,15 @@ from cardea.service.profiles import for_runtime
 from cardea.service.responses import (
     AgentReceipts,
     ChildrenView,
+    CollectionApplied,
+    CollectionView,
     ContentChunk,
     EventDelivered,
     HostBudgetView,
     OperationCatalog,
     OperationView,
     ReconcileResult,
+    RecordHistory,
     RunOutput,
     RunView,
     SystemView,
@@ -76,6 +80,7 @@ TaskID = Annotated[str, Path(pattern=r"^task-[0-9a-f]{32}$")]
 TriggerPath = Annotated[str, Path(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,110}$")]
 OperationID = Annotated[str, Path(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")]
 Namespace = Annotated[str, Query(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")]
+CollectionPath = Annotated[str, Path(pattern=f"^{COLLECTION_NAME}$")]
 
 
 DEFAULT_MAX_REQUEST_BYTES = 32768
@@ -433,6 +438,41 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
         # Every outcome is 202 so a Standard Webhooks sender stops retrying; `outcome` says
         # whether this delivery started a task, found the one it started, or matched nothing.
         return JSONResponse(result, status_code=202)
+
+    @app.put("/v0.2/collections/{name}", response_model=CollectionApplied)
+    def apply_collection(
+        name: CollectionPath,
+        document: records.CollectionDocument,
+        proof: Credential,
+        dry_run: Annotated[bool, Query()] = False,
+    ) -> dict[str, Any]:
+        """Apply a supervisor-managed Collection (ADR-034). The caller must be
+        `spec.supervisor` and hold `groups.manage` in the namespace."""
+        if document.metadata.name != name:
+            raise Fault("collection_mismatch", "Path and body collection names differ", 422)
+        with kernel.database.engine.begin() as conn:
+            principal = proof.resolve(conn)
+            return records.apply_collection(conn, principal, document, dry_run=dry_run)
+
+    @app.get("/v0.2/collections/{name}", response_model=CollectionView)
+    def get_collection(name: CollectionPath, proof: Credential, namespace: Namespace) -> Any:
+        with kernel.database.read() as conn:
+            principal = proof.resolve(conn)
+            return records.get_collection(conn, principal, namespace, name)
+
+    @app.get("/v0.2/collections/{name}/records/{record_id}/events", response_model=RecordHistory)
+    def record_history(
+        name: CollectionPath,
+        record_id: Annotated[str, Path(pattern=r"^rec-[0-9a-f]{32}$")],
+        proof: Credential,
+        namespace: Namespace,
+        after: Annotated[int, Query(ge=0)] = 0,
+        limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    ) -> Any:
+        """A record's append-only history; the supervisor or a `record:<name>/read` holder."""
+        with kernel.database.read() as conn:
+            principal = proof.resolve(conn)
+            return records.history(conn, principal, namespace, name, record_id, after, limit)
 
     @app.delete("/v0.2/triggers/{trigger_id}", response_model=TriggerRemoved)
     def unschedule(trigger_id: TriggerPath, proof: Credential) -> dict[str, Any]:

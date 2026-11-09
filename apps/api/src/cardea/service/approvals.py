@@ -87,8 +87,13 @@ class ConditionInvalid(ValueError):
 
 
 @lru_cache(maxsize=1024)
-def compile_condition(source: str) -> cel.Program:
-    """Compile and statically check a condition; raise ConditionInvalid when it is refused."""
+def compile_condition(source: str, variables: frozenset[str] = VARIABLES) -> cel.Program:
+    """Compile and statically check a condition; raise ConditionInvalid when it is refused.
+
+    ``variables`` names what the expression may read. Approval conditions use ``VARIABLES``;
+    ADR-034 record write guards use ``record``, ``args`` and ``caller``. The size, macro and
+    function limits are the same for every caller.
+    """
     if not source.strip():
         raise ConditionInvalid("Condition is empty")
     if len(source) > MAX_CONDITION_CHARS:
@@ -101,10 +106,11 @@ def compile_condition(source: str) -> cel.Program:
     except Exception as error:
         raise ConditionInvalid(f"Condition is not valid CEL: {_first_line(error)}") from error
     references = program.references()
-    unknown = set(references["variables"]) - VARIABLES
+    unknown = set(references["variables"]) - variables
     if unknown:
+        allowed = ", ".join(sorted(variables))
         raise ConditionInvalid(
-            f"Condition may only use args, operation and ns, not {', '.join(sorted(unknown))}"
+            f"Condition may only use {allowed}, not {', '.join(sorted(unknown))}"
         )
     functions = set(references["functions"]) - FUNCTIONS
     if functions:
@@ -120,22 +126,37 @@ class ConditionResult:
     error: str | None = None
 
 
-def evaluate_condition(
-    source: str, args: Mapping[str, JsonValue], operation: str, namespace: str
-) -> ConditionResult:
-    """Evaluate one condition against frozen arguments, failing closed."""
+def execute_condition(
+    source: str, activation: Mapping[str, object], variables: frozenset[str] = VARIABLES
+) -> tuple[bool | None, str | None]:
+    """Evaluate one condition: ``(value, None)`` for a boolean result, else ``(None, error)``.
+
+    The caller decides what an error means; approvals and record guards both fail closed.
+    """
     try:
-        program = compile_condition(source)
-        value = program.execute({"args": dict(args), "operation": operation, "ns": namespace})
+        program = compile_condition(source, variables)
+        value = program.execute(dict(activation))
     # The binding raises KeyError, TypeError, ValueError, RuntimeError, OverflowError and, on
     # internal panics, pyo3's PanicException, which derives from BaseException.
     except BaseException as error:  # noqa: B036
         if isinstance(error, KeyboardInterrupt | SystemExit):
             raise
-        return ConditionResult(True, f"{type(error).__name__}: {_first_line(error)}")
+        return None, f"{type(error).__name__}: {_first_line(error)}"
     if type(value) is not bool:
-        return ConditionResult(True, f"Condition returned {type(value).__name__}, not a boolean")
-    return ConditionResult(value)
+        return None, f"Condition returned {type(value).__name__}, not a boolean"
+    return value, None
+
+
+def evaluate_condition(
+    source: str, args: Mapping[str, JsonValue], operation: str, namespace: str
+) -> ConditionResult:
+    """Evaluate one condition against frozen arguments, failing closed."""
+    value, error = execute_condition(
+        source, {"args": dict(args), "operation": operation, "ns": namespace}
+    )
+    if error is not None:
+        return ConditionResult(True, error)
+    return ConditionResult(bool(value))
 
 
 def _first_line(error: BaseException) -> str:

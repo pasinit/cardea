@@ -18,23 +18,48 @@ import mcp.types
 import rfc8785
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
-from pydantic import Field, JsonValue, TypeAdapter, ValidationError, model_validator
+from pydantic import (
+    Field,
+    JsonValue,
+    TypeAdapter,
+    ValidationError,
+    ValidationInfo,
+    model_validator,
+)
 
 from cardea.kernel.models import MAX_DOCUMENT_BYTES, OperationName, canonical_json
 from cardea.service.database import Fault, private_file
-from cardea.service.models import Record, Right
+from cardea.service.models import RECORD_GRANT_PREFIX, RECORD_OPERATIONS, Record, Right
 
 ENTRY_POINT_GROUP = "cardea.operations"
 KERNEL_RIGHTS: frozenset[str] = frozenset(get_args(Right))
 # Prefixes owned by kernel rights and fixed installed profiles.
-RESERVED_PREFIXES = ("objects.", "tasks.", "events.", "host.", "models.", "tools.", "inputs.")
+RESERVED_PREFIXES = (
+    "objects.",
+    "tasks.",
+    "events.",
+    "host.",
+    "models.",
+    "tools.",
+    "inputs.",
+    # Built-in record operations (ADR-034); installed only by the kernel itself.
+    "records.",
+)
 # Room in a receipt's 64 KiB result document for the output and its wrapper keys.
 MAX_RECORDED_OUTPUT_BYTES = MAX_DOCUMENT_BYTES - 64
 _NAME = TypeAdapter(OperationName)
 
 
 class OperationRejected(Exception):
-    """Raised by a handler that is certain no external effect happened."""
+    """Raised by a handler that is certain no external effect happened.
+
+    ``code`` becomes the receipt's failure code; built-in operations use specific codes
+    such as ``version_conflict`` (ADR-034), installed ones normally keep the default.
+    """
+
+    def __init__(self, message: str = "", code: str = "operation_rejected") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 def http_status(error: BaseException) -> int | None:
@@ -133,13 +158,15 @@ class OperationDescriptor(Record):
     cardea: Binding
 
     @model_validator(mode="after")
-    def standard_tool(self) -> Self:
+    def standard_tool(self, info: ValidationInfo) -> Self:
         try:
             tool = mcp.types.Tool.model_validate(self.tool)
         except ValidationError as error:
             raise ValueError("Descriptor tool is not a valid MCP Tool") from error
         _NAME.validate_python(tool.name)
-        if tool.name in KERNEL_RIGHTS or tool.name.startswith(RESERVED_PREFIXES):
+        # Only the kernel's own built-in descriptors may use a reserved name.
+        builtin = bool(info.context and info.context.get("builtin"))
+        if not builtin and (tool.name in KERNEL_RIGHTS or tool.name.startswith(RESERVED_PREFIXES)):
             raise ValueError("Operation name is reserved for kernel rights")
         if tool.output_schema is None:
             raise ValueError("Installed operations require an output schema for verification")
@@ -179,7 +206,11 @@ class Registry:
         descriptors: Iterable[OperationDescriptor] = (),
         handlers: Mapping[str, Handler | Reconciler] | None = None,
     ) -> None:
-        self.descriptors: dict[str, OperationDescriptor] = {}
+        from cardea.service.records import DESCRIPTORS
+
+        # Built-in record operations (ADR-034) are always installed; the kernel binds
+        # their handlers, so they are not entry points.
+        self.descriptors: dict[str, OperationDescriptor] = {d.name: d for d in DESCRIPTORS}
         for descriptor in descriptors:
             if descriptor.name in self.descriptors:
                 raise Fault("operation_duplicate", "Operation is installed twice", 500)
@@ -193,6 +224,8 @@ class Registry:
     def entry_points(self) -> set[str]:
         names = set()
         for descriptor in self.descriptors.values():
+            if descriptor.name in RECORD_OPERATIONS:
+                continue
             if descriptor.cardea.handler:
                 names.add(descriptor.cardea.handler)
             if descriptor.cardea.reconciler:
@@ -272,8 +305,11 @@ class Registry:
 
     def check_grants(self, grants: Iterable[str]) -> None:
         for grant in grants:
-            # Harness grants (ADR-033) are checked against the installed harnesses.
-            if grant not in KERNEL_RIGHTS and not grant.startswith("harness:"):
+            # Harness grants (ADR-033) are checked against the installed harnesses. Record
+            # grants (ADR-034) name collections, which are documents checked at each call.
+            if grant not in KERNEL_RIGHTS and not grant.startswith(
+                ("harness:", RECORD_GRANT_PREFIX)
+            ):
                 self.get(grant)
 
     def validate_arguments(self, name: str, arguments: Mapping[str, JsonValue]) -> None:
