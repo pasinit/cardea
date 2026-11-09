@@ -399,6 +399,567 @@
         "title": "AgentRunVerification",
         "type": "object"
       },
+      "ApprovalDecided": {
+        "additionalProperties": false,
+        "description": "`POST /v0.2/approvals/{request_id}/decision`: the request after the decision.",
+        "properties": {
+          "decision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApprovalDecisionRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          },
+          "void_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Void Reason"
+          }
+        },
+        "required": [
+          "request_id",
+          "task_id",
+          "state",
+          "void_reason",
+          "decision"
+        ],
+        "title": "ApprovalDecided",
+        "type": "object"
+      },
+      "ApprovalDecisionRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "approver_id": {
+            "title": "Approver Id",
+            "type": "string"
+          },
+          "decided_at": {
+            "title": "Decided At",
+            "type": "string"
+          },
+          "decision": {
+            "enum": [
+              "approve",
+              "reject"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "decision_id": {
+            "title": "Decision Id",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Approver's text: untrusted, one line, at most 200.",
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "decision_id",
+          "approver_id",
+          "decision",
+          "reason",
+          "decided_at"
+        ],
+        "title": "ApprovalDecisionRecord",
+        "type": "object"
+      },
+      "ApprovalList": {
+        "additionalProperties": false,
+        "description": "`GET /v0.2/approvals`: requests the caller may decide or supervises.",
+        "properties": {
+          "approvals": {
+            "items": {
+              "$ref": "#/components/schemas/ApprovalSummary"
+            },
+            "title": "Approvals",
+            "type": "array"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pass as `after` for the next page; null on the last.",
+            "title": "Next"
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "approvals",
+          "next"
+        ],
+        "title": "ApprovalList",
+        "type": "object"
+      },
+      "ApprovalRuleOutcome": {
+        "additionalProperties": false,
+        "description": "A rule that required approval for the frozen arguments.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set when the rule required approval because its condition failed to evaluate (fail closed).",
+            "title": "Error"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "rule_id": {
+            "title": "Rule Id",
+            "type": "string"
+          },
+          "source": {
+            "description": "operation (descriptor default), host or grant.",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "rule_id",
+          "reason",
+          "error"
+        ],
+        "title": "ApprovalRuleOutcome",
+        "type": "object"
+      },
+      "ApprovalSummary": {
+        "additionalProperties": false,
+        "description": "One approval request without its arguments.",
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "argument_sha256": {
+            "description": "SHA-256 of the RFC 8785 arguments.",
+            "title": "Argument Sha256",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "decision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApprovalDecisionRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "distinct_from_supervisor": {
+            "title": "Distinct From Supervisor",
+            "type": "boolean"
+          },
+          "expires_at": {
+            "title": "Expires At",
+            "type": "string"
+          },
+          "idempotency_context": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotency Context"
+          },
+          "intent_digest": {
+            "description": "Echo this with the decision.",
+            "title": "Intent Digest",
+            "type": "string"
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "on_expiry": {
+            "enum": [
+              "resume",
+              "fail"
+            ],
+            "title": "On Expiry",
+            "type": "string"
+          },
+          "operation": {
+            "title": "Operation",
+            "type": "string"
+          },
+          "operation_id": {
+            "description": "The receipt the approved effect runs as: apr-NN.",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "operation_version": {
+            "title": "Operation Version",
+            "type": "integer"
+          },
+          "receipt_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Receipt of the executed effect.",
+            "title": "Receipt Id"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/ApprovalRuleOutcome"
+            },
+            "title": "Rules",
+            "type": "array"
+          },
+          "rules_digest": {
+            "title": "Rules Digest",
+            "type": "string"
+          },
+          "runtime_id": {
+            "title": "Runtime Id",
+            "type": "string"
+          },
+          "scope_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ADR-026 effect scope key, when declared.",
+            "title": "Scope Key"
+          },
+          "state": {
+            "enum": [
+              "pending",
+              "approved",
+              "executed",
+              "rejected",
+              "expired",
+              "withdrawn",
+              "void"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "supervisor_id": {
+            "title": "Supervisor Id",
+            "type": "string"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "void_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Void Reason"
+          }
+        },
+        "required": [
+          "request_id",
+          "task_id",
+          "namespace",
+          "supervisor_id",
+          "agent_id",
+          "runtime_id",
+          "operation",
+          "operation_version",
+          "operation_id",
+          "argument_sha256",
+          "idempotency_context",
+          "scope_key",
+          "intent_digest",
+          "rules",
+          "rules_digest",
+          "distinct_from_supervisor",
+          "created_at",
+          "expires_at",
+          "on_expiry",
+          "state",
+          "void_reason",
+          "receipt_id",
+          "decision",
+          "updated_at"
+        ],
+        "title": "ApprovalSummary",
+        "type": "object"
+      },
+      "ApprovalView": {
+        "additionalProperties": false,
+        "description": "`GET /v0.2/approvals/{request_id}`: the whole frozen intent.",
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "argument_sha256": {
+            "description": "SHA-256 of the RFC 8785 arguments.",
+            "title": "Argument Sha256",
+            "type": "string"
+          },
+          "arguments": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "description": "The validated arguments that run if approved; at most 64 KiB.",
+            "title": "Arguments",
+            "type": "object"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "decision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApprovalDecisionRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "distinct_from_supervisor": {
+            "title": "Distinct From Supervisor",
+            "type": "boolean"
+          },
+          "expires_at": {
+            "title": "Expires At",
+            "type": "string"
+          },
+          "idempotency_context": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotency Context"
+          },
+          "intent_digest": {
+            "description": "Echo this with the decision.",
+            "title": "Intent Digest",
+            "type": "string"
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "on_expiry": {
+            "enum": [
+              "resume",
+              "fail"
+            ],
+            "title": "On Expiry",
+            "type": "string"
+          },
+          "operation": {
+            "title": "Operation",
+            "type": "string"
+          },
+          "operation_id": {
+            "description": "The receipt the approved effect runs as: apr-NN.",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "operation_version": {
+            "title": "Operation Version",
+            "type": "integer"
+          },
+          "receipt_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Receipt of the executed effect.",
+            "title": "Receipt Id"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/ApprovalRuleOutcome"
+            },
+            "title": "Rules",
+            "type": "array"
+          },
+          "rules_digest": {
+            "title": "Rules Digest",
+            "type": "string"
+          },
+          "runtime_id": {
+            "title": "Runtime Id",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "scope_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ADR-026 effect scope key, when declared.",
+            "title": "Scope Key"
+          },
+          "state": {
+            "enum": [
+              "pending",
+              "approved",
+              "executed",
+              "rejected",
+              "expired",
+              "withdrawn",
+              "void"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "supervisor_id": {
+            "title": "Supervisor Id",
+            "type": "string"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "void_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Void Reason"
+          }
+        },
+        "required": [
+          "request_id",
+          "task_id",
+          "namespace",
+          "supervisor_id",
+          "agent_id",
+          "runtime_id",
+          "operation",
+          "operation_version",
+          "operation_id",
+          "argument_sha256",
+          "idempotency_context",
+          "scope_key",
+          "intent_digest",
+          "rules",
+          "rules_digest",
+          "distinct_from_supervisor",
+          "created_at",
+          "expires_at",
+          "on_expiry",
+          "state",
+          "void_reason",
+          "receipt_id",
+          "decision",
+          "updated_at",
+          "arguments"
+        ],
+        "title": "ApprovalView",
+        "type": "object"
+      },
       "AuthorityWait": {
         "additionalProperties": false,
         "properties": {
@@ -731,6 +1292,57 @@
           "operation"
         ],
         "title": "ContextCall",
+        "type": "object"
+      },
+      "DecisionRequest": {
+        "additionalProperties": false,
+        "description": "`POST /v0.2/approvals/{request_id}/decision`. `decision_id` is the idempotency key.",
+        "properties": {
+          "decision": {
+            "enum": [
+              "approve",
+              "reject"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "decision_id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "title": "Decision Id",
+            "type": "string"
+          },
+          "intent_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Intent Digest",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "pattern": "^[ -~]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision_id",
+          "decision",
+          "intent_digest"
+        ],
+        "title": "DecisionRequest",
         "type": "object"
       },
       "DelegationTaskRequest": {
@@ -3161,6 +3773,20 @@
           },
           "task": {
             "$ref": "#/components/schemas/Task"
+          },
+          "waiting_for": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Waiting For"
           }
         },
         "required": [
@@ -3876,6 +4502,548 @@
           }
         ],
         "summary": "Submit Agent Run"
+      }
+    },
+    "/v0.2/approvals": {
+      "get": {
+        "description": "Approval requests (ADR-036) the caller may decide or supervises, without arguments.",
+        "operationId": "approvals_v0_2_approvals_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "namespace",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "Namespace",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "default": "pending",
+              "pattern": "^(pending|approved|executed|rejected|expired|withdrawn|void)$",
+              "title": "State",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 128,
+              "title": "After",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-cardea-auth",
+            "required": false,
+            "schema": {
+              "default": "spiffe",
+              "title": "X-Cardea-Auth",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Method Not Allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Approvals"
+      }
+    },
+    "/v0.2/approvals/{request_id}": {
+      "get": {
+        "description": "The whole frozen intent; needs `approve` for the operation or to supervise the task.",
+        "operationId": "approval_v0_2_approvals__request_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "pattern": "^req-[0-9a-f]{32}$",
+              "title": "Request Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-cardea-auth",
+            "required": false,
+            "schema": {
+              "default": "spiffe",
+              "title": "X-Cardea-Auth",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Method Not Allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Approval"
+      }
+    },
+    "/v0.2/approvals/{request_id}/decision": {
+      "post": {
+        "description": "Approve or reject; idempotent by `decision_id`, and the first commit wins.",
+        "operationId": "decide_v0_2_approvals__request_id__decision_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "pattern": "^req-[0-9a-f]{32}$",
+              "title": "Request Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-cardea-auth",
+            "required": false,
+            "schema": {
+              "default": "spiffe",
+              "title": "X-Cardea-Auth",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalDecided"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Method Not Allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Decide"
       }
     },
     "/v0.2/delegation-tasks": {

@@ -21,6 +21,7 @@ from jsonschema.exceptions import SchemaError
 from pydantic import Field, JsonValue, TypeAdapter, ValidationError, model_validator
 
 from cardea.kernel.models import MAX_DOCUMENT_BYTES, OperationName, canonical_json
+from cardea.service.approvals import OperationApproval
 from cardea.service.database import Fault, private_file
 from cardea.service.models import Record, Right
 
@@ -112,6 +113,9 @@ class Binding(Record):
     idempotency_scope: Annotated[tuple[Pointer, ...], Field(max_length=16)] | None = None
     # Entry point that observes destination state to settle an uncertain effect.
     reconciler: HandlerName | None = None
+    # Default approval rules (ADR-036); a host rule for a namespace replaces them. None, like
+    # an empty rule list, is autonomous: authority alone decides.
+    approval: OperationApproval | None = None
 
     @model_validator(mode="after")
     def effect_only(self) -> Self:
@@ -168,8 +172,16 @@ class OperationDescriptor(Record):
 
     @property
     def digest(self) -> str:
-        # In-process descriptors keep the digest they had before executors existed.
-        exclude = {"cardea": {"executor"}} if self.cardea.executor is None else None
+        # Descriptors keep the digest they had before executors and approval rules existed.
+        unset = {
+            name
+            for name, value in (
+                ("executor", self.cardea.executor),
+                ("approval", self.cardea.approval),
+            )
+            if value is None
+        }
+        exclude = {"cardea": unset} if unset else None
         return sha256(rfc8785.dumps(self.model_dump(mode="json", exclude=exclude))).hexdigest()
 
 

@@ -19,13 +19,22 @@ from cardea.kernel.store import KernelTransaction, SQLiteKernelStore, StoreError
 
 
 class Fault(Exception):
-    def __init__(self, code: str, message: str, status: int = 403) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        status: int = 403,
+        *,
+        details: dict[str, str] | None = None,
+    ) -> None:
         super().__init__(message)
         self.code, self.message, self.status = code, message, status
+        # Extra machine-readable fields of the error body, e.g. a request's current state.
+        self.details = details or {}
 
 
 # Latest Alembic revision this release runs against; older stores need migration.
-SCHEMA_HEAD = "m6_004"
+SCHEMA_HEAD = "m6_005"
 
 
 def private_file(path: Path) -> bytes:
