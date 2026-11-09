@@ -306,6 +306,9 @@ def test_m1_restore_migrates_charges_without_rewriting_receipt(
             "SELECT snapshot FROM operations WHERE task_id=?", (task,)
         ).scalar_one()
         for table in (
+            "mailbox_delivery_events",
+            "mailbox_deliveries",
+            "mailbox_messages",
             "recovery_epochs",
             "trigger_deliveries",
             "trigger_events",
@@ -350,6 +353,9 @@ def test_failed_m2_migration_is_atomic(kernel: Kernel) -> None:
 
     with kernel.database.engine.begin() as conn:
         for table in (
+            "mailbox_delivery_events",
+            "mailbox_deliveries",
+            "mailbox_messages",
             "recovery_epochs",
             "trigger_deliveries",
             "trigger_events",

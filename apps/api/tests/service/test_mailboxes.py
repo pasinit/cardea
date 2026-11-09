@@ -32,7 +32,6 @@ from cardea.service.operation_runtime import OperationRuntime
 from cardea.service.operations import OperationDescriptor, Registry
 
 GRANTS = (*RIGHTS, "models.invoke", "mailbox.send", "mailbox.inbox", "mail:bob", "mail:alice")
-SUPERVISOR = runs.Auth().validate("supervisor")
 
 
 @pytest.fixture
@@ -103,7 +102,7 @@ def run(kernel: Kernel, agent: str, request_id: str, **changes: Any) -> str:
             **changes,
         }
     )
-    return kernel.submit(SUPERVISOR, request).task.task_id
+    return kernel.submit(kernel.auth.validate("supervisor"), request).task.task_id
 
 
 INBOX = [{"operation": "mailbox.inbox"}]
@@ -536,5 +535,5 @@ def test_mailbox_operations_are_built_in_and_reserved(kernel: Kernel) -> None:
         }
     )
     with pytest.raises(Fault) as refused:
-        kernel.submit(SUPERVISOR, request)
+        kernel.submit(kernel.auth.validate("supervisor"), request)
     assert refused.value.code == "builtin_operation"
