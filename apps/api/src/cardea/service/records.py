@@ -36,11 +36,12 @@ from pydantic import (
     model_validator,
 )
 
-from cardea.kernel.models import Identifier
+from cardea.kernel.models import Identifier, OperationReceipt, OperationState
 from cardea.service.approvals import execute_condition
 from cardea.service.database import Database, Fault, borrow
 from cardea.service.models import (
     COLLECTION_NAME,
+    RECORD_ACTION,
     CollectionName,
     GroupPool,
     GroupSpec,
@@ -62,6 +63,7 @@ from cardea.service.record_states import (
     MAX_STATES,
     MAX_TRANSITIONS,
     GuardSource,
+    ReceiptRequirement,
     StateMigration,
     StateName,
     Transition,
@@ -666,8 +668,18 @@ def check_guard(
     args: Mapping[str, JsonValue],
     caller: Mapping[str, JsonValue],
 ) -> None:
-    """Fail closed: a false guard, or one that errors, refuses the call (ADR-034 2.3)."""
-    source = getattr(spec.guards, action, None)
+    """A collection's write guard for one action (decision 2.3); fails closed."""
+    check_condition(getattr(spec.guards, action, None), action, record, args, caller)
+
+
+def check_condition(
+    source: str | None,
+    label: str,
+    record: Mapping[str, JsonValue],
+    args: Mapping[str, JsonValue],
+    caller: Mapping[str, JsonValue],
+) -> None:
+    """Fail closed: a false guard, or one that errors, refuses the call (decisions 2.3, 3.1)."""
     if source is None:
         return
     value, error = execute_condition(
@@ -676,15 +688,64 @@ def check_guard(
         GUARD_VARIABLES,
     )
     if error is not None:
-        raise OperationRejected(f"{action} guard failed to evaluate: {error}", "guard_refused")
+        raise OperationRejected(f"{label} guard failed to evaluate: {error}", "guard_refused")
     if value is not True:
-        raise OperationRejected(f"{action} guard refused this call", "guard_refused")
+        raise OperationRejected(f"{label} guard refused this call", "guard_refused")
+
+
+def check_receipt(
+    conn: sa.Connection,
+    need: ReceiptRequirement,
+    arguments: Mapping[str, JsonValue],
+    context: OperationContext,
+    caller: str,
+    record_id: str,
+) -> str:
+    """The evidence a transition needs (decision 3.1): the cited receipt is a successful,
+    or reconciled-applied, call of the named operation, made by the caller's task (or, for
+    `same_caller`, by the caller within the window), for this record."""
+    receipt_id = arguments.get("receipt_id")
+    if not isinstance(receipt_id, str):
+        raise OperationRejected(
+            f"This transition needs receipt_id of a {need.operation} call", "receipt_required"
+        )
+    row = conn.exec_driver_sql(
+        "SELECT o.snapshot, b.agent_id FROM operations o JOIN task_bindings b USING(task_id) "
+        "WHERE o.receipt_id=?",
+        (receipt_id,),
+    ).first()
+    receipt = OperationReceipt.model_validate_json(row[0]) if row is not None else None
+    if receipt is None or receipt.request.name != need.operation:
+        raise OperationRejected(f"Cite a receipt of {need.operation}", "receipt_invalid")
+    if receipt.state is not OperationState.SUCCEEDED:
+        raise OperationRejected("The cited call did not succeed", "receipt_invalid")
+    if need.within == "same_task":
+        if receipt.request.task_id != context.task_id:
+            raise OperationRejected("The cited call belongs to another task", "receipt_invalid")
+    else:
+        assert need.window_seconds is not None
+        if row is None or row[1] != caller:
+            raise OperationRejected("The cited call was made by someone else", "receipt_invalid")
+        if receipt.updated_at < now() - timedelta(seconds=need.window_seconds):
+            raise OperationRejected("The cited call is outside the window", "receipt_invalid")
+    recorded = receipt.request.arguments
+    called = recorded.get("arguments")
+    provenance = recorded.get("context")
+    names_record = (isinstance(called, dict) and called.get("record_id") == record_id) or (
+        isinstance(provenance, dict)
+        and str(provenance.get("idempotency_context") or "").startswith(f"{record_id}.")
+    )
+    if not names_record:
+        raise OperationRejected("The cited call was not made for this record", "receipt_invalid")
+    return receipt_id
 
 
 # Claims (ADR-034 decision 2.4)
 
 # Built-in operations that change a record; their reconciler reads the history.
-WRITES = frozenset({"records.create", "records.update", "records.claim", "records.release"})
+WRITES = frozenset(
+    {"records.create", "records.update", "records.claim", "records.release", "records.transition"}
+)
 
 
 def stamp(at: datetime) -> str:
@@ -779,6 +840,8 @@ def write_claim(
     row: sa.RowMapping,
     new: Mapping[str, JsonValue],
     claim_transition: str | None = None,
+    *,
+    holder_event: bool = True,
 ) -> None:
     """Store a claim or state change; any holder event restarts the follow-up count.
 
@@ -786,13 +849,15 @@ def write_claim(
     `on_claim_expiry` applies later); a claim taken by `records.claim` has none.
     """
     changed = conn.exec_driver_sql(
-        "UPDATE records SET state=?,holder=?,claim_epoch=?,lease_expires_at=?,followups=0,"
+        "UPDATE records SET state=?,holder=?,claim_epoch=?,lease_expires_at=?,"
+        "followups=CASE WHEN ? THEN 0 ELSE followups END,"
         "claim_transition=?,version=?,updated_at=? WHERE seq=? AND version=?",
         (
             new["state"],
             new["holder"],
             new["claim_epoch"],
             new["lease_expires_at"],
+            int(holder_event),
             claim_transition if new["holder"] is not None else None,
             new["version"],
             new["updated_at"],
@@ -869,6 +934,7 @@ class Records:
             "records.claim": self.claim,
             "records.release": self.release,
             "records.claimed": self.claimed,
+            "records.transition": self.transition,
         }
 
     def handler(self, name: str) -> Handler:
@@ -1208,6 +1274,126 @@ class Records:
             claims.append({**claim_view(view), "record": view})
         return {"claims": claims}
 
+    async def transition(
+        self, arguments: dict[str, JsonValue], context: OperationContext
+    ) -> dict[str, JsonValue]:
+        """Move a record along its collection's table (decision 3.1), in one transaction:
+        the live grant `record:<C>/<transition>`, the from state, the guard, the claim
+        effect and the receipt evidence; then the state, history and journal event."""
+        collection = str(arguments["collection"])
+        record_id = str(arguments["record_id"])
+        name = str(arguments["transition"])
+        targs = arguments.get("args", {})
+        assert isinstance(targs, dict)
+        with self.database.engine.begin() as conn:
+            spec, caller = self._authorize(conn, context, collection, name)
+            transition = spec.transition(name)
+            if transition is None:
+                raise OperationRejected(
+                    f"Collection {collection} has no transition {name}", "transition_unknown"
+                )
+            row = _record_row(conn, context.namespace, collection, record_id)
+            if row is None:
+                raise OperationRejected("No such record", "record_not_found")
+            at = now()
+            actor = str(caller["id"])
+            self._fence(conn, context)
+            if row["holder"] is not None and expired(row, at):
+                # A lapsed claim is released first, as the sweep would, state included.
+                expire(conn, row, at, actor=actor, reason="lease_expired", spec=spec)
+                row = _record_row(conn, context.namespace, collection, record_id)
+                assert row is not None
+            if row["state"] not in transition.from_:
+                raise OperationRejected(
+                    f"Transition {name} needs state {' or '.join(transition.from_)}; the "
+                    f"record is in {row['state']}",
+                    "transition_not_allowed",
+                )
+            old = record_view(row)
+            check_condition(transition.guard, name, old, targs, caller)
+            new: dict[str, JsonValue] = {
+                **old,
+                "state": transition.to,
+                "version": int(row["version"]) + 1,
+                "updated_at": at.isoformat(),
+            }
+            acquired = row["claim_transition"]
+            if transition.claim == "acquire":
+                assert spec.claims is not None, "checked at apply"
+                if row["holder"] is not None and row["holder"] != actor:
+                    raise OperationRejected("Another principal holds this record", "record_claimed")
+                if row["holder"] == actor:
+                    if "claim_epoch" in arguments:
+                        check_holder(row, caller, arguments["claim_epoch"])
+                else:
+                    self._check_limit(conn, context.namespace, collection, actor, spec, at)
+                    new["claim_epoch"] = int(row["claim_epoch"]) + 1
+                new["holder"] = actor
+                new["lease_expires_at"] = stamp(at + timedelta(seconds=spec.claims.lease_seconds))
+                acquired = name
+            elif transition.claim == "holder":
+                check_holder(row, caller, arguments.get("claim_epoch"))
+            elif transition.claim == "release":
+                # The holder releases with its epoch; another principal may close the work
+                # when its grant and the guard allow, e.g. a reviewer approving it.
+                if row["holder"] == actor:
+                    check_holder(row, caller, arguments.get("claim_epoch"))
+                new["holder"] = None
+                new["lease_expires_at"] = None
+            receipt = None
+            if transition.requires_receipt is not None:
+                receipt = check_receipt(
+                    conn, transition.requires_receipt, arguments, context, actor, record_id
+                )
+            write_claim(
+                conn, row, new, acquired, holder_event=actor in (row["holder"], new["holder"])
+            )
+            detail: dict[str, JsonValue] = {
+                "transition": name,
+                "from": old["state"],
+                "to": transition.to,
+                "claim": transition.claim,
+                "args": targs,
+                "receipt_id": receipt,
+            }
+            self._event(conn, context, actor, "transitioned", old, new, detail)
+            journal(
+                conn,
+                context.namespace,
+                "transitioned",
+                new,
+                actor,
+                context.task_id,
+                at,
+                {"from": old["state"], "to": transition.to, "transition": name},
+            )
+        result: dict[str, JsonValue] = {"record": new}
+        if new["holder"] is not None:
+            result["claim"] = claim_view(new)
+        return result
+
+    @staticmethod
+    def _check_limit(
+        conn: sa.Connection,
+        namespace: str,
+        collection: str,
+        holder: str,
+        spec: CollectionSpec,
+        at: datetime,
+    ) -> None:
+        assert spec.claims is not None
+        held = conn.exec_driver_sql(
+            "SELECT COUNT(*) FROM records WHERE namespace=? AND collection=? AND holder=? "
+            "AND lease_expires_at>?",
+            (namespace, collection, holder, stamp(at)),
+        ).scalar_one()
+        if held >= spec.claims.max_per_holder:
+            raise OperationRejected(
+                f"The holder already has {held} claim(s); the collection allows "
+                f"{spec.claims.max_per_holder}",
+                "claim_limit",
+            )
+
     async def reconcile(
         self, arguments: dict[str, JsonValue], context: OperationContext
     ) -> Reconciliation:
@@ -1416,6 +1602,29 @@ DESCRIPTORS: tuple[OperationDescriptor, ...] = (
         {"record_id": _RECORD_ID, "claim_epoch": _EPOCH},
         ["record_id", "claim_epoch"],
         _ONE,
+        reconciler="cardea.records.reconcile",
+    ),
+    _descriptor(
+        "records.transition",
+        "Move a record along its collection's state machine "
+        "(grant action: the transition's name)",
+        "effect",
+        {
+            "record_id": _RECORD_ID,
+            "transition": {"type": "string", "pattern": f"^{RECORD_ACTION}$"},
+            # Needed by claim: holder and by the holder for claim: release.
+            "claim_epoch": _EPOCH,
+            # A receipt of the operation the transition requires, when it requires one.
+            "receipt_id": {"type": "string", "minLength": 1, "maxLength": 128},
+            # The transition's own arguments; guards see them as `args`.
+            "args": {"type": "object", "maxProperties": 32},
+        },
+        ["record_id", "transition"],
+        {
+            "type": "object",
+            "properties": {"record": _RECORD, "claim": _CLAIM},
+            "required": ["record"],
+        },
         reconciler="cardea.records.reconcile",
     ),
     _descriptor(

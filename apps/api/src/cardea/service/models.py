@@ -63,6 +63,7 @@ RECORD_OPERATIONS: frozenset[str] = frozenset(
         "records.claim",
         "records.release",
         "records.claimed",
+        "records.transition",
     }
 )
 
