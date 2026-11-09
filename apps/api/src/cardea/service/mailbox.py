@@ -395,11 +395,14 @@ def send(
     sender_task_id: str | None = None,
     sender_receipt_id: str | None = None,
     about_message_id: str | None = None,
+    from_kernel: bool = False,
 ) -> dict[str, JsonValue]:
     """Commit one message and its delivery rows in the caller's transaction.
 
     Authority is the caller's to check. `client_key` makes a supervisor's send
     idempotent; an agent's send is idempotent through its receipt's effect scope.
+    Kernel mail (`from_kernel`, or a notice about another message) may also go to a
+    supervisor, e.g. about a lapsed record claim (ADR-034 decision 2.4).
     """
     body = check_parts(parts)
     notice = about_message_id is not None
@@ -424,7 +427,7 @@ def send(
             if existing["request_sha256"] != request:
                 raise Fault("request_conflict", "Client key already sent a different message", 409)
             return summary(conn, existing)
-    rows = recipients(conn, namespace, to, runtime_id, notice=notice)
+    rows = recipients(conn, namespace, to, runtime_id, notice=notice or from_kernel)
     message_id = str(uuid4())
     conn.exec_driver_sql(
         "INSERT INTO mailbox_messages(message_id,namespace,kind,sender_id,sender_task_id,"

@@ -36,7 +36,7 @@ from cardea.kernel.store import KernelTransaction
 from cardea.runtime import activity as activities
 from cardea.runtime.activity import AttemptActivity, OutputLimits
 from cardea.runtime.harness import Harness, HarnessRequest, HarnessResult
-from cardea.service import approval_requests, confined, invocation, mailbox
+from cardea.service import approval_requests, claims, confined, invocation, mailbox
 from cardea.service.confined import ConfinedAgentSession, WorkerFailed
 from cardea.service.database import Fault, borrow
 from cardea.service.kernel import TERMINAL, Kernel
@@ -333,6 +333,8 @@ class AgentRunRuntime:
                 lease=self._lease(at, task.limits.deadline, attempt_lease_seconds(request)),
             )
             assert task.lease is not None
+            # The holder is alive: its record claims outlast this attempt (ADR-034 2.4).
+            claims.renew_for_attempt(conn, task.agent_id, task.lease.expires_at)
             return request, task.lease, attempt
 
     def _lease(self, at: Any, deadline: Any, seconds: float) -> DispatchLease:
@@ -1071,6 +1073,8 @@ class AgentRunRuntime:
                 mailbox.settle(conn, tx, task_id, "failed", self.kernel.runtime_id, now())
                 return "failed"
             if not result.is_error and result.text.strip() and not unmet:
+                # A successful run renews the holder's claims to their full lease.
+                claims.renew_for_success(conn, task.agent_id, now())
                 return self._publish(
                     conn, tx, task, request, lease, attempt, result, self._calls(tx, task_id)
                 )

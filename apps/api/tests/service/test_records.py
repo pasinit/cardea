@@ -263,9 +263,9 @@ def test_get_needs_supervision_or_a_read_grant(items: Kernel) -> None:
         {"guards": {"update": "record.labels.exists(l, l == 'x')"}},  # comprehension macro
         {"guards": {"update": "ns == 'test'"}},  # not a guard variable
         {"guards": {"update": "args.a == 1 || " * 40 + "true"}},  # over 512 characters
-        {"guards": {"claim": "true"}},  # a later slice
+        {"guards": {"transition": "true"}},  # transitions guard themselves (slice 3)
         {"states": ["open"]},  # state machines are slice 3
-        {"claims": {"lease_seconds": 3600}},  # claims are slice 2
+        {"claims": {"lease_seconds": 60}},  # below the five-minute minimum lease
         {"max_record_bytes": 10**6},
     ],
 )
