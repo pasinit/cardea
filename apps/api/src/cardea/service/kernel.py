@@ -21,7 +21,6 @@ from cardea.service.database import Database, Fault, borrow
 from cardea.service.harnesses import Catalog, Harnesses, check_harness_grants
 from cardea.service.models import (
     APPROVAL_OPERATIONS,
-    APPROVE_GRANT_PREFIX,
     DEFAULT_MAX_TASK_REQUEST_BYTES,
     RECORD_GRANT_PREFIX,
     RECORD_OPERATIONS,

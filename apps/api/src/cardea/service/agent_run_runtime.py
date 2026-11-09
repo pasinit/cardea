@@ -13,7 +13,7 @@ import time
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager, suppress
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -24,6 +24,7 @@ from mcp import types
 from cardea.kernel.models import (
     Checkpoint,
     DispatchLease,
+    EventWait,
     KernelFailure,
     OperationReceipt,
     OperationState,
@@ -37,11 +38,13 @@ from cardea.runtime import activity as activities
 from cardea.runtime.activity import AttemptActivity, OutputLimits
 from cardea.runtime.harness import Harness, HarnessRequest, HarnessResult
 from cardea.service import approval_requests, confined, invocation
+from cardea.service.approvals import ApprovalRequirement
 from cardea.service.confined import ConfinedAgentSession, WorkerFailed
 from cardea.service.database import Fault, borrow
 from cardea.service.kernel import TERMINAL, Kernel
 from cardea.service.logs import ATTEMPT_LOGS, attempt_log_file
-from cardea.service.models import RECORD_OPERATIONS, AgentRunRequest, InboundEvent, now
+from cardea.service.models import BUILTIN_OPERATIONS, AgentRunRequest, InboundEvent, now
+from cardea.service.operation_runtime import void_reason_for
 from cardea.service.operations import Handler, OperationContext, OperationRejected
 from cardea.service.policy import Policy
 from cardea.service.tool_endpoint import ToolEndpoint, operation_name, tool_name
@@ -87,6 +90,16 @@ BUSY = (
     "more. Nothing was done; make this call again once one of them returns."
 )
 
+PENDING = (
+    "approval_pending: this call needs approval and was not run. Do not call it again. "
+    "The decision comes back to this run later; continue with other work or finish."
+)
+
+RESUMED = (
+    "This run resumes after an approval wait. Its earlier tool calls are listed below and "
+    "their results are final; do not repeat effects that already succeeded."
+)
+
 
 @dataclass(frozen=True)
 class Outcome:
@@ -98,6 +111,8 @@ class Outcome:
     deduplicated: bool = False
     # One of invocation.REASONS for a failed call; empty on success or a pre-dispatch refusal.
     reason: str = ""
+    # The call is held for approval (ADR-036): request_id and expires_at, nothing ran.
+    pending: dict[str, Any] | None = None
 
 
 def _text(value: object) -> str:
@@ -174,6 +189,8 @@ class AgentRunRuntime:
         self.kernel = kernel
         # The attempt in progress; tool calls arrive on the endpoint's thread and report here.
         self.activity: AttemptActivity | None = None
+        # Approval requests whose outcome this attempt's prompt reported (ADR-036).
+        self.reported: set[str] = set()
 
     # Authority
 
@@ -185,8 +202,9 @@ class AgentRunRuntime:
         for right in ("models.invoke", "objects.read", "objects.write"):
             policy.ceiling(task.task_id, right)
         for name in (*request.operations, *(c.operation for c in request.context)):
-            if name in RECORD_OPERATIONS:
-                # Authorized per call by `record:<collection>/<action>` (ADR-034).
+            if name in BUILTIN_OPERATIONS:
+                # Authorized per call by `record:<collection>/<action>` (ADR-034) or
+                # `approve:<operation>` (ADR-036).
                 continue
             policy.ceiling(task.task_id, name)
             for required in self.kernel.operations.get(name).cardea.requires:
@@ -228,7 +246,9 @@ class AgentRunRuntime:
                 outcome = self._finish(task_id, request, lease, attempt, result)
                 activity.event(
                     "attempt finished",
-                    logging.INFO if outcome in {"succeeded", "retry"} else logging.WARNING,
+                    logging.INFO
+                    if outcome in {"succeeded", "retry", "waiting"}
+                    else logging.WARNING,
                     outcome=outcome,
                     reason=_reason(result) if result.is_error else None,
                     code=self._failure_code(task_id) if outcome == "failed" else None,
@@ -257,15 +277,50 @@ class AgentRunRuntime:
                     extra={"task_id": task_id, "lease_expires_at": expires},
                 )
                 return "recover"
+            if task.state is TaskState.WAITING:
+                # Parked for approval: the request's continuation starts the next attempt.
+                return task.state.value
             if task.state is TaskState.SUSPENDED:
                 task = tx.change_task(
                     task_id, TaskState.QUEUED, expected_revision=task.revision, at=now()
                 )
-            recorded = task.checkpoint.state.get("attempt", 0) if task.checkpoint else 0
-            attempt = (recorded if isinstance(recorded, int) else 0) + 1
+            state = task.checkpoint.state if task.checkpoint else {}
+            recorded, free = state.get("attempt", 0), state.get("free", 0)
+            recorded = recorded if isinstance(recorded, int) else 0
+            # Attempts that parked after a successful session do not use a retry (ADR-036).
+            free = free if isinstance(free, int) else 0
+            parked = state.get("approval_request_id")
+            attempt = recorded + 1
+            open_request = self._open_request(conn, task_id)
             try:
                 request = self.guard(conn, task)
-                if attempt > request.max_attempts:
+                if isinstance(parked, str):
+                    closed = approval_requests.get(conn, parked)
+                    if closed["state"] == "expired" and closed["on_expiry"] == "fail":
+                        raise Fault("approval_expired", "The approval request expired")
+                if open_request is not None and open_request["state"] == "pending":
+                    # An attempt lost its lease after proposing: park again with no session
+                    # and no attempt used.
+                    at = now()
+                    task = tx.change_task(
+                        task_id,
+                        TaskState.RUNNING,
+                        expected_revision=task.revision,
+                        at=at,
+                        lease=self._lease(at, task.limits.deadline, 1.0),
+                    )
+                    assert task.lease is not None
+                    return self._park(
+                        conn,
+                        tx,
+                        task,
+                        task.lease.lease_id,
+                        open_request,
+                        {"attempt": recorded, "free": free},
+                    )
+                # A continuation attempt after an approval does not use a retry.
+                resumed = isinstance(parked, str) or open_request is not None
+                if not resumed and attempt - free > request.max_attempts:
                     raise Fault("attempts_exhausted", "Every allowed session attempt was used")
             except Fault as error:
                 tx.change_task(
@@ -273,7 +328,13 @@ class AgentRunRuntime:
                     TaskState.FAILED,
                     expected_revision=task.revision,
                     at=now(),
-                    failure=KernelFailure(code=error.code, message=error.message),
+                    failure=KernelFailure(
+                        code=error.code,
+                        message=error.message,
+                        details={"request_id": str(parked)}
+                        if error.code == "approval_expired"
+                        else {},
+                    ),
                 )
                 log.warning(
                     "attempt refused before it started",
@@ -302,7 +363,7 @@ class AgentRunRuntime:
                     checkpoint_id=f"checkpoint-{task_id}-{attempt}",
                     task_id=task_id,
                     saved_at=at,
-                    state={"attempt": attempt},
+                    state={"attempt": attempt, "free": free, "resumed": resumed},
                 ),
             )
             task = tx.change_task(
@@ -441,7 +502,9 @@ class AgentRunRuntime:
         return [
             receipt
             for receipt in tx.list_operations(task_id)
-            if receipt.request.operation_id.startswith("call-")
+            # Tool calls, and approved calls run as `apr-NN` (ADR-036): both count as calls of
+            # their operation for expectations and are listed to a retried session.
+            if receipt.request.operation_id.startswith(("call-", "apr-"))
         ]
 
     def _calls(self, tx: KernelTransaction, task_id: str) -> list[OperationReceipt]:
@@ -450,7 +513,7 @@ class AgentRunRuntime:
             (
                 r
                 for r in tx.list_operations(task_id)
-                if r.request.operation_id.startswith(("ctx-", "call-"))
+                if r.request.operation_id.startswith(("ctx-", "call-", "apr-"))
             ),
             key=lambda r: (r.created_at, r.request.operation_id),
         )
@@ -488,6 +551,8 @@ class AgentRunRuntime:
         attempt: int,
         journal: list[OperationReceipt],
         context: tuple[str, ...] = (),
+        approvals: tuple[str, ...] = (),
+        resumed: bool = False,
     ) -> str:
         instructions = request.instructions
         if request.expect:
@@ -502,6 +567,10 @@ class AgentRunRuntime:
                 instructions += "\n" + CONTEXT_GAP
         if request.trigger_event is not None:
             instructions += "\n\n" + EVENT_PREFACE + "\n" + event_block(request.trigger_event)
+        if approvals:
+            instructions += (
+                "\n\n" + approval_requests.APPROVAL_PREFACE + "\n" + "\n".join(approvals)
+            )
         if attempt == 1 or not journal:
             return instructions
         lines = []
@@ -518,11 +587,14 @@ class AgentRunRuntime:
                 f"- {tool_name(receipt.request.name)} {_text(arguments)[:400]} -> "
                 f"{receipt.state.value}: {_text(outcome)[:800]}"
             )
-        prompt = (
-            f"{instructions}\n\nThis is attempt {attempt}. An earlier attempt stopped "
+        header = (
+            RESUMED
+            if resumed
+            else f"This is attempt {attempt}. An earlier attempt stopped "
             "before finishing. Its tool calls are listed below and their results are final; "
-            "do not repeat effects that already succeeded.\n" + "\n".join(lines)
+            "do not repeat effects that already succeeded."
         )
+        prompt = f"{instructions}\n\n{header}\n" + "\n".join(lines)
         applied = [
             f"- {tool_name(r.request.name)} ({r.request.operation_id})"
             for r in journal
@@ -542,8 +614,13 @@ class AgentRunRuntime:
             return HarnessResult.failed("agent_disabled")
         harness_id, model = self.kernel.selection(request)
         harness = self.kernel.harnesses.get(harness_id)
+        # An approved request runs first, as `apr-NN` under this attempt's lease (ADR-036).
+        asyncio.run(self._run_approved(task_id, lease.lease_id, request))
+        approvals = self._approval_blocks(task_id)
         with self.kernel.database.engine.begin() as conn, borrow(conn) as tx:
             journal = self._journal(tx, task_id)
+            checkpoint = tx.get_task(task_id).checkpoint
+            resumed = bool(checkpoint and checkpoint.state.get("resumed"))
         tools = []
         for name in request.operations:
             descriptor = self.kernel.operations.get(name)
@@ -576,7 +653,7 @@ class AgentRunRuntime:
             self._current(task_id).redact(endpoint.token)
             session_request = HarnessRequest(
                 system_prompt=self._system_prompt(request),
-                prompt=self._prompt(request, attempt, journal, context),
+                prompt=self._prompt(request, attempt, journal, context, approvals, resumed),
                 mcp_url=endpoint.url,
                 mcp_token=endpoint.token,
                 tool_names=tuple(tool.name for tool in tools),
@@ -709,6 +786,12 @@ class AgentRunRuntime:
                 gate.leave()
         if outcome.code:
             return _error(outcome.code, outcome.detail)
+        if outcome.pending is not None:
+            # Not an error: the call is held; no receipt and no tool-call budget used.
+            return types.CallToolResult(
+                content=[types.TextContent(type="text", text=PENDING)],
+                structured_content=outcome.pending,
+            )
         if outcome.deduplicated:
             return types.CallToolResult(
                 content=[
@@ -760,17 +843,24 @@ class AgentRunRuntime:
                 descriptor = registry.get(name)
                 handler = self.kernel.handler(name)
                 executor = self.kernel.executor_record(name)
-                # Approval waits exist for single-operation tasks only (ADR-036 slice 2);
-                # a run's call that a rule holds for approval is refused, never run unheld.
+                # Approval is an extra conjunct inside the live ceiling the guard checked
+                # (ADR-036): a held call is frozen as a request and runs later as `apr-NN`.
                 registry.validate_arguments(name, arguments)
-                if approval_requests.evaluate(
+                needed = approval_requests.evaluate(
                     conn, registry, name, request.namespace, arguments
-                ).required:
-                    raise Fault(
-                        "approval_unsupported",
-                        "This call needs approval, which agent runs do not support yet",
-                        409,
+                )
+                if needed.required:
+                    if kind == "ctx":
+                        raise Fault(
+                            "approval_required", "A context operation cannot wait for approval"
+                        )
+                    pending = self._propose(conn, tx, task, request, name, arguments, needed)
+                    self._current(task_id).event(
+                        "tool call held for approval",
+                        operation=name,
+                        request_id=pending["request_id"],
                     )
+                    return Outcome(pending=pending)
                 admitted = invocation.admit(
                     conn,
                     tx,
@@ -934,6 +1024,272 @@ class AgentRunRuntime:
                 conn, tx, task, lease_id=lease_id, operation_id=operation_id, failure=failure
             )
 
+    # Approval waits (ADR-036 slice 4)
+
+    @staticmethod
+    def _open_request(conn: sa.Connection, task_id: str) -> sa.RowMapping | None:
+        return (
+            conn.exec_driver_sql(
+                "SELECT * FROM approval_requests WHERE task_id=? "
+                "AND state IN ('pending','approved')",
+                (task_id,),
+            )
+            .mappings()
+            .first()
+        )
+
+    def _propose(
+        self,
+        conn: sa.Connection,
+        tx: KernelTransaction,
+        task: Task,
+        request: AgentRunRequest,
+        name: str,
+        arguments: dict[str, Any],
+        needed: ApprovalRequirement,
+    ) -> dict[str, Any]:
+        """Freeze one held tool call; the same intent while it is pending returns it again."""
+        intent = approval_requests.ToolIntent(
+            name, request.namespace, arguments, request.idempotency_context
+        )
+        digest = approval_requests.intent_digest(
+            task_id=task.task_id,
+            namespace=request.namespace,
+            operation=name,
+            version=self.kernel.operations.get(name).cardea.version,
+            arguments_sha256=approval_requests.argument_sha256(arguments),
+            idempotency_context=request.idempotency_context,
+        )
+        row = self._open_request(conn, task.task_id)
+        if row is not None:
+            if row["state"] == "pending" and row["intent_digest"] == digest:
+                return self._pending_view(row)
+            raise Fault(
+                "approval_pending",
+                f"Request {row['request_id']} of this run is still open; nothing was done. "
+                "Make this call again after it is decided.",
+                409,
+            )
+        made = conn.exec_driver_sql(
+            "SELECT COUNT(*) FROM approval_requests WHERE task_id=?", (task.task_id,)
+        ).scalar_one()
+        if made >= request.approval_waits:
+            raise Fault(
+                "approval_limit",
+                f"This run may wait for approval at most {request.approval_waits} times",
+                409,
+            )
+        row = approval_requests.propose(
+            conn,
+            tx,
+            task,
+            Policy(conn).binding(task.task_id),
+            intent,
+            self.kernel.operations,
+            needed,
+            operation_id=f"apr-{made + 1:02d}",
+            at=now(),
+            agent_run=True,
+        )
+        return self._pending_view(row)
+
+    @staticmethod
+    def _pending_view(row: sa.RowMapping) -> dict[str, Any]:
+        return {
+            "status": "approval_pending",
+            "request_id": row["request_id"],
+            "expires_at": row["expires_at"],
+        }
+
+    def _park(
+        self,
+        conn: sa.Connection,
+        tx: KernelTransaction,
+        task: Task,
+        lease_id: str,
+        row: sa.RowMapping,
+        state: dict[str, Any],
+    ) -> str:
+        """RUNNING -> WAITING on `approval.<id>`; already-committed closure wakes it at once.
+
+        The wait's cursor is the request's own `approval.requested` event, so a decision or
+        expiry that committed while the attempt was still running is found, never lost.
+        """
+        request_id = str(row["request_id"])
+        cursor = conn.exec_driver_sql(
+            "SELECT cursor FROM events WHERE event_type='approval.requested' AND correlation_id=?",
+            (request_id,),
+        ).scalar_one()
+        at = now()
+        tx.change_task(
+            task.task_id,
+            TaskState.WAITING,
+            expected_revision=task.revision,
+            lease_id=lease_id,
+            at=at,
+            checkpoint=Checkpoint(
+                checkpoint_id=f"checkpoint-{task.task_id}-{state['attempt']}-{request_id}",
+                task_id=task.task_id,
+                saved_at=at,
+                state={**state, "approval_request_id": request_id},
+                event_cursor=int(cursor),
+            ),
+            wait=EventWait(
+                namespace=str(row["namespace"]),
+                event_type=f"approval.{request_id}",
+                after_cursor=int(cursor),
+            ),
+        )
+        log.info("run parked for approval", extra={"task_id": task.task_id, "code": request_id})
+        return "waiting"
+
+    def _parked_on(
+        self, conn: sa.Connection, task_id: str, lease: DispatchLease
+    ) -> sa.RowMapping | None:
+        """The request this attempt must wait on: an open one, or one that closed during the
+        attempt after its prompt was built (the agent has not been told yet)."""
+        row = self._open_request(conn, task_id)
+        if row is not None:
+            return row
+        for closed in reversed(approval_requests.closed_for(conn, task_id)):
+            if (
+                closed["request_id"] not in self.reported
+                and datetime.fromisoformat(closed["updated_at"]) >= lease.acquired_at
+            ):
+                return closed
+        return None
+
+    async def _run_approved(self, task_id: str, lease_id: str, request: AgentRunRequest) -> None:
+        """Execute an approved request as `apr-NN` before the session (ADR-036 item 6)."""
+        registry = self.kernel.operations
+        with self.kernel.database.read() as conn:
+            row = self._open_request(conn, task_id)
+        if row is None or row["state"] != "approved":
+            return
+        name, operation_id = str(row["operation"]), str(row["operation_id"])
+        arguments = json.loads(row["arguments_json"])
+        try:
+            admitted, handler, timeout = self._admit_approved(
+                task_id, lease_id, request, row, arguments
+            )
+        except Fault as error:
+            if error.code == "stale_session":
+                return
+            # The admission rolled back: nothing ran. The request becomes void.
+            voided = (
+                error.code
+                if error.code in {"operation_changed", "approver_authority_lost"}
+                else void_reason_for(error)
+            )
+            with self.kernel.database.engine.begin() as conn, borrow(conn) as tx:
+                approval_requests.mark_void(tx, conn, row, voided, self.kernel.runtime_id, now())
+            self._current(task_id).event(
+                "approved call voided", request_id=row["request_id"], reason=voided
+            )
+            return
+        if admitted.deduplicated is not None:
+            return
+        activity = self._current(task_id)
+        activity.tool_started(name, operation_id, "apr")
+        began = time.monotonic()
+        outcome = await self._dispatch(
+            task_id,
+            lease_id,
+            operation_id,
+            arguments,
+            registry.get(name).cardea.effect == "effect",
+            handler,
+            admitted.context,
+            timeout,
+        )
+        activity.tool_finished(
+            name,
+            operation_id,
+            kind="apr",
+            duration_ms=max(0, int((time.monotonic() - began) * 1000)),
+            outcome=outcome.code or "ok",
+            reason=outcome.reason,
+        )
+
+    def _admit_approved(
+        self,
+        task_id: str,
+        lease_id: str,
+        request: AgentRunRequest,
+        row: sa.RowMapping,
+        arguments: dict[str, Any],
+    ) -> tuple[invocation.Admitted, Handler, float]:
+        """Execution checks and the `apr-NN` intent in one transaction; a Fault rolls back."""
+        registry = self.kernel.operations
+        name, operation_id = str(row["operation"]), str(row["operation_id"])
+        with self.kernel.database.engine.begin() as conn, borrow(conn) as tx:
+            task = tx.get_task(task_id)
+            if (
+                task.state is not TaskState.RUNNING
+                or task.lease is None
+                or task.lease.lease_id != lease_id
+            ):
+                raise Fault("stale_session", "This attempt has ended")
+            self.guard(conn, task)
+            if registry.get(name).cardea.version != row["operation_version"]:
+                raise Fault("operation_changed", "Operation was reinstalled")
+            decision = approval_requests.decision_for(conn, str(row["request_id"]))
+            assert decision is not None
+            if not approval_requests.holds_approve(Policy(conn), str(decision["approver_id"]), row):
+                raise Fault("approver_authority_lost", "Approver no longer holds approve")
+            admitted = invocation.admit(
+                conn,
+                tx,
+                registry,
+                task,
+                lease_id=lease_id,
+                operation_id=operation_id,
+                name=name,
+                namespace=request.namespace,
+                arguments=arguments,
+                idempotency_context=request.idempotency_context,
+                deadline=task.limits.deadline,
+                executor=self.kernel.executor_record(name),
+                agent_id=task.agent_id,
+                slot_time=request.slot_time.isoformat() if request.slot_time else None,
+                approval=approval_requests.receipt_block(conn, row),
+            )
+            # The intent is committed and never replayed: the request is executed.
+            conn.exec_driver_sql(
+                "UPDATE approval_requests SET state='executed',receipt_id=?,updated_at=? "
+                "WHERE request_id=? AND state='approved'",
+                (admitted.context.receipt_id, now().isoformat(), row["request_id"]),
+            )
+            timeout = invocation.timeout_for(
+                registry,
+                name,
+                task.lease.expires_at,
+                SETTLE_MARGIN,
+                self.kernel.queue_allowance(name),
+            )
+            return admitted, self.kernel.handler(name), timeout
+
+    def _approval_blocks(self, task_id: str) -> tuple[str, ...]:
+        """One `<approval>` block per closed request, with the `apr-NN` result when it ran."""
+        self.reported = set()
+        with self.kernel.database.read() as conn, borrow(conn) as tx:
+            receipts = {r.request.operation_id: r for r in tx.list_operations(task_id)}
+            blocks = []
+            for row in approval_requests.closed_for(conn, task_id):
+                receipt = receipts.get(str(row["operation_id"]))
+                result: Any = None
+                if row["state"] == "executed" and receipt is not None:
+                    result = (
+                        receipt.result.get("output")
+                        if receipt.result
+                        else {"state": receipt.state.value, "failure": receipt.failure.code}
+                        if receipt.failure
+                        else {"state": receipt.state.value}
+                    )
+                blocks.append(approval_requests.prompt_block(conn, row, result))
+                self.reported.add(str(row["request_id"]))
+        return tuple(blocks)
+
     # Completion
 
     def _finish(
@@ -968,6 +1324,23 @@ class AgentRunRuntime:
                     at=now(),
                 )
                 return "cancelled"
+            state = task.checkpoint.state if task.checkpoint else {}
+            free = state.get("free", 0)
+            free = free if isinstance(free, int) else 0
+            waiting_on = self._parked_on(conn, task_id, lease)
+            if waiting_on is not None:
+                # A request is open, or closed unseen by the agent: wait instead of finishing
+                # (ADR-036 item 4). A failed session still uses a retry; a successful one not.
+                succeeded = not result.is_error and bool(result.text.strip())
+                return self._park(
+                    conn,
+                    tx,
+                    task,
+                    lease.lease_id,
+                    waiting_on,
+                    {"attempt": attempt, "free": free + 1 if succeeded else free},
+                )
+            # Expectations hold only once no request is open (ADR-036 item 7).
             unmet = self._unmet(request, calls)
             if any(code == "expectation_exceeded" for code, _ in unmet):
                 tx.change_task(
@@ -985,7 +1358,7 @@ class AgentRunRuntime:
                 )
             if unmet and not result.is_error:
                 result = HarnessResult.failed("expectation_unmet", text=result.text)
-            if attempt < request.max_attempts and now() < task.limits.deadline:
+            if attempt - free < request.max_attempts and now() < task.limits.deadline:
                 at = now()
                 tx.change_task(
                     task_id,
@@ -997,7 +1370,11 @@ class AgentRunRuntime:
                         checkpoint_id=f"checkpoint-{task_id}-{attempt}-end",
                         task_id=task_id,
                         saved_at=at,
-                        state={"attempt": attempt, "last_stop": _reason(result)[:64]},
+                        state={
+                            "attempt": attempt,
+                            "free": free,
+                            "last_stop": _reason(result)[:64],
+                        },
                     ),
                 )
                 return "retry"

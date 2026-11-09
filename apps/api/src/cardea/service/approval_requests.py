@@ -650,9 +650,7 @@ def record_decision(
     )
     if prior is not None:
         if prior["request_id"] != request_id or prior["body_sha256"] != digest:
-            raise Fault(
-                "decision_conflict", "Decision ID was already used with another body", 409
-            )
+            raise Fault("decision_conflict", "Decision ID was already used with another body", 409)
         return None
     check_approver(policy, approver, row)
     if within is not None:
@@ -811,10 +809,14 @@ def expire(kernel: "Kernel", request_id: str, at: datetime) -> str:
         # An agent run is told in a continuation attempt: on `resume`, on void, and whenever
         # its attempt is still running (that attempt parks, then the continuation applies
         # `fail`). A waiting run with `fail`, and every operation task, fails now.
-        if task.state not in TERMINAL_TASK and is_agent_run(task) and (
-            task.state is not TaskState.WAITING
-            or state == "void"
-            or resumes_on_expiry(task, row)
+        if (
+            task.state not in TERMINAL_TASK
+            and is_agent_run(task)
+            and (
+                task.state is not TaskState.WAITING
+                or state == "void"
+                or resumes_on_expiry(task, row)
+            )
         ):
             resume(kernel, conn, tx, row, at)
         elif task.state is TaskState.WAITING:
@@ -1042,9 +1044,7 @@ def closed_for(conn: sa.Connection, task_id: str) -> list[sa.RowMapping]:
     )
 
 
-def prompt_block(
-    conn: sa.Connection, row: sa.RowMapping, result: JsonValue | None = None
-) -> str:
+def prompt_block(conn: sa.Connection, row: sa.RowMapping, result: JsonValue | None = None) -> str:
     """One `<approval>` block; markup in the reason or the result cannot close it early."""
     decision = decision_for(conn, str(row["request_id"]))
     state = str(row["state"])
