@@ -401,3 +401,140 @@ def test_an_over_budget_message_is_delivered_shortened(
     assert entry["body_truncated"] is True
     assert entry["parts"][0]["text"].endswith(mailbox.TRUNCATION_MARK)
     assert len(compact(entry)) <= mailbox.INBOX_BYTES
+
+
+# Supervisor API
+
+
+def test_supervisor_sends_are_idempotent_on_the_client_key(kernel: Kernel) -> None:
+    first = supervisor_send(kernel)
+    assert first["status"] == 201 and first["to"] == {"instance": "bob"}
+    assert first["recipients"] == 1
+    again = supervisor_send(kernel)
+    assert again["message_id"] == first["message_id"]
+    conflict = supervisor_send(kernel, parts=note("something else"))
+    assert (conflict["status"], conflict["code"]) == (409, "request_conflict")
+    assert len(mail_rows(kernel)) == 1
+
+
+def test_supervisor_sends_need_a_mail_grant_and_a_valid_body(kernel: Kernel) -> None:
+    refused = supervisor_send(kernel, to={"instance": "carol"})
+    assert (refused["status"], refused["code"]) == (403, "authority_denied")
+    too_big = supervisor_send(kernel, parts=[{"text": "x" * 17000}])
+    assert (too_big["status"], too_big["code"]) == (413, "body_too_large")
+    raw = supervisor_send(kernel, parts=[{"raw": "aGk="}])
+    assert (raw["status"], raw["code"]) == (422, "invalid_parts")
+    both = supervisor_send(kernel, parts=[{"text": "a", "data": 1}])
+    assert both["status"] == 422
+    many = supervisor_send(kernel, parts=[{"text": "a"}] * 17)
+    assert many["status"] == 422
+    to_human = supervisor_send(kernel, to={"instance": "outsider"})
+    assert to_human["status"] == 403
+    assert mail_rows(kernel) == []
+
+
+def test_pool_and_group_addresses_wait_for_agent_groups(kernel: Kernel) -> None:
+    with kernel.database.engine.begin() as conn, borrow(conn) as tx:
+        for to in (mailbox.Address(pool="g1.dev"), mailbox.Address(group="g1")):
+            with pytest.raises(Fault) as refused:
+                mailbox.send(
+                    conn,
+                    tx,
+                    namespace="test",
+                    sender_id="supervisor",
+                    supervisor_id="supervisor",
+                    to=to,
+                    parts=note(),
+                    runtime_id="runtime",
+                    at=now(),
+                )
+            assert refused.value.code == "address_unsupported"
+    with pytest.raises(ValueError):
+        mailbox.Address(instance="bob", pool="g1.dev")
+
+
+def test_messages_are_listed_with_their_delivery_history(
+    kernel: Kernel, session: runs.FakeSession
+) -> None:
+    sent = supervisor_send(kernel)
+    session.scripts = [fails, succeeds]
+    failed = run(kernel, "bob", "h-1", context=INBOX)
+    assert AgentRunRuntime(kernel).execute(failed) == "failed"
+    done = run(kernel, "bob", "h-2", context=INBOX)
+    assert AgentRunRuntime(kernel).execute(done) == "succeeded"
+    client = TestClient(create_app(kernel))
+    auth = {"Authorization": "Bearer supervisor"}
+    page = client.get("/v0.2/mailbox", params={"namespace": "test"}, headers=auth).json()
+    (listed,) = page["messages"]
+    assert page["next"] is None and listed["message_id"] == sent["message_id"]
+    (delivery,) = listed["deliveries"]
+    assert delivery["state"] == "consumed" and delivery["deliveries"] == 2
+    assert [(h["kind"], h["task_id"]) for h in delivery["history"]] == [
+        ("created", None),
+        ("leased", failed),
+        ("released", failed),
+        ("leased", done),
+        ("consumed", done),
+    ]
+    one = client.get(f"/v0.2/mailbox/{sent['message_id']}", headers=auth).json()
+    assert one["message"] == listed
+    # Only the sender, its supervisor and the recipients can see a message.
+    hidden = client.get(
+        f"/v0.2/mailbox/{sent['message_id']}", headers={"Authorization": "Bearer outsider"}
+    )
+    assert hidden.status_code == 404
+    empty = client.get(
+        "/v0.2/mailbox", params={"namespace": "test"}, headers={"Authorization": "Bearer outsider"}
+    )
+    assert empty.json()["messages"] == []
+
+
+def test_messages_page_in_order(kernel: Kernel) -> None:
+    ids = [supervisor_send(kernel, client_key=f"p{n}")["message_id"] for n in range(3)]
+    client = TestClient(create_app(kernel))
+    auth = {"Authorization": "Bearer supervisor"}
+    seen: list[str] = []
+    after = ""
+    while True:
+        page = client.get(
+            "/v0.2/mailbox",
+            params={"namespace": "test", "limit": 2, "after": after},
+            headers=auth,
+        ).json()
+        seen += [m["message_id"] for m in page["messages"]]
+        if page["next"] is None:
+            break
+        after = page["next"]
+    assert sorted(seen) == sorted(ids) and len(seen) == 3
+
+
+def test_mailbox_operations_are_built_in_and_reserved(kernel: Kernel) -> None:
+    assert {"mailbox.send", "mailbox.inbox"} <= set(Registry().descriptors)
+    with pytest.raises(ValueError, match="reserved for built-in"):
+        OperationDescriptor.model_validate(
+            {
+                "tool": {
+                    "name": "mailbox.peek",
+                    "inputSchema": {"type": "object"},
+                    "outputSchema": {"type": "object"},
+                },
+                "cardea": {"version": 1, "effect": "read", "handler": "x.peek"},
+            }
+        )
+    # Sending is an agent-run tool; a supervisor uses the API instead.
+    from cardea.service.models import OperationTaskRequest
+
+    request = OperationTaskRequest.model_validate(
+        {
+            "request_id": "op",
+            "agent_id": "alice",
+            "namespace": "test",
+            "objective": "send",
+            "operation": "mailbox.send",
+            "arguments": {"client_key": "k", "to": {"instance": "bob"}, "parts": note()},
+            "grants": [*RIGHTS, "mailbox.send", "mail:bob"],
+        }
+    )
+    with pytest.raises(Fault) as refused:
+        kernel.submit(SUPERVISOR, request)
+    assert refused.value.code == "builtin_operation"
