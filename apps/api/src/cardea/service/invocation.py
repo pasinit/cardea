@@ -87,7 +87,7 @@ def classify(error: BaseException, timeout: float) -> Failure:
     if isinstance(error, WorkerNotStarted):
         return Failure("operation_rejected", "worker_refused", str(error))
     if isinstance(error, OperationRejected):
-        return Failure("operation_rejected", "rejected", str(error))
+        return Failure(error.code, "rejected", str(error))
     if isinstance(error, WorkerFailed):
         return Failure(error.code, error.reason, error.summary)
     if isinstance(error, TimeoutError):

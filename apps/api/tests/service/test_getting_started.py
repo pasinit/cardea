@@ -14,7 +14,8 @@ from cardea.service.models import (
     OperationTaskRequest,
     TriggerSpec,
 )
-from cardea.service.operations import Binding
+from cardea.service.operations import Binding, Registry
+from cardea.service.records import CollectionDocument
 
 GUIDE = Path(__file__).parents[4] / "docs" / "getting-started.md"
 
@@ -27,7 +28,12 @@ def examples() -> list[dict[str, Any]]:
 
 def test_every_example_validates() -> None:
     (single, run, trigger, on_event, event, effect, held, decision, *rest) = examples()
-    confined, research, registry, group = rest
+    confined, research, registry, group, collection, create, update = rest
+    CollectionDocument.model_validate(collection)
+    OperationTaskRequest.model_validate(create)
+    OperationTaskRequest.model_validate(update)
+    for request in (create, update):
+        Registry().validate_arguments(request["operation"], request["arguments"])
     OperationTaskRequest.model_validate(single)
     assert AgentGroup.model_validate(group).spec.pools[0].replicas == 2
     AgentRunRequest.model_validate(run)
