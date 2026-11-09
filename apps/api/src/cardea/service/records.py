@@ -1606,8 +1606,7 @@ DESCRIPTORS: tuple[OperationDescriptor, ...] = (
     ),
     _descriptor(
         "records.transition",
-        "Move a record along its collection's state machine "
-        "(grant action: the transition's name)",
+        "Move a record along its collection's state machine (grant action: the transition's name)",
         "effect",
         {
             "record_id": _RECORD_ID,

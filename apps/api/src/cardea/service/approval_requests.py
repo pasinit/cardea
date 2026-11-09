@@ -34,6 +34,7 @@ from cardea.kernel.models import Identifier, KernelFailure, Task, TaskState
 from cardea.kernel.store import KernelTransaction
 from cardea.service.approvals import (
     ApprovalRequirement,
+    GrantApprovalRule,
     HostApprovalRule,
     HostApprovals,
     Reason,
@@ -41,10 +42,16 @@ from cardea.service.approvals import (
 )
 from cardea.service.auth import Proof
 from cardea.service.database import Fault, borrow
-from cardea.service.models import OperationTaskRequest, Wire, now
+from cardea.service.models import RECORD_OPERATIONS, OperationTaskRequest, Wire, now
 from cardea.service.operations import Registry
 from cardea.service.policy import Policy
 from cardea.service.profiles import AGENT_RUN_WORKFLOW, APPROVAL_WORKFLOW, QUEUE, for_runtime
+from cardea.service.record_states import (
+    TRANSITION_OPERATION,
+    approval_resource,
+    approval_rule,
+    record_right,
+)
 
 if TYPE_CHECKING:
     from cardea.service.kernel import Kernel
@@ -129,7 +136,35 @@ def evaluate(
         args=arguments,
         descriptor=registry.get(name).cardea.approval,
         host=host,
+        grant=transition_rules(conn, name, namespace, arguments),
     )
+
+
+def transition_rules(
+    conn: sa.Connection, name: str, namespace: str, arguments: Mapping[str, JsonValue]
+) -> tuple[GrantApprovalRule, ...]:
+    """A transition's `approval` gate as an ADR-036 rule on `records.transition`
+    (ADR-034 decision 3.2), read from the collection's current generation."""
+    if name != TRANSITION_OPERATION:
+        return ()
+    row = conn.exec_driver_sql(
+        "SELECT spec_json FROM collections WHERE namespace=? AND name=?",
+        (namespace, str(arguments.get("collection"))),
+    ).first()
+    if row is None:
+        return ()
+    from cardea.service.records import CollectionSpec
+
+    spec = CollectionSpec.model_validate_json(row[0])
+    transition = spec.transition(str(arguments.get("transition")))
+    rule = approval_rule(str(arguments["collection"]), transition) if transition else None
+    return (rule,) if rule is not None else ()
+
+
+def resource_of(operation: str, arguments: Mapping[str, JsonValue]) -> str | None:
+    """The approval resource of a request (ADR-036 amendment, 2026-11-09): a transition is
+    approved under `record:<collection>/<transition>`; any other operation by its name."""
+    return approval_resource(arguments) if operation == TRANSITION_OPERATION else None
 
 
 def get(conn: sa.Connection, request_id: str) -> sa.RowMapping:
@@ -212,8 +247,8 @@ def propose(
         "INSERT INTO approval_requests (request_id,task_id,namespace,supervisor_id,agent_id,"
         "runtime_id,operation,operation_version,operation_id,arguments_json,argument_sha256,"
         "idempotency_context,scope_key,intent_digest,rules_json,rules_digest,"
-        "distinct_from_supervisor,created_at,expires_at,on_expiry,state,updated_at) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?)",
+        "distinct_from_supervisor,created_at,expires_at,on_expiry,state,updated_at,"
+        "approval_resource) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?,?)",
         (
             request_id,
             task.task_id,
@@ -258,6 +293,7 @@ def propose(
             expires.isoformat(),
             needed.resolved_on_expiry(agent_run=False),
             at.isoformat(),
+            resource_of(request.operation, arguments),
         ),
     )
     row = get(conn, request_id)
@@ -291,10 +327,13 @@ def _requesters(policy: Policy, task_id: str) -> set[str]:
 
 def holds_approve(policy: Policy, principal: str, row: sa.RowMapping) -> bool:
     """The live `approve` right: an enabled principal and matching principal and platform rows."""
+    # A resource-qualified request needs `approve` on that resource; the operation-level
+    # row does not satisfy it (ADR-036 amendment, 2026-11-09).
+    resource = row["approval_resource"] or row["operation"]
     try:
         policy.principal(principal)
-        policy.require(principal, row["namespace"], row["operation"], "approve")
-        policy.require("platform", row["namespace"], row["operation"], "approve")
+        policy.require(principal, row["namespace"], resource, "approve")
+        policy.require("platform", row["namespace"], resource, "approve")
     except Fault:
         return False
     return True
@@ -327,7 +366,15 @@ def readable(policy: Policy, principal: str, row: sa.RowMapping) -> bool:
 def ceiling_rights(registry: Registry, row: sa.RowMapping) -> tuple[str, ...]:
     """The rights an operation task's live ceiling must hold to run the operation."""
     descriptor = registry.get(str(row["operation"]))
-    return (str(row["operation"]), "objects.read", "objects.write", *descriptor.cardea.requires)
+    operation = str(row["operation"])
+    # A built-in record operation is authorized by its record grant, which the requesting
+    # task must hold itself (ADR-036 amendment).
+    right = (
+        record_right(operation, json.loads(row["arguments_json"]))
+        if operation in RECORD_OPERATIONS
+        else operation
+    )
+    return (right, "objects.read", "objects.write", *descriptor.cardea.requires)
 
 
 def void_reason(policy: Policy, registry: Registry, row: sa.RowMapping) -> str | None:

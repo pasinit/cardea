@@ -186,6 +186,26 @@ def approval_resource(arguments: Mapping[str, JsonValue]) -> str:
     return record_grant(str(arguments["collection"]), str(arguments["transition"]))
 
 
+# The action each built-in record operation needs a `record:<collection>/<action>` grant for.
+_ACTIONS = {
+    "records.create": "create",
+    "records.get": "read",
+    "records.query": "read",
+    "records.claimed": "read",
+    "records.update": "update",
+    "records.claim": "claim",
+    "records.release": "claim",
+}
+
+
+def record_right(operation: str, arguments: Mapping[str, JsonValue]) -> str:
+    """The resource-qualified grant one call of a built-in record operation needs."""
+    action = (
+        str(arguments["transition"]) if operation == TRANSITION_OPERATION else _ACTIONS[operation]
+    )
+    return record_grant(str(arguments["collection"]), action)
+
+
 def claiming_grants(collection: str, transitions: Iterable[Transition]) -> set[str]:
     """Grants that let a pool hold a record: standalone claims and acquiring transitions."""
     grants = {record_grant(collection, "claim")}
