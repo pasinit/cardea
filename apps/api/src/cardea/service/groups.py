@@ -468,6 +468,10 @@ def check_member(conn: sa.Connection, supervisor: str, request: TaskRequest) -> 
         raise Fault("member_binding", "A group member runs only for its group's supervisor")
     if member["state"] != "active" or not isinstance(request, AgentRunRequest):
         raise Fault("member_binding", "A group member runs only active agent runs")
+    # Revoking the supervisor's `groups.manage` stops its members at their next admission.
+    policy = Policy(conn)
+    policy.require(supervisor, request.namespace, "groups.manage")
+    policy.require("platform", request.namespace, "groups.manage")
     busy = conn.exec_driver_sql(
         "SELECT b.task_id FROM task_bindings b JOIN tasks t USING(task_id) "
         f"WHERE b.agent_id=? AND {UNFINISHED} LIMIT 1",

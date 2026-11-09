@@ -272,6 +272,8 @@ An agent group ([ADR-034](decisions/034-agent-groups-and-shared-records.md), sli
 }
 ```
 
+A pool's `grants` are its runs' complete grants, and nothing is added. An agent run needs `objects.read`, `objects.write`, `models.invoke` and a grant for every exposed or context operation.
+
 **You get:** two principals, `desk.analyst.0` and `desk.analyst.1`. They are bound to the kernel's runtime and have no external identity. Each has one trigger, `desk.analyst.<n>.t0`. Every slot runs full admission under the supervisor's live ceiling. A member runs one task at a time: a slot that arrives while its previous run is unfinished is recorded as `coalesced`. `GET /v0.2/groups/desk?namespace=team` returns the manifest with `status.members`.
 
 To restructure the group, change the manifest and apply it again. For example, set `replicas` to 3 or pick another `model`; no code change is needed. Until ADR-034 slice 8 lands, scaling down, removing a pool and deleting the group are refused with `409 group_drain_unsupported`. Until their slices land, `spend`, `expect_window` and `event` triggers are refused with 422.

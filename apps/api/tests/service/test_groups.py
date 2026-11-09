@@ -412,6 +412,17 @@ def test_ceiling_is_checked_at_every_run(kernel: Kernel, anchored: None) -> None
     ]
 
 
+def test_revoking_groups_manage_stops_members(kernel: Kernel, anchored: None) -> None:
+    put(kernel, manifest(pool(replicas=1)))
+    provision(kernel.database, document(RUN_GRANTS), REGISTRY)
+    assert tick(kernel, "2026-10-01T07:00:10") == {"desk.worker.0.t0": "failed"}
+    assert rows(kernel, "SELECT code FROM trigger_events WHERE kind='failed'") == [
+        ("authority_denied",)
+    ]
+    provision(kernel.database, document(), REGISTRY)
+    assert tick(kernel, "2026-10-01T08:00:10") == {"desk.worker.0.t0": "admitted"}
+
+
 def test_disabled_supervisor_stops_members(
     kernel: Kernel, session: FakeSession, anchored: None
 ) -> None:
