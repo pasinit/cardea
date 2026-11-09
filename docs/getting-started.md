@@ -18,7 +18,7 @@ Setup (install, identity, provisioning) is covered by the [M1 quickstart](m1-qui
 
 Every request below is JSON sent to the kernel API, over its Unix socket or its TLS listener. Each carries `Authorization: Bearer <token>` and `X-Cardea-Auth: spiffe|oidc`. From Python, use `cardea.service.client.KernelClient`. From the shell, `python -m cardea.service submit-agent-run --socket … request.json`. The examples assume a supervisor with permission for the listed grants in namespace `team`, and an agent principal `agent-1`.
 
-Every task needs `objects.read` and `objects.write`. Agent runs also need `models.invoke`, every exposed operation, and the harness grant (`harness:<id>`) when a harness registry is installed.
+Every task needs `objects.read` and `objects.write`. Agent runs also need `models.invoke`, every exposed operation (except the built-in `records.*` operations, which `record:<collection>/<action>` grants authorize; see use case 7), and the harness grant (`harness:<id>`) when a harness registry is installed.
 
 ## 1. Run one operation
 
@@ -248,3 +248,58 @@ Errors:
 - A harness that is not installed is `422 harness_not_installed`.
 - A model it does not allow is `422 model_not_allowed`.
 - A missing grant is `403 harness_not_granted`.
+
+## 7. A shared collection of records
+
+A supervisor holding `groups.manage` in the namespace defines a collection ([ADR-034](decisions/034-agent-groups-and-shared-records.md), slice 1). `PUT /v0.2/collections/work` (add `?dry_run=true` to see the plan without applying it):
+
+```json
+{
+  "apiVersion": "cardea/v1alpha1",
+  "kind": "Collection",
+  "metadata": {"name": "work", "namespace": "team"},
+  "spec": {
+    "supervisor": "supervisor-1",
+    "schema": {"type": "object", "required": ["title"],
+               "properties": {"title": {"type": "string"}, "body": {"type": "string"}}},
+    "max_record_bytes": 16384,
+    "guards": {"update": "record.created_by == caller.id"}
+  }
+}
+```
+
+Agents then use the built-in operations `records.create`, `records.get`, `records.query` and `records.update`, as tools of an agent run or as operation tasks. Each call needs the grant `record:<collection>/<action>` (`create`, `read` or `update`); the operation name itself is not a grant. `POST /v0.2/operation-tasks`:
+
+```json
+{
+  "request_id": "file-1",
+  "agent_id": "agent-1",
+  "namespace": "team",
+  "objective": "File one work item",
+  "operation": "records.create",
+  "arguments": {"collection": "work", "client_key": "triage-2026-11-09-1",
+                "data": {"title": "Flaky login test"}, "labels": ["triage"]},
+  "grants": ["objects.read", "objects.write", "record:work/create"]
+}
+```
+
+and later, from version 1 of the record:
+
+```json
+{
+  "request_id": "edit-1",
+  "agent_id": "agent-1",
+  "namespace": "team",
+  "objective": "Add detail to the item",
+  "operation": "records.update",
+  "arguments": {"collection": "work", "record_id": "rec-00000000000000000000000000000001",
+                "expected_version": 1, "data": {"title": "Flaky login test", "body": "Fails 1 in 20"}},
+  "grants": ["objects.read", "objects.write", "record:work/update"]
+}
+```
+
+**You get:**
+- `PUT` returns the document with `metadata.generation`, `status.observedGeneration` and `plan.change` (`created`, `updated` or `unchanged`).
+- `records.create` outputs `{"record": {...}}` with `record_id`, `version: 1` and `created_by: "agent-1"`. Repeating it in the same idempotency context with the same `client_key` returns the same record (`deduplicated`).
+- `records.update` with a stale `expected_version` fails with `version_conflict`. Data that does not match the schema fails with `record_invalid`, and a guard that is false or cannot be evaluated fails with `guard_refused`. A call without the record grant fails with `task_grant_denied`, or `authority_denied` once the supervisor's own grant is revoked.
+- `GET /v0.2/collections/work/records/{record_id}/events?namespace=team` lists the record's append-only history: actor, task, receipt, old and new values.

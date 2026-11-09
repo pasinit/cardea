@@ -102,6 +102,16 @@ An event trigger starts its agent-run template once per signed inbound CloudEven
 "event_triggers": {"max_event_bytes": 8192, "timestamp_tolerance_seconds": 300}
 ```
 
+## Collections and records
+
+Collections are shared, versioned records with a JSON Schema ([ADR-034](decisions/034-agent-groups-and-shared-records.md), slice 1; worked example in [getting started](getting-started.md#7-a-shared-collection-of-records)). Migration `m6_005` adds the `collections`, `records` and `record_events` tables.
+
+- **Who manages them.** A supervisor applies its own collections with `PUT /v0.2/collections/{name}`. It needs the right `groups.manage` in the namespace, with a matching `platform` row, as for every right. The host owner grants that right by provisioning; there is no host-owner collection file.
+- **Grants.** The built-in operations `records.create`, `records.get`, `records.query` and `records.update` are always installed. They are authorized by resource-qualified grants `record:<collection>/<action>` (`create`, `read`, `update`), provisioned like any other right (`"operation": "record:work/update"`, with `delegate` for supervisors). Revoking one stops the next call of every task that relies on it.
+- **Limits.** Record data is at most `max_record_bytes` (64–49152, default 16384) of canonical JSON, with at most 16 labels and 32 links. A query page holds at most 100 records and 56 KiB. Guards are CEL with ADR-036's limits: 512 characters, no comprehension macros, a fixed function list, failing closed.
+- **Recovery.** A create or update interrupted by a crash becomes `outcome_unknown`. The 30 s reconciliation loop settles it from `record_events`, which records the receipt of every change: the change happened exactly when its history row exists.
+- **History.** `record_events` is append-only (SQLite triggers refuse `UPDATE` and `DELETE`), and records are never deleted. `GET /v0.2/collections/{name}/records/{record_id}/events` pages it for the supervisor and for holders of `record:<name>/read`.
+
 ## Retention and deletion
 
 Task, object, event, provenance, budget, receipt and idempotency history is retained for the lifetime of a store. Host payload cleanup is recoverable and retains reconciliation tombstones. Partial history or tombstone garbage collection is unsupported because deleting it could destroy evidence or permit duplicate effects.
