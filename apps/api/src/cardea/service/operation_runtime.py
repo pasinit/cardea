@@ -25,7 +25,7 @@ from cardea.kernel.models import (
     VerificationRecord,
 )
 from cardea.kernel.store import KernelTransaction
-from cardea.service import invocation
+from cardea.service import invocation, mailbox
 from cardea.service.confined import WorkerFailed
 from cardea.service.database import Fault, borrow
 from cardea.service.kernel import TERMINAL, Kernel
@@ -34,6 +34,7 @@ from cardea.service.operations import (
     OperationContext,
     OperationDescriptor,
     OperationRejected,
+    Reconciliation,
 )
 from cardea.service.policy import Policy
 
@@ -338,8 +339,12 @@ class OperationRuntime:
             if receipt.state is not OperationState.OUTCOME_UNKNOWN:
                 raise Fault("not_uncertain", "Only uncertain operations can be reconciled", 409)
             name = receipt.request.name
-            reconciler = self.kernel.operations.reconciler(name)
-            if reconciler is None:
+            observed: Reconciliation | None = None
+            if name == mailbox.SEND:
+                # A built-in send commits with its receipt; its table is the destination.
+                observed = mailbox.reconcile_send(conn, receipt)
+            reconciler = None if name == mailbox.SEND else self.kernel.operations.reconciler(name)
+            if reconciler is None and name != mailbox.SEND:
                 raise Fault("reconciler_missing", "Operation declares no reconciler", 409)
             recorded = receipt.request.arguments
             arguments = recorded["arguments"]
@@ -356,7 +361,11 @@ class OperationRuntime:
                 **{k: str(v) for k, v in provenance.items() if v is not None},
             )
             timeout = float(self.kernel.operations.get(name).cardea.timeout_seconds)
-        observed = asyncio.run(asyncio.wait_for(reconciler(dict(arguments), context), timeout))
+        if reconciler is not None:
+            observed = asyncio.run(
+                asyncio.wait_for(reconciler(dict(arguments), context), timeout)
+            )
+        assert observed is not None
         with self.kernel.database.engine.begin() as conn, borrow(conn) as tx:
             receipt = tx.get_operation(task_id, operation_id)
             if receipt.state is not OperationState.OUTCOME_UNKNOWN:

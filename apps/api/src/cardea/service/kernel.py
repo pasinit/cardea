@@ -17,6 +17,7 @@ from cardea.service import host_budget
 from cardea.service.auth import IdentityProvider, Proof
 from cardea.service.confined import ConfinedAgentSession, Workers, confined_handler, job_id
 from cardea.service.database import Database, Fault, borrow
+from cardea.service.mailbox import BUILTIN
 from cardea.service.harnesses import Catalog, Harnesses, check_harness_grants
 from cardea.service.models import (
     DEFAULT_MAX_TASK_REQUEST_BYTES,
@@ -113,6 +114,9 @@ def provision(
     for rule in (*document.permissions, *document.platform):
         if rule.operation.startswith("harness:"):
             check_harness_grants(harnesses, (rule.operation,), required=False)
+        elif rule.operation.startswith("mail:"):
+            # Mail grants name addresses (ADR-034); recipients resolve when mail is sent.
+            continue
         elif rule.operation not in KERNEL_RIGHTS and rule.operation not in installed:
             raise Fault(
                 "operation_not_installed", "Policy names an operation that is not installed"
@@ -512,6 +516,10 @@ class Kernel:
         check_harness_grants(self.harnesses, request.grants)
         if isinstance(request, OperationTaskRequest):
             descriptor = self.operations.get(request.operation)
+            if request.operation in BUILTIN:
+                raise Fault(
+                    "builtin_operation", "Built-in mailbox operations run in agent runs", 422
+                )
             if not set(descriptor.cardea.requires) <= set(request.grants):
                 raise Fault("task_grant_denied", "Operation requires additional explicit grants")
             self.operations.validate_arguments(request.operation, request.arguments)

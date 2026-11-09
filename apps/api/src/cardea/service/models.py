@@ -36,10 +36,16 @@ ModelID = Annotated[
 # Right `harness.use` on one harness, written `harness:<id>` (ADR-033).
 HarnessGrant = Annotated[str, Field(strict=True, pattern=r"^harness:[a-z][a-z0-9-]{0,31}$")]
 
-# A kernel right, the name of an installed operation (ADR-023), or a harness grant.
-# Installed names are checked against the live registry at provisioning, admission and
-# dispatch; harness grants against the installed harnesses.
-Grant = Right | OperationName | HarnessGrant
+# Right to send mail to one address, written `mail:<address>` (ADR-034 decision 4.2): an
+# instance (a principal ID), a pool (`<group>.<pool>`) or a group (`<group>`).
+MailGrant = Annotated[
+    str, Field(strict=True, pattern=r"^mail:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+]
+
+# A kernel right, the name of an installed operation (ADR-023), a harness grant or a mail
+# grant. Installed names are checked against the live registry at provisioning, admission
+# and dispatch; harness grants against the installed harnesses.
+Grant = Right | OperationName | HarnessGrant | MailGrant
 
 RIGHTS: tuple[Right, ...] = (
     "objects.read",

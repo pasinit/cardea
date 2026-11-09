@@ -18,7 +18,14 @@ import mcp.types
 import rfc8785
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
-from pydantic import Field, JsonValue, TypeAdapter, ValidationError, model_validator
+from pydantic import (
+    Field,
+    JsonValue,
+    TypeAdapter,
+    ValidationError,
+    ValidationInfo,
+    model_validator,
+)
 
 from cardea.kernel.models import MAX_DOCUMENT_BYTES, OperationName, canonical_json
 from cardea.service.database import Fault, private_file
@@ -28,6 +35,10 @@ ENTRY_POINT_GROUP = "cardea.operations"
 KERNEL_RIGHTS: frozenset[str] = frozenset(get_args(Right))
 # Prefixes owned by kernel rights and fixed installed profiles.
 RESERVED_PREFIXES = ("objects.", "tasks.", "events.", "host.", "models.", "tools.", "inputs.")
+# Built-in operations the kernel itself provides (ADR-034 mailboxes); never host-installed.
+BUILTIN_PREFIXES = ("mailbox.",)
+# Entry-point names of built-in handlers; they are not loaded from installed packages.
+BUILTIN_HANDLER = "cardea.builtin."
 # Room in a receipt's 64 KiB result document for the output and its wrapper keys.
 MAX_RECORDED_OUTPUT_BYTES = MAX_DOCUMENT_BYTES - 64
 _NAME = TypeAdapter(OperationName)
@@ -133,7 +144,7 @@ class OperationDescriptor(Record):
     cardea: Binding
 
     @model_validator(mode="after")
-    def standard_tool(self) -> Self:
+    def standard_tool(self, info: ValidationInfo) -> Self:
         try:
             tool = mcp.types.Tool.model_validate(self.tool)
         except ValidationError as error:
@@ -141,6 +152,9 @@ class OperationDescriptor(Record):
         _NAME.validate_python(tool.name)
         if tool.name in KERNEL_RIGHTS or tool.name.startswith(RESERVED_PREFIXES):
             raise ValueError("Operation name is reserved for kernel rights")
+        builtin = bool(info.context and info.context.get("builtin"))
+        if tool.name.startswith(BUILTIN_PREFIXES) != builtin:
+            raise ValueError("Operation name is reserved for built-in operations")
         if tool.output_schema is None:
             raise ValueError("Installed operations require an output schema for verification")
         for schema in (tool.input_schema, tool.output_schema):
@@ -179,11 +193,16 @@ class Registry:
         descriptors: Iterable[OperationDescriptor] = (),
         handlers: Mapping[str, Handler | Reconciler] | None = None,
     ) -> None:
+        from cardea.service import mailbox
+
         self.descriptors: dict[str, OperationDescriptor] = {}
         for descriptor in descriptors:
             if descriptor.name in self.descriptors:
                 raise Fault("operation_duplicate", "Operation is installed twice", 500)
             self.descriptors[descriptor.name] = descriptor
+        for builtin in mailbox.descriptors():
+            # Always present; a copy of another registry's descriptors may carry them.
+            self.descriptors.setdefault(builtin.name, builtin)
         self.handlers: dict[str, Any] = dict(handlers or {})
         if handlers is not None:
             missing = self.entry_points() - set(self.handlers)
@@ -193,6 +212,8 @@ class Registry:
     def entry_points(self) -> set[str]:
         names = set()
         for descriptor in self.descriptors.values():
+            if descriptor.name.startswith(BUILTIN_PREFIXES):
+                continue
             if descriptor.cardea.handler:
                 names.add(descriptor.cardea.handler)
             if descriptor.cardea.reconciler:
@@ -233,6 +254,8 @@ class Registry:
             raise Fault("operation_not_installed", "Operation is not installed", 409) from None
 
     def handler(self, name: str) -> Handler:
+        if name.startswith(BUILTIN_PREFIXES) and name in self.descriptors:
+            return _builtin_handler
         try:
             return cast(Handler, self.handlers[self.get(name).cardea.handler or ""])
         except KeyError:
@@ -273,7 +296,8 @@ class Registry:
     def check_grants(self, grants: Iterable[str]) -> None:
         for grant in grants:
             # Harness grants (ADR-033) are checked against the installed harnesses.
-            if grant not in KERNEL_RIGHTS and not grant.startswith("harness:"):
+            # Mail grants (ADR-034) name addresses, resolved when mail is sent.
+            if grant not in KERNEL_RIGHTS and not grant.startswith(("harness:", "mail:")):
                 self.get(grant)
 
     def validate_arguments(self, name: str, arguments: Mapping[str, JsonValue]) -> None:
@@ -302,3 +326,10 @@ def check_context(registry: Registry, name: str) -> None:
     """A context operation (ADR-031) must be installed and declare no external effect."""
     if registry.get(name).cardea.effect != "read":
         raise Fault("context_not_read_only", "Context operations must be read-only", 422)
+
+
+async def _builtin_handler(
+    arguments: dict[str, JsonValue], context: OperationContext
+) -> dict[str, JsonValue]:
+    """Built-in operations run inside their settle transaction, never as plain handlers."""
+    raise OperationRejected("This built-in operation runs only inside an agent run")
