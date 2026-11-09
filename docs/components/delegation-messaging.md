@@ -11,3 +11,5 @@
 **Acceptance.** Native client/server calls, SQL SDK fit, concurrent allocation denial, broader/forged messages, ancestor restrictions, cancellation, lost replies, interrupted publication and false peer artifacts. Real Debian and matched load results belong in the [M4 report](../../experiments/m4/M4-REPORT.md).
 
 **Status.** Complete for the bounded profile; portable, real Debian and matched load acceptance pass. Up to four one-level installed host children, zero model calls. Arbitrary remote peers, nested coordinator plans, streaming/push, arbitrary mailbox traffic and general multi-agent execution are outside this profile. See [usage](../../experiments/m4/README.md).
+
+**Mailboxes (proposed).** [ADR-034](../decisions/034-agent-groups-and-shared-records.md) proposes durable mailboxes between principals (instance, pool or group address), committed with the sender's receipt and delivered as context. They reuse A2A's message body; A2A remains the delegation wire.

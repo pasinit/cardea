@@ -1,6 +1,6 @@
 # ADR-036: Approval Waits and Per-Operation Autonomy
 
-- **Date / owner / milestones:** 2026-11-08; kernel and runtime maintainers. Affects the operation registry (ADR-023), the invocation core and effect scopes (ADR-026), agent runs (ADR-027, ADR-031), triggers (ADR-024, ADR-029) and policy provisioning (ADR-010). Related proposals written in parallel: ADR-034 (agent teams: roles, work items, messaging) and ADR-035 (event triggers). This record does not design either.
+- **Date / owner / milestones:** 2026-11-08; kernel and runtime maintainers. Affects the operation registry (ADR-023), the invocation core and effect scopes (ADR-026), agent runs (ADR-027, ADR-031), triggers (ADR-024, ADR-029) and policy provisioning (ADR-010). Related proposals written in parallel: ADR-034 (agent groups, shared records, state machines and mailboxes) and ADR-035 (event triggers). This record does not design either.
 - **Status:** selected (design), 2026-11-08, by the lead reviewer; the project owner may veto. Slice 1 is implemented (2026-11-08): the CEL fit test ran and selected `common-expression-language` 0.10.0 (see [Fit evidence](#fit-evidence-slice-1-2026-11-08)), and the rule schema and fail-closed evaluator exist as a library with unit tests. They are not wired into the runtime: no call waits for approval yet. Slices 2–6 are pending, and nothing in this record is verified on Debian with a real approver. The open questions are settled under [Decisions settled in review](#decisions-settled-in-review-2026-11-08).
 - **Requirement:** some effects must not run until an authorised principal has approved that exact effect. Examples: an agent proposes an order, a payment, a deployment or a merge, and a principal holding approval authority approves or rejects it. A reviewer role can block a change. Small effects inside tighter limits run without approval.
   - Whether approval is needed is configuration per operation and per grant, never code in the kernel.
@@ -195,7 +195,7 @@ A deployment routes these events to people or agents with what it already has:
 
 - a client long-polling `events.wait`;
 - an ADR-035 event trigger on `approval.requested` that runs an installed operation (for example a chat or mail operation with an ADR-026 idempotency scope keyed on `request_id`, so each request notifies once);
-- an ADR-034 work item addressed to a reviewer role.
+- an ADR-034 mailbox message addressed to a reviewer agent pool.
 
 Cardea builds no notification service, channel routing or reminders. A reminder is a further trigger.
 
@@ -225,6 +225,18 @@ The lead reviewer decided these open questions on 2026-11-08. The project owner 
 6. **Deadline.** An approval wait extends the task deadline through `approval_wait_seconds`, at most 30 days.
 7. **Reason text.** Shown to the agent, bounded to 200 characters and marked untrusted.
 8. **Bounds.** A maximum expiry of 30 days and a default of 4 approval waits per run (`max_approval_waits`, at most 16).
+
+## Amendment (2026-11-09): resource-qualified approve
+
+Decided by the lead on 2026-11-09 for [ADR-034](034-agent-groups-and-shared-records.md); the owner may veto. Not implemented.
+
+- **Why.** ADR-034 routes every record state transition through one built-in operation, `records.transition`. An `approve` row on `(namespace, records.transition)` would let its holder approve every transition of every collection. Approvers must instead be scoped to one transition of one collection: approving `orders/approve` must not also approve `work/approve`.
+- **What changes.** The `approve` mode (item 2) may also be granted on a resource-qualified grant of the form `<kind>:<resource>`, written like ADR-033's `harness:<id>`. The row `(P, namespace, record:orders/approve, approve)` means "P may decide approval requests for the `approve` transition of collection `orders` in this namespace". It needs a matching `platform` row, as every right does.
+- **Which grant a request needs.** An approval request records the *approval resource* that its requiring rule names. For a rule that ADR-034 compiles from a transition's `approval`, that resource is `record:<collection>/<transition>`. For every other rule it is the operation name, exactly as today.
+  - The decision-time check (item 2) looks up the `approve` row on that resource.
+  - The ceiling check (`policy.ceiling`) also applies to that resource: the requesting task must hold the resource-qualified grant itself.
+- **What does not change.** The requester exclusion, `distinct_from_supervisor`, the frozen intent and its digest, the durable wait, expiry, idempotent decisions and execution are all unchanged. A resource-qualified `approve` row grants no other right, and it can never raise a task above its supervisor's live ceiling.
+- **Tests (to write).** A principal holding `approve` on `record:orders/approve` can decide that transition's request and is refused with `403 approver_denied` for `record:work/approve`. An operation-level `approve` row on `records.transition` does not satisfy a resource-qualified request.
 
 ## Integration
 

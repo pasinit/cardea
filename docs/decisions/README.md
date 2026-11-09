@@ -36,6 +36,7 @@ Each record states the requirement, the open-source candidates considered, fit e
 | [031](031-agent-run-context-operations.md) | Agent-Run Context Operations |
 | [032](032-remove-incident-agent-tasks.md) | Remove the Incident Agent-Task Path |
 | [033](033-pluggable-agent-harnesses.md) | Pluggable Agent Harnesses |
+| [034](034-agent-groups-and-shared-records.md) | Agent Groups, Shared Records, State Machines and Mailboxes (selected; not implemented) |
 | [035](035-event-triggers.md) | Event Triggers |
 | [036](036-approval-waits.md) | Approval Waits and Per-Operation Autonomy (selected; slice 1 implemented: CEL fit test, rule evaluator) |
 

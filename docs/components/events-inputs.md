@@ -11,3 +11,5 @@
 **Acceptance.** Events arriving before registration, around a crash, and during downtime all lead to the appropriate durable wakeup.
 
 **Status.** Journal, wait registration, and explicit event/timer wakeups exist in [store.py](../../apps/api/src/cardea/kernel/store.py). M1 now commits authenticated resume/cancel events together with native DBOS messages and uses native durable timers for deadlines. Early signals, retries, restart and paginated reads are tested. M3 implements one additive input delivery and directory rescan under ADR-016. Portable early/late input tests and real Debian restart-with-new-file acceptance pass. These are authenticated task commands, not exchanged event envelopes; CloudEvents mapping is deferred until an external event producer needs it.
+
+**Kernel events as trigger sources (proposed).** [ADR-034](../decisions/034-agent-groups-and-shared-records.md) proposes record-transition and mailbox events in the kernel journal as an internal ADR-035 trigger source.
