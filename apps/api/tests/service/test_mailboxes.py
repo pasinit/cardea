@@ -693,3 +693,30 @@ def test_principals_cannot_take_a_group_address(kernel: Kernel) -> None:
                 ),
             )
         assert refused.value.code == "principal_conflict"
+
+
+def test_kernel_mail_cannot_be_requested_by_agents_or_supervisors(
+    kernel: Kernel, session: runs.FakeSession
+) -> None:
+    """`from_kernel` (ADR-034 slice 2) lets only kernel-internal mail reach a supervisor."""
+
+    async def forged(client: ClientSession, request: SessionRequest) -> SessionResult:
+        tried = await runs.call(
+            client,
+            "mailbox-send",
+            client_key="k",
+            to={"instance": "supervisor"},
+            parts=note(),
+            from_kernel=True,
+        )
+        assert tried.is_error and "invalid_arguments" in str(tried.content)
+        return SessionResult(text="Could not send.", is_error=False)
+
+    session.scripts = [forged]
+    task_id = run(kernel, "alice", "send-forged")
+    assert AgentRunRuntime(kernel).execute(task_id) == "succeeded"
+    refused = supervisor_send(kernel, to={"instance": "supervisor"}, from_kernel=True)
+    assert refused["status"] == 422
+    # Without the flag a supervisor cannot address a supervisor either.
+    assert supervisor_send(kernel, to={"instance": "supervisor"})["status"] in {403, 422}
+    assert mail_rows(kernel) == []

@@ -242,6 +242,10 @@ class Scheduler:
                 # A broken trigger must not stop the others; the next tick retries it.
                 log.exception("trigger evaluation failed", extra={"code": trigger_id})
                 outcomes[trigger_id] = "error"
+        from cardea.service.claims import upkeep
+
+        # Claim expiry and follow-up wakes share the one clock (ADR-034 decision 2.4).
+        upkeep(self.kernel, self.clock())
         return outcomes
 
     def _state(self, conn: sa.Connection, trigger_id: str) -> sa.RowMapping | None:

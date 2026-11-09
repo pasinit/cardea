@@ -1323,6 +1323,45 @@
         "title": "ChildrenView",
         "type": "object"
       },
+      "ClaimsConfig": {
+        "additionalProperties": false,
+        "description": "Claims on a collection's records (ADR-034 decision 2.4).\n\nA claim belongs to a principal, not a run. Without a state machine (slice 3) claims are\ntaken and dropped with `records.claim` and `records.release`, which need `standalone`.",
+        "properties": {
+          "fence_writes": {
+            "default": true,
+            "title": "Fence Writes",
+            "type": "boolean"
+          },
+          "lease_seconds": {
+            "default": 14400,
+            "maximum": 2592000.0,
+            "minimum": 300.0,
+            "title": "Lease Seconds",
+            "type": "integer"
+          },
+          "max_followups": {
+            "default": 6,
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Max Followups",
+            "type": "integer"
+          },
+          "max_per_holder": {
+            "default": 1,
+            "maximum": 64.0,
+            "minimum": 1.0,
+            "title": "Max Per Holder",
+            "type": "integer"
+          },
+          "standalone": {
+            "default": false,
+            "title": "Standalone",
+            "type": "boolean"
+          }
+        },
+        "title": "ClaimsConfig",
+        "type": "object"
+      },
       "CollectionApplied": {
         "additionalProperties": false,
         "description": "`PUT /v0.2/collections/{name}`: the document and what the request changed, or\nwould change with `?dry_run=true`.",
@@ -1367,7 +1406,7 @@
       },
       "CollectionDocument": {
         "additionalProperties": false,
-        "description": "`kind: Collection` (ADR-034 decision 2). Claims and states are later slices.",
+        "description": "`kind: Collection` (ADR-034 decision 2). State machines are slice 3.",
         "properties": {
           "apiVersion": {
             "const": "cardea/v1alpha1",
@@ -1473,6 +1512,16 @@
       "CollectionSpec": {
         "additionalProperties": false,
         "properties": {
+          "claims": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimsConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "guards": {
             "$ref": "#/components/schemas/Guards",
             "default": {}
@@ -3039,6 +3088,17 @@
         "additionalProperties": false,
         "description": "Optional CEL write guards over ``record``, ``args`` and ``caller``; they only narrow.",
         "properties": {
+          "claim": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claim"
+          },
           "create": {
             "anyOf": [
               {
@@ -3049,6 +3109,17 @@
               }
             ],
             "title": "Create"
+          },
+          "release": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Release"
           },
           "update": {
             "anyOf": [

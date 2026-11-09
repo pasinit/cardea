@@ -55,7 +55,15 @@ RECORD_GRANT_PREFIX = "record:"
 # qualified grant for the collection and action each call names, checked under the live
 # ceiling at every call; the operation name itself is not a grant.
 RECORD_OPERATIONS: frozenset[str] = frozenset(
-    {"records.create", "records.get", "records.query", "records.update"}
+    {
+        "records.create",
+        "records.get",
+        "records.query",
+        "records.update",
+        "records.claim",
+        "records.release",
+        "records.claimed",
+    }
 )
 
 
