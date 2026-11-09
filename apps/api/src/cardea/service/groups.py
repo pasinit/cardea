@@ -31,6 +31,7 @@ import rfc8785
 import sqlalchemy as sa
 from pydantic import JsonValue, ValidationError
 
+from cardea.service import mailbox
 from cardea.service.auth import Proof
 from cardea.service.database import Fault, borrow
 from cardea.service.models import (
@@ -227,6 +228,8 @@ def _apply(
         raise Fault("group_supervisor", "Supervisors manage only their own groups", 403)
     policy = _authorize(conn, principal, namespace)
     _unsupported(spec)
+    # `mail:<address>` grants must name exactly one thing (ADR-034 slice 5 review).
+    mailbox.check_group_addresses(conn, namespace, name, [p.name for p in spec.pools])
     # Each collection the group uses must exist here under the same supervisor (2.1), with
     # a claim lease long enough for every pool that may claim its records (2.4).
     for collection in spec.collections:

@@ -88,13 +88,15 @@ Names are logical operations; transport and path spelling are not a promise that
 
 The proposed generic `tasks.spawn` and `messages.send/receive` names are not implemented endpoints. M4 exposes `POST /v0.2/delegation-tasks`, native A2A messages/tasks at the agent boundary, and authenticated `/tasks/{id}/children` inspection. Existing DBOS wakeups, immutable message/slot associations and conditional object publication supply the bounded profile without a new mailbox API.
 
+Mailboxes (ADR-034 slice 5, implemented for portable execution) are store-and-forward mail between principals that may not be running, not a replacement for A2A delegation. An agent run sends with the built-in `mailbox.send` operation (grant `mail:<address>` checked against the live ceiling; ADR-026 scope on `/client_key`); the message commits in the transaction that settles its receipt. A supervisor sends with `POST /v0.2/mailbox` and reads with `GET /v0.2/mailbox` and `GET /v0.2/mailbox/{message_id}`. Recipients receive mail as the `mailbox.inbox` context block: deliveries are leased in the attempt-checkpoint transaction, consumed when the run succeeds, released when it fails or is cancelled, and dead-lettered after `max_deliveries` with a notice to the sender and the supervisor. Addresses are an instance, a pool of an agent group (any one active member) or a group (every active member).
+
 The 2026-09-22 [standards-first decision](standards-first.md) revises the earlier M0 session proposal. [ADR-001](decisions/001-m0-contracts.md) selects HTTP/OpenAPI over a private Unix-domain socket with SPIFFE/OIDC authentication adapters; provider/session integration must pass M1 acceptance before exposure. Socket permissions alone cannot distinguish agents sharing an account. Trusted execution bindings must connect authenticated runtime identity to the admitted task. Supervisor and agent clients share authorization handlers; remote network exposure is outside the first MVP. See [runtime decisions](runtime-decisions.md).
 
 ## Task Lifecycle
 
 - `queued`: accepted and durably recorded; waiting for admission.
 - `running`: admitted under a bounded dispatch lease; may execute model/tool steps.
-- `waiting`: checkpointed with an event cursor, timer, dependency, or authority request. [ADR-036](decisions/036-approval-waits.md) selects approval waits: an exact, argument-bound effect waits for an authorised approver, as an extra condition inside the live ceiling. Implemented for single-operation tasks only (slice 2, portable tests); agent runs, expiry and withdrawal are pending, and nothing is verified on Debian with a real approver.
+- `waiting`: checkpointed with an event cursor, timer, dependency, or authority request. [ADR-036](decisions/036-approval-waits.md) selects approval waits: an exact, argument-bound effect waits for an authorised approver, as an extra condition inside the live ceiling. Implemented for single-operation tasks only, including expiry on the minute schedule and withdrawal on cancel (slices 2 and 3, portable tests); agent runs are pending, and nothing is verified on Debian with a real approver.
 - `suspended`: explicit supervisor pause at a durable boundary; not native memory suspension.
 - `succeeded`: independent result checks passed and outputs are committed.
 - `failed`: terminal error with a structured reason and evidence.

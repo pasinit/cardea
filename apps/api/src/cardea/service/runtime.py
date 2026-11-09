@@ -26,6 +26,7 @@ from cardea.kernel.models import (
     VerificationRecord,
 )
 from cardea.kernel.store import KernelTransaction
+from cardea.service import approval_requests
 from cardea.service.agent_run_runtime import AgentRunRuntime
 from cardea.service.database import Fault, borrow
 from cardea.service.delegation_runtime import DelegationRuntime
@@ -148,11 +149,19 @@ class Runtime:
         def trigger_tick() -> dict[str, str]:
             return Scheduler(kernel).tick()
 
+        @DBOS.step(name="cardea.m6.approvals.expire", retries_allowed=False)
+        def approval_expiry() -> dict[str, str]:
+            return approval_requests.expire_due(kernel)
+
         # DBOS owns the clock (ADR-024): one schedule, no second scheduler or queue.
         # Slot identity, misfire and timezone semantics live in `triggers`/`schedule`.
+        # The same tick expires overdue approval requests (ADR-036), at most a minute late.
         @DBOS.workflow(name=TRIGGER_WORKFLOW)
         def tick_triggers(scheduled_at: datetime, context: Any) -> None:
-            trigger_tick()
+            try:
+                trigger_tick()
+            finally:
+                approval_expiry()
 
         self.tick_triggers = tick_triggers
 

@@ -392,6 +392,16 @@ def test_an_idle_holder_keeps_its_claim_until_follow_ups_run_out(
     assert stored["holder"] is None and stored["claim_epoch"] == 2
     lapsed = journal(kernel, "record.claim_expired")[-1]
     assert lapsed["reason"] == "followups_exhausted" and lapsed["holder"] == MEMBER
+    # The supervisor is told by mail, committed with the expiry.
+    with kernel.database.read() as conn:
+        mail = conn.exec_driver_sql(
+            "SELECT sender_id,to_kind,to_address,record_json,parts_json FROM mailbox_messages"
+        ).all()
+    assert len(mail) == 1
+    sender, kind, address, record, parts = mail[0]
+    assert (sender, kind, address) == ("runtime", "instance", "supervisor")
+    assert json.loads(record) == {"collection": "items", "record_id": record_id}
+    assert json.loads(parts)[1]["data"]["reason"] == "followups_exhausted"
 
 
 def test_a_failing_holder_loses_its_claim_within_lease_and_a_tick(
