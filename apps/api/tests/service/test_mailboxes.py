@@ -19,9 +19,11 @@ from cardea.service.agent_run_runtime import AgentRunRuntime
 from cardea.service.app import create_app
 from cardea.service.auth import Authentication
 from cardea.service.database import Database, Fault, borrow
+from cardea.service.groups import apply
 from cardea.service.kernel import Kernel, provision
 from cardea.service.models import (
     RIGHTS,
+    AgentGroup,
     AgentRunRequest,
     Permission,
     Principal,
@@ -31,7 +33,16 @@ from cardea.service.models import (
 from cardea.service.operation_runtime import OperationRuntime
 from cardea.service.operations import OperationDescriptor, Registry
 
-GRANTS = (*RIGHTS, "models.invoke", "mailbox.send", "mailbox.inbox", "mail:bob", "mail:alice")
+GRANTS = (
+    *RIGHTS,
+    "models.invoke",
+    "mailbox.send",
+    "mailbox.inbox",
+    "mail:bob",
+    "mail:alice",
+    "mail:team.dev",
+    "mail:team",
+)
 
 
 @pytest.fixture
@@ -68,7 +79,7 @@ def kernel(
             delegate=True,
             expires_at=now() + timedelta(hours=1),
         )
-        for right in GRANTS
+        for right in (*GRANTS, "groups.manage")
     )
     provision(
         db,
@@ -432,7 +443,7 @@ def test_supervisor_sends_need_a_mail_grant_and_a_valid_body(kernel: Kernel) -> 
     assert mail_rows(kernel) == []
 
 
-def test_pool_and_group_addresses_wait_for_agent_groups(kernel: Kernel) -> None:
+def test_pool_and_group_addresses_need_active_members(kernel: Kernel) -> None:
     with kernel.database.engine.begin() as conn, borrow(conn) as tx:
         for to in (mailbox.Address(pool="g1.dev"), mailbox.Address(group="g1")):
             with pytest.raises(Fault) as refused:
@@ -447,7 +458,7 @@ def test_pool_and_group_addresses_wait_for_agent_groups(kernel: Kernel) -> None:
                     runtime_id="runtime",
                     at=now(),
                 )
-            assert refused.value.code == "address_unsupported"
+            assert refused.value.code == "unknown_recipient"
     with pytest.raises(ValueError):
         mailbox.Address(instance="bob", pool="g1.dev")
 
@@ -537,3 +548,102 @@ def test_mailbox_operations_are_built_in_and_reserved(kernel: Kernel) -> None:
     with pytest.raises(Fault) as refused:
         kernel.submit(kernel.auth.validate("supervisor"), request)
     assert refused.value.code == "builtin_operation"
+
+
+# Pool and group addresses (ADR-034 slice 4 groups)
+
+
+def team(kernel: Kernel) -> None:
+    apply(
+        kernel,
+        kernel.auth.validate("supervisor"),
+        "team",
+        AgentGroup.model_validate(
+            {
+                "apiVersion": "cardea/v1alpha1",
+                "kind": "AgentGroup",
+                "metadata": {"name": "team", "namespace": "test"},
+                "spec": {
+                    "supervisor": "supervisor",
+                    "pools": [
+                        {
+                            "name": "dev",
+                            "replicas": 2,
+                            "grants": list(GRANTS),
+                            "run": {
+                                "instructions": "Handle your mail.",
+                                "operations": ["mailbox.send"],
+                                "context": INBOX,
+                                "bounds": {"timeout_seconds": 60, "attempts": 1},
+                            },
+                            "triggers": [
+                                {
+                                    "schedule": {
+                                        "cron": "0 9 * * *",
+                                        "timezone": "UTC",
+                                        "misfire": "skip",
+                                    }
+                                }
+                            ],
+                        }
+                    ],
+                },
+            }
+        ),
+        False,
+    )
+
+
+def test_pool_mail_is_consumed_by_exactly_one_member(
+    kernel: Kernel, session: runs.FakeSession
+) -> None:
+    team(kernel)
+    assert supervisor_send(kernel, to={"pool": "team.dev"})["recipients"] == 1
+    (sent,) = journal(kernel, "sent")
+    assert sent["subject"] == "team.dev"
+    session.scripts = [succeeds, succeeds]
+    first = run(kernel, "team.dev.1", "pool-1", context=INBOX)
+    assert AgentRunRuntime(kernel).execute(first) == "succeeded"
+    assert len(inbox_block(session.requests[0])["messages"]) == 1
+    second = run(kernel, "team.dev.0", "pool-0", context=INBOX)
+    assert AgentRunRuntime(kernel).execute(second) == "succeeded"
+    assert inbox_block(session.requests[1])["messages"] == []
+    (row,) = mail_rows(kernel)
+    assert (row["recipient_id"], row["state"], row["task_id"]) == ("team.dev.1", "consumed", first)
+
+
+def test_group_mail_is_delivered_to_every_member(kernel: Kernel, session: runs.FakeSession) -> None:
+    team(kernel)
+    assert supervisor_send(kernel, to={"group": "team"})["recipients"] == 2
+    session.scripts = [succeeds, succeeds]
+    for n in (0, 1):
+        task_id = run(kernel, f"team.dev.{n}", f"group-{n}", context=INBOX)
+        assert AgentRunRuntime(kernel).execute(task_id) == "succeeded"
+        assert len(inbox_block(session.requests[n])["messages"]) == 1
+    assert [(r["recipient_id"], r["state"]) for r in mail_rows(kernel)] == [
+        ("team.dev.0", "consumed"),
+        ("team.dev.1", "consumed"),
+    ]
+
+
+def test_a_pool_grant_does_not_cover_its_instances(
+    kernel: Kernel, session: runs.FakeSession
+) -> None:
+    team(kernel)
+
+    async def tries(client: ClientSession, request: SessionRequest) -> SessionResult:
+        member = await runs.call(
+            client, "mailbox-send", client_key="a", to={"instance": "team.dev.0"}, parts=note()
+        )
+        assert member.is_error and "task_grant_denied" in str(member.content)
+        pool = await runs.call(
+            client, "mailbox-send", client_key="b", to={"pool": "team.dev"}, parts=note()
+        )
+        assert not pool.is_error, pool.content
+        return SessionResult(text="Sent to the pool.", is_error=False)
+
+    session.scripts = [tries]
+    task_id = run(kernel, "alice", "pool-grant")
+    assert AgentRunRuntime(kernel).execute(task_id) == "succeeded"
+    (row,) = mail_rows(kernel)
+    assert row["recipient_id"] is None and row["state"] == "pending"

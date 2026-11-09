@@ -260,9 +260,38 @@ def recipients(
         if not notice and (row["kind"] != "agent" or row["runtime_id"] != runtime_id):
             raise Fault("unknown_recipient", "Mail goes to agents of this kernel", 422)
         return [(to.instance, None)]
-    raise Fault(
-        "address_unsupported", "Pool and group addresses need agent groups (ADR-034 slice 4)", 422
-    )
+    if to.pool is not None:
+        # Any one active member: the row is bound to the first member that leases it.
+        found = conn.exec_driver_sql(
+            "SELECT 1 FROM group_members WHERE namespace=? AND group_name || '.' || pool = ? "
+            "AND state='active' LIMIT 1",
+            (namespace, to.pool),
+        ).first()
+        if found is None:
+            raise Fault("unknown_recipient", "The pool has no active members here", 422)
+        return [(None, to.pool)]
+    # Every active member of the group, each with its own delivery.
+    members = conn.exec_driver_sql(
+        "SELECT principal_id FROM group_members WHERE namespace=? AND group_name=? "
+        "AND state='active' ORDER BY pool, ordinal",
+        (namespace, to.group),
+    ).fetchall()
+    if not members:
+        raise Fault("unknown_recipient", "The group has no active members here", 422)
+    return [(str(m[0]), None) for m in members]
+
+
+def member_pool(conn: sa.Connection, namespace: str, principal: str) -> str | None:
+    """The pool address `<group>.<pool>` of an active group member, else None.
+
+    A draining or removed member gets no pool-addressed mail (ADR-034 decision 1.5).
+    """
+    row = conn.exec_driver_sql(
+        "SELECT group_name || '.' || pool FROM group_members WHERE principal_id=? "
+        "AND namespace=? AND state='active'",
+        (principal, namespace),
+    ).first()
+    return str(row[0]) if row else None
 
 
 def _digest(**fields: JsonValue) -> str:
@@ -577,9 +606,9 @@ def lease(
         conn.exec_driver_sql(
             "SELECT d.delivery_id,d.deliveries,d.recipient_id,d.pool,m.* "
             "FROM mailbox_deliveries d JOIN mailbox_messages m USING(message_id) "
-            "WHERE d.namespace=? AND d.recipient_id=? AND d.state='pending' "
-            "ORDER BY d.delivery_id",
-            (namespace, recipient),
+            "WHERE d.namespace=? AND d.state='pending' AND (d.recipient_id=? "
+            "OR (d.recipient_id IS NULL AND d.pool=?)) ORDER BY d.delivery_id",
+            (namespace, recipient, member_pool(conn, namespace, recipient)),
         )
         .mappings()
         .all()
@@ -591,9 +620,9 @@ def lease(
             # Mail is delivered in order: a later, smaller message does not overtake.
             break
         conn.exec_driver_sql(
-            "UPDATE mailbox_deliveries SET state='leased',task_id=?,attempt=?,"
+            "UPDATE mailbox_deliveries SET state='leased',task_id=?,attempt=?,recipient_id=?,"
             "deliveries=deliveries+1,updated_at=? WHERE delivery_id=? AND state='pending'",
-            (task_id, attempt, at.isoformat(), row["delivery_id"]),
+            (task_id, attempt, recipient, at.isoformat(), row["delivery_id"]),
         )
         _history(conn, row["delivery_id"], "leased", at, task_id, attempt)
         used += size
