@@ -322,7 +322,13 @@ def apply_collection(
         change, generation = "unchanged", int(existing["generation"])
     else:
         change, generation = "updated", int(existing["generation"]) + 1
-    plan = {"change": change, "generation": generation, "dry_run": dry_run}
+    moves = plan_moves(conn, namespace, name, document.spec)
+    plan: dict[str, Any] = {
+        "change": change,
+        "generation": generation,
+        "dry_run": dry_run,
+        "migrated": [{"from": old, "to": new, "records": n} for old, new, n in moves],
+    }
     if dry_run or change == "unchanged":
         view = (
             _document_view(existing, _count(conn, namespace, name))
@@ -351,9 +357,157 @@ def apply_collection(
             "WHERE namespace=? AND name=?",
             (generation, json.dumps(spec), digest, at, namespace, name),
         )
+    apply_moves(conn, namespace, name, moves, principal, generation)
     row = _row(conn, namespace, name)
     assert row is not None
     return {**_document_view(row, _count(conn, namespace, name)), "plan": plan}
+
+
+Move = tuple[str | None, str, int]
+
+
+def plan_moves(
+    conn: sa.Connection, namespace: str, name: str, spec: "CollectionSpec"
+) -> list[Move]:
+    """Records this generation moves to another state (decision 3.3).
+
+    A state that records still occupy may be removed only with a `migrate` entry. Records
+    without a state join the `initial` state when a collection gains a state machine.
+    """
+    states = set(spec.states or ())
+    migrate = {m.from_: m.to for m in spec.migrate}
+    moves: list[Move] = []
+    for state, count in conn.exec_driver_sql(
+        "SELECT state, COUNT(*) FROM records WHERE namespace=? AND collection=? "
+        "GROUP BY state ORDER BY state",
+        (namespace, name),
+    ):
+        if state is None:
+            if spec.initial is not None:
+                moves.append((None, spec.initial, int(count)))
+            continue
+        if state in states:
+            continue
+        if state not in migrate:
+            raise Fault(
+                "state_occupied",
+                f"{count} record(s) are in state {state}; remove it with migrate "
+                f"{{from: {state}, to: <state>}}",
+                409,
+            )
+        moves.append((str(state), migrate[state], int(count)))
+    return moves
+
+
+def apply_moves(
+    conn: sa.Connection,
+    namespace: str,
+    name: str,
+    moves: list[Move],
+    actor: str,
+    generation: int,
+) -> None:
+    """Move records as recorded `migrated` changes; their history is kept."""
+    at = now()
+    for source, target, _ in moves:
+        rows = (
+            conn.exec_driver_sql(
+                "SELECT * FROM records WHERE namespace=? AND collection=? AND state IS ?",
+                (namespace, name, source),
+            )
+            .mappings()
+            .all()
+        )
+        for row in rows:
+            old = record_view(row)
+            new = {
+                **old,
+                "state": target,
+                "version": int(row["version"]) + 1,
+                "updated_at": at.isoformat(),
+            }
+            conn.exec_driver_sql(
+                "UPDATE records SET state=?,version=?,updated_at=? WHERE seq=?",
+                (target, new["version"], new["updated_at"], row["seq"]),
+            )
+            detail: dict[str, JsonValue] = {"from": source, "to": target, "generation": generation}
+            append_history(conn, namespace, "migrated", actor, None, None, old, new, detail)
+            journal(conn, namespace, "migrated", new, actor, None, at, detail)
+
+
+def append_history(
+    conn: sa.Connection,
+    namespace: str,
+    kind: str,
+    actor: str,
+    task_id: str | None,
+    receipt_id: str | None,
+    old: Mapping[str, JsonValue] | None,
+    new: Mapping[str, JsonValue],
+    detail: Mapping[str, JsonValue] | None = None,
+) -> None:
+    """One append-only history row for a change of one record."""
+    conn.exec_driver_sql(
+        "INSERT INTO record_events(namespace,collection,record_id,version,kind,actor,"
+        "task_id,receipt_id,old_json,new_json,at,detail_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            namespace,
+            new["collection"],
+            new["record_id"],
+            new["version"],
+            kind,
+            actor,
+            task_id,
+            receipt_id,
+            json.dumps(old) if old is not None else None,
+            json.dumps(new),
+            new["updated_at"],
+            json.dumps(detail) if detail is not None else None,
+        ),
+    )
+
+
+def journal(
+    conn: sa.Connection,
+    namespace: str,
+    kind: str,
+    record: Mapping[str, JsonValue],
+    producer: str,
+    task_id: str | None,
+    at: datetime,
+    data: Mapping[str, JsonValue],
+) -> None:
+    """A kernel journal event in CloudEvents 1.0 shape, in the change's transaction.
+
+    `type` is `cardea.record.<kind>` and `subject` `<collection>/<record_id>` (decision 6), so
+    slice 7 can match transitions, claims and expiry like any ADR-035 event.
+    """
+    with borrow(conn) as tx:
+        tx.append_event(
+            namespace=namespace,
+            event_type=f"cardea.record.{kind}",
+            producer_id=producer,
+            correlation_id=f"{record['record_id']}.{record['version']}",
+            task_id=task_id,
+            at=at,
+            payload={
+                "specversion": "1.0",
+                "id": f"{record['record_id']}.{record['version']}.{kind}",
+                "source": f"cardea://{namespace}",
+                "type": f"cardea.record.{kind}",
+                "subject": f"{record['collection']}/{record['record_id']}",
+                "time": at.isoformat(),
+                "data": {
+                    "collection": record["collection"],
+                    "record_id": record["record_id"],
+                    "version": record["version"],
+                    "state": record["state"],
+                    "holder": record["holder"],
+                    "claim_epoch": record["claim_epoch"],
+                    **data,
+                },
+            },
+        )
 
 
 def read_access(conn: sa.Connection, principal: str, namespace: str, name: str) -> sa.RowMapping:
@@ -620,15 +774,26 @@ def check_write(
         raise OperationRejected("Another principal holds this record", "record_claimed")
 
 
-def write_claim(conn: sa.Connection, row: sa.RowMapping, new: Mapping[str, JsonValue]) -> None:
-    """Store a claim change; any holder event restarts the follow-up count."""
+def write_claim(
+    conn: sa.Connection,
+    row: sa.RowMapping,
+    new: Mapping[str, JsonValue],
+    claim_transition: str | None = None,
+) -> None:
+    """Store a claim or state change; any holder event restarts the follow-up count.
+
+    `claim_transition` names the transition that acquired the claim (its
+    `on_claim_expiry` applies later); a claim taken by `records.claim` has none.
+    """
     changed = conn.exec_driver_sql(
-        "UPDATE records SET holder=?,claim_epoch=?,lease_expires_at=?,followups=0,version=?,"
-        "updated_at=? WHERE seq=? AND version=?",
+        "UPDATE records SET state=?,holder=?,claim_epoch=?,lease_expires_at=?,followups=0,"
+        "claim_transition=?,version=?,updated_at=? WHERE seq=? AND version=?",
         (
+            new["state"],
             new["holder"],
             new["claim_epoch"],
             new["lease_expires_at"],
+            claim_transition if new["holder"] is not None else None,
             new["version"],
             new["updated_at"],
             row["seq"],
@@ -652,52 +817,43 @@ def renew(conn: sa.Connection, row: sa.RowMapping, until: datetime) -> dict[str,
 
 
 def expire(
-    conn: sa.Connection, row: sa.RowMapping, at: datetime, *, actor: str, reason: str
+    conn: sa.Connection,
+    row: sa.RowMapping,
+    at: datetime,
+    *,
+    actor: str,
+    reason: str,
+    spec: "CollectionSpec | None" = None,
 ) -> None:
-    """Return a lapsed claim to the pool: holder cleared, epoch incremented, history and a
-    kernel journal event appended, all in the caller's transaction."""
+    """Return a lapsed claim to the pool: holder cleared, epoch incremented, and the state
+    set to the acquiring transition's `on_claim_expiry`, with history and a journal event,
+    all in the caller's transaction."""
     old = record_view(row)
+    acquired = (
+        spec.transition(row["claim_transition"]) if spec and row["claim_transition"] else None
+    )
+    state = acquired.on_claim_expiry if acquired and acquired.on_claim_expiry else old["state"]
     new: dict[str, JsonValue] = {
         **old,
+        "state": state,
         "holder": None,
         "lease_expires_at": None,
         "claim_epoch": int(row["claim_epoch"]) + 1,
-        # TODO(ADR-034 slice 3): set `state` to the acquiring transition's on_claim_expiry.
         "version": int(row["version"]) + 1,
         "updated_at": at.isoformat(),
     }
     write_claim(conn, row, new)
-    conn.exec_driver_sql(
-        "INSERT INTO record_events(namespace,collection,record_id,version,kind,actor,"
-        "task_id,receipt_id,old_json,new_json,at) "
-        "VALUES (?,?,?,?,'claim_expired',?,NULL,NULL,?,?,?)",
-        (
-            row["namespace"],
-            row["collection"],
-            row["record_id"],
-            new["version"],
-            actor,
-            json.dumps(old),
-            json.dumps(new),
-            new["updated_at"],
-        ),
-    )
-    with borrow(conn) as tx:
-        tx.append_event(
-            namespace=str(row["namespace"]),
-            event_type="record.claim_expired",
-            producer_id=actor,
-            correlation_id=claim_context(str(row["record_id"]), int(row["claim_epoch"])),
-            at=at,
-            payload={
-                "collection": row["collection"],
-                "record_id": row["record_id"],
-                "holder": row["holder"],
-                "claim_epoch": row["claim_epoch"],
-                "followups": row["followups"],
-                "reason": reason,
-            },
-        )
+    detail: dict[str, JsonValue] = {
+        "reason": reason,
+        "previous_holder": row["holder"],
+        "previous_epoch": row["claim_epoch"],
+        "followups": row["followups"],
+        "from": old["state"],
+        "to": state,
+    }
+    namespace = str(row["namespace"])
+    append_history(conn, namespace, "claim_expired", actor, None, None, old, new, detail)
+    journal(conn, namespace, "claim_expired", new, actor, None, at, detail)
 
 
 class Records:
@@ -761,23 +917,18 @@ class Records:
         kind: str,
         old: Mapping[str, JsonValue] | None,
         new: Mapping[str, JsonValue],
+        detail: Mapping[str, JsonValue] | None = None,
     ) -> None:
-        conn.exec_driver_sql(
-            "INSERT INTO record_events(namespace,collection,record_id,version,kind,actor,"
-            "task_id,receipt_id,old_json,new_json,at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-            (
-                context.namespace,
-                new["collection"],
-                new["record_id"],
-                new["version"],
-                kind,
-                caller,
-                context.task_id,
-                context.receipt_id,
-                json.dumps(old) if old is not None else None,
-                json.dumps(new),
-                new["updated_at"],
-            ),
+        append_history(
+            conn,
+            context.namespace,
+            kind,
+            caller,
+            context.task_id,
+            context.receipt_id,
+            old,
+            new,
+            detail,
         )
 
     # Operations
@@ -795,8 +946,8 @@ class Records:
                 "data": _data(spec, arguments["data"]),
                 "labels": _labels(arguments.get("labels", [])),
                 "links": _links(arguments.get("links", [])),
-                # Collections with a state machine (slice 3) set the initial state here.
-                "state": None,
+                # A record starts in its collection's initial state (decision 3).
+                "state": spec.initial,
                 "holder": None,
                 "claim_epoch": 0,
                 "lease_expires_at": None,
@@ -809,8 +960,8 @@ class Records:
             self._fence(conn, context)
             conn.exec_driver_sql(
                 "INSERT INTO records(namespace,collection,record_id,data_json,labels_json,"
-                "links_json,version,created_by,created_at,updated_at) "
-                "VALUES (?,?,?,?,?,?,1,?,?,?)",
+                "links_json,state,version,created_by,created_at,updated_at) "
+                "VALUES (?,?,?,?,?,?,?,1,?,?,?)",
                 (
                     context.namespace,
                     collection,
@@ -818,6 +969,7 @@ class Records:
                     json.dumps(record["data"]),
                     json.dumps(record["labels"]),
                     json.dumps(record["links"]),
+                    record["state"],
                     caller["id"],
                     at,
                     at,
@@ -957,7 +1109,7 @@ class Records:
             self._fence(conn, context)
             if row["holder"] is not None and expired(row, at):
                 # A lapsed claim the sweep has not reached yet is released first.
-                expire(conn, row, at, actor=holder, reason="lease_expired")
+                expire(conn, row, at, actor=holder, reason="lease_expired", spec=spec)
                 row = _record_row(conn, context.namespace, collection, record_id)
                 assert row is not None
             if row["holder"] == holder:
@@ -989,6 +1141,7 @@ class Records:
             }
             write_claim(conn, row, new)
             self._event(conn, context, holder, "claimed", old, new)
+            journal(conn, context.namespace, "claimed", new, holder, context.task_id, at, {})
         return {"record": new, "claim": claim_view(new)}
 
     async def release(
@@ -1016,6 +1169,16 @@ class Records:
             self._fence(conn, context)
             write_claim(conn, row, new)
             self._event(conn, context, str(caller["id"]), "released", old, new)
+            journal(
+                conn,
+                context.namespace,
+                "released",
+                new,
+                str(caller["id"]),
+                context.task_id,
+                now(),
+                {"previous_holder": caller["id"], "previous_epoch": row["claim_epoch"]},
+            )
         return {"record": new}
 
     async def claimed(

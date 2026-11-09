@@ -93,7 +93,8 @@ def sweep(kernel: "Kernel", at: datetime) -> int:
             .all()
         )
         for row in rows:
-            claims = CollectionSpec.model_validate_json(row["spec_json"]).claims
+            spec = CollectionSpec.model_validate_json(row["spec_json"])
+            claims = spec.claims
             exhausted = claims is not None and int(row["followups"]) >= claims.max_followups
             expire(
                 conn,
@@ -101,6 +102,7 @@ def sweep(kernel: "Kernel", at: datetime) -> int:
                 at,
                 actor=kernel.runtime_id,
                 reason="followups_exhausted" if exhausted else "lease_expired",
+                spec=spec,
             )
             if exhausted:
                 escalate(conn, row, kernel.runtime_id, at)
