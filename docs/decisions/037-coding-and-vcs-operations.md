@@ -316,6 +316,15 @@ The owner may veto either.
   - **Token containment:** the token reaches the host's `Authorization` header and appears in no database row, log record, session request or handler representation.
   - **Digests:** descriptors without `resource` or `inputs` keep their digest.
 
+### Milestone 1 dress rehearsal (2026-11-16, portable)
+
+`examples/teams/dev_team.py` (`make teams`, tested by `make teams-test`) runs an ADR-034 software team on `code.session`, `vcs.*`, the content gate, records with claims, mailboxes, spend accounts and `expect` with `any_of`, with fake backends only. It needed no kernel change. It found:
+
+- **Receipt evidence needs a record link.** `requires_receipt` accepts a cited call when its `record_id` argument names the record, or when its idempotency context is the record's `<record>.<epoch>`. Only claim follow-up runs have that context. `vcs.open_change` had no `record_id`, so a developer that claims and opens a change in one run could never `submit`.
+  - Fixed in the package: `vcs.open_change` and `vcs.push_branch` take an optional `record_id`, recorded in the receipt and never sent to the host. Their descriptors are at version 2.
+- **`code.session` has no repository grant.** It does not declare a `repo:<alias>` resource, unlike `vcs.*`, so a run granted `code.session` may work on any repository in the coding configuration. Recommended: declare `resource: {grant: "repo", argument: "/repository"}` on `code.session` (a descriptor change, pending the lead).
+- **Two alias configurations.** `CARDEA_CODING_CONFIG` and `CARDEA_VCS_CONFIG` each name repositories by alias. A coding alias's read-only source must be the same repository as the vcs alias's host repository, or the base of `code.session`'s thin bundle is not found at push. Nothing checks that they agree.
+
 ## Verification
 
 Portable tests only, for the implemented parts (all in `apps/api/tests/service/`): `test_content_gate.py`, `test_content_gate_agent_runs.py` and `test_content_gate_confined.py` for the gate; `test_code_session.py`, `test_code_session_claude.py` and `test_code_session_fit_script.py` for slices 2 and 3; and `test_vcs_ops.py` for slices 4 and 5. The Debian fit test in `experiments/code-session/` is written, not run. Nothing has run on Debian, or against a real repository host, a GitHub App or a ruleset; see the [Debian acceptance checklist](../acceptance/debian-adr-034-037.md). The rest of this record is a proposal.
