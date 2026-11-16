@@ -260,6 +260,8 @@ def test_apply_creates_members_grants_and_triggers(kernel: Kernel) -> None:
     assert again["change"] == "unchanged" and again["generation"] == 1
     assert again["plan"] == {
         "members_added": [],
+        "members_draining": [],
+        "members_removed": [],
         "triggers_installed": [],
         "triggers_updated": [],
         "triggers_removed": [],
@@ -278,10 +280,11 @@ def test_dry_run_returns_the_plan_and_changes_nothing(kernel: Kernel) -> None:
     assert scaled["plan"]["members_added"] == ["desk.worker.2"]
     assert scaled["group"]["metadata"]["generation"] == 2
     assert counts(kernel) == applied
-    # A dry run refuses exactly what the apply would refuse.
-    with pytest.raises(Fault, match="slice 8") as refused:
-        put(kernel, manifest(pool(replicas=1)), dry_run=True)
-    assert refused.value.code == "group_drain_unsupported"
+    # A dry run shows the drain a scale-down would start, and changes nothing.
+    shrunk = put(kernel, manifest(pool(replicas=1)), dry_run=True)
+    assert shrunk["plan"]["members_draining"] == ["desk.worker.1"]
+    assert shrunk["plan"]["members_removed"] == ["desk.worker.1"]
+    assert counts(kernel) == applied
 
 
 def test_restructure_by_manifest_only(kernel: Kernel) -> None:
@@ -309,21 +312,6 @@ def test_restructure_by_manifest_only(kernel: Kernel) -> None:
         "desk.worker.2.t0",
     ]
     assert len(removed["group"]["status"]["members"]) == 4
-
-
-def test_scale_down_pool_removal_and_deletion_wait_for_slice_8(kernel: Kernel) -> None:
-    put(kernel, manifest())
-    for body in (manifest(pool(replicas=1)), manifest(pool(name="other"))):
-        with pytest.raises(Fault) as refused:
-            put(kernel, body)
-        assert refused.value.code == "group_drain_unsupported" and refused.value.status == 409
-    client = TestClient(create_app(kernel))
-    response = client.delete(
-        "/v0.2/groups/desk",
-        params={"namespace": "test"},
-        headers={"Authorization": "Bearer supervisor"},
-    )
-    assert response.status_code == 409 and response.json()["code"] == "group_drain_unsupported"
 
 
 @pytest.mark.parametrize(

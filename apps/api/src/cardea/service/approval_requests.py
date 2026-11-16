@@ -186,7 +186,7 @@ def transition_rules(
     if name != TRANSITION_OPERATION:
         return ()
     row = conn.exec_driver_sql(
-        "SELECT spec_json FROM collections WHERE namespace=? AND name=?",
+        "SELECT spec_json FROM collections WHERE namespace=? AND name=? AND deleted_at IS NULL",
         (namespace, str(arguments.get("collection"))),
     ).first()
     if row is None:

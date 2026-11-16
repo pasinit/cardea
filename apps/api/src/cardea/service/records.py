@@ -153,7 +153,8 @@ def referencing_groups(conn: sa.Connection, namespace: str, name: str) -> list[G
     specs = [
         GroupSpec.model_validate_json(row[0])
         for row in conn.exec_driver_sql(
-            "SELECT spec_json FROM agent_groups WHERE namespace=?", (namespace,)
+            "SELECT spec_json FROM agent_groups WHERE namespace=? AND state!='deleted'",
+            (namespace,),
         )
     ]
     return [spec for spec in specs if name in spec.collections]
@@ -268,7 +269,8 @@ class Link(Record):
 def _row(conn: sa.Connection, namespace: str, name: str) -> sa.RowMapping | None:
     return (
         conn.exec_driver_sql(
-            "SELECT * FROM collections WHERE namespace=? AND name=?", (namespace, name)
+            "SELECT * FROM collections WHERE namespace=? AND name=? AND deleted_at IS NULL",
+            (namespace, name),
         )
         .mappings()
         .first()
@@ -309,6 +311,12 @@ def apply_collection(
     policy = Policy(conn)
     policy.require(principal, namespace, "groups.manage")
     policy.require("platform", namespace, "groups.manage")
+    if conn.exec_driver_sql(
+        "SELECT 1 FROM collections WHERE namespace=? AND name=? AND deleted_at IS NOT NULL",
+        (namespace, name),
+    ).first():
+        # Its records and history are kept; reusing the name would revive them.
+        raise Fault("collection_deleted", "This collection was deleted; choose a new name", 409)
     existing = _row(conn, namespace, name)
     spec = document.spec_json()
     digest = document.digest
@@ -350,7 +358,8 @@ def apply_collection(
     at = now().isoformat()
     if existing is None:
         conn.exec_driver_sql(
-            "INSERT INTO collections VALUES (?,?,?,?,?,?,?,?)",
+            "INSERT INTO collections(namespace,name,supervisor_id,generation,spec_json,"
+            "spec_digest,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
             (namespace, name, principal, generation, json.dumps(spec), digest, at, at),
         )
     else:
@@ -511,6 +520,61 @@ def journal(
                 },
             },
         )
+
+
+def delete_collection(
+    conn: sa.Connection, principal: str, namespace: str, name: str
+) -> dict[str, Any]:
+    """`DELETE /v0.2/collections/{name}` (ADR-034 decision 2.1, slice 8).
+
+    Refused while a group that is not deleted lists the collection. Held claims are released
+    (`claim_expired`, reason `collection_deleted`); records and history are kept, and the
+    collection becomes a tombstone that no operation reaches.
+    """
+    policy = Policy(conn)
+    row = _row(conn, namespace, name)
+    if row is None or row["supervisor_id"] != principal:
+        raise Fault("collection_not_found", "No accessible collection", 404)
+    policy.require(principal, namespace, "groups.manage")
+    policy.require("platform", namespace, "groups.manage")
+    users = [
+        str(r[0])
+        for r in conn.exec_driver_sql(
+            "SELECT name FROM agent_groups WHERE namespace=? AND state!='deleted' "
+            "AND EXISTS (SELECT 1 FROM json_each(json_extract(spec_json,'$.collections')) "
+            "WHERE value=?) ORDER BY name",
+            (namespace, name),
+        )
+    ]
+    if users:
+        raise Fault(
+            "collection_in_use",
+            f"Groups {', '.join(users)} still use this collection; remove it from them first",
+            409,
+        )
+    at = now()
+    spec = CollectionSpec.model_validate_json(row["spec_json"])
+    held = (
+        conn.exec_driver_sql(
+            "SELECT * FROM records WHERE namespace=? AND collection=? AND holder IS NOT NULL",
+            (namespace, name),
+        )
+        .mappings()
+        .all()
+    )
+    for record in held:
+        expire(conn, record, at, actor=principal, reason="collection_deleted", spec=spec)
+    conn.exec_driver_sql(
+        "UPDATE collections SET deleted_at=?,updated_at=? WHERE namespace=? AND name=?",
+        (at.isoformat(), at.isoformat(), namespace, name),
+    )
+    return {
+        "name": name,
+        "namespace": namespace,
+        "change": "deleted",
+        "claims_released": len(held),
+        "records": _count(conn, namespace, name),
+    }
 
 
 def read_access(conn: sa.Connection, principal: str, namespace: str, name: str) -> sa.RowMapping:
@@ -694,20 +758,21 @@ def check_condition(
         raise OperationRejected(f"{label} guard refused this call", "guard_refused")
 
 
-def _names_record(receipt: OperationReceipt, record_id: str) -> bool:
-    """A call was made for a record: its `record_id` argument, or a claim idempotency
-    context `<record_id>.<epoch>`."""
+def _names_record(receipt: OperationReceipt, record_id: str, epoch: int) -> bool:
+    """A call was made for a record: its `record_id` argument, or the idempotency context
+    `<record_id>.<epoch>` of the record's current claim epoch, so evidence gathered under a
+    claim that was lost and later reacquired does not count (lead, 2026-11-16)."""
     recorded = receipt.request.arguments
     called = recorded.get("arguments")
     provenance = recorded.get("context")
     return (isinstance(called, dict) and called.get("record_id") == record_id) or (
         isinstance(provenance, dict)
-        and str(provenance.get("idempotency_context") or "").startswith(f"{record_id}.")
+        and provenance.get("idempotency_context") == claim_context(record_id, epoch)
     )
 
 
 def _latest_receipt(
-    conn: sa.Connection, task_id: str, operation: str, record_id: str
+    conn: sa.Connection, task_id: str, operation: str, record_id: str, epoch: int
 ) -> str | None:
     rows = conn.exec_driver_sql(
         "SELECT snapshot FROM operations WHERE task_id=? AND state='succeeded' "
@@ -716,7 +781,7 @@ def _latest_receipt(
     ).fetchall()
     for (snapshot,) in rows:
         receipt = OperationReceipt.model_validate_json(snapshot)
-        if _names_record(receipt, record_id):
+        if _names_record(receipt, record_id, epoch):
             return receipt.receipt_id
     return None
 
@@ -728,6 +793,7 @@ def check_receipt(
     context: OperationContext,
     caller: str,
     record_id: str,
+    epoch: int,
 ) -> str:
     """The evidence a transition needs (decision 3.1): the cited receipt is a successful,
     or reconciled-applied, call of the named operation, made by the caller's task (or, for
@@ -738,7 +804,7 @@ def check_receipt(
     """
     receipt_id = arguments.get("receipt_id")
     if receipt_id is None and need.within == "same_task":
-        receipt_id = _latest_receipt(conn, context.task_id, need.operation, record_id)
+        receipt_id = _latest_receipt(conn, context.task_id, need.operation, record_id, epoch)
     if not isinstance(receipt_id, str):
         raise OperationRejected(
             f"This transition needs receipt_id of a {need.operation} call", "receipt_required"
@@ -762,7 +828,7 @@ def check_receipt(
             raise OperationRejected("The cited call was made by someone else", "receipt_invalid")
         if receipt.updated_at < now() - timedelta(seconds=need.window_seconds):
             raise OperationRejected("The cited call is outside the window", "receipt_invalid")
-    if not _names_record(receipt, record_id):
+    if not _names_record(receipt, record_id, epoch):
         raise OperationRejected("The cited call was not made for this record", "receipt_invalid")
     return receipt_id
 
@@ -823,6 +889,15 @@ def standalone(spec: CollectionSpec) -> ClaimsConfig:
 def expired(row: sa.RowMapping, at: datetime) -> bool:
     lease = row["lease_expires_at"]
     return lease is not None and datetime.fromisoformat(str(lease)) <= at
+
+
+def check_may_claim(conn: sa.Connection, principal: str) -> None:
+    """A draining or removed group member takes no new claims (decision 1.5)."""
+    state = conn.exec_driver_sql(
+        "SELECT state FROM group_members WHERE principal_id=?", (principal,)
+    ).scalar()
+    if state is not None and state != "active":
+        raise OperationRejected("A draining group member takes no new claims", "member_draining")
 
 
 def check_holder(row: sa.RowMapping, caller: Mapping[str, JsonValue], epoch: object) -> None:
@@ -1228,6 +1303,7 @@ class Records:
                 raise OperationRejected("Another principal holds this record", "record_claimed")
             old = record_view(row)
             check_guard(spec, "claim", old, arguments, caller)
+            check_may_claim(conn, holder)
             held = conn.exec_driver_sql(
                 "SELECT COUNT(*) FROM records WHERE namespace=? AND collection=? AND holder=? "
                 "AND lease_expires_at>?",
@@ -1434,6 +1510,7 @@ class Records:
                     if "claim_epoch" in arguments:
                         check_holder(row, caller, arguments["claim_epoch"])
                 else:
+                    check_may_claim(conn, actor)
                     self._check_limit(conn, context.namespace, collection, actor, spec, at)
                     new["claim_epoch"] = int(row["claim_epoch"]) + 1
                 new["holder"] = actor
@@ -1451,7 +1528,13 @@ class Records:
             receipt = None
             if transition.requires_receipt is not None:
                 receipt = check_receipt(
-                    conn, transition.requires_receipt, arguments, context, actor, record_id
+                    conn,
+                    transition.requires_receipt,
+                    arguments,
+                    context,
+                    actor,
+                    record_id,
+                    int(row["claim_epoch"]),
                 )
             write_claim(
                 conn, row, new, acquired, holder_event=actor in (row["holder"], new["holder"])
