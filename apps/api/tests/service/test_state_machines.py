@@ -31,7 +31,15 @@ HOUR = timedelta(hours=1)
 WORK_ACTIONS = ("create", "read", "update", "triage", "start", "submit", "rework", "approve")
 WORK = tuple(f"record:work/{a}" for a in (*WORK_ACTIONS, "broken"))
 ORDERS = ("record:orders/create", "record:orders/read", "record:orders/approve")
-SUPERVISOR = (*RIGHTS, "groups.manage", "vcs.open_change", "ci.report", *WORK, *ORDERS)
+SUPERVISOR = (
+    *RIGHTS,
+    "groups.manage",
+    "vcs.open_change",
+    "ci.report",
+    "ci.run",
+    *WORK,
+    *ORDERS,
+)
 
 
 class Auth:
@@ -121,7 +129,29 @@ CI = OperationDescriptor.model_validate(
         "cardea": {"version": 1, "effect": "effect", "handler": "test.ci"},
     }
 )
-REGISTRY = Registry((*descriptors(), CI), {**Fakes().handlers(), "test.ci": report})
+
+
+async def ci_run(arguments: dict[str, JsonValue], context: OperationContext) -> Any:
+    """A stand-in for `env.try`: its output reports whether every scenario passed."""
+    passed = bool(arguments.get("passed"))
+    outcome = "pass" if passed else "fail"
+    return {"passed": passed, "scenarios": [{"name": "try", "outcome": outcome}]}
+
+
+CI_RUN = OperationDescriptor.model_validate(
+    {
+        "tool": {
+            "name": "ci.run",
+            "inputSchema": {"type": "object"},
+            "outputSchema": {"type": "object"},
+        },
+        "cardea": {"version": 1, "effect": "read", "handler": "test.ci_run"},
+    }
+)
+REGISTRY = Registry(
+    (*descriptors(), CI, CI_RUN),
+    {**Fakes().handlers(), "test.ci": report, "test.ci_run": ci_run},
+)
 
 
 @pytest.fixture
@@ -704,3 +734,85 @@ def test_summary_lists_what_the_callers_transitions_can_move(work: Kernel) -> No
     ]
     reader = run(work, "records.summary", {"collection": "work"}, grants=("record:work/read",))
     assert reader[1] is not None and reader[1]["available"] == []
+
+
+# Receipt-result guards (ADR-034 amendment, 2026-11-16; ADR-038 question 3)
+
+
+def guarded_spec(result: str | None = "result.passed == true") -> dict[str, Any]:
+    needs: dict[str, Any] = {"operation": "ci.run", "in": "same_caller", "window_seconds": 3600}
+    if result is not None:
+        needs["result"] = result
+    return {
+        **WORK_SPEC,
+        "transitions": [
+            *(t for t in WORK_SPEC["transitions"] if t["name"] != "submit"),
+            {
+                "name": "submit",
+                "from": ["doing"],
+                "to": "review",
+                "claim": "holder",
+                "requires_receipt": needs,
+            },
+        ],
+    }
+
+
+def ci_receipt(kernel: Kernel, record_id: str, passed: bool, **extra: Any) -> str:
+    request = OperationTaskRequest.model_validate(
+        {
+            "request_id": f"ci-run-{record_id[-6:]}-{time.monotonic_ns()}",
+            "agent_id": "a1",
+            "namespace": "test",
+            "objective": "Run the checks",
+            "operation": "ci.run",
+            "arguments": {"record_id": record_id, "passed": passed, **extra},
+            "grants": ["objects.read", "objects.write", "ci.run"],
+        }
+    )
+    task_id = kernel.submit(kernel.auth.validate("supervisor"), request).task.task_id
+    assert OperationRuntime(kernel).execute(task_id) == "succeeded"
+    with kernel.database.read() as conn, borrow(conn) as tx:
+        return tx.get_operation(task_id, "execute").receipt_id
+
+
+def test_a_transition_needs_a_passing_cited_result(work: Kernel) -> None:
+    assert apply(work, "work", guarded_spec()).status_code == 200
+    record = ready(work)
+    move(work, record, "start")
+    failing = ci_receipt(work, record["record_id"], passed=False)
+    refused = move(work, record, "submit", claim_epoch=1, receipt_id=failing)
+    assert refused[0] == "failed" and refused[2] == "receipt_result_refused"
+    passing = ci_receipt(work, record["record_id"], passed=True)
+    assert move(work, record, "submit", claim_epoch=1, receipt_id=passing)[0] == "succeeded"
+
+
+def test_a_guard_that_cannot_evaluate_refuses(work: Kernel) -> None:
+    assert apply(work, "work", guarded_spec("result.missing == 1")).status_code == 200
+    record = ready(work)
+    move(work, record, "start")
+    cited = ci_receipt(work, record["record_id"], passed=True)
+    assert move(work, record, "submit", claim_epoch=1, receipt_id=cited)[2] == (
+        "receipt_result_refused"
+    )
+
+
+@pytest.mark.parametrize(
+    "source", ["record.state == 'open'", "args.x == 1", "result.scenarios.all(s, s.ok)", ""]
+)
+def test_a_result_guard_reads_only_the_result_without_macros(work: Kernel, source: str) -> None:
+    response = apply(work, "work", guarded_spec(source))
+    assert response.status_code == 422, response.json()
+
+
+def test_a_requirement_without_a_result_guard_keeps_its_digest() -> None:
+    plain = CollectionDocument.model_validate(
+        {"metadata": {"name": "work", "namespace": "test"}, "spec": guarded_spec(None)}
+    )
+    guarded = CollectionDocument.model_validate(
+        {"metadata": {"name": "work", "namespace": "test"}, "spec": guarded_spec()}
+    )
+    stored = plain.spec_json()["transitions"]
+    assert isinstance(stored, list)
+    assert all("result" not in json.dumps(t) for t in stored)
+    assert plain.digest != guarded.digest

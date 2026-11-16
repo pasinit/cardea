@@ -253,6 +253,7 @@ used by the examples.
 | `push_rejected` | — | `cardea_vcs_ops.ops` |
 | `receipt_invalid` | Cite a receipt of {…}; The cited call did not succeed; The cited call was not made for this record (and 3 more) | `cardea.service.records` |
 | `receipt_required` | This transition needs receipt_id of a {…} call | `cardea.service.records` |
+| `receipt_result_refused` | The cited call has no result to check; The receipt result guard failed to evaluate: {…}; The cited call's result does not satisfy this transition | `cardea.service.records` |
 | `reconciliation_required` | An interrupted effect has unknown outcome. | `cardea.kernel.store` |
 | `record_claimed` | Another principal holds this record | `cardea.service.records` |
 | `record_invalid` | labels must be distinct; data must be an object; data does not match the collection schema at {…} ({…}) (and 2 more) | `cardea.service.records` |
