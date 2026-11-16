@@ -1,0 +1,32 @@
+{
+  "tool": {
+    "name": "vcs.comment",
+    "title": "Comment on a pull request",
+    "description": "Add one comment to a pull request of an allowed repository. The same client_key never comments twice. Needs repo:<alias>.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repository": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"},
+        "number": {"type": "integer", "minimum": 1},
+        "body": {"type": "string", "minLength": 1, "maxLength": 16000},
+        "client_key": {"type": "string", "minLength": 1, "maxLength": 128}
+      },
+      "required": ["repository", "number", "body", "client_key"]
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {"comment_id": {"type": "integer"}, "url": {"type": "string"}},
+      "required": ["comment_id", "url"]
+    }
+  },
+  "cardea": {
+    "version": 1,
+    "effect": "effect",
+    "handler": "vcs.comment",
+    "timeout_seconds": 60,
+    "idempotency_scope": ["/repository", "/number", "/client_key"],
+    "reconciler": "vcs.find_comment",
+    "resource": {"grant": "repo", "argument": "/repository"}
+  }
+}

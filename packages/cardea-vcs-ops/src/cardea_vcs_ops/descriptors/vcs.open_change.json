@@ -1,0 +1,39 @@
+{
+  "tool": {
+    "name": "vcs.open_change",
+    "title": "Open a pull request",
+    "description": "Open a pull request from an agent branch (agent/<group>/...) into a base branch of an allowed repository. Opening it again returns the same pull request. Needs repo:<alias>.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repository": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"},
+        "head": {"type": "string", "minLength": 1, "maxLength": 200},
+        "base": {"type": "string", "minLength": 1, "maxLength": 200},
+        "title": {"type": "string", "minLength": 1, "maxLength": 256},
+        "body": {"type": "string", "maxLength": 16000},
+        "draft": {"type": "boolean"}
+      },
+      "required": ["repository", "head", "base", "title"]
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "number": {"type": "integer"},
+        "url": {"type": "string"},
+        "state": {"type": "string"},
+        "head": {"type": "string"}
+      },
+      "required": ["number", "url", "state", "head"]
+    }
+  },
+  "cardea": {
+    "version": 1,
+    "effect": "effect",
+    "handler": "vcs.open_change",
+    "timeout_seconds": 60,
+    "idempotency_scope": ["/repository", "/head"],
+    "reconciler": "vcs.find_change",
+    "resource": {"grant": "repo", "argument": "/repository"}
+  }
+}
