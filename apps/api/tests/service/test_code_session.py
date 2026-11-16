@@ -338,7 +338,12 @@ def test_a_call_without_the_repo_grant_is_refused_before_a_worker_starts(
     kernel, host = coding_kernel(tmp_path, monkeypatch, source)
     started: list[str] = []
     real = host.start_confined
-    host.start_confined = lambda job, *args: started.append(job) or real(job, *args)  # type: ignore[method-assign]
+
+    def recording(job: str, *args: Any) -> None:
+        started.append(job)
+        real(job, *args)
+
+    host.start_confined = recording  # type: ignore[method-assign,assignment]
     task_id = submit(kernel, "code.session", change({"x.txt": "x\n"}), grants=())
     assert OperationRuntime(kernel).execute(task_id) == "failed"
     assert cast(Any, task(kernel, task_id).failure).code == "task_grant_denied"

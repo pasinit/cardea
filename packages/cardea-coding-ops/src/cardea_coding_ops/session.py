@@ -10,8 +10,11 @@ One call, no state kept between calls:
 5. return the bounded summary and the bundle as the `change.bundle` artifact.
 
 Configuration is a host-owner JSON file named by `CARDEA_CODING_CONFIG` (read-only in the
-worker): repositories by alias with their read-only `source` and `gates`, and the `harness`
-command. A call names only an alias, never a path or a command.
+worker): the `harness` command and the gates' environment. Repositories come from the
+host's repository registry (`CARDEA_REPOSITORIES`, `cardea.service.repositories`): each
+alias's read-only `source` and its `gates`. For one release this file may still list
+`repositories` itself, with a deprecation warning. A call names only an alias, never a path
+or a command.
 
 Every command runs with an environment built from nothing: a fixed `PATH`, a scratch
 `HOME`, no global git configuration, plus only the variables the harness entry passes
@@ -32,6 +35,8 @@ from typing import Any
 
 from pydantic import JsonValue
 
+from cardea.service import repositories
+from cardea.service.database import Fault
 from cardea.service.operations import OperationContext, OperationRejected, WithArtifacts
 from cardea_coding_ops import claude_code
 
@@ -190,10 +195,27 @@ def _claude(
     }
 
 
+def repository_entry(alias: str, config: dict[str, Any]) -> dict[str, Any] | None:
+    """The alias's `source` and `gates`: from the host's repository registry
+    (`CARDEA_REPOSITORIES`), or, deprecated for one release, from this file's
+    `repositories`. Both set and disagreeing is refused."""
+    try:
+        registry = repositories.resolve("code.session", config.get("repositories"))
+    except Fault as error:
+        raise OperationRejected(error.message, error.code) from None
+    if registry is None:
+        legacy = config.get("repositories", {}).get(alias)
+        return legacy if isinstance(legacy, dict) else None
+    entry = registry.repositories.get(alias)
+    if entry is None:
+        return None
+    return {"source": entry.source, "gates": entry.gate_documents()}
+
+
 def session(arguments: dict[str, JsonValue], config: dict[str, Any], scratch: Path) -> Any:
     """The whole call in `scratch`; returns the output and, if anything changed, the bundle."""
     alias = str(arguments["repository"])
-    repository = config.get("repositories", {}).get(alias)
+    repository = repository_entry(alias, config)
     if not isinstance(repository, dict):
         raise OperationRejected(f"repository {alias} is not allowed on this host")
     base_ref = str(arguments["base_ref"])

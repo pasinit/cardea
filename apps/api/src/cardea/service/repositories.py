@@ -20,6 +20,7 @@ refuses to start (`check`) and refuses the call (`resolve`).
 import json
 import logging
 import os
+import re
 import stat
 import warnings
 from collections.abc import Mapping
@@ -49,20 +50,31 @@ class Gate(Record):
 
 class Repository(Record):
     source: Annotated[str, Field(strict=True, min_length=1, max_length=512)]
-    owner: Name
-    name: Name
-    api_url: Annotated[str, Field(strict=True, pattern=r"^(https://|http://127\.0\.0\.1)")]
-    git_url: Annotated[str, Field(strict=True, min_length=1, max_length=512)]
+    # Where `vcs.*` acts: all four, or none for a repository `code.session` only reads.
+    owner: Name | None = None
+    name: Name | None = None
+    api_url: (
+        Annotated[str, Field(strict=True, pattern=r"^(https://|http://127\.0\.0\.1)")] | None
+    ) = None
+    git_url: Annotated[str, Field(strict=True, min_length=1, max_length=512)] | None = None
     gates: Annotated[tuple[Gate, ...], Field(max_length=16)] = ()
-    branch_prefix: Annotated[str, Field(strict=True, min_length=1, max_length=64)] = (
-        DEFAULT_PREFIX
-    )
+    branch_prefix: Annotated[str, Field(strict=True, min_length=1, max_length=64)] = DEFAULT_PREFIX
 
     @model_validator(mode="after")
     def prefix_names_the_group(self) -> Self:
         if "{group}" not in self.branch_prefix or not self.branch_prefix.endswith("/"):
             raise ValueError("branch_prefix must contain {group} and end with /")
+        if not re.fullmatch(r"[A-Za-z0-9._/-]*\{group\}[A-Za-z0-9._/-]*", self.branch_prefix):
+            raise ValueError("branch_prefix may hold only branch-name characters")
+        host = (self.owner, self.name, self.api_url, self.git_url)
+        if any(v is None for v in host) and any(v is not None for v in host):
+            raise ValueError("owner, name, api_url and git_url go together")
         return self
+
+    @property
+    def hosted(self) -> bool:
+        """Whether `vcs.*` may act on this repository."""
+        return self.git_url is not None
 
     def gate_documents(self) -> list[dict[str, Any]]:
         """The gates as `code.session` reads them."""
@@ -96,7 +108,9 @@ def load(environ: Mapping[str, str] = os.environ) -> Registry | None:
         return Registry.model_validate(_read(Path(location)))
     except (OSError, ValueError, ValidationError) as error:
         reason = type(error).__name__
-        raise Fault("invalid_repositories", f"The repository registry is invalid ({reason})") from None
+        raise Fault(
+            "invalid_repositories", f"The repository registry is invalid ({reason})"
+        ) from None
 
 
 def _deprecated(variable: str) -> None:
@@ -143,9 +157,8 @@ def disagreements(
             found.append(alias)
             continue
         view = _coding_view(entry) if package == "code.session" else _vcs_view(entry)
-        if view != _legacy_view(package, legacy[alias]):
-            found.append(alias)
-        elif legacy_prefix is not None and legacy_prefix != entry.branch_prefix:
+        moved = legacy_prefix is not None and legacy_prefix != entry.branch_prefix
+        if moved or view != _legacy_view(package, legacy[alias]):
             found.append(alias)
     return found
 

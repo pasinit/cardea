@@ -20,7 +20,7 @@ from cardea.runtime.agent_session import ClaudeAgentSession
 from cardea.runtime.harness import Harness
 from cardea.runtime.opencode import OpenCodeHarness, Price
 from cardea.service import harnesses as registry
-from cardea.service import mailbox
+from cardea.service import mailbox, repositories
 from cardea.service.app import create_app
 from cardea.service.auth import Authentication, IdentityProvider
 from cardea.service.confined import ConfinedAgentSession, Workers
@@ -206,6 +206,8 @@ def serve(
     if any(name.startswith("DBOS_") for name in os.environ):
         raise Fault("unsafe_environment", "Remove inherited DBOS environment overrides", 500)
     configure_logging(config.log_level)
+    # One repository registry (ADR-037): refuse a host whose package files disagree with it.
+    repositories.check()
     with service_lock(config.data_dir):
         database = Database(config.data_dir)
         auth: IdentityProvider | None = None
