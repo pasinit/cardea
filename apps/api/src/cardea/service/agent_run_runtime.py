@@ -45,6 +45,7 @@ from cardea.service import (
     context_sources,
     invocation,
     mailbox,
+    spend,
 )
 from cardea.service.approvals import ApprovalRequirement
 from cardea.service.confined import ConfinedAgentSession, WorkerFailed
@@ -1481,6 +1482,8 @@ class AgentRunRuntime:
     ) -> str:
         with self.kernel.database.engine.begin() as conn, borrow(conn) as tx:
             task = tx.get_task(task_id)
+            # What the attempt spent, whatever happens next (ADR-033 metering; ADR-034 5.3).
+            spend.record_attempt(conn, task_id, attempt, result.cost_usd, now())
             if task.state in TERMINAL:
                 return task.state.value
             if task.lease is None or task.lease.lease_id != lease.lease_id:

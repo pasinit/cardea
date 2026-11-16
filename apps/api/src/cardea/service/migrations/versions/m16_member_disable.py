@@ -11,8 +11,8 @@ that history was not recorded, so they are backfilled as drain-disabled.
 
 from alembic import op
 
-revision = "m15_member_disable"
-down_revision = "m14_group_drain"
+revision = "m16_member_disable"
+down_revision = "m15_spend"
 branch_labels = None
 depends_on = None
 

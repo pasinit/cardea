@@ -148,20 +148,16 @@ def compile_trigger(
 def _unsupported(spec: GroupSpec, namespace: str) -> None:
     """Refuse manifest features whose ADR-034 slice has not landed, rather than accept a
     bound the kernel would not enforce."""
-    if spec.spend is not None or any(p.spend is not None for p in spec.pools):
-        raise Fault(
-            "group_spend_unsupported",
-            "Group and pool spend accounts arrive with ADR-034 slice 9; remove `spend`",
-            422,
-        )
     journal_source = f"cardea://{namespace}"
     for pool in spec.pools:
-        if pool.expect_window:
-            raise Fault(
-                "group_expect_window_unsupported",
-                f"Pool {pool.name}: windowed expectations arrive with ADR-034 slice 9",
-                422,
-            )
+        for entry in pool.expect_window:
+            if entry.operation not in pool.run.operations:
+                raise Fault(
+                    "invalid_template",
+                    f"Pool {pool.name}: a windowed expectation names {entry.operation}, "
+                    "which its runs do not expose",
+                    422,
+                )
         for trigger in pool.triggers:
             # Group event triggers read the group's own journal; inbound HTTP sources need
             # a host-owner secret, so they stay host-owned (ADR-035).

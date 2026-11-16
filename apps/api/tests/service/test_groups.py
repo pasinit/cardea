@@ -318,10 +318,10 @@ def test_restructure_by_manifest_only(kernel: Kernel) -> None:
 @pytest.mark.parametrize(
     ("change", "code"),
     [
-        ({"spend": {"usd": 10, "window": "day"}}, "group_spend_unsupported"),
         (
-            {"expect_window": [{"operation": "mail.send", "min": 1, "window": "day"}]},
-            "group_expect_window_unsupported",
+            # A windowed expectation must name an operation the pool's runs expose.
+            {"expect_window": [{"operation": "other.op", "min": 1, "window": "day"}]},
+            "invalid_template",
         ),
         (
             # Group event triggers read the group's own journal (ADR-034 slice 7); an

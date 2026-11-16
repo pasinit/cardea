@@ -13,7 +13,7 @@ from cardea.hosts.debian import Host
 from cardea.kernel.models import BudgetLimits, Task, TaskState
 from cardea.kernel.store import KernelTransaction
 from cardea.runtime.agent_session import AgentSession
-from cardea.service import approval_requests, context_sources, host_budget
+from cardea.service import approval_requests, context_sources, host_budget, spend
 from cardea.service.approval_requests import waiting_for, withdraw
 from cardea.service.auth import IdentityProvider, Proof
 from cardea.service.confined import ConfinedAgentSession, Workers, confined_handler, job_id
@@ -710,6 +710,8 @@ class Kernel:
                 request.parent_task_id,
             ),
         )
+        # A group member's run reserves against its group and pool spend (ADR-034 5.3).
+        spend.reserve(conn, request, task_id, at)
         if delegation is not None:
             conn.exec_driver_sql(
                 "INSERT INTO delegation_links VALUES (?,?,?,?)",

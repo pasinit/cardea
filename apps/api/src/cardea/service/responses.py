@@ -352,6 +352,34 @@ class AgentRunVerification(Record):
     output_digest: str
 
 
+class AttemptCost(Record):
+    attempt: int
+    cost_usd: float | None = Field(description="What the attempt reported; null is unknown.")
+
+
+class SpendReservation(Record):
+    """A group member run's charge against its group and pool spend (ADR-034 5.3)."""
+
+    group: str
+    pool: str
+    group_window: str | None
+    pool_window: str | None
+    reserved_usd: float
+    state: Literal["reserved", "settled", "unknown"] = Field(
+        description="reserved while the run is open; settled to its reported cost; unknown "
+        "when any attempt's cost is unknown, so the full reservation stays charged."
+    )
+    charged_usd: float
+
+
+class RunSpend(Record):
+    attempts: list[AttemptCost]
+    cost_usd: float | None = Field(
+        description="Total reported cost of the run's attempts; null when any is unknown."
+    )
+    reservation: SpendReservation | None = None
+
+
 class RunView(Wire):
     """`GET /v0.2/tasks/{task_id}/run`: what a run did (ADR-029)."""
 
@@ -361,6 +389,9 @@ class RunView(Wire):
     created_at: str
     updated_at: str
     attempt: int | None = Field(description="The agent run's latest attempt number.")
+    spend: RunSpend | None = Field(
+        default=None, description="Per-attempt cost and any spend reservation (ADR-034)."
+    )
     messages_consumed: list[str] = Field(
         default_factory=list,
         description="Mailbox messages this run consumed by succeeding (ADR-034).",

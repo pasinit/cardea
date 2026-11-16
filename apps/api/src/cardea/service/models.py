@@ -20,7 +20,7 @@ from pydantic import (
 
 from cardea.kernel.models import Identifier, ObjectVersion, OperationName, Task, Timestamp
 from cardea.service.approvals import HostApprovals
-from cardea.service.schedule import validate_schedule
+from cardea.service.schedule import validate_schedule, zone
 
 # ADR-036 bounds: approval waits per agent run, and the longest wait (30 days).
 DEFAULT_APPROVAL_WAITS = 4
@@ -906,21 +906,41 @@ class RunTemplate(Record):
 
 
 class GroupSpend(Record):
-    """A spend account (ADR-034 decision 5.3; slice 9). Refused at apply until then."""
+    """A spend account (ADR-034 decision 5.3): a ceiling in USD per calendar day or ISO
+    week on the wall clock of `timezone`, metered from the runs' reported cost."""
 
     usd: Annotated[float, Field(strict=True, gt=0, le=100000)]
     window: Literal["day", "week"]
     timezone: Annotated[str, Field(strict=True, min_length=1, max_length=64)] = "UTC"
 
+    @model_validator(mode="after")
+    def known_zone(self) -> Self:
+        zone(self.timezone)
+        return self
+
 
 class WindowExpectation(Record):
-    """A windowed pool expectation (ADR-034 decision 5.4; slice 9). Refused until then."""
+    """A windowed pool expectation (ADR-034 decision 5.4): successful receipted calls of
+    `operation` (for `records.transition`, optionally of one named transition) across the
+    pool's members in each day or ISO week. Checked at window close; never fails a run."""
 
     operation: OperationName
     transition: Identifier | None = None
     min: Annotated[int, Field(strict=True, ge=0, le=100000)] | None = None
     max: Annotated[int, Field(strict=True, ge=0, le=100000)] | None = None
     window: Literal["day", "week"]
+    timezone: Annotated[str, Field(strict=True, min_length=1, max_length=64)] = "UTC"
+
+    @model_validator(mode="after")
+    def bounded(self) -> Self:
+        zone(self.timezone)
+        if self.min is None and self.max is None:
+            raise ValueError("A windowed expectation needs min, max or both")
+        if self.min is not None and self.max is not None and self.max < self.min:
+            raise ValueError("max must not be below min")
+        if self.transition is not None and self.operation != "records.transition":
+            raise ValueError("transition applies only to records.transition")
+        return self
 
 
 class GroupPool(Record):
