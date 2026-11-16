@@ -91,7 +91,8 @@ LIMITS = {
     "memory_mb": (16, 16384),
     "cpu_percent": (1, 800),
     "tasks": (1, 1024),
-    "wall_seconds": (1, 3600),
+    # Up to two hours: long confined operations such as a coding session (ADR-023 amendment).
+    "wall_seconds": (1, 7200),
     "scratch_mb": (1, 8192),
     "output_kb": (1, MAX_OUTPUT // 1024),
 }

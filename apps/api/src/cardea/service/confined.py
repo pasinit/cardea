@@ -155,14 +155,28 @@ class Workers:
                 return {"profiles": {}, "workers": {}}
         return self._installed
 
-    def require(self, profile: str, worker: str) -> dict[str, JsonValue]:
-        """The intent's executor record, or a refusal when the host lacks the profile."""
+    def require(
+        self, profile: str, worker: str, timeout_seconds: int | None = None
+    ) -> dict[str, JsonValue]:
+        """The intent's executor record, or a refusal when the host lacks the profile.
+
+        An operation may run as long as its profile's `wall_seconds` and no longer (ADR-023
+        amendment, 2026-11-16): a longer timeout is refused before anything starts.
+        """
         installed = self.installed()
         entry = installed.get("profiles", {}).get(profile)
         if entry is None or profile not in installed.get("workers", {}).get(worker, ()):
             raise Fault(
                 "worker_profile_not_installed",
                 "The host owner has not installed this worker profile",
+                409,
+            )
+        wall = entry.get("wall_seconds")
+        if timeout_seconds is not None and isinstance(wall, int) and timeout_seconds > wall:
+            raise Fault(
+                "operation_timeout_exceeds_profile",
+                f"The operation's {timeout_seconds} s timeout exceeds its profile's "
+                f"{wall} s wall time",
                 409,
             )
         return {"profile": profile, "worker": worker, "profile_sha256": str(entry.get("sha256"))}

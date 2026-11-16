@@ -483,7 +483,8 @@ class Kernel:
             raise Fault(
                 "worker_profile_not_installed", "Confined workers are not enabled on this host", 409
             )
-        return self.workers.require(executor.profile, executor.worker)
+        timeout = self.operations.get(name).cardea.timeout_seconds
+        return self.workers.require(executor.profile, executor.worker, timeout)
 
     def queue_allowance(self, name: str) -> float:
         """Seconds an operation may wait for a confined-worker slot before it runs (ADR-028)."""
