@@ -131,7 +131,7 @@ def kernel_for(
             delegate=True,
             expires_at=now() + timedelta(hours=1),
         )
-        for right in (*RIGHTS, operation)
+        for right in (*RIGHTS, operation, "repo:app")
     )
     principals = tuple(
         Principal(
@@ -155,7 +155,17 @@ def kernel_for(
     return Kernel(db, cast(Authentication, Auth()), operations=registry, workers=Workers(host))
 
 
-def submit(kernel: Kernel, operation: str, arguments: dict[str, Any], key: str = "one") -> str:
+def submit(
+    kernel: Kernel,
+    operation: str,
+    arguments: dict[str, Any],
+    key: str = "one",
+    grants: tuple[str, ...] | None = None,
+) -> str:
+    if grants is None:
+        # `code.session` needs the repository's `repo:<alias>` grant (ADR-037).
+        repository = arguments.get("repository")
+        grants = (f"repo:{repository}",) if isinstance(repository, str) else ()
     request = OperationTaskRequest.model_validate(
         {
             "request_id": f"call-{key}",
@@ -164,7 +174,7 @@ def submit(kernel: Kernel, operation: str, arguments: dict[str, Any], key: str =
             "objective": "One long call",
             "operation": operation,
             "arguments": arguments,
-            "grants": ["objects.read", "objects.write", operation],
+            "grants": ["objects.read", "objects.write", operation, *grants],
             "timeout_seconds": 3600,
         }
     )
@@ -318,6 +328,25 @@ def test_failing_gates_are_reported_not_hidden(
     output = receipt(kernel, task_id).result["output"]
     assert [(g["name"], g["exit_code"]) for g in output["gates"]] == [("lint", 0), ("test", 3)]
     assert output["gates_passed"] is False
+
+
+def test_a_call_without_the_repo_grant_is_refused_before_a_worker_starts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: Path
+) -> None:
+    """`code.session` needs `repo:<alias>` like `vcs.*` (ADR-037, rehearsal finding 2): the
+    kernel refuses the call from the descriptor's `resource` before any intent exists."""
+    kernel, host = coding_kernel(tmp_path, monkeypatch, source)
+    started: list[str] = []
+    real = host.start_confined
+    host.start_confined = lambda job, *args: started.append(job) or real(job, *args)  # type: ignore[method-assign]
+    task_id = submit(kernel, "code.session", change({"x.txt": "x\n"}), grants=())
+    assert OperationRuntime(kernel).execute(task_id) == "failed"
+    assert cast(Any, task(kernel, task_id).failure).code == "task_grant_denied"
+    with kernel.database.read() as conn, borrow(conn) as tx:
+        assert tx.list_operations(task_id) == []
+    assert started == []
+    granted = submit(kernel, "code.session", change({"x.txt": "x\n"}), key="two")
+    assert OperationRuntime(kernel).execute(granted) == "succeeded" and len(started) == 1
 
 
 def test_no_repository_host_credential_reaches_the_harness_or_gates(
