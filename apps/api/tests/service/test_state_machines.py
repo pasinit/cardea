@@ -628,3 +628,25 @@ def test_only_the_gated_transition_requires_approval(kernel: Kernel) -> None:
         )
     assert needed.required and [r.rule_id for r in needed.rules] == ["transition.approve"]
     assert not free.required
+
+
+def test_summary_lists_what_the_callers_transitions_can_move(work: Kernel) -> None:
+    """`records.summary` counts by state; `available` follows the caller's live
+    transition grants (ADR-034 slice 6)."""
+    first, second = create(work, "k1"), create(work, "k2")
+    assert move(work, first, "triage", args={"priority": 1})[0] == "succeeded"
+    every = run(work, "records.summary", {"collection": "work"}, grants=ALL)
+    assert every[0] == "succeeded" and every[1] is not None
+    assert every[1]["by_state"] == {"open": 1, "ready": 1} and every[1]["total"] == 2
+    assert {a["record_id"] for a in every[1]["available"]} == {
+        first["record_id"],
+        second["record_id"],
+    }
+    starter = ("record:work/read", "record:work/start")
+    only = run(work, "records.summary", {"collection": "work"}, grants=starter)
+    assert only[1] is not None
+    assert [(a["record_id"], a["state"]) for a in only[1]["available"]] == [
+        (first["record_id"], "ready")
+    ]
+    reader = run(work, "records.summary", {"collection": "work"}, grants=("record:work/read",))
+    assert reader[1] is not None and reader[1]["available"] == []

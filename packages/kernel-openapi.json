@@ -249,9 +249,16 @@
             "items": {
               "$ref": "#/components/schemas/ContextCall"
             },
-            "maxItems": 4,
+            "maxItems": 8,
             "title": "Context",
             "type": "array"
+          },
+          "context_max_bytes": {
+            "default": 24576,
+            "maximum": 65536.0,
+            "minimum": 1024.0,
+            "title": "Context Max Bytes",
+            "type": "integer"
           },
           "expect": {
             "default": [],
@@ -1774,6 +1781,19 @@
             },
             "title": "Arguments",
             "type": "object"
+          },
+          "max_bytes": {
+            "anyOf": [
+              {
+                "maximum": 65536.0,
+                "minimum": 256.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Bytes"
           },
           "operation": {
             "maxLength": 128,
@@ -5217,9 +5237,16 @@
             "items": {
               "$ref": "#/components/schemas/ContextCall"
             },
-            "maxItems": 4,
+            "maxItems": 8,
             "title": "Context",
             "type": "array"
+          },
+          "context_max_bytes": {
+            "default": 24576,
+            "maximum": 65536.0,
+            "minimum": 1024.0,
+            "title": "Context Max Bytes",
+            "type": "integer"
           },
           "expect": {
             "default": [],
@@ -5314,9 +5341,16 @@
             "items": {
               "$ref": "#/components/schemas/ContextCall"
             },
-            "maxItems": 4,
+            "maxItems": 8,
             "title": "Context",
             "type": "array"
+          },
+          "context_max_bytes": {
+            "default": 24576,
+            "maximum": 65536.0,
+            "minimum": 1024.0,
+            "title": "Context Max Bytes",
+            "type": "integer"
           },
           "expect": {
             "default": [],

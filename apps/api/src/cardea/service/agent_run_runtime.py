@@ -12,8 +12,9 @@ import threading
 import time
 from collections.abc import Callable, Iterator, Set
 from contextlib import ExitStack, contextmanager, suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
+from functools import partial
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -37,10 +38,17 @@ from cardea.kernel.store import KernelTransaction
 from cardea.runtime import activity as activities
 from cardea.runtime.activity import AttemptActivity, OutputLimits
 from cardea.runtime.harness import Harness, HarnessRequest, HarnessResult
-from cardea.service import approval_requests, claims, confined, invocation, mailbox
+from cardea.service import (
+    approval_requests,
+    claims,
+    confined,
+    context_sources,
+    invocation,
+    mailbox,
+)
 from cardea.service.approvals import ApprovalRequirement
 from cardea.service.confined import ConfinedAgentSession, WorkerFailed
-from cardea.service.database import Fault, borrow
+from cardea.service.database import Fault, Snapshot, borrow
 from cardea.service.kernel import TERMINAL, Kernel
 from cardea.service.logs import ATTEMPT_LOGS, attempt_log_file
 from cardea.service.models import BUILTIN_OPERATIONS, AgentRunRequest, InboundEvent, now
@@ -127,14 +135,26 @@ def _error(code: str, detail: str = "") -> types.CallToolResult:
     )
 
 
-def context_block(name: str, outcome: Outcome) -> str:
-    """One labelled prompt block; markup in the output cannot close the block early."""
+def context_block(
+    name: str,
+    outcome: Outcome,
+    output: Any = None,
+    snapshot: tuple[str, int] | None = None,
+) -> str:
+    """One labelled prompt block; markup in the output cannot close the block early.
+
+    `output` replaces the call's output when its budget trimmed it. A built-in source's
+    block carries the read snapshot it came from: `as_of` and the journal `cursor`.
+    """
     if outcome.code:
         reason = outcome.reason or "rejected"
         return f'<context operation="{name}" status="unavailable" reason="{reason}"></context>'
-    data = json.dumps(outcome.output, sort_keys=True, ensure_ascii=False)
+    data = json.dumps(
+        outcome.output if output is None else output, sort_keys=True, ensure_ascii=False
+    )
     data = data.replace("<", "\\u003c").replace(">", "\\u003e")
-    return f'<context operation="{name}" status="ok">{data}</context>'
+    stamp = f' as_of="{snapshot[0]}" cursor="{snapshot[1]}"' if snapshot else ""
+    return f'<context operation="{name}" status="ok"{stamp}>{data}</context>'
 
 
 def event_block(event: InboundEvent) -> str:
@@ -366,7 +386,10 @@ class AgentRunRuntime:
                     recipient=task.agent_id,
                     namespace=request.namespace,
                     attempt=attempt,
-                    budget=mailbox.inbox_budget(dict(inbox.arguments)),
+                    budget=min(
+                        inbox.max_bytes or mailbox.inbox_budget(dict(inbox.arguments)),
+                        request.context_max_bytes,
+                    ),
                     runtime_id=self.kernel.runtime_id,
                     at=at,
                 )
@@ -541,16 +564,46 @@ class AgentRunRuntime:
     async def _context(
         self, task_id: str, lease_id: str, request: AgentRunRequest
     ) -> tuple[str, ...]:
-        """Invoke the run's context operations in order, as receipts ``ctx-NN``."""
-        blocks: list[str] = []
-        for call in request.context:
-            outcome = await self._invoke(
-                task_id, lease_id, request, call.operation, dict(call.arguments), "ctx"
+        """Invoke the run's context operations in order, as receipts ``ctx-NN``, and fit
+        their blocks to the run's budgets (ADR-034 decision 5).
+
+        Built-in sources read their data through one snapshot, taken here and handed to
+        them alone, so their blocks agree with each other and with the journal cursor
+        they report. Admission, policy and every other read stay fresh.
+        """
+        fetched: list[context_sources.Fetched] = []
+        with self.kernel.database.snapshot() as snapshot:
+            connection = snapshot.connection()
+            assert connection is not None, "opened on this thread"
+            cursor = int(
+                connection.exec_driver_sql(
+                    "SELECT COALESCE(MAX(cursor),0) FROM events"
+                ).scalar_one()
             )
-            if outcome.code == "stale_session":
-                break
-            blocks.append(context_block(call.operation, outcome))
-        return tuple(blocks)
+            taken = (now().isoformat(), cursor)
+            for call in request.context:
+                builtin = call.operation in context_sources.SNAPSHOT_SOURCES
+                outcome = await self._invoke(
+                    task_id,
+                    lease_id,
+                    request,
+                    call.operation,
+                    dict(call.arguments),
+                    "ctx",
+                    snapshot=snapshot if builtin else None,
+                )
+                if outcome.code == "stale_session":
+                    break
+                stamp = taken if call.operation in context_sources.SNAPSHOT_SOURCES else None
+                fetched.append(
+                    context_sources.Fetched(
+                        call.operation,
+                        call.max_bytes,
+                        None if outcome.code else outcome.output,
+                        partial(context_block, call.operation, outcome, snapshot=stamp),
+                    )
+                )
+        return tuple(context_sources.fit(fetched, request.context_max_bytes))
 
     def _system_prompt(self, request: AgentRunRequest) -> str:
         limit = self.kernel.agent_tools.max_concurrent_tool_calls
@@ -847,8 +900,11 @@ class AgentRunRuntime:
         arguments: dict[str, Any],
         kind: Literal["call", "ctx"],
         abandoned: Callable[[], bool] | None = None,
+        snapshot: Snapshot | None = None,
     ) -> Outcome:
-        """One receipted invocation under this attempt's lease: a tool call or context call."""
+        """One receipted invocation under this attempt's lease: a tool call or context call.
+
+        `snapshot` is the run's context snapshot, handed only to a built-in source."""
         registry = self.kernel.operations
         try:
             with self.kernel.database.engine.begin() as conn, borrow(conn) as tx:
@@ -935,7 +991,7 @@ class AgentRunRuntime:
                 arguments,
                 descriptor.cardea.effect == "effect",
                 handler,
-                admitted.context,
+                replace(admitted.context, snapshot=snapshot),
                 timeout,
                 abandoned,
             )

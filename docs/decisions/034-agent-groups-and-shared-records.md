@@ -1,7 +1,7 @@
 # ADR-034: Agent Groups, Shared Records, State Machines and Mailboxes
 
 - **Date / owner / milestones:** 2026-11-08; runtime and API maintainers. Builds on [ADR-023](023-installed-operation-registry.md) (installed operations), [ADR-024](024-time-triggers.md) (time triggers), [ADR-026](026-effect-idempotency-and-reconciliation.md) (effect scopes), [ADR-027](027-agent-runs.md) (agent runs), [ADR-029](029-supervisor-schedules-expectations-and-run-evidence.md) (supervisor-managed triggers, expectations), [ADR-031](031-agent-run-context-operations.md) (context operations), [ADR-033](033-pluggable-agent-harnesses.md) (harnesses), [ADR-035](035-event-triggers.md) (event triggers, selected, slice 1 implemented) and [ADR-036](036-approval-waits.md) (approval waits, selected, implementation pending). Relates to roadmap M8.
-- **Status:** selected (design); slices 1 (collections and records), 2 (claims), 3 (state machines), 4 (agent groups), 5 (mailboxes) and 7 (journal event triggers) implemented portably on 2026-11-09, see [Implementation status](#implementation-status) and [Verification](#verification); slices 6 and 8–11 not implemented; nothing verified on Debian. The lead approved this design on 2026-11-09, and the owner may veto. It was reworked on 2026-11-08 at the lead's and owner's direction. The first version made "team" a kernel concept, with roles, role relations and a fixed work-item lifecycle; that baked one workflow into the kernel and is withdrawn. This version has only generic primitives. Review decisions are recorded under [Carried decisions](#carried-decisions) and [Decisions settled in review (2026-11-09)](#decisions-settled-in-review-2026-11-09). No fit test below has run.
+- **Status:** selected (design); slices 1 (collections and records), 2 (claims), 3 (state machines), 4 (agent groups), 5 (mailboxes), 6 (context sources) and 7 (journal event triggers) implemented portably on 2026-11-09 to 2026-11-16, see [Implementation status](#implementation-status) and [Verification](#verification); slices 8–11 not implemented; nothing verified on Debian. The lead approved this design on 2026-11-09, and the owner may veto. It was reworked on 2026-11-08 at the lead's and owner's direction. The first version made "team" a kernel concept, with roles, role relations and a fixed work-item lifecycle; that baked one workflow into the kernel and is withdrawn. This version has only generic primitives. Review decisions are recorded under [Carried decisions](#carried-decisions) and [Decisions settled in review (2026-11-09)](#decisions-settled-in-review-2026-11-09). No fit test below has run.
 - **Affected components:** [tasks and scheduler](../components/tasks-scheduler.md), [delegation and messaging](../components/delegation-messaging.md), [events and inputs](../components/events-inputs.md), [identity and capabilities](../components/identity-capabilities.md), [resource budgets](../components/resource-budgets.md), [agent runtime](../components/agent-runtime.md).
 
 ## Requirement
@@ -569,6 +569,57 @@ Portable tests go in `apps/api/tests/service/`. Before the record is called veri
   - group triggers refuse an inbound source.
 
   Acceptance test 10 is covered portably. Not run on Debian.
+- **Decisions in review (lead, 2026-11-09; the owner may veto).**
+  1. Waking within about a minute (the DBOS tick) is acceptable for now. An immediate nudge on a mailbox send is a revisit item.
+  2. Peers waking each other is by design. The self-wake guard stays self-only.
+  3. The 4 KiB cap on event data in a run's context is right.
+
+### Slice 6: context sources and the ADR-031 amendments (implemented 2026-11-16, portable tests only)
+
+- **ADR-031 amendments.**
+  - A context entry gains an optional `max_bytes` (256 B to 64 KiB).
+  - A run gains `context_max_bytes` (default 24 KiB, 1 KiB to 64 KiB).
+  - A run may list up to 8 context entries instead of 4.
+  - Group pool run templates accept the same fields.
+  - Left at their defaults, the new fields change neither a request's digest nor a compiled group trigger's, so existing triggers and idempotent resubmissions keep their identity.
+- **Sources.** All are built-in read operations, receipted as `ctx-NN` like any context call.
+  - `records.claimed` (8 KiB by default): the caller's claims.
+  - `mailbox.inbox` (6 KiB): the leased mail.
+  - `runs.recent` (4 KiB, new): the calling principal's own last finished runs in the namespace, oldest first. Each gives its outcome and failure code, the records it touched (from record history) and the tail of its result text. `limit` is at most 20 and `tail_bytes` at most 2048. The current run and other principals' runs are never listed. It needs the grant `runs.recent`.
+  - `records.summary` (3 KiB, new): counts by state (`null` without a state machine) and by label, and up to 50 unclaimed records, titles only, needing `record:<collection>/read`. With a state machine, only records in a state that a transition the caller holds the live grant for may leave are listed as available.
+  - `records.query` (2 KiB).
+  - Installed read operations share only the total.
+- **One snapshot.** The built-in sources of one attempt read through one SQLite read snapshot, taken before the first context call (`Database.snapshot()`).
+  - The snapshot is handed explicitly, through `OperationContext.snapshot`, to those sources only: `records.summary`, `records.query`, `records.claimed` and `runs.recent`. They read their authority fresh and their data from the snapshot. The inbox shows the mail leased in the checkpoint transaction.
+  - Nothing else reads through it. Admission, policy, cancellation and lease polls, and installed operations all keep fresh reads.
+  - It is usable only on the thread that opened it and only while it is open; elsewhere a source falls back to a fresh read.
+  - Each of their blocks carries `as_of` and the journal `cursor` of that snapshot as tag attributes: `<context operation="…" status="ok" as_of="…" cursor="N">`. A record committed while the context is being fetched appears in none of them.
+- **Fitting.** Blocks are filled in priority order: `mailbox.inbox`, then `records.claimed`, then the rest in request order. The prompt lists them in that order. Each block gets the smaller of its own budget and what is left of the total.
+  - A list source drops its oldest entries and reports how many in `truncated`.
+  - Any other output that does not fit becomes `{"omitted": true, "bytes", "max_bytes"}`.
+  - The inbox is shown whole, because its run consumes exactly what it leased. Its lease budget is the smaller of its entry budget and the run total.
+  - Claims are never dropped entirely: at worst `{"claims": [], "truncated": N}`.
+  - A source the caller may not read gives ADR-031's `unavailable` block, so a block shows only what the caller's live grants allow.
+- **Tests** (`apps/api/tests/service/test_context_sources.py`):
+  - list truncation and its count;
+  - every block within its budget and the total;
+  - inbox and claims first and never dropped;
+  - unavailable blocks kept;
+  - eight entries, the total bound, and digests unchanged at defaults;
+  - one shared snapshot across `records.summary` and `records.query`, with a write during the fetch visible in neither;
+  - sources refused without the read grant;
+  - `runs.recent` scoped to the caller, excluding the current run and another agent's run, with tail and touched records;
+  - `runs.recent` needs its grant;
+  - priority order in the prompt;
+  - the snapshot is explicit and bound to its thread: ordinary reads stay fresh while it is open, and another thread or a closed snapshot gets no connection (`test_context_sources.py`);
+  - a cancel issued during an in-flight context call is seen (`test_agent_runs.py`);
+  - `records.summary`'s `available` follows the caller's live transition grants (`test_state_machines.py`).
+
+- **Decisions in review (lead, 2026-11-16; the owner may veto).**
+  1. `runs.recent` keeps its explicit `runs.recent` grant: least privilege, consistent with the other sources.
+  2. An installed operation's output over budget is replaced by a size note, not cut in the middle. A cut would produce broken JSON and could split a structure the agent relies on.
+
+  Acceptance test 9 is covered portably. Not run on Debian.
 
 ## Verification
 
@@ -607,6 +658,7 @@ Revisit if:
 - runs need more than 64 KiB of context, or retrieval instead of recency;
 - approver sets need relationships that grants cannot express, in which case evaluate OpenFGA (as ADR-036 says);
 - human recipients need to acknowledge mailbox notices (slice 5 decision 4);
+- journal triggers need to wake faster than the minute tick, for example an immediate nudge when mail is sent (slice 7 decision 1);
 - a deployment needs kernel journal events in one namespace to trigger groups in another (decision 6 keeps them namespace-local);
 - group names must repeat across namespaces, which needs namespaced member principal IDs (slice 4 refuses the clash).
 
