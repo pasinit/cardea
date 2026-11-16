@@ -7,13 +7,15 @@ file may still list `repositories` and a global `branch_prefix`, with a deprecat
 warning. Callers name an alias; they never send a URL, a token or a host.
 
 In the `vcs` confined worker (ADR-037) the file holds no secret: the provider is
-`profile_credential`, the worker profile's own credential, which systemd loads into
-the unit. Such a file may be a shared, read-only host-owner file (root-owned, not
+`personal_access_token` (a fine-grained token, the owner's choice for now) or
+`profile_credential`, both read from the worker profile's own credential, which systemd
+loads into the unit. Such a file may be a shared, read-only host-owner file (root-owned, not
 writable by others), bound read-only into the sandbox. A file that holds a token must
 be private to the reading account.
 """
 
 import os
+from datetime import date
 import re
 import stat
 from pathlib import Path
@@ -25,6 +27,10 @@ from cardea.service.database import Fault, private_file
 
 Alias = Annotated[str, Field(strict=True, pattern=r"^[a-z][a-z0-9-]{0,63}$")]
 Name = Annotated[str, Field(strict=True, pattern=r"^[A-Za-z0-9_.-]{1,100}$")]
+# A group pool, `<group>.<pool>`: the names ADR-034 allows, which hold no dots.
+PoolAddress = Annotated[
+    str, Field(strict=True, pattern=r"^[a-z][a-z0-9-]{0,39}\.[a-z][a-z0-9-]{0,31}$")
+]
 
 
 class Record(BaseModel):
@@ -57,6 +63,24 @@ class ProfileCredentialConfig(Record):
     kind: Literal["profile_credential"]
 
 
+class PersonalAccessTokenConfig(Record):
+    """A fine-grained personal access token held as the `vcs` profile's credential
+    (ADR-037 question 7, decided by the owner 2026-11-16).
+
+    The token itself is never in this file: systemd loads it into the worker unit from a
+    root-only host secret, and the worker reads it at `$CARDEA_CREDENTIAL` for each call,
+    as `profile_credential` does. `expires_on` is the expiry the owner set when creating
+    it; from that day on every call is refused with nothing sent, so a lapsed token fails
+    loudly instead of as a host 401."""
+
+    kind: Literal["personal_access_token"]
+    expires_on: date
+
+
+# Providers whose secret lives outside the configuration file, so the file may be shared.
+NoSecret = ProfileCredentialConfig | PersonalAccessTokenConfig
+
+
 class VcsConfig(Record):
     # Deprecated for one release: repositories come from the host's repository registry
     # (`CARDEA_REPOSITORIES`, `cardea.service.repositories`). When both are set they must
@@ -67,9 +91,14 @@ class VcsConfig(Record):
     branch_prefix: Annotated[str, Field(strict=True, min_length=1, max_length=64)] = (
         "agent/{group}/"
     )
-    # `APPROVE` reviews are refused unless the host owner enables them (open question 2).
-    allow_approve: bool = False
-    credentials: Annotated[FixedTokenConfig | ProfileCredentialConfig, Field(discriminator="kind")]
+    # `APPROVE` reviews (ADR-037 question 2, decided by the owner 2026-11-16): refused by
+    # default. `true` allows them for every caller; a list of pools, each `<group>.<pool>`
+    # as in mail addresses, allows them only for members of those pools.
+    allow_approve: bool | Annotated[tuple[PoolAddress, ...], Field(max_length=32)] = False
+    credentials: Annotated[
+        FixedTokenConfig | ProfileCredentialConfig | PersonalAccessTokenConfig,
+        Field(discriminator="kind"),
+    ]
 
     @model_validator(mode="after")
     def prefix_names_the_group(self) -> Self:
@@ -90,7 +119,7 @@ def load(path: Path | None = None) -> VcsConfig:
         if refused.code != "unsafe_file":
             raise
     config = VcsConfig.model_validate_json(shared_file(location))
-    if not isinstance(config.credentials, ProfileCredentialConfig):
+    if not isinstance(config.credentials, NoSecret):
         raise Fault("unsafe_file", "A vcs configuration with a token must be private", 500)
     return config
 
