@@ -158,8 +158,10 @@ def text(result: types.CallToolResult) -> str:
 
 async def proposes(client: ClientSession, request: SessionRequest) -> SessionResult:
     held = await call(client, "mail-send", to="user@example.invalid", body="recap")
-    assert not held.is_error, held.content
+    # An error result (MCP output schemas apply only to successes) with a structured body.
+    assert held.is_error, held.content
     assert held.structured_content is not None
+    assert held.structured_content["request_id"] in text(held)
     assert held.structured_content["status"] == "approval_pending"
     assert "Do not call it again" in text(held)
     return SessionResult(text="Asked for approval to send the recap.", is_error=False)

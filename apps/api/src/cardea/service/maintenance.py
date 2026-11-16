@@ -38,6 +38,7 @@ SCHEMAS = {
     "m10_records",
     "m11_mailboxes",
     "m12_journal_triggers",
+    "m13_state_machines",
 }
 RUNTIME = "dbos=3.0.0;workflow=cardea-m1-v1"
 HOST_INPUT_RUNTIMES = runtime_ids(lambda p: p.host_inputs)

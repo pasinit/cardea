@@ -76,6 +76,7 @@ RECORD_OPERATIONS: frozenset[str] = frozenset(
         "records.claim",
         "records.release",
         "records.claimed",
+        "records.transition",
     }
 )
 
@@ -84,7 +85,8 @@ def record_grant(collection: str, action: str) -> str:
     return f"{RECORD_GRANT_PREFIX}{collection}/{action}"
 
 
-# The `approve` right on one installed operation, inside a task's own ceiling, written
+# The `approve` right on one installed operation, or on one record transition
+# (`approve:record:<collection>/<transition>`), inside a task's own ceiling, written
 # `approve:<operation>` (ADR-036 item 2): what lets an agent run, such as a reviewer, decide
 # that operation's approval requests through the built-in `approvals.decide`.
 APPROVE_GRANT_PREFIX = "approve:"
@@ -92,8 +94,11 @@ ApproveGrant = Annotated[
     str,
     Field(
         strict=True,
-        max_length=136,
-        pattern=r"^approve:[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$",
+        max_length=160,
+        pattern=(
+            r"^approve:(?:[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+"
+            f"|record:{COLLECTION_NAME}/{RECORD_ACTION})$"
+        ),
     ),
 ]
 # Built-in, in-process approval operations (ADR-036 slice 4), authorized per call by an

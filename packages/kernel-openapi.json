@@ -301,8 +301,8 @@
                   "type": "string"
                 },
                 {
-                  "maxLength": 136,
-                  "pattern": "^approve:[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+                  "maxLength": 160,
+                  "pattern": "^approve:(?:[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+|record:[a-z][a-z0-9_-]{0,63}/[a-z][a-z0-9_]{0,63})$",
                   "type": "string"
                 }
               ]
@@ -1437,7 +1437,7 @@
       },
       "CollectionDocument": {
         "additionalProperties": false,
-        "description": "`kind: Collection` (ADR-034 decision 2). State machines are slice 3.",
+        "description": "`kind: Collection` (ADR-034 decisions 2 and 3).",
         "properties": {
           "apiVersion": {
             "const": "cardea/v1alpha1",
@@ -1530,6 +1530,14 @@
           "generation": {
             "title": "Generation",
             "type": "integer"
+          },
+          "migrated": {
+            "description": "State moves; recorded as `migrated` history.",
+            "items": {
+              "$ref": "#/components/schemas/StateMove"
+            },
+            "title": "Migrated",
+            "type": "array"
           }
         },
         "required": [
@@ -1557,12 +1565,33 @@
             "$ref": "#/components/schemas/Guards",
             "default": {}
           },
+          "initial": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z][a-z0-9_]{0,63}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initial"
+          },
           "max_record_bytes": {
             "default": 16384,
             "maximum": 49152.0,
             "minimum": 64.0,
             "title": "Max Record Bytes",
             "type": "integer"
+          },
+          "migrate": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/StateMigration"
+            },
+            "maxItems": 64,
+            "title": "Migrate",
+            "type": "array"
           },
           "schema": {
             "additionalProperties": {
@@ -1571,10 +1600,46 @@
             "title": "Schema",
             "type": "object"
           },
+          "states": {
+            "anyOf": [
+              {
+                "items": {
+                  "pattern": "^[a-z][a-z0-9_]{0,63}$",
+                  "type": "string"
+                },
+                "maxItems": 64,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "States"
+          },
           "supervisor": {
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
             "title": "Supervisor",
             "type": "string"
+          },
+          "terminal": {
+            "default": [],
+            "items": {
+              "pattern": "^[a-z][a-z0-9_]{0,63}$",
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Terminal",
+            "type": "array"
+          },
+          "transitions": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Transition"
+            },
+            "maxItems": 64,
+            "title": "Transitions",
+            "type": "array"
           }
         },
         "required": [
@@ -2688,8 +2753,8 @@
                   "type": "string"
                 },
                 {
-                  "maxLength": 136,
-                  "pattern": "^approve:[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+                  "maxLength": 160,
+                  "pattern": "^approve:(?:[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+|record:[a-z][a-z0-9_-]{0,63}/[a-z][a-z0-9_]{0,63})$",
                   "type": "string"
                 }
               ]
@@ -2800,8 +2865,8 @@
                   "type": "string"
                 },
                 {
-                  "maxLength": 136,
-                  "pattern": "^approve:[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+                  "maxLength": 160,
+                  "pattern": "^approve:(?:[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+|record:[a-z][a-z0-9_-]{0,63}/[a-z][a-z0-9_]{0,63})$",
                   "type": "string"
                 }
               ]
@@ -4389,8 +4454,8 @@
                   "type": "string"
                 },
                 {
-                  "maxLength": 136,
-                  "pattern": "^approve:[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+                  "maxLength": 160,
+                  "pattern": "^approve:(?:[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+|record:[a-z][a-z0-9_-]{0,63}/[a-z][a-z0-9_]{0,63})$",
                   "type": "string"
                 }
               ]
@@ -4507,6 +4572,45 @@
           "receipt"
         ],
         "title": "OperationView",
+        "type": "object"
+      },
+      "ReceiptRequirement": {
+        "additionalProperties": false,
+        "description": "Evidence a transition needs: a successful call of `operation` by the caller.\n\n`same_task` accepts a call of the caller's own task (its run). `same_caller` accepts one\nof any task of the same agent principal within `window_seconds` before the transition.\nThe cited call must name this record: its `record_id` argument, or an idempotency\ncontext `<record_id>.<epoch>`.",
+        "properties": {
+          "in": {
+            "default": "same_task",
+            "enum": [
+              "same_task",
+              "same_caller"
+            ],
+            "title": "In",
+            "type": "string"
+          },
+          "operation": {
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+            "title": "Operation",
+            "type": "string"
+          },
+          "window_seconds": {
+            "anyOf": [
+              {
+                "maximum": 2592000.0,
+                "minimum": 60.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Seconds"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "title": "ReceiptRequirement",
         "type": "object"
       },
       "ReconcileResult": {
@@ -5518,6 +5622,61 @@
         "title": "Signal",
         "type": "object"
       },
+      "StateMigration": {
+        "additionalProperties": false,
+        "description": "Where records in a removed state go (decision 3.3).",
+        "properties": {
+          "from": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$",
+            "title": "From",
+            "type": "string"
+          },
+          "to": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$",
+            "title": "To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "title": "StateMigration",
+        "type": "object"
+      },
+      "StateMove": {
+        "additionalProperties": false,
+        "description": "Records this generation moves to another state (ADR-034 decision 3.3).",
+        "properties": {
+          "from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null for records without a state.",
+            "title": "From"
+          },
+          "records": {
+            "title": "Records",
+            "type": "integer"
+          },
+          "to": {
+            "title": "To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "records"
+        ],
+        "title": "StateMove",
+        "type": "object"
+      },
       "SystemView": {
         "additionalProperties": false,
         "description": "`GET /v0.2/system`: what this kernel runs and the limits its listeners enforce.",
@@ -5841,8 +6000,8 @@
                   "type": "string"
                 },
                 {
-                  "maxLength": 136,
-                  "pattern": "^approve:[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+                  "maxLength": 160,
+                  "pattern": "^approve:(?:[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+|record:[a-z][a-z0-9_-]{0,63}/[a-z][a-z0-9_]{0,63})$",
                   "type": "string"
                 }
               ]
@@ -5982,8 +6141,8 @@
                   "type": "string"
                 },
                 {
-                  "maxLength": 136,
-                  "pattern": "^approve:[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+                  "maxLength": 160,
+                  "pattern": "^approve:(?:[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+|record:[a-z][a-z0-9_-]{0,63}/[a-z][a-z0-9_]{0,63})$",
                   "type": "string"
                 }
               ]
@@ -6071,6 +6230,163 @@
           "wake_at"
         ],
         "title": "TimerWait",
+        "type": "object"
+      },
+      "Transition": {
+        "additionalProperties": false,
+        "properties": {
+          "approval": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TransitionApproval"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "claim": {
+            "default": "none",
+            "enum": [
+              "acquire",
+              "holder",
+              "release",
+              "none"
+            ],
+            "title": "Claim",
+            "type": "string"
+          },
+          "from": {
+            "items": {
+              "pattern": "^[a-z][a-z0-9_]{0,63}$",
+              "type": "string"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "title": "From",
+            "type": "array"
+          },
+          "guard": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guard"
+          },
+          "name": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$",
+            "title": "Name",
+            "type": "string"
+          },
+          "on_claim_expiry": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z][a-z0-9_]{0,63}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "On Claim Expiry"
+          },
+          "requires_receipt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReceiptRequirement"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "to": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$",
+            "title": "To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "from",
+          "to"
+        ],
+        "title": "Transition",
+        "type": "object"
+      },
+      "TransitionApproval": {
+        "additionalProperties": false,
+        "description": "An ADR-036 approval gate. `when` (CEL) sees the `records.transition` call arguments as\n`args`; it is combined with the collection and transition the rule applies to.",
+        "properties": {
+          "distinct_from_supervisor": {
+            "default": false,
+            "title": "Distinct From Supervisor",
+            "type": "boolean"
+          },
+          "expires_after_seconds": {
+            "anyOf": [
+              {
+                "maximum": 2592000.0,
+                "minimum": 60.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires After Seconds"
+          },
+          "level": {
+            "enum": [
+              "always",
+              "conditional"
+            ],
+            "title": "Level",
+            "type": "string"
+          },
+          "on_expiry": {
+            "anyOf": [
+              {
+                "enum": [
+                  "resume",
+                  "fail"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "On Expiry"
+          },
+          "reason": {
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "^[ -~]+$",
+            "title": "Reason",
+            "type": "string"
+          },
+          "when": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "When"
+          }
+        },
+        "required": [
+          "level",
+          "reason"
+        ],
+        "title": "TransitionApproval",
         "type": "object"
       },
       "TriggerDelivery": {

@@ -813,10 +813,14 @@ class AgentRunRuntime:
         if outcome.code:
             return _error(outcome.code, outcome.detail)
         if outcome.pending is not None:
-            # Not an error: the call is held; no receipt and no tool-call budget used.
+            # The call is held: no receipt and no tool-call budget used. It is marked as an
+            # error result, like tool_busy, because MCP clients validate a non-error result
+            # against the tool's output schema; the structured body is still sent.
+            body = json.dumps(outcome.pending, sort_keys=True)
             return types.CallToolResult(
-                content=[types.TextContent(type="text", text=PENDING)],
+                content=[types.TextContent(type="text", text=f"{PENDING} {body}")],
                 structured_content=outcome.pending,
+                is_error=True,
             )
         if outcome.deduplicated:
             return types.CallToolResult(
@@ -1348,6 +1352,10 @@ class AgentRunRuntime:
             self.guard(conn, task)
             if registry.get(name).cardea.version != row["operation_version"]:
                 raise Fault("operation_changed", "Operation was reinstalled")
+            # The run's live ceiling on what the call needs, including a built-in record
+            # operation's `record:<collection>/<action>` grant (ADR-036 amendment).
+            for right in approval_requests.ceiling_rights(registry, row):
+                Policy(conn).ceiling(task_id, right)
             decision = approval_requests.decision_for(conn, str(row["request_id"]))
             assert decision is not None
             if not approval_requests.holds_approve(Policy(conn), str(decision["approver_id"]), row):

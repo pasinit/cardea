@@ -345,7 +345,9 @@ class Registry:
             # mail grants name addresses, resolved when mail is sent. An approve grant
             # (ADR-036) names an installed operation.
             if grant.startswith(APPROVE_GRANT_PREFIX):
-                self.get(grant.removeprefix(APPROVE_GRANT_PREFIX))
+                resource = grant.removeprefix(APPROVE_GRANT_PREFIX)
+                if not resource.startswith(RECORD_GRANT_PREFIX):
+                    self.get(resource)
             elif grant not in KERNEL_RIGHTS and not grant.startswith(
                 ("harness:", "mail:", RECORD_GRANT_PREFIX)
             ):
