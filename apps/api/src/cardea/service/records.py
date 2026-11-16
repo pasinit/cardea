@@ -153,7 +153,8 @@ def referencing_groups(conn: sa.Connection, namespace: str, name: str) -> list[G
     specs = [
         GroupSpec.model_validate_json(row[0])
         for row in conn.exec_driver_sql(
-            "SELECT spec_json FROM agent_groups WHERE namespace=?", (namespace,)
+            "SELECT spec_json FROM agent_groups WHERE namespace=? AND state!='deleted'",
+            (namespace,),
         )
     ]
     return [spec for spec in specs if name in spec.collections]
@@ -268,7 +269,8 @@ class Link(Record):
 def _row(conn: sa.Connection, namespace: str, name: str) -> sa.RowMapping | None:
     return (
         conn.exec_driver_sql(
-            "SELECT * FROM collections WHERE namespace=? AND name=?", (namespace, name)
+            "SELECT * FROM collections WHERE namespace=? AND name=? AND deleted_at IS NULL",
+            (namespace, name),
         )
         .mappings()
         .first()
@@ -309,6 +311,12 @@ def apply_collection(
     policy = Policy(conn)
     policy.require(principal, namespace, "groups.manage")
     policy.require("platform", namespace, "groups.manage")
+    if conn.exec_driver_sql(
+        "SELECT 1 FROM collections WHERE namespace=? AND name=? AND deleted_at IS NOT NULL",
+        (namespace, name),
+    ).first():
+        # Its records and history are kept; reusing the name would revive them.
+        raise Fault("collection_deleted", "This collection was deleted; choose a new name", 409)
     existing = _row(conn, namespace, name)
     spec = document.spec_json()
     digest = document.digest
@@ -512,6 +520,61 @@ def journal(
                 },
             },
         )
+
+
+def delete_collection(
+    conn: sa.Connection, principal: str, namespace: str, name: str
+) -> dict[str, Any]:
+    """`DELETE /v0.2/collections/{name}` (ADR-034 decision 2.1, slice 8).
+
+    Refused while a group that is not deleted lists the collection. Held claims are released
+    (`claim_expired`, reason `collection_deleted`); records and history are kept, and the
+    collection becomes a tombstone that no operation reaches.
+    """
+    policy = Policy(conn)
+    row = _row(conn, namespace, name)
+    if row is None or row["supervisor_id"] != principal:
+        raise Fault("collection_not_found", "No accessible collection", 404)
+    policy.require(principal, namespace, "groups.manage")
+    policy.require("platform", namespace, "groups.manage")
+    users = [
+        str(r[0])
+        for r in conn.exec_driver_sql(
+            "SELECT name FROM agent_groups WHERE namespace=? AND state!='deleted' "
+            "AND EXISTS (SELECT 1 FROM json_each(json_extract(spec_json,'$.collections')) "
+            "WHERE value=?) ORDER BY name",
+            (namespace, name),
+        )
+    ]
+    if users:
+        raise Fault(
+            "collection_in_use",
+            f"Groups {', '.join(users)} still use this collection; remove it from them first",
+            409,
+        )
+    at = now()
+    spec = CollectionSpec.model_validate_json(row["spec_json"])
+    held = (
+        conn.exec_driver_sql(
+            "SELECT * FROM records WHERE namespace=? AND collection=? AND holder IS NOT NULL",
+            (namespace, name),
+        )
+        .mappings()
+        .all()
+    )
+    for record in held:
+        expire(conn, record, at, actor=principal, reason="collection_deleted", spec=spec)
+    conn.exec_driver_sql(
+        "UPDATE collections SET deleted_at=?,updated_at=? WHERE namespace=? AND name=?",
+        (at.isoformat(), at.isoformat(), namespace, name),
+    )
+    return {
+        "name": name,
+        "namespace": namespace,
+        "change": "deleted",
+        "claims_released": len(held),
+        "records": _count(conn, namespace, name),
+    }
 
 
 def read_access(conn: sa.Connection, principal: str, namespace: str, name: str) -> sa.RowMapping:
@@ -826,6 +889,15 @@ def standalone(spec: CollectionSpec) -> ClaimsConfig:
 def expired(row: sa.RowMapping, at: datetime) -> bool:
     lease = row["lease_expires_at"]
     return lease is not None and datetime.fromisoformat(str(lease)) <= at
+
+
+def check_may_claim(conn: sa.Connection, principal: str) -> None:
+    """A draining or removed group member takes no new claims (decision 1.5)."""
+    state = conn.exec_driver_sql(
+        "SELECT state FROM group_members WHERE principal_id=?", (principal,)
+    ).scalar()
+    if state is not None and state != "active":
+        raise OperationRejected("A draining group member takes no new claims", "member_draining")
 
 
 def check_holder(row: sa.RowMapping, caller: Mapping[str, JsonValue], epoch: object) -> None:
@@ -1228,6 +1300,7 @@ class Records:
                 raise OperationRejected("Another principal holds this record", "record_claimed")
             old = record_view(row)
             check_guard(spec, "claim", old, arguments, caller)
+            check_may_claim(conn, holder)
             held = conn.exec_driver_sql(
                 "SELECT COUNT(*) FROM records WHERE namespace=? AND collection=? AND holder=? "
                 "AND lease_expires_at>?",
@@ -1365,6 +1438,7 @@ class Records:
                     if "claim_epoch" in arguments:
                         check_holder(row, caller, arguments["claim_epoch"])
                 else:
+                    check_may_claim(conn, actor)
                     self._check_limit(conn, context.namespace, collection, actor, spec, at)
                     new["claim_epoch"] = int(row["claim_epoch"]) + 1
                 new["holder"] = actor

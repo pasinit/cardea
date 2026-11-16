@@ -513,6 +513,17 @@ class CollectionApplied(CollectionView):
     plan: CollectionPlan
 
 
+class CollectionDeleted(Wire):
+    """`DELETE /v0.2/collections/{name}`: a tombstone; records and history are kept."""
+
+    name: str
+    namespace: str
+    dry_run: bool
+    change: Literal["deleted"]
+    claims_released: int = Field(description="Held claims released with the deletion.")
+    records: int
+
+
 class RecordEvent(Record):
     event_id: int
     version: int
