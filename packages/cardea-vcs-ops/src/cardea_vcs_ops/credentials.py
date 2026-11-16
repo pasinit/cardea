@@ -21,8 +21,8 @@ permissions, at most an hour) is the documented upgrade, not built.
 """
 
 import os
-from dataclasses import dataclass, field
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Literal, Protocol
