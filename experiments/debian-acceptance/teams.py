@@ -51,6 +51,7 @@ EXAMPLES = REPOSITORY / "examples" / "teams"
 RUN = ("objects.read", "objects.write", "models.invoke")
 # A Standard Webhooks secret for the fake broker; generated per run, never a real one.
 SECRET_BYTES = 32
+APPROVER_SUBJECT = "acceptance-desk-approver"
 
 
 def document(path: str) -> dict[str, Any]:
@@ -61,8 +62,11 @@ def groups() -> dict[str, dict[str, Any]]:
     return {name: document(f"{name}/group.json") for name in ("software-team", "trading-desk")}
 
 
-def provisioning(triggers: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    """As the walkthrough's: each supervisor may delegate what its pools are granted."""
+def provisioning(issuer: str, triggers: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """As the walkthrough's: each supervisor may delegate what its pools are granted.
+
+    The desk approver is a human with an OIDC identity at the run's test issuer.
+    """
     from cardea.service.models import RIGHTS
 
     permissions: list[Any] = []
@@ -83,7 +87,13 @@ def provisioning(triggers: list[dict[str, Any]] | None = None) -> dict[str, Any]
     return {
         "principals": [
             *people("runtime", "sup-eng", "sup-desk"),
-            *people("desk-approver", kind="human"),
+            {
+                "principal_id": "desk-approver",
+                "kind": "human",
+                "auth_kind": "oidc",
+                "issuer": issuer,
+                "subject": APPROVER_SUBJECT,
+            },
         ],
         "permissions": permissions,
         "platform": platform_rows,
@@ -92,9 +102,39 @@ def provisioning(triggers: list[dict[str, Any]] | None = None) -> dict[str, Any]
 
 
 class Teams:
-    def __init__(self, stack: Stack, evidence: Evidence) -> None:
+    def __init__(self, stack: Stack, evidence: Evidence, issuer: Any) -> None:
         self.stack = stack
         self.evidence = evidence
+        self.issuer = issuer
+
+    def approver(self, **mint: Any) -> tuple[str, str]:
+        """An OIDC access token for the desk approver, from the run's test issuer."""
+        return ("oidc", self.issuer.mint(mint.pop("subject", APPROVER_SUBJECT), **mint))
+
+    def oidc_refusals(self) -> None:
+        """Tokens the kernel must refuse: wrong audience, expired, no `openid`, unknown."""
+        tries = {
+            "wrong_audience": self.approver(audience="another-service"),
+            "expired": self.approver(seconds=-30),
+            "no_openid_scope": self.approver(scope="profile"),
+            "unknown_subject": self.approver(subject="nobody"),
+            "forged": ("oidc", self.approver()[1][:-4] + "AAAA"),
+        }
+        results = {
+            name: self.stack.attempt(
+                "desk-approver",
+                "GET",
+                "/approvals",
+                credential=credential,
+                params={"namespace": "desk", "state": "pending"},
+            )
+            for name, credential in tries.items()
+        }
+        self.evidence.check(
+            "oidc_bad_tokens_refused",
+            all(not r["ok"] and r["status"] in {401, 403} for r in results.values()),
+            results=results,
+        )
 
     def configure(self, example: str) -> dict[str, Any]:
         manifest = groups()[example]
@@ -319,15 +359,27 @@ class Teams:
             [{"calls": [self.move("orders", order, "approve")]}, {"calls": []}],
         )
         ev.check("trading_desk_approve_waits", state == "waiting", state=state)
+        self.oidc_refusals()
+        before = self.issuer.introspections
         pending = st.request(
-            "desk-approver", "GET", "/approvals", params={"namespace": "desk", "state": "pending"}
+            "desk-approver",
+            "GET",
+            "/approvals",
+            credential=self.approver(),
+            params={"namespace": "desk", "state": "pending"},
         )["approvals"]
+        ev.check(
+            "oidc_approver_token_introspected_by_the_kernel",
+            self.issuer.introspections > before,
+            introspections=self.issuer.introspections - before,
+        )
         ev.check("trading_desk_approver_sees_one_request", len(pending) == 1)
         request = pending[0]
-        st.request(
+        decided = st.request(
             "desk-approver",
             "POST",
             f"/approvals/{request['request_id']}/decision",
+            credential=self.approver(),
             json={
                 "decision_id": "d-1",
                 "decision": "approve",
@@ -336,6 +388,18 @@ class Teams:
         )
         wait_for(lambda: self.state_of("desk", order) == "approved", 300, 2)
         ev.check("trading_desk_held_transition_ran", self.state_of("desk", order) == "approved")
+        decisions = rows(
+            st.database,
+            "SELECT approver_id, decision FROM approval_decisions WHERE request_id=?",
+            request["request_id"],
+        )
+        ev.check(
+            "oidc_human_decision_recorded",
+            [(d["approver_id"], d["decision"]) for d in decisions]
+            == [("desk-approver", "approve")],
+            decided=decided,
+            decisions=decisions,
+        )
 
         place = {
             "tool": "broker.place_order",
@@ -368,7 +432,7 @@ class Teams:
         path.chmod(0o600)
         fills = document("trading-desk/trigger.fills.json")
         fills["event"]["secret_file"] = str(path)
-        st.provision(provisioning([fills]))
+        st.provision(provisioning(self.issuer.url, [fills]))
         set_plan(
             st.work,
             "desk.execution.0",
@@ -453,18 +517,33 @@ def main(argv: list[str]) -> int:
     processes = Processes(work)
 
     def body() -> None:
-        stack = Stack(work, processes, lib, reference_ops=True)
-        stack.provision(provisioning())
-        stack.start()
-        teams = Teams(stack, evidence)
-        for example in (teams.software_team, teams.trading_desk):
-            try:
-                example()
-            except Exception as error:  # noqa: BLE001 - one example must not hide the other
-                evidence.check(
-                    f"{example.__name__}_completed", False, error=f"{type(error).__name__}: {error}"
-                )
-        stack.stop()
+        from oidc_issuer import Issuer
+
+        with Issuer() as issuer:
+            secret = work / "oidc-client-secret"
+            secret.write_text(issuer.client_secret + "\n")
+            secret.chmod(0o600)
+            oidc = {
+                "issuer": issuer.url,
+                "client_id": issuer.client_id,
+                "client_secret_file": str(secret),
+                "allow_loopback_http": True,
+            }
+            evidence.observe("oidc_issuer", issuer.metadata())
+            stack = Stack(work, processes, lib, reference_ops=True, oidc=oidc)
+            stack.provision(provisioning(issuer.url))
+            stack.start()
+            teams = Teams(stack, evidence, issuer)
+            for example in (teams.software_team, teams.trading_desk):
+                try:
+                    example()
+                except Exception as error:  # noqa: BLE001 - one example must not hide the other
+                    evidence.check(
+                        f"{example.__name__}_completed",
+                        False,
+                        error=f"{type(error).__name__}: {error}",
+                    )
+            stack.stop()
 
     try:
         return run_script(evidence, body)

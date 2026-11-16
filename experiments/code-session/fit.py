@@ -188,6 +188,28 @@ def check_bundle(bundle: bytes, base_sha: str) -> dict[str, Any]:
         return {"verified": True, "files": files}
 
 
+def installed_profile(installed: dict[str, Any]) -> dict[str, Any]:
+    """The `coding` profile from the helper's `profiles` answer, or a loud refusal.
+
+    The helper answers `{"profiles": {name: profile}, "workers": {name: [profiles]}}`,
+    the shape `cardea.service.confined.Workers` reads. A missing profile, a worker that
+    may not use it or a profile without an integer `wall_seconds` stops the fit test
+    before anything starts, instead of being checked against defaults.
+    """
+    profiles = installed.get("profiles")
+    workers = installed.get("workers")
+    if not isinstance(profiles, dict) or not isinstance(workers, dict):
+        raise SystemExit(f"unexpected helper answer: keys {sorted(installed)}")
+    profile = profiles.get(PROFILE)
+    if not isinstance(profile, dict):
+        raise SystemExit(f"the helper has no {PROFILE!r} profile: {sorted(profiles)}")
+    if PROFILE not in (workers.get(WORKER) or ()):
+        raise SystemExit(f"the {WORKER!r} worker may not use the {PROFILE!r} profile")
+    if not isinstance(profile.get("wall_seconds"), int):
+        raise SystemExit(f"the {PROFILE!r} profile has no integer wall_seconds")
+    return profile
+
+
 def run(out: Path, poll: float) -> int:
     from cardea.hosts.debian import DebianHost
 
@@ -199,8 +221,7 @@ def run(out: Path, poll: float) -> int:
     }
     checks: dict[str, bool] = evidence["checks"]
     host.probe()
-    profiles = host.profiles()
-    profile = profiles.get(PROFILE, {})
+    profile = installed_profile(host.profiles())
     evidence["profile"] = profile
     checks["profile_model_api_only"] = profile.get("network", {}).get("policy") == (
         "model_api_only"
@@ -208,7 +229,7 @@ def run(out: Path, poll: float) -> int:
     checks["token_file_present"] = Path(TOKEN).exists()
     checks["cache_present"] = Path(CACHE).is_dir()
     job = uuid.uuid4().hex
-    deadline = time.time() + profile.get("wall_seconds", 3600)
+    deadline = time.time() + profile["wall_seconds"]
     content = json.dumps(payload(job), separators=(",", ":")).encode()
     host.start_confined(job, content, deadline, PROFILE, WORKER)
     try:

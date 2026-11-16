@@ -34,7 +34,18 @@ def scripts() -> Iterator[None]:
         yield
     finally:
         sys.path.remove(str(SCRIPTS))
-        for name in ("common", "plan", "stack", "upgrade", "events_tls", "teams", "long_call"):
+        for name in (
+            "common",
+            "plan",
+            "stack",
+            "upgrade",
+            "events_tls",
+            "teams",
+            "long_call",
+            "oidc_issuer",
+            "launcher",
+            "devauth",
+        ):
             sys.modules.pop(name, None)
 
 
@@ -76,6 +87,7 @@ def test_help_works_without_a_store(argv: list[str], tmp_path: Path) -> None:
 def test_every_program_is_covered_by_help() -> None:
     assert {p.name for p in SCRIPTS.glob("*.py")} - set(PROGRAMS) == {
         "common.py",
+        "oidc_issuer.py",
         "plan.py",
         "stack.py",
     }
@@ -186,3 +198,77 @@ def test_the_long_call_configuration_names_only_the_fixture(scripts: None) -> No
     assert alias == long_call.REPOSITORY_ALIAS and not registry.repositories[alias].hosted
     assert config["harness"]["argv"][:2] == ["/usr/bin/python3", "-I"]
     assert "CARDEA_TASK" in config["harness"]["argv"][3]
+
+
+def oidc_config(tmp_path: Path, issuer: object) -> object:
+    from cardea.service.models import ServiceConfig
+
+    secret = tmp_path / "client-secret"
+    secret.write_text(issuer.client_secret + "\n")  # type: ignore[attr-defined]
+    secret.chmod(0o600)
+    return ServiceConfig.model_validate(
+        {
+            "data_dir": str(tmp_path / "store"),
+            "spiffe_socket": "unix:///nonexistent",
+            "trust_domain": "acceptance.invalid",
+            "runtime_spiffe_id": "spiffe://acceptance.invalid/runtime",
+            "oidc": {
+                "issuer": issuer.url,  # type: ignore[attr-defined]
+                "client_id": issuer.client_id,  # type: ignore[attr-defined]
+                "client_secret_file": str(secret),
+                "allow_loopback_http": True,
+            },
+        }
+    )
+
+
+def test_the_test_issuer_passes_the_kernels_oidc_validation(tmp_path: Path, scripts: None) -> None:
+    """The launcher's identity checks OIDC tokens with the kernel's own discovery and
+    introspection code, against the test issuer over loopback."""
+    sys.path.insert(0, str(SCRIPTS.parents[0] / "try"))
+    try:
+        from cardea.service.database import Fault
+
+        issuer_module = load("oidc_issuer")
+        launcher = load("launcher")
+        (tmp_path / "store").mkdir(mode=0o700)
+        with issuer_module.Issuer() as issuer:
+            identity = launcher.AcceptanceIdentity(oidc_config(tmp_path, issuer))
+            proof = identity.validate(issuer.mint("human-1"), "oidc")
+            assert (proof.kind, proof.issuer, proof.subject) == ("oidc", issuer.url, "human-1")
+            assert issuer.introspections == 1
+            for bad in (
+                issuer.mint("human-1", audience="another-service"),
+                issuer.mint("human-1", seconds=-30),
+                issuer.mint("human-1", scope="profile"),
+                issuer.mint("human-1")[:-4] + "AAAA",
+            ):
+                with pytest.raises(Fault):
+                    identity.validate(bad, "oidc")
+            # Development SPIFFE tokens still work beside it.
+            issue = load("devauth").issue
+
+            spiffe = identity.validate(
+                issue(identity.dev.config, "spiffe://acceptance.invalid/sup"), "spiffe"
+            )
+            assert spiffe.subject == "spiffe://acceptance.invalid/sup"
+            identity.close()
+    finally:
+        sys.path.remove(str(SCRIPTS.parents[0] / "try"))
+
+
+def test_the_test_issuer_refuses_unauthenticated_introspection(scripts: None) -> None:
+    import httpx
+
+    with load("oidc_issuer").Issuer() as issuer:
+        token = issuer.mint("human-1")
+        refused = httpx.post(f"{issuer.url}/introspect", data={"token": token})
+        assert refused.status_code == 401
+        answered = httpx.post(
+            f"{issuer.url}/introspect",
+            data={"token": token},
+            auth=(issuer.client_id, issuer.client_secret),
+        )
+        assert answered.json()["active"] is True and answered.json()["sub"] == "human-1"
+        keys = httpx.get(f"{issuer.url}/jwks").json()["keys"]
+        assert keys and "d" not in keys[0]

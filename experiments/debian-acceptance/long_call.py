@@ -315,7 +315,9 @@ def run(args: argparse.Namespace) -> int:
             installed = probe.workers.installed()
         finally:
             probe.database.close()
-        profile = installed.get("profiles", {}).get("coding", {})
+        profile = installed.get("profiles", {}).get("coding")
+        if not isinstance(profile, dict):
+            raise SystemExit("the helper has no 'coding' profile; install it first")
         evidence.check(
             "code_session_worker_installed",
             "coding" in installed.get("workers", {}).get("code-session", ()),
