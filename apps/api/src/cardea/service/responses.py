@@ -209,6 +209,133 @@ class GroupView(Wire):
     status: GroupStatus
 
 
+class OverviewRun(Record):
+    task_id: str
+    outcome: str
+    failure_code: str | None
+    finished_at: str | None
+
+
+class OverviewMember(Record):
+    principal_id: str
+    pool: str
+    ordinal: int
+    state: str = Field(description="active, draining or removed.")
+    disabled: bool
+    active_task_id: str | None = Field(description="The member's unfinished run, if any.")
+    last_run: OverviewRun | None = Field(description="Its most recently finished run.")
+    claims: list[str] = Field(description="Live claims held, as `<collection>/<record_id>`.")
+    claims_truncated: int
+
+
+class OverviewPool(Record):
+    name: str
+    replicas: int = Field(description="Replicas in the spec; 0 for a removed pool.")
+    members: list[OverviewMember]
+
+
+class OverviewClaim(Record):
+    record_id: str
+    title: str | None
+    state: str | None
+    holder: str
+    claim_epoch: int
+    claimed_at: str | None
+    age_seconds: int | None
+    lease_expires_at: str | None
+
+
+class OverviewCollection(Record):
+    name: str
+    status: Literal["ok", "unavailable"]
+    by_state: dict[str, int] = Field(description="Record counts by state; `null` without states.")
+    total: int
+    claimed: list[OverviewClaim]
+    truncated: int
+
+
+class OverviewAddress(Record):
+    address: str
+    pending: int
+    in_flight: int
+    dead: int
+    consumed: int
+
+
+class OverviewMailbox(Record):
+    addresses: list[OverviewAddress]
+    truncated: int
+
+
+class OverviewApproval(Record):
+    request_id: str
+    task_id: str
+    operation: str
+    resource: str | None
+    state: str
+    created_at: str
+    expires_at: str | None
+
+
+class OverviewApprovals(Record):
+    items: list[OverviewApproval]
+    truncated: int
+
+
+class OverviewAccount(Record):
+    account: str = Field(description="`group` or `pool:<name>`.")
+    usd: float
+    window: str
+    window_ends_at: str
+    used_usd: float = Field(description="Settled costs plus open and unknown reservations.")
+
+
+class OverviewExpectation(Record):
+    pool: str
+    window_key: str
+    outcome: str
+    observed: int
+    reported_at: str
+
+
+class OverviewSpend(Record):
+    accounts: list[OverviewAccount]
+    expectations: list[OverviewExpectation] = Field(description="Latest closed windows first.")
+    expectations_truncated: int
+
+
+class OverviewEvent(Record):
+    cursor: int
+    type: str
+    producer_id: str
+    task_id: str | None
+    subject: str | None
+    at: str
+
+
+class OverviewJournal(Record):
+    events: list[OverviewEvent] = Field(description="Newest first.")
+    truncated: int
+
+
+class GroupOverview(Wire):
+    """`GET /v0.2/groups/{name}/overview`: one read snapshot of a group's state."""
+
+    group: str
+    namespace: str
+    state: str
+    generation: int
+    observed_generation: int
+    as_of: str
+    cursor: int = Field(description="The journal cursor of the snapshot.")
+    pools: list[OverviewPool]
+    collections: list[OverviewCollection]
+    mailbox: OverviewMailbox
+    approvals: OverviewApprovals
+    spend: OverviewSpend
+    journal: OverviewJournal
+
+
 class GroupPlan(Record):
     members_added: list[str]
     members_draining: list[str] = Field(

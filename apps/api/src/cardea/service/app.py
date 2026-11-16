@@ -28,6 +28,9 @@ from cardea.service import (
     spend,
 )
 from cardea.service import events as intake
+from cardea.service import (
+    group_overview as overview,
+)
 from cardea.service.auth import Proof
 from cardea.service.database import Fault, borrow
 from cardea.service.kernel import Kernel
@@ -63,6 +66,7 @@ from cardea.service.responses import (
     EventDelivered,
     GroupApplied,
     GroupDeleted,
+    GroupOverview,
     GroupView,
     HostBudgetView,
     MailboxMessage,
@@ -620,6 +624,19 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
     @app.get("/v0.2/groups/{name}", response_model=GroupView)
     def read_group(name: GroupPath, namespace: Namespace, proof: Credential) -> dict[str, Any]:
         return groups.read(kernel, proof, namespace, name)
+
+    @app.get("/v0.2/groups/{name}/overview", response_model=GroupOverview)
+    def group_overview(
+        name: GroupPath,
+        namespace: Namespace,
+        proof: Credential,
+        events: Annotated[int, Query(ge=0, le=100)] = 20,
+    ) -> dict[str, Any]:
+        """A supervisor's overview of a group (ADR-034 amendment 2026-11-16), read in one
+        snapshot: members and their runs and claims, each listed collection's counts and
+        claimed records, mailbox counts, open approvals, spend and the latest journal
+        events. The rights are those of `GET /v0.2/groups/{name}`."""
+        return overview.overview(kernel, proof, namespace, name, events)
 
     @app.delete("/v0.2/groups/{name}", response_model=GroupDeleted)
     def delete_group(
