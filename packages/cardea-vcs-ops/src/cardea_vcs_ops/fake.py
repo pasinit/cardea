@@ -17,6 +17,8 @@ from typing import Any
 
 import httpx
 
+from cardea.service.repositories import Registry
+from cardea.service.repositories import Repository as RegistryEntry
 from cardea_vcs_ops.config import Repository
 
 API = "https://api.github.test"
@@ -56,6 +58,25 @@ class FakeGitHub:
         subprocess.run(["git", "init", "--bare", "-q", str(path)], check=True)
         self.repositories[f"{owner}/{name}"] = FakeRepository(owner, name, path)
         return Repository(owner=owner, name=name, api_url=API, git_url=str(path))
+
+    def registry(self, **branch_prefixes: str) -> Registry:
+        """The host's repository registry for these fake repositories, aliased by name: each
+        bare repository is both the read-only `source` and where `vcs.*` pushes."""
+        entries = {}
+        for repo in self.repositories.values():
+            entries[repo.name] = RegistryEntry(
+                source=str(repo.path),
+                owner=repo.owner,
+                name=repo.name,
+                api_url=API,
+                git_url=str(repo.path),
+                **(
+                    {"branch_prefix": branch_prefixes[repo.name]}
+                    if repo.name in branch_prefixes
+                    else {}
+                ),
+            )
+        return Registry(repositories=entries)
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self.handle)
