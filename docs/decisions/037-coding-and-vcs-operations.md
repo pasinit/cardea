@@ -5,7 +5,8 @@
   - the content gate (decision 4, implementation slice 6), selected and implemented; see [Content gate: implementation](#content-gate-implementation-2026-11-16) and [redaction and confined workers](#content-gate-redaction-and-confined-workers-2026-11-16);
   - implementation slices 2 and 3: the ADR-023 amendment and `code.session` with a fake harness and fake gates;
   - the Claude Code harness, the `coding` profile and the Debian fit-test script, with portable tests against a fake `claude` (the fit test is written but has not run);
-  - implementation slices 4 and 5, except credential minting, which waits on the owner's choice between a GitHub App and a personal access token (open question 7).
+  - implementation slices 4 and 5, except credential minting, which waits on the owner's choice between a GitHub App and a personal access token (open question 7);
+  - the `vcs` confined-worker profile, staged inputs for confined workers, and the `vcs.check_repository` readiness check.
 
   See [Implementation status](#implementation-status). Open question 1 is decided by the lead and questions 2–4 carry the lead's recommendations, all subject to the owner's veto (see [Decisions](#decisions-lead-2026-11-16)). Nothing is verified on Debian or against a real repository host. Apart from the Gitleaks fit test recorded there, no fit test has run, and none with a real harness; every other "fit" is from documentation and says so. The owner's remaining questions are at the end.
 - **Affected components:** [operation broker](../components/operation-broker.md), [installed host operations](../components/installed-host-operations.md), [Debian host](../components/debian-host.md), [identity and capabilities](../components/identity-capabilities.md), [agent runtime](../components/agent-runtime.md).
@@ -293,10 +294,12 @@ The owner may veto either.
   - descriptor `inputs`: argument pointers that name an object version, or an artifact listing (`{sha256, parts}`, the form confined operations return), in the call's namespace. The core reads them under the `objects.read` ceiling: the store verifies each part's digest and the core checks the joined bytes against `sha256` (`input_digest_mismatch`). The handler gets the bytes in `OperationContext.inputs`, and they are never recorded.
   - `OperationContext.group`: the caller's group from the member table, also recorded in the receipt's context for reconcilers;
   - the grant form `repo:<alias>`, which provisioning accepts like `mail:` and `record:`.
-- **Not yet:**
-  - the `vcs` confined-worker profile: the handlers run in the service process for now, and moving them behind ADR-028 is a later slice;
+- **Not yet (at that point):**
+  - the `vcs` confined-worker profile;
   - the App minter;
   - the repository-side ruleset readiness check.
+
+  The profile and the readiness check are in the next section.
 
   No migration was needed.
 - **Tests** (`apps/api/tests/service/test_vcs_ops.py`, with an in-process fake GitHub in `cardea_vcs_ops.fake`: REST over `httpx.MockTransport`, backed by real bare repositories so pushes and ref reads agree):
@@ -311,6 +314,56 @@ The owner may veto either.
   - **Content gate:** a denylisted term in a pushed file, in a commit message or in a comment is refused with nothing sent and without echoing the term, and with no gate configured nothing is sent.
   - **Token containment:** the token reaches the host's `Authorization` header and appears in no database row, log record, session request or handler representation.
   - **Digests:** descriptors without `resource` or `inputs` keep their digest.
+
+### The `vcs` confined worker, staged inputs and the readiness check (implemented 2026-11-16, portable tests only)
+
+- **Confined.** The installed `vcs.*` descriptors name the executor `{profile: "vcs", worker: "vcs-<operation>"}` and no in-process handler, so the service process never loads the package. Each worker runs `operation_worker <handler> [<reconciler>]`: the handler by default, and its reconciler only for a reconcile job (`"reconcile": true` with a listed `entry`). A worker never runs the handler when asked to reconcile.
+- **Confined reconcilers.** For a confined operation that declares a reconciler, the kernel runs the reconciler in the operation's worker, with its own deadline, as a new job on each pass. The worker returns `{applied, output}`. The registry no longer needs a confined operation's reconciler in-process.
+- **The `vcs` profile** (`deploy/small-host/cardea/cardea-host-workers.json`):
+  - `allow_list` through its own proxy port `127.0.10.6`, allowing `api.github.com` and `github.com` (git over HTTPS);
+  - the new optional `kernel_callback: true`, which adds `127.0.0.1` to the unit's `IPAddressAllow`. It is allowed only on `allow_list` profiles and lets the worker reach the content gate's per-call loopback endpoint (#53);
+  - `input_kb` 12288 for a 10 MiB change bundle;
+  - 300 s of wall time, concurrency 2;
+  - the credential `/etc/cardea/credentials/github`.
+- **Credential, into the worker only.** The provider is now chosen in the host-owner file. `{"kind": "profile_credential"}` reads the profile's single credential at `$CARDEA_CREDENTIAL` for each call, as #54's provider is asked for each call. systemd loads the credential into the unit from a root-only file. The kernel never reads it, and it never appears in a job document, a staged input, a worker's output or the store.
+  - A configuration file that holds no secret may be a shared, read-only host-owner file. The worker reads it at `/opt/cardea-vcs/vcs.json`, bound read-only; an example is `cardea/cardea-vcs.json`.
+  - A file holding the test provider's token must still be private.
+  - A missing credential is a definite refusal, `credential_unavailable`, with nothing sent.
+  - The future GitHub App minter (open question 7) fits here: the App's key becomes the profile credential and minting happens in the worker.
+- **Content gate** through the #53 callback: the worker's `check_content` asks the kernel over loopback. A refusal keeps its code (`content_refused`) and names no matched text.
+- **Rejection codes.** A worker's refusal now carries its code (`{"rejected", "code"}`), so `branch_not_allowed`, `approve_refused`, `content_refused` and the others reach the caller as they do in-process.
+- **Group.** The caller's group goes to the worker in the job document, as the recorded context already carries it for reconcilers.
+- **Staged inputs.** `OperationContext.inputs` reach confined workers as files:
+  - The kernel sends each input's bytes and SHA-256 beside the job document, with a manifest in the document (pointer to file index, SHA-256 and size). It refuses more than 8 inputs or 16 MiB before anything starts (`input_too_large`).
+  - The helper checks each digest (`input_digest_mismatch`) and their total against the profile's `input_kb`, which defaults to 0, before its no-relaunch fence. It then writes them as `0444` files in the job's staging and binds that directory read-only at `/run/cardea/inputs` (`$CARDEA_INPUTS`).
+  - The worker checks each file's size and SHA-256 against the manifest again.
+  - The files go with the job's cleanup. Inputs are never recorded: not in the receipt, the job document or the helper's status.
+  - The helper's request limit grows to carry them base64-encoded.
+- **`vcs.check_repository`** (read, `repo:<alias>`) reports and enforces nothing. It reads the repository's default branch and the ruleset rules that apply (`GET /repos/{owner}/{repo}/rules/branches/{branch}`) to three branch names: the default branch, a branch outside the agent prefix, and one inside it. These probe names are never created. It reports three required checks and two recommendations, and lists under `missing` the required ones that fail:
+  - **Required:**
+    - `default_branch_requires_review`: a `pull_request` rule with at least one approving review;
+    - `pushes_outside_agent_prefix_blocked`: `creation` and `update` rules outside the prefix;
+    - `agent_prefix_pushable`: neither rule under the prefix.
+  - **Recommended:**
+    - `default_branch_last_push_approval`;
+    - `agent_prefix_no_force_push`.
+
+  It cannot see bypass actors or classic branch protection, and it says so in `not_checked`.
+- **Tests:**
+  - `test_vcs_confined.py` (9 tests) runs the real worker command as a separate process with only the worker's environment, against the fake GitHub served over loopback HTTP. It covers:
+    - push, open, comment, review, read and check, each in its own worker, with the change staged as an input whose manifest matches;
+    - token containment: the token reaches the host from the worker, and appears in no database row, log record, session request, job document, staged input, worker output, the kernel's environment or its handlers;
+    - refusal codes and the content gate through the callback, with nothing sent;
+    - a crash after the host acted, reconciled in the operation's worker as a reconcile job;
+    - the readiness report on a repository without rules, with the right rulesets, and with rules that also stop the agents' branches;
+    - a tampered staged input refused in the worker;
+    - a reconcile job that never runs the handler;
+    - a shared configuration that may not hold a token;
+    - a missing profile credential refused with nothing sent.
+  - `test_confined_launcher.py` covers staged inputs as read-only files bound read-only, digest, size and count refusals before the fence, a profile without `input_kb`, and `kernel_callback` only on `allow_list` profiles.
+  - `test_deploy_examples.py` checks that the profile and its six workers fit the descriptors.
+  - #54's in-process tests (`test_vcs_ops.py`) keep testing the handler logic, with the executor removed.
+- **Not yet:** the App minter (open question 7), and a Debian fit test of the `vcs` profile against a real repository host. No migration was needed.
 
 ## Verification
 

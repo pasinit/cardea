@@ -140,13 +140,16 @@ Single-operation tasks and agent runs can wait for an approver before an effect 
 
 ## Repository-host operations
 
-The `cardea-vcs-ops` package installs `vcs.push_branch`, `vcs.open_change`, `vcs.comment`, `vcs.review` and `vcs.read_change` ([ADR-037](decisions/037-coding-and-vcs-operations.md), slices 4 and 5, without credential minting).
+The `cardea-vcs-ops` package installs `vcs.push_branch`, `vcs.open_change`, `vcs.comment`, `vcs.review`, `vcs.read_change` and `vcs.check_repository` ([ADR-037](decisions/037-coding-and-vcs-operations.md), slices 4 and 5, without credential minting).
 
-- **Configuration.** A private JSON file named by `CARDEA_VCS_CONFIG` (default `/etc/cardea/vcs.json`) lists the repository aliases (owner, name, REST API URL, git URL), the branch prefix (default `agent/{group}/`), `allow_approve` (default false) and the credential provider. Install the descriptors from the package's `descriptors/` directory under `operations_dir`.
+- **Confined.** The installed descriptors run in the `vcs` worker profile (ADR-028), one worker per operation, so they need host execution and the root helper. See [deploy/small-host/README.md](../deploy/small-host/README.md), section 4, step 9. The service process holds no repository credential.
+
+- **Configuration.** A JSON file named by `CARDEA_VCS_CONFIG` (in the worker, `/opt/cardea-vcs/vcs.json`) lists the repository aliases (owner, name, REST API URL, git URL), the branch prefix (default `agent/{group}/`), `allow_approve` (default false) and the credential provider. With `{"kind": "profile_credential"}` it holds no secret and may be a root-owned, read-only file; with a token it must be private. Install the descriptors from the package's `descriptors/` directory under `operations_dir`.
 - **Authority.** Each call needs the operation's grant and `repo:<alias>` in the caller's live ceiling. Provision supervisor rows for `repo:<alias>` like any right, with `delegate` to pass it to group pools.
 - **Branches.** Only group members push or open changes, under `agent/<group>/`; other names are refused with `branch_not_allowed` before any network call. `APPROVE` reviews are refused with `approve_refused` unless `allow_approve` is set.
 - **Content gate.** Every push, pull request, comment and review passes the kernel's content gate first (ADR-037 slice 6): a push's added lines and commit messages, and every text field. Without a configured gate these operations refuse (`content_gate_unavailable`) and send nothing.
-- **Credentials.** Only the test provider exists (`{"kind": "test", "token": ...}`), for fakes and tests. A production minter (a GitHub App or a personal access token, ADR-037 open question 7) is not available yet, so do not point these operations at a real host.
+- **Credentials.** `profile_credential` reads the `vcs` profile's credential, a root-only file systemd loads into the unit. Until the minter exists that file is a token; the test provider (`{"kind": "test", "token": ...}`) is for fakes and tests. A production minter (a GitHub App or a personal access token, ADR-037 open question 7) is not available yet, so do not point these operations at a real host.
+- **Readiness.** `vcs.check_repository` reports whether the repository's rules require a human review on the default branch and allow pushes only under the agent prefix. It lists what is missing and changes nothing; check it before pointing a team at a repository.
 - **Recovery.** An interrupted push, pull request, comment or review is `outcome_unknown`. `POST /v0.2/tasks/<id>/operations/<operation_id>/reconcile` reads the host (the branch head, the pull request for the head, or the comment or review marker) and settles it without sending again.
 
 ## Retention and deletion

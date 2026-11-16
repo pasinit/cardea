@@ -178,6 +178,20 @@ python3 /opt/cardea/packaging/fetch_opencode.py /opt/cardea/opencode
    - `curl -s -o /dev/null -w '%{http_connect}\n' -x http://127.0.10.5:3128 https://api.anthropic.com/` prints 200; any other host prints 403.
    - `experiments/code-session/debian.sh` runs one session on a fixture repository and records evidence (see its README).
 
+9. Optional: the repository-host operations (`vcs.*`, [ADR-037](../../docs/decisions/037-coding-and-vcs-operations.md)), confined in the `vcs` profile.
+   1. `cardea/cardea-host-workers.json` holds the `vcs` profile and one worker per operation:
+      - the profile allows only `api.github.com` and `github.com`, through proxy port `127.0.10.6`;
+      - `kernel_callback` lets the worker reach the content gate's loopback endpoint;
+      - `input_kb` admits a 10 MiB change bundle as a staged, read-only input;
+      - each worker runs `cardea.hosts.operation_worker` with the operation's handler, then its reconciler.
+   2. The credential is a root-only file, `/etc/cardea/credentials/github` (`0600 root`), which systemd hands to each unit. The kernel never reads it.
+   3. Install `cardea/cardea-vcs.json`, edited for your repositories, as `/opt/cardea-vcs/vcs.json` (root, `0644`). It holds no secret.
+   4. Install `packages/cardea-vcs-ops` into `/opt/cardea/apps/api/.venv`, copy its `descriptors/` into the kernel's `operations_dir`, and configure the content gate. Provision `vcs.*` and `repo:<alias>` for the supervisors that may use them, and restart.
+
+   Checks:
+   - `curl -s -o /dev/null -w '%{http_connect}\n' -x http://127.0.10.6:3128 https://api.github.com/` prints 200, and `https://api.anthropic.com/` prints 403.
+   - A supervisor's `vcs.check_repository` on each repository reports `ready: true`. Otherwise its `missing` list names the rule to add on the host.
+
 ## 5. Telos host
 
 1. Run a SPIRE agent with `spire/agent-telos.conf` (replace `CARDEA_PRIVATE_IP`), using the second join token. Its socket must be at `/run/spire/agent.sock`.
