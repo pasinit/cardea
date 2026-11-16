@@ -1,7 +1,7 @@
 # ADR-037: Coding and Version-Control Operations for an Agent Team
 
 - **Date / owner / milestones:** 2026-11-16; runtime, host-execution and API maintainers. Builds on [ADR-023](023-installed-operation-registry.md) (installed operations), [ADR-026](026-effect-idempotency-and-reconciliation.md) (effect scopes and reconciliation), [ADR-028](028-configurable-worker-profiles.md) (confined workers), [ADR-033](033-pluggable-agent-harnesses.md) (harnesses), [ADR-034](034-agent-groups-and-shared-records.md) (agent groups; its software-team example names `vcs.open_change`) and [ADR-036](036-approval-waits.md) (approval waits).
-- **Status:** proposed. Two questions are decided by the lead, subject to the owner's veto (see [Decisions](#decisions-lead-2026-11-16)). Implementation-plan slices 2 and 3 are implemented and pass portable tests (2026-11-16): the ADR-023 amendment and `code.session` with a fake harness and fake gates. Nothing else is implemented, nothing is verified on Debian, and no fit test with a real harness has run. The owner's remaining questions are at the end.
+- **Status:** proposed, except the content gate (decision 4, implementation slice 6) and implementation-plan slices 2 and 3. At the lead's direction the gate was selected and implemented portably on 2026-11-16; see [Content gate: implementation](#content-gate-implementation-2026-11-16). Two questions are decided by the lead, subject to the owner's veto (see [Decisions](#decisions-lead-2026-11-16)), and slices 2 and 3 are implemented and pass portable tests (2026-11-16): the ADR-023 amendment and `code.session` with a fake harness and fake gates; see [Implementation status](#implementation-status). Nothing else is implemented and nothing is verified on Debian. Apart from the Gitleaks fit test recorded there, no fit test has run, and none with a real harness; every other "fit" is from documentation and says so. The owner's remaining questions are at the end.
 - **Affected components:** [operation broker](../components/operation-broker.md), [installed host operations](../components/installed-host-operations.md), [Debian host](../components/debian-host.md), [identity and capabilities](../components/identity-capabilities.md), [agent runtime](../components/agent-runtime.md).
 
 ## Requirement
@@ -125,6 +125,43 @@ Compose existing pieces into one operations package, `vcs.*` and `code.*`, insta
 - Each operation is a grant (ADR-023). Repositories are resource-qualified like ADR-033's `harness:<id>`: a call names a repository alias from host configuration, and needs `repo:<alias>` in its grants and in the supervisor's live ceiling (open question 4).
 - Operations that leave the host can carry ADR-036 rules, for example "always" for `vcs.open_change` on a protected repository.
 - Branch names come from the operation, not the agent: `agent/<group>/<record or task>` by default, inside the configured prefix (open question 3).
+
+### Content gate: implementation (2026-11-16)
+
+**Gitleaks as a pinned binary, or a port of its rules?** Both were fit-tested on Gitleaks v8.30.1, and the binary was chosen. The evidence is in [`gitleaks-fit-evidence-2026-11-16.json`](gitleaks-fit-evidence-2026-11-16.json).
+
+- **A rule port loses fidelity.** The default configuration has 222 rules.
+  - Of the 221 with a regex, 25 do not compile with Python's `re`: Go RE2 allows `(?i)` in the middle of a pattern and `\z`, and Python does not.
+  - 130 rules also depend on an entropy threshold, 221 on keyword prefilters, and 9 on allowlists, plus a global allowlist and stopwords.
+  - A port would need a regex translator and a re-implementation of each of those, and it would drift from upstream with every release.
+- **The binary fits.**
+  - `gitleaks stdin` scans the text it is given in about 0.3 s, and `--redact` keeps secrets out of its report.
+  - It reads only what the kernel passes: an explicit `--config` (or its built-in rules), an empty ignore directory (`-i`), a cleaned environment (so `GITLEAKS_CONFIG` has no effect) and a scratch working directory.
+  - It honours an inline `gitleaks:allow` comment unless `--ignore-gitleaks-allow` is passed. The fit test confirmed the bypass, so the gate always passes the flag: content must never be able to exempt itself.
+- **Pinned like OpenCode.** `packaging/fetch_gitleaks.py` downloads the release archive and checks the archive's SHA-256 against the release's checksums. The host configuration pins the binary's own SHA-256, which the gate checks before every use.
+
+**What is built** (`cardea.service.content_gate`):
+- **Configuration.** A `content_gate` section in the host configuration: the binary and its SHA-256, an optional Gitleaks TOML, a denylist file, `notify_supervisor` (default `true`) and a timeout. Every file is private and read like the other secret files.
+- **Denylist.** One case-insensitive term per line, or `re:<pattern>` for a regular expression. Blank lines and `#` comments are ignored. The rule ID is `denylist:<line>`, so the term itself is never shown. An invalid pattern, a pattern that matches the empty string, an over-long line, a file that is not UTF-8 and a file that is not private all fail closed with `content_gate_unavailable`, and the message names the line at most.
+- **Inputs.**
+  - The added lines of a unified diff, located as `<file>:<line>` in the new file. An added line outside a hunk refuses the diff.
+  - Free-text fields, located as `<field>` or `<field>:<line>`.
+- **The check.**
+  - The kernel hands every in-process installed operation `OperationContext.check_content(operation=…, diff=…, texts=…)`. The future `vcs.*` operations call it before any network request.
+  - A finding raises `OperationRejected` with code `content_refused`. The refusal names each rule and location (at most ten, then a count), never the matched text. Nothing is sent and the failure is definite.
+  - When the gate is not configured, the scanner is missing or tampered with, or the scan fails, the call is refused with `content_gate_unavailable`.
+- **Supervisor mail.** A refusal also sends kernel mail to the run's supervisor (ADR-034 decision 4), listing the rules and locations. This is the lead's recommendation on open question 5 and can be turned off with `notify_supervisor: false`.
+- **Scope.** Added lines only, as recommended on open question 5. Whole-tree scanning is not built.
+- **Tests** (`apps/api/tests/service/test_content_gate.py`; the Gitleaks tests run in CI with the pinned binary):
+  - diff and text locations;
+  - the denylist's terms and patterns, case-insensitive;
+  - five ways a denylist fails closed;
+  - the binary's digest pin;
+  - a fake secret, assembled at runtime, found in an added line despite an inline `gitleaks:allow`, and in a text field;
+  - a clean change sent;
+  - a denylisted term and a secret each refusing a call through an installed operation, with nothing sent, and neither the receipt's refusal nor the supervisor's mail containing the matched text;
+  - the notice switched off;
+  - no gate, or a malformed one, refusing the call.
 
 ## Integration
 
