@@ -325,7 +325,7 @@ The owner may veto either.
 - **Confined reconcilers.** For a confined operation that declares a reconciler, the kernel runs the reconciler in the operation's worker, with its own deadline, as a new job on each pass. The worker returns `{applied, output}`. The registry no longer needs a confined operation's reconciler in-process.
 - **The `vcs` profile** (`deploy/small-host/cardea/cardea-host-workers.json`):
   - `allow_list` through its own proxy port `127.0.10.6`, allowing `api.github.com` and `github.com` (git over HTTPS);
-  - the new optional `kernel_callback: true`, which adds `127.0.0.1` to the unit's `IPAddressAllow`. It is allowed only on `allow_list` profiles and lets the worker reach the content gate's per-call loopback endpoint (#53);
+  - the new optional `kernel_callback: true`, which adds the dedicated endpoint address to the unit's `IPAddressAllow` (`127.0.11.1` since the [ADR-028 amendment](028-configurable-worker-profiles.md#amendment-2026-11-16-a-dedicated-endpoint-address); `127.0.0.1` before). It is allowed only on `allow_list` profiles and lets the worker reach the content gate's per-call loopback endpoint (#53);
   - `input_kb` 12288 for a 10 MiB change bundle;
   - 300 s of wall time, concurrency 2;
   - the credential `/etc/cardea/credentials/github`.

@@ -27,7 +27,7 @@ Checked 2026-10-15.
 2. **Attempts.** Each attempt first records its number in a checkpoint, then takes a fresh lease covering the session budget plus settlement time. The checkpoint is written through RUNNING → SUSPENDED → QUEUED → RUNNING. This means a crash cannot reuse an attempt number, and kernel recovery always finds a checkpoint.
    - A failed session with every call settled is suspended and retried while attempts remain.
    - Any `running` or `outcome_unknown` call fences the run. It waits for the lease to expire, and kernel recovery then fails it with `reconciliation_required`, after which ADR-026 reconciliation applies.
-3. **Tool endpoint.** It is served on 127.0.0.1 with a per-attempt bearer token and lists only the exposed operations. Operation names map to tool names by turning `.` into `-`, because model APIs reject dots and operation names cannot contain `-`. Before each call, Cardea checks that:
+3. **Tool endpoint.** It is served on 127.0.0.1 (on `127.0.11.1` under host execution, [ADR-028 amendment](028-configurable-worker-profiles.md#amendment-2026-11-16-a-dedicated-endpoint-address)) with a per-attempt bearer token and lists only the exposed operations. Operation names map to tool names by turning `.` into `-`, because model APIs reject dots and operation names cannot contain `-`. Before each call, Cardea checks that:
    - the task is RUNNING under *this attempt's* lease, which is unexpired;
    - the full live ceiling holds;
    - the tool-call budget is not exhausted.

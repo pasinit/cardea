@@ -22,6 +22,10 @@ so the change bundle has a chosen, incompressible size. Phases:
 5. **Limits.** A descriptor whose timeout exceeds the installed profile's `wall_seconds`
    is refused at admission with `operation_timeout_exceeds_profile`, and one above 7200 s
    is invalid.
+6. **Loopback fence (ADR-028).** From inside the `coding` worker, the harness connects to
+   a kernel listener on 127.0.0.1 (`--kernel-port`, or a stand-in this script opens) and
+   to a real per-attempt tool endpoint on the helper's dedicated address. The first
+   fails, the second answers, and the tool endpoint is not on 127.0.0.1.
 
 The "service" is this script's own child process running the kernel's operation runtime
 (`OperationRuntime.execute`), exactly the step the daemon's workflow runs, on this script's
@@ -69,6 +73,19 @@ HARNESS = (
     "with open('payload.bin', 'wb') as stream:\n"
     "    stream.write(os.urandom(int(task['bytes'])))\n"
     "print('slept', task['sleep'], 'wrote', task['bytes'])\n"
+    # Phase 6: which loopback listeners the worker reaches, without any proxy.
+    "import socket\n"
+    "seen = {}\n"
+    "for name, (host, port) in task.get('probe', {}).items():\n"
+    "    try:\n"
+    "        with socket.create_connection((host, port), timeout=5) as conn:\n"
+    "            conn.sendall(b'POST /mcp HTTP/1.0\\r\\nContent-Length: 0\\r\\n\\r\\n')\n"
+    "            first = conn.recv(64).split(b'\\r\\n')[0].decode('ascii', 'replace')\n"
+    "        seen[name] = {'connected': True, 'status_line': first}\n"
+    "    except OSError as error:\n"
+    "        seen[name] = {'connected': False, 'error': type(error).__name__}\n"
+    "if seen:\n"
+    "    print('LOOPBACK', json.dumps(seen, sort_keys=True))\n"
 )
 
 
@@ -202,7 +219,13 @@ def prepare(store: Path) -> None:
 
 
 def submit(
-    store: Path, key: str, sleep: float, size: int, token: str, timeout: int | None = None
+    store: Path,
+    key: str,
+    sleep: float,
+    size: int,
+    token: str,
+    timeout: int | None = None,
+    probe: dict[str, list[Any]] | None = None,
 ) -> str:
     from cardea.service.models import OperationTaskRequest
 
@@ -218,7 +241,9 @@ def submit(
                 "arguments": {
                     "repository": REPOSITORY_ALIAS,
                     "base_ref": "main",
-                    "task": json.dumps({"sleep": sleep, "bytes": size, "token": token}),
+                    "task": json.dumps(
+                        {"sleep": sleep, "bytes": size, "token": token, "probe": probe or {}}
+                    ),
                     "task_key": f"{key}-{token[:8]}",
                 },
                 "grants": [
@@ -454,10 +479,81 @@ def run(args: argparse.Namespace) -> int:
             invalid = True
         evidence.check("timeout_above_two_hours_invalid", invalid)
 
+        # 6. The loopback fence: only the dedicated endpoint address is reachable.
+        loopback_fence(store, service, evidence, args.kernel_port)
+
     try:
         return run_script(evidence, body)
     finally:
         processes.close()
+
+
+def loopback_fence(store: Path, service: Any, evidence: Evidence, kernel_port: int | None) -> None:
+    """Phase 6: from inside the worker, 127.0.0.1 is closed and the endpoint answers."""
+    import socket
+    import threading
+
+    from cardea.hosts import launcher
+    from cardea.service.tool_endpoint import ToolEndpoint
+
+    async def no_call(name: str, arguments: dict[str, Any], gone: Any) -> Any:
+        raise RuntimeError("the probe calls no tool")
+
+    stand_in: socket.socket | None = None
+    if kernel_port is None:
+        # A stand-in for the kernel API or any operator service on 127.0.0.1.
+        stand_in = socket.create_server(("127.0.0.1", 0))
+        kernel_port = int(stand_in.getsockname()[1])
+
+        def answer() -> None:
+            assert stand_in is not None
+            while True:
+                try:
+                    conn, _ = stand_in.accept()
+                except OSError:
+                    return
+                with conn:
+                    conn.sendall(b"HTTP/1.0 200 OK\r\n\r\n")
+
+        threading.Thread(target=answer, daemon=True).start()
+    try:
+        with socket.create_connection(("127.0.0.1", kernel_port), timeout=5):
+            host_reaches = True
+    except OSError:
+        host_reaches = False
+    evidence.check("host_reaches_the_kernel_listener", host_reaches, port=kernel_port)
+    try:
+        with ToolEndpoint([], no_call, launcher.ENDPOINT_ADDRESS) as endpoint:
+            try:
+                with socket.create_connection(("127.0.0.1", endpoint.port), timeout=5):
+                    on_default = True
+            except OSError:
+                on_default = False
+            evidence.check("tool_endpoint_not_on_127_0_0_1", not on_default, url=endpoint.url)
+            probe = {
+                "kernel": ["127.0.0.1", kernel_port],
+                "endpoint": [launcher.ENDPOINT_ADDRESS, endpoint.port],
+            }
+            task_id = submit(store, "loopback", 0, 1024, uuid.uuid4().hex, probe=probe)
+            service(task_id, "loopback").wait(timeout=900)
+    finally:
+        if stand_in is not None:
+            stand_in.close()
+    output = (receipt(store, task_id).result or {}).get("output", {})
+    tail = str(output.get("harness", {}).get("output_tail", ""))
+    line = next((x for x in tail.splitlines() if x.startswith("LOOPBACK ")), "")
+    seen = json.loads(line.removeprefix("LOOPBACK ")) if line else {}
+    evidence.observe("loopback_probe", seen)
+    evidence.check(
+        "worker_cannot_reach_127_0_0_1",
+        seen.get("kernel", {}).get("connected") is False,
+        kernel=seen.get("kernel"),
+    )
+    evidence.check(
+        "worker_reaches_the_tool_endpoint",
+        str(seen.get("endpoint", {}).get("status_line", "")).startswith("HTTP/1."),
+        endpoint=seen.get("endpoint"),
+    )
 
 
 def main(argv: list[str]) -> int:
@@ -469,6 +565,12 @@ def main(argv: list[str]) -> int:
     running.add_argument("--kill-after", type=int, default=600)
     running.add_argument("--bundle-mib", type=int, default=9)
     running.add_argument("--oversize-mib", type=float, default=10.3)
+    running.add_argument(
+        "--kernel-port",
+        type=int,
+        default=None,
+        help="a listener on 127.0.0.1 the worker must not reach, e.g. the daemon's port",
+    )
     config = commands.add_parser("config", help="print the code.session configuration")
     config.add_argument("source", help="the fixture repository's path")
     registry = commands.add_parser("repositories", help="print the repository registry")
