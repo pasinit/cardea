@@ -1,7 +1,11 @@
 # ADR-037: Coding and Version-Control Operations for an Agent Team
 
 - **Date / owner / milestones:** 2026-11-16; runtime, host-execution and API maintainers. Builds on [ADR-023](023-installed-operation-registry.md) (installed operations), [ADR-026](026-effect-idempotency-and-reconciliation.md) (effect scopes and reconciliation), [ADR-028](028-configurable-worker-profiles.md) (confined workers), [ADR-033](033-pluggable-agent-harnesses.md) (harnesses), [ADR-034](034-agent-groups-and-shared-records.md) (agent groups; its software-team example names `vcs.open_change`) and [ADR-036](036-approval-waits.md) (approval waits).
-- **Status:** proposed, except the content gate (decision 4, implementation slice 6) and implementation-plan slices 2 and 3. At the lead's direction the gate was selected and implemented portably on 2026-11-16; see [Content gate: implementation](#content-gate-implementation-2026-11-16) and [redaction and confined workers](#content-gate-redaction-and-confined-workers-2026-11-16). Two questions are decided by the lead, subject to the owner's veto (see [Decisions](#decisions-lead-2026-11-16)), and slices 2 and 3 are implemented and pass portable tests (2026-11-16): the ADR-023 amendment and `code.session` with a fake harness and fake gates; see [Implementation status](#implementation-status). Nothing else is implemented and nothing is verified on Debian. Apart from the Gitleaks fit test recorded there, no fit test has run, and none with a real harness; every other "fit" is from documentation and says so. The owner's remaining questions are at the end.
+- **Status:** proposed, except three parts that are selected and implemented; nothing is verified on Debian. Two questions are decided by the lead, subject to the owner's veto (see [Decisions](#decisions-lead-2026-11-16)); the owner's remaining questions are at the end.
+  - **Implemented:** the content gate (decision 4, plan slice 6), with redaction of refused content and the confined-worker callback (see [Content gate: implementation](#content-gate-implementation-2026-11-16) and [redaction and confined workers](#content-gate-redaction-and-confined-workers-2026-11-16)); plan slice 2, the [ADR-023 amendment](023-installed-operation-registry.md#amendment-2026-11-16-long-confined-operations); and plan slice 3, `code.session` with a fake harness and fake gates (see [Implementation status](#implementation-status)).
+  - **Not implemented:** credentials and the repository-host operations (`vcs.*`, plan slices 4 and 5), a real harness, and the `coding` profile's network policy.
+  - **Portable tests only:** everything implemented. Apart from the Gitleaks fit test, no fit test has run, and none with a real harness; every other "fit" is from documentation and says so.
+  - **Verified on Debian:** nothing yet (plan slice 7); see the [Debian acceptance checklist](../acceptance/debian-adr-034-037.md).
 - **Affected components:** [operation broker](../components/operation-broker.md), [installed host operations](../components/installed-host-operations.md), [Debian host](../components/debian-host.md), [identity and capabilities](../components/identity-capabilities.md), [agent runtime](../components/agent-runtime.md).
 
 ## Requirement
@@ -224,7 +228,7 @@ The owner may veto either.
 
 ## Verification
 
-None. This record is a proposal.
+Portable tests only, for the implemented parts: `test_content_gate.py`, `test_content_gate_agent_runs.py` and `test_content_gate_confined.py` for the gate, and `test_code_session.py` for slices 2 and 3 (all in `apps/api/tests/service/`). Nothing has run on Debian; see the [Debian acceptance checklist](../acceptance/debian-adr-034-037.md). The rest of this record is a proposal.
 
 ## Limits
 
