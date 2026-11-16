@@ -86,6 +86,9 @@ PROPERTIES = {
 # A worker's output document; artifacts such as a coding session's change bundle travel in it
 # (ADR-037), so it may reach 16 MiB. Each profile's `output_kb` sets its own, smaller limit.
 MAX_OUTPUT = 16 * 1048576
+# The output limit of a job that recorded none: the fixed M2 workers, and jobs staged before
+# per-job limits existed. It is the helper's former global limit.
+LEGACY_OUTPUT = 262144
 MAX_REQUEST = 262144
 MAX_CONFINED_INPUT = 131072
 NAME = r"[a-z][a-z0-9-]{0,31}"
@@ -518,14 +521,7 @@ def status(job: str) -> dict[str, Any]:
     path = ROOT / job / "output"
     # The output is read once the worker has finished, not on every poll while it runs.
     if state == "finished" and path.exists():
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
-        try:
-            info = os.fstat(fd)
-            if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_OUTPUT:
-                raise ValueError("invalid_output")
-            output = os.read(fd, MAX_OUTPUT + 1)
-        finally:
-            os.close(fd)
+        output = read_output(path, output_limit(job))
     return {
         "state": state,
         "result": props.get("Result", "unknown"),
@@ -535,6 +531,51 @@ def status(job: str) -> dict[str, Any]:
         "memory_peak": props.get("MemoryPeak", "[not set]"),
         "wall_ms": elapsed(props),
     }
+
+
+def output_limit(job: str) -> int:
+    """The job's recorded output limit, within the global ceiling; the legacy one if absent."""
+    path = ROOT / job / "output_limit"
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return LEGACY_OUTPUT
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_size > 16:
+            raise ValueError("invalid_output_limit")
+        text = os.read(fd, 17).decode()
+    finally:
+        os.close(fd)
+    if not re.fullmatch(r"[1-9][0-9]{0,15}", text):
+        raise ValueError("invalid_output_limit")
+    return min(int(text), MAX_OUTPUT)
+
+
+def read_output(path: Path, limit: int) -> bytes:
+    """The whole output file, at most `limit` bytes; any other size is refused."""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > limit:
+            raise ValueError("invalid_output")
+        chunks: list[bytes] = []
+        size = 0
+        while True:
+            # A short read is not the end: read until EOF, never past the limit.
+            chunk = os.read(fd, min(1048576, limit + 1 - size))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            size += len(chunk)
+            if size > limit:
+                raise ValueError("invalid_output")
+    finally:
+        os.close(fd)
+    if size != info.st_size:
+        # The file changed while it was read: refuse rather than return part of it.
+        raise ValueError("invalid_output")
+    return b"".join(chunks)
 
 
 def elapsed(props: dict[str, str]) -> int | None:
@@ -619,10 +660,16 @@ def admit_confined(
     return content, profile, worker
 
 
-def stage(directory: Path, content: bytes) -> None:
+def stage(directory: Path, content: bytes, output_limit: int = LEGACY_OUTPUT) -> None:
+    """Stage a job: its input, and the largest output `status` will accept from it."""
     # Exclusive creation is a durable no-relaunch fence; a partial start is never retried.
     directory.mkdir(mode=0o711)
     directory.chmod(0o711)
+    with (directory / "output_limit").open("x") as stream:
+        stream.write(str(min(output_limit, MAX_OUTPUT)))
+        stream.flush()
+        os.fsync(stream.fileno())
+    (directory / "output_limit").chmod(0o444)
     (directory / "input").mkdir(mode=0o755)
     (directory / "input").chmod(0o755)
     with (directory / "input/data").open("xb") as stream:
@@ -680,7 +727,8 @@ def handle(request: dict[str, Any]) -> dict[str, Any]:
             content, profile, worker = admit_confined(job, request)
         except Exception as error:
             raise refusal(error) from error
-        stage(directory, content)
+        # The job may return at most its profile's `output_kb`, whatever the global ceiling.
+        stage(directory, content, profile["output_kb"] * 1024)
         if request["deadline"] <= time.time():
             raise ValueError("expired_authority")
         run(confined_command(job, request["deadline"], profile, worker))
