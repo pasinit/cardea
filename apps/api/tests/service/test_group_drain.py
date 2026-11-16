@@ -341,3 +341,33 @@ def test_a_collection_in_use_cannot_be_deleted(kernel: Kernel) -> None:
     with pytest.raises(Fault) as reused:
         items(kernel)
     assert reused.value.code == "collection_deleted"
+
+
+def disable(kernel: Kernel, principal: str) -> None:
+    """An operator's kill switch: the principal is disabled outside the group's lifecycle."""
+    with kernel.database.engine.begin() as conn:
+        conn.exec_driver_sql("UPDATE principals SET disabled=1 WHERE principal_id=?", (principal,))
+
+
+def test_reactivation_re_enables_only_what_the_drain_disabled(kernel: Kernel) -> None:
+    put(kernel, manifest(pool(replicas=3)))
+    disable(kernel, "desk.worker.2")
+    put(kernel, manifest(pool(replicas=1)))
+    assert members(kernel)["desk.worker.1"] == ("removed", 1)
+    assert members(kernel)["desk.worker.2"] == ("removed", 1)
+    grown = put(kernel, manifest(pool(replicas=3)))
+    # The drained member comes back; the operator-disabled one stays disabled and is shown.
+    assert members(kernel)["desk.worker.1"] == ("active", 0)
+    assert members(kernel)["desk.worker.2"] == ("active", 1)
+    assert grown["plan"]["members_disabled"] == ["desk.worker.2"]
+    assert live_triggers(kernel) == ["desk.worker.0.t0", "desk.worker.1.t0"]
+    with pytest.raises(Fault) as refused:
+        run_for(kernel, "desk.worker.2")
+    assert refused.value.code == "principal_disabled"
+    # Disabling an active member and deleting the group, then reviving it, keeps it disabled.
+    disable(kernel, "desk.worker.0")
+    delete(kernel)
+    revived = put(kernel, manifest(pool(replicas=3)))
+    assert members(kernel)["desk.worker.0"] == ("active", 1)
+    assert members(kernel)["desk.worker.1"] == ("active", 0)
+    assert revived["plan"]["members_disabled"] == ["desk.worker.0", "desk.worker.2"]
