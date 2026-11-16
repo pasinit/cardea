@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling==1.29.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cardea-vcs-ops"
+version = "0.1.0"
+description = "Repository-host operations (vcs.*) for Cardea agent teams (ADR-037)"
+requires-python = ">=3.12"
+# Installed into the kernel's own environment, which provides `cardea`, `httpx` and `pydantic`.
+dependencies = []
+
+# ADR-023: a descriptor's `handler` and `reconciler` name entry points in this group.
+[project.entry-points."cardea.operations"]
+"vcs.push_branch" = "cardea_vcs_ops:push_branch"
+"vcs.find_branch" = "cardea_vcs_ops:find_branch"
+"vcs.open_change" = "cardea_vcs_ops:open_change"
+"vcs.find_change" = "cardea_vcs_ops:find_change"
+"vcs.comment" = "cardea_vcs_ops:comment"
+"vcs.find_comment" = "cardea_vcs_ops:find_comment"
+"vcs.review" = "cardea_vcs_ops:review"
+"vcs.find_review" = "cardea_vcs_ops:find_review"
+"vcs.read_change" = "cardea_vcs_ops:read_change"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cardea_vcs_ops"]

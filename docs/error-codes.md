@@ -48,6 +48,7 @@ errors answer 409. A request that fails schema validation answers
 | `collection_supervisor` | 403 | The caller must be the collection's supervisor; The collection belongs to another supervisor | `cardea.service.records` |
 | `content_gate_unavailable` | 503 | The content gate cannot run ({…}) | `cardea.service.content_gate` |
 | `context_not_read_only` | 422 | Context operations must be read-only | `cardea.service.operations` |
+| `custom` | — | A pull request already exists for {…}:{…}. | `cardea_vcs_ops.fake` |
 | `deadline_exceeded` | 403, 409 | A kernel contract rule refused the change; Execution deadline elapsed | `cardea.kernel.lifecycle`, `cardea.service.runtime` |
 | `deadline_or_terminal` | 403 | Task cannot dispatch | `cardea.service.agent_run_runtime`, `cardea.service.host_runtime`, `cardea.service.operation_runtime` |
 | `decision_conflict` | 409 | Decision ID was already used with another body | `cardea.service.approval_requests` |
@@ -79,11 +80,14 @@ errors answer 409. A request that fails schema validation answers
 | `host_unavailable` | 503 | Host result could not be established | `cardea.hosts.debian` |
 | `http_error` | — | HTTP request cannot be served | `cardea.service.app` |
 | `identity_immutable` | 403 | Provision a new principal instead of reassigning identity | `cardea.service.kernel` |
-| `input_too_large` | 413 | Host input exceeds 16384 bytes | `cardea.service.host_runtime`, `cardea.service.kernel` |
+| `input_digest_mismatch` | 409 | Input {…} does not match its sha256 | `cardea.service.invocation` |
+| `input_namespace` | 403 | Inputs must be objects of the call's namespace | `cardea.service.invocation` |
+| `input_too_large` | 413 | Host input exceeds 16384 bytes; Inputs exceed 16 MiB | `cardea.service.host_runtime`, `cardea.service.invocation`, `cardea.service.kernel` |
+| `input_unavailable` | 409 | Input {…}: {…} | `cardea.service.invocation` |
 | `intent_mismatch` | 409 | intent_digest does not match the stored intent | `cardea.service.approval_requests` |
 | `internal_error` | — | Operation failed; inspect state before retry | `cardea.service.app` |
 | `invalid_approve` | 403 | Only installed operations take approve rights | `cardea.service.kernel` |
-| `invalid_arguments` | 422 | Malformed gate request; Address exactly one instance, pool or group; Arguments do not match the operation schema (and 1 more) | `cardea.service.content_gate`, `cardea.service.mailbox`, `cardea.service.operations` |
+| `invalid_arguments` | 422 | Malformed gate request; The resource argument must name a resource; Input {…} must name an object version (and 3 more) | `cardea.service.content_gate`, `cardea.service.invocation`, `cardea.service.mailbox`, `cardea.service.operations` |
 | `invalid_backup` | 400 | Use a standalone SQLite backup, not the active file; Wrong database application identity; Unsupported base schema (and 5 more) | `cardea.service.admin`, `cardea.service.maintenance` |
 | `invalid_checkpoint` | 409 | This store checkpoints only settled work. | `cardea.kernel.store` |
 | `invalid_credential` | 401 | Bound coordinator proof required; Bearer authentication is required; Credential has expired (and 2 more) | `cardea.runtime.a2a`, `cardea.service.app`, `cardea.service.auth` |
@@ -204,21 +208,26 @@ errors answer 409. A request that fails schema validation answers
 
 What a receipt's or a task's `failure.code` can hold. These are not request errors:
 a run or an operation task records them, and the run view and receipts show them.
-Codes raised in `cardea_coding_ops` come from that operations package, and codes
-raised in `cardea_reference_ops` from the fake reference package used by the examples.
+Codes raised in `cardea_coding_ops` and `cardea_vcs_ops` come from those operations
+packages, and codes raised in `cardea_reference_ops` from the fake reference package
+used by the examples.
 
 | Code | Meaning | Raised in |
 |---|---|---|
+| `approve_refused` | APPROVE reviews are not allowed on this host | `cardea_vcs_ops.ops` |
 | `artifact_refused` | — | `cardea.service.kernel` |
 | `bad_cursor` | cursor is not one this operation returned | `cardea.service.records` |
+| `branch_moved` | The branch moved since the caller read it | `cardea_vcs_ops.ops` |
+| `branch_not_allowed` | Only agent-group members push branches or open changes; Branches must be named {…}<name> | `cardea_vcs_ops.ops` |
 | `call_abandoned` | — | `cardea.service.invocation` |
+| `change_invalid` | The change bundle was not staged | `cardea_vcs_ops.ops` |
 | `checkpoint_missing` | Completed work has no resumable checkpoint. | `cardea.kernel.store` |
 | `claim_limit` | The holder already has {…} claim(s); the collection allows {…} | `cardea.service.records` |
 | `claim_lost` | This claim is no longer held at epoch {…}; the record is at epoch {…}; Writes to a held record need claim_epoch {…} | `cardea.service.records` |
 | `claims_disabled` | This collection has no claims | `cardea.service.records` |
 | `claims_not_standalone` | Claims on this collection are taken by state transitions, not records.claim | `cardea.service.records` |
 | `collection_not_found` | No such collection in this namespace | `cardea.service.records` |
-| `content_gate_unavailable` | The content gate is unreachable | `cardea.service.content_gate` |
+| `content_gate_unavailable` | The content gate is unreachable; The content gate is not available to this call | `cardea.service.content_gate`, `cardea_vcs_ops.ops` |
 | `content_refusal_ignored` | the worker continued after the content gate refused | `cardea.service.confined` |
 | `content_refused` | The content gate refused a call (ADR-037 decision 4). | `cardea.service.operations` |
 | `credential_in_change` | the change or a command's output contains the model credential; nothing is returned | `cardea_coding_ops.session` |
@@ -228,11 +237,13 @@ raised in `cardea_reference_ops` from the fake reference package used by the exa
 | `expectation_exceeded` | — | `cardea.service.agent_run_runtime` |
 | `guard_refused` | {…} guard failed to evaluate: {…}; {…} guard refused this call | `cardea.service.records` |
 | `host_outcome_unknown` | Interrupted host intent; no replay | `cardea.service.host_runtime` |
+| `host_refused` | The host reports a duplicate it does not list | `cardea_vcs_ops.ops` |
 | `invalid_arguments` | Invalid decision | `cardea.service.approval_requests` |
 | `member_draining` | A draining group member takes no new claims | `cardea.service.records` |
 | `operation_failed` | no result within {…} s; {…} (HTTP {…}) | `cardea.service.invocation` |
 | `operation_outcome_unknown` | Interrupted operation; no replay | `cardea.service.invocation` |
 | `operation_rejected` | — | `cardea.service.invocation` |
+| `push_rejected` | — | `cardea_vcs_ops.ops` |
 | `receipt_invalid` | Cite a receipt of {…}; The cited call did not succeed; The cited call was not made for this record (and 3 more) | `cardea.service.records` |
 | `receipt_required` | This transition needs receipt_id of a {…} call | `cardea.service.records` |
 | `reconciliation_required` | An interrupted effect has unknown outcome. | `cardea.kernel.store` |
@@ -240,6 +251,7 @@ raised in `cardea_reference_ops` from the fake reference package used by the exa
 | `record_invalid` | labels must be distinct; data must be an object; data does not match the collection schema at {…} ({…}) (and 2 more) | `cardea.service.records` |
 | `record_not_found` | No such record | `cardea.service.records` |
 | `record_too_large` | data is {…} bytes; the collection allows {…} | `cardea.service.records` |
+| `repository_unknown` | No such repository alias on this host | `cardea_vcs_ops.ops` |
 | `risk_limit` | The order would breach the desk limit | `cardea_reference_ops.__init__` |
 | `snapshot_restored` | Historical execution sealed by snapshot recovery. | `cardea.service.admin` |
 | `stale_call` | This call is no longer running | `cardea.service.approval_requests`, `cardea.service.records` |

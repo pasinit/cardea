@@ -60,7 +60,7 @@ EXECUTE = "execute"
 # A single-operation task has at most one approval request, so its effect is `apr-01`.
 APPROVED = "apr-01"
 # Receipt context keys that are also OperationContext fields.
-CONTEXT_FIELDS = frozenset({"agent_id", "idempotency_context", "slot_time"})
+CONTEXT_FIELDS = frozenset({"agent_id", "idempotency_context", "slot_time", "group"})
 # Refusals before an approved intent runs that mean the live ceiling no longer holds.
 AUTHORITY_CODES = frozenset(
     {

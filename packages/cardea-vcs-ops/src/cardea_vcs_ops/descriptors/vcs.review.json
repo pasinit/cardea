@@ -1,0 +1,37 @@
+{
+  "tool": {
+    "name": "vcs.review",
+    "title": "Review a pull request",
+    "description": "Submit one review (COMMENT or REQUEST_CHANGES; APPROVE only where the host owner allows it) on a pull request of an allowed repository. The same client_key never reviews twice. Needs repo:<alias>.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repository": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"},
+        "number": {"type": "integer", "minimum": 1},
+        "event": {"enum": ["COMMENT", "REQUEST_CHANGES", "APPROVE"]},
+        "body": {"type": "string", "minLength": 1, "maxLength": 16000},
+        "client_key": {"type": "string", "minLength": 1, "maxLength": 128}
+      },
+      "required": ["repository", "number", "event", "body", "client_key"]
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "review_id": {"type": "integer"},
+        "state": {"type": "string"},
+        "url": {"type": "string"}
+      },
+      "required": ["review_id", "state", "url"]
+    }
+  },
+  "cardea": {
+    "version": 1,
+    "effect": "effect",
+    "handler": "vcs.review",
+    "timeout_seconds": 60,
+    "idempotency_scope": ["/repository", "/number", "/client_key"],
+    "reconciler": "vcs.find_review",
+    "resource": {"grant": "repo", "argument": "/repository"}
+  }
+}

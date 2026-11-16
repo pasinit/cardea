@@ -196,6 +196,7 @@ dev = [
     { name = "authlib" },
     { name = "cardea-coding-ops" },
     { name = "cardea-reference-ops" },
+    { name = "cardea-vcs-ops" },
     { name = "cryptography" },
     { name = "httpx" },
     { name = "mypy" },
@@ -236,6 +237,7 @@ dev = [
     { name = "authlib", specifier = "==1.8.0" },
     { name = "cardea-coding-ops", editable = "../../packages/cardea-coding-ops" },
     { name = "cardea-reference-ops", editable = "../../packages/cardea-reference-ops" },
+    { name = "cardea-vcs-ops", editable = "../../packages/cardea-vcs-ops" },
     { name = "cryptography", specifier = "==50.0.1" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "mypy", specifier = ">=1.10.0" },
@@ -257,6 +259,11 @@ source = { editable = "../../packages/cardea-coding-ops" }
 name = "cardea-reference-ops"
 version = "0.1.0"
 source = { editable = "../../packages/cardea-reference-ops" }
+
+[[package]]
+name = "cardea-vcs-ops"
+version = "0.1.0"
+source = { editable = "../../packages/cardea-vcs-ops" }
 
 [[package]]
 name = "casbin"
