@@ -69,6 +69,7 @@ RECORD_GRANT_PREFIX = "record:"
 # ceiling at every call; the operation name itself is not a grant.
 RECORD_OPERATIONS: frozenset[str] = frozenset(
     {
+        "records.summary",
         "records.create",
         "records.get",
         "records.query",
@@ -295,11 +296,19 @@ class Expectation(Record):
         return f"{bound} successful call(s) of {self.operation.replace('.', '-')}"
 
 
+# Context budgets (ADR-031 as amended by ADR-034 decision 5.2).
+DEFAULT_CONTEXT_BYTES = 24576
+MAX_CONTEXT_BYTES = 65536
+MAX_CONTEXT_ENTRIES = 8
+
+
 class ContextCall(Record):
     """A read-only operation whose output an agent run receives before its session."""
 
     operation: OperationName
     arguments: dict[str, JsonValue] = Field(default_factory=dict)
+    # This block's byte budget; the source's default when omitted (ADR-034 decision 5.1).
+    max_bytes: Annotated[int, Field(strict=True, ge=256, le=MAX_CONTEXT_BYTES)] | None = None
 
 
 class InboundEvent(Record):
@@ -338,7 +347,11 @@ class AgentRunRequest(TaskRequest):
     # The run succeeds only when every expectation holds over its successful calls.
     expect: Annotated[tuple[Expectation, ...], Field(max_length=16)] = ()
     # Read-only operations invoked before each attempt's session; outputs go into the prompt.
-    context: Annotated[tuple[ContextCall, ...], Field(max_length=4)] = ()
+    context: Annotated[tuple[ContextCall, ...], Field(max_length=MAX_CONTEXT_ENTRIES)] = ()
+    # All context blocks together; blocks beyond it are trimmed (ADR-034 decision 5.2).
+    context_max_bytes: Annotated[int, Field(strict=True, ge=1024, le=MAX_CONTEXT_BYTES)] = (
+        DEFAULT_CONTEXT_BYTES
+    )
     # The harness and model to run (ADR-033); defaults come from the host's registry.
     harness: HarnessID | None = None
     model: ModelID | None = None
@@ -382,6 +395,16 @@ class AgentRunRequest(TaskRequest):
         if not context <= set(self.grants):
             raise ValueError("Context operations must be granted")
         return self
+
+    def digest(self, principal: str) -> str:
+        """As before the context budgets existed when they are left at their defaults."""
+        document = self.model_dump(mode="json")
+        if document.get("context_max_bytes") == DEFAULT_CONTEXT_BYTES:
+            document.pop("context_max_bytes")
+        for call in document.get("context", ()):
+            if call.get("max_bytes") is None:
+                call.pop("max_bytes", None)
+        return sha256(rfc8785.dumps({"principal": principal, "request": document})).hexdigest()
 
 
 class TaskView(Wire):
@@ -871,7 +894,11 @@ class RunTemplate(Record):
     objective: Annotated[str, Field(strict=True, min_length=1, max_length=1024)] | None = None
     instructions: Annotated[str, Field(strict=True, min_length=1, max_length=65536)]
     operations: Annotated[tuple[OperationName, ...], Field(min_length=1, max_length=32)]
-    context: Annotated[tuple[ContextCall, ...], Field(max_length=4)] = ()
+    context: Annotated[tuple[ContextCall, ...], Field(max_length=MAX_CONTEXT_ENTRIES)] = ()
+    # All context blocks together; blocks beyond it are trimmed (ADR-034 decision 5.2).
+    context_max_bytes: Annotated[int, Field(strict=True, ge=1024, le=MAX_CONTEXT_BYTES)] = (
+        DEFAULT_CONTEXT_BYTES
+    )
     harness: HarnessID | None = None
     model: ModelID | None = None
     bounds: RunBounds = RunBounds()

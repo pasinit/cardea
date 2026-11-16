@@ -29,7 +29,7 @@ from pydantic import (
 
 from cardea.kernel.models import MAX_DOCUMENT_BYTES, OperationName, canonical_json
 from cardea.service.approvals import OperationApproval
-from cardea.service.database import Fault, private_file
+from cardea.service.database import Fault, Snapshot, private_file
 from cardea.service.models import (
     APPROVE_GRANT_PREFIX,
     BUILTIN_OPERATIONS,
@@ -54,10 +54,12 @@ RESERVED_PREFIXES = (
     "records.",
     # Built-in mailbox operations (ADR-034); they run inside their settle transaction.
     "mailbox.",
+    # Built-in context sources (ADR-034 decision 5).
+    "runs.",
     # Built-in approval operations (ADR-036 slice 4).
     "approvals.",
 )
-BUILTIN_PREFIXES = ("mailbox.",)
+BUILTIN_PREFIXES = ("mailbox.", "runs.")
 # Room in a receipt's 64 KiB result document for the output and its wrapper keys.
 MAX_RECORDED_OUTPUT_BYTES = MAX_DOCUMENT_BYTES - 64
 _NAME = TypeAdapter(OperationName)
@@ -102,6 +104,8 @@ class OperationContext:
     idempotency_context: str | None = None
     # ISO 8601 scheduled slot time with its trigger's UTC offset; None outside triggers.
     slot_time: str | None = None
+    # The run's context read snapshot, for built-in context sources only (ADR-034 5.1).
+    snapshot: Snapshot | None = None
 
 
 @dataclass(frozen=True)
@@ -243,7 +247,9 @@ class Registry:
             if descriptor.name in self.descriptors:
                 raise Fault("operation_duplicate", "Operation is installed twice", 500)
             self.descriptors[descriptor.name] = descriptor
-        for builtin in mailbox.descriptors():
+        from cardea.service import context_sources
+
+        for builtin in (*mailbox.descriptors(), *context_sources.DESCRIPTORS):
             # Always present; a copy of another registry's descriptors may carry them.
             self.descriptors.setdefault(builtin.name, builtin)
         self.handlers: dict[str, Any] = dict(handlers or {})

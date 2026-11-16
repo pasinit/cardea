@@ -180,7 +180,7 @@ def compact(value: object) -> str:
 
 
 def inbox_block(request: SessionRequest) -> dict[str, Any]:
-    start = request.prompt.index('<context operation="mailbox.inbox" status="ok">')
+    start = request.prompt.index('<context operation="mailbox.inbox" status="ok"')
     body = request.prompt[start:].split(">", 1)[1].split("</context>", 1)[0]
     return cast(dict[str, Any], json.loads(body))
 

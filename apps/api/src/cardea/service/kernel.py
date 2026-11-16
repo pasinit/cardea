@@ -13,7 +13,7 @@ from cardea.hosts.debian import Host
 from cardea.kernel.models import BudgetLimits, Task, TaskState
 from cardea.kernel.store import KernelTransaction
 from cardea.runtime.agent_session import AgentSession
-from cardea.service import approval_requests, host_budget, spend
+from cardea.service import approval_requests, context_sources, host_budget, spend
 from cardea.service.approval_requests import waiting_for, withdraw
 from cardea.service.auth import IdentityProvider, Proof
 from cardea.service.confined import ConfinedAgentSession, Workers, confined_handler, job_id
@@ -308,6 +308,7 @@ class Kernel:
         self.operations = operations or Registry(handlers={})
         # Built-in record operations (ADR-034), bound to this store.
         self.records = Records(database)
+        self.recent_runs = context_sources.RecentRuns(database)
         # Installed agent harnesses (ADR-033). A lone `session` is the ADR-027 configuration,
         # served as the implicit `claude-sdk` entry so there is one code path.
         if harnesses is None and session is not None:
@@ -501,6 +502,8 @@ class Kernel:
     def handler(self, name: str) -> Handler:
         if name in RECORD_OPERATIONS:
             return self.records.handler(name)
+        if name == context_sources.RECENT:
+            return self.recent_runs.handler
         if name in APPROVAL_OPERATIONS:
             return approval_requests.decide_handler(self)
         descriptor = self.operations.get(name)
