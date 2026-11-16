@@ -130,10 +130,23 @@ class Stack:
 
         return str(issue(self.config, spiffe(principal)))
 
-    def request(self, principal: str, method: str, path: str, **kwargs: Any) -> Any:
+    def request(
+        self,
+        principal: str,
+        method: str,
+        path: str,
+        *,
+        credential: tuple[str, str] | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """A request as `principal` (a development SPIFFE token), or with `credential`,
+        a `(kind, token)` pair such as `("oidc", token)` from a test issuer."""
         from cardea.service.client import KernelClient
 
-        client = KernelClient(self.store / "kernel.sock", lambda: ("spiffe", self.token(principal)))
+        def credentials() -> tuple[str, str]:
+            return credential or ("spiffe", self.token(principal))
+
+        client = KernelClient(self.store / "kernel.sock", credentials)
         try:
             return client.request(method, path, **kwargs)
         finally:

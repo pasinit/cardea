@@ -22,10 +22,10 @@ PY=/opt/cardea/apps/api/.venv/bin/python    # the small-host kit
 ```
 
 Scripts that need a daemon start the installed kernel's real `serve()` through `launcher.py`, with two stand-ins:
-- the UNENFORCED development identity of [`experiments/try`](../try/README.md), which refuses root, host execution and OIDC;
+- the UNENFORCED development identity of [`experiments/try`](../try/README.md) for SPIFFE tokens. It refuses root and host execution. When a script configures an `oidc` block, OIDC tokens are checked by the kernel's own OIDC code (discovery, then RFC 7662 introspection) against the test issuer in `oidc_issuer.py`;
 - the scripted harness in `plan.py`: each agent-run attempt plays an action the script queued for its agent (tool calls over the attempt's real MCP endpoint, then succeed, fail or crash), instead of a model.
 
-Everything else is the production path: DBOS dispatch and schedules, the SQLite store, admission and the live ceiling, receipts and the journal. Identities are therefore not SPIFFE or OIDC. The M1 and M5 acceptance cover those (see the checklist's regression section).
+Everything else is the production path: DBOS dispatch and schedules, the SQLite store, admission and the live ceiling, receipts and the journal. SPIFFE identities are therefore not real ones; the M1 and M5 acceptance cover those (see the checklist's regression section). OIDC validation is the kernel's real code, against a local test issuer.
 
 ## The scripts
 
@@ -34,7 +34,7 @@ Everything else is the production path: DBOS dispatch and schedules, the SQLite 
 | `upgrade.py --source SNAPSHOT` | An M5 store (`m5_001`, a `cardea backup`) upgraded to the head by the installed `cardea init`. Checks row counts, that the schema equals a fresh store's, `cardea verify`, and that every append-only trigger refuses a change. `--synthesize` builds an empty `m5_001` store instead. | any user | minutes |
 | `sudo sh long_call.sh` | The ADR-023 amendment with `code.session` under the real helper and `coding` profile. Checks lease renewal over a 20-minute call; a SIGKILLed service whose worker outlives it and is then reaped, leaving `outcome_unknown` and no process; a 9 MiB artifact read back by digest and kept across backup and restore; an oversized artifact; and the timeout limits. | root, then `cardea-kernel` | about 45 min |
 | `groups.py` | ADR-034 acceptance tests 3, 4, 5 and 10 with real daemon kills and restarts. `--tests` picks some of them. | any non-root user | about 40 min |
-| `teams.py` | The two worked examples (`examples/teams`) against the daemon. Each agent step is a queued run. It also restructures the software team by manifest. | any non-root user | minutes |
+| `teams.py` | The two worked examples (`examples/teams`) against the daemon. Each agent step is a queued run. It also restructures the software team by manifest. The desk approver is an OIDC human at a test issuer, so its approval exercises the kernel's OIDC validation, and bad tokens are refused. | any non-root user | minutes |
 | `events_tls.py` | ADR-035 through the live TLS 1.3 listener with `curl` as the sender: admission, duplicates across a restart, refusals, no plaintext and no TLS 1.2. With `--external-wait`, it also checks a delivery sent by `curl` from another machine. | any non-root user | minutes |
 
 Examples:
@@ -51,5 +51,5 @@ $PY experiments/debian-acceptance/events_tls.py --listen-host 0.0.0.0 --server-n
 
 - **The daemon under systemd.** Every daemon here is a child process of its script. Restart and reboot through `systemctl` are covered by the M5 acceptance.
 - **`long_call.py`'s service** is the kernel's operation runtime in a child process (`OperationRuntime.execute`, the step the daemon's workflow runs). It is not the daemon, because the development identity cannot enable host execution.
-- **ADR-036 with a human OIDC approver.** There is still no test issuer in the fixtures, so this remains a gap. `teams.py` exercises a human approver with the development identity only.
+- **A real OIDC provider.** `teams.py`'s desk approver is an OIDC human at `oidc_issuer.py`, a local stand-in with no login, whose tokens the kernel introspects. A provider such as Keycloak is still not part of these runs.
 - **A third-party webhook sender library.** `events_tls.py` signs with its own HMAC code and sends with `curl`. Neither is a hosted sender.
