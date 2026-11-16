@@ -34,7 +34,7 @@ class Fault(Exception):
 
 
 # Latest Alembic revision this release runs against; older stores need migration.
-SCHEMA_HEAD = "m12_journal_triggers"
+SCHEMA_HEAD = "m13_state_machines"
 
 
 def private_file(path: Path) -> bytes:

@@ -370,3 +370,10 @@ and later, from version 1 of the record:
 - While a record is held, `records.update` needs the holder's current `claim_epoch`: the holder without it, or a stale holder, gets `claim_lost`, and anyone else gets `record_claimed`. Set `"fence_writes": false` in `claims` to opt out. `records.release` with `claim_epoch` gives the record back.
 - When the lease runs out, the next minute tick releases the record with a new epoch. A group member that holds a record but has no run in progress gets a follow-up run from its first trigger once less than half the lease is left, at most `max_followups` per epoch. If its claim then lapses, the supervisor gets a message.
 - `records.claimed {"collection": "work"}` lists the caller's live claims; it also works as a context operation.
+
+**State machines** ([ADR-034](decisions/034-agent-groups-and-shared-records.md) slice 3). Add `states`, `initial`, `terminal` and `transitions` to the spec, for example `{"name": "submit", "from": ["in_progress"], "to": "in_review", "claim": "holder", "requires_receipt": {"operation": "vcs.open_change", "in": "same_task"}}`. Then:
+- `records.transition {"collection": "work", "record_id": …, "transition": "submit", "claim_epoch": 1}` needs the grant `record:work/submit`, a record in a `from` state, a passing `guard` (CEL over `record`, `args` and `caller`), the claim effect (`acquire`, `holder` or `release`) and, here, a `vcs.open_change` call for this record earlier in the same run.
+- Refusals: `transition_not_allowed`, `guard_refused`, `claim_lost`, `record_claimed`, `receipt_required`, `receipt_invalid`.
+- A transition with `approval` waits for an approver holding `approve` on `record:work/<transition>` (single-operation tasks; agent runs are refused with `approval_unsupported` until ADR-036 slice 4).
+- To remove a state that records occupy, add `"migrate": [{"from": "old", "to": "new"}]`.
+- The ADR's two worked examples run end to end in `apps/api/tests/service/test_worked_examples.py`.

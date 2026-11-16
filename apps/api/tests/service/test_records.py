@@ -225,7 +225,12 @@ def items(kernel: Kernel) -> Kernel:
 def test_apply_tracks_generation_and_dry_run_writes_nothing(kernel: Kernel) -> None:
     planned = put(kernel, collection(), dry_run="true")
     assert planned.status_code == 200, planned.json()
-    assert planned.json()["plan"] == {"change": "created", "generation": 1, "dry_run": True}
+    assert planned.json()["plan"] == {
+        "change": "created",
+        "generation": 1,
+        "dry_run": True,
+        "migrated": [],
+    }
     client = TestClient(create_app(kernel))
     assert client.get("/v0.2/collections/items?namespace=test", headers=HEADERS).status_code == 404
     first = put(kernel, collection()).json()
@@ -234,7 +239,12 @@ def test_apply_tracks_generation_and_dry_run_writes_nothing(kernel: Kernel) -> N
     assert first["status"] == {"observedGeneration": 1, "records": 0}
     assert put(kernel, collection()).json()["plan"]["change"] == "unchanged"
     changed = put(kernel, collection(max_record_bytes=1024)).json()
-    assert changed["plan"] == {"change": "updated", "generation": 2, "dry_run": False}
+    assert changed["plan"] == {
+        "change": "updated",
+        "generation": 2,
+        "dry_run": False,
+        "migrated": [],
+    }
     view = client.get("/v0.2/collections/items?namespace=test", headers=HEADERS).json()
     assert view["metadata"]["generation"] == 2 and view["spec"]["max_record_bytes"] == 1024
     assert view["spec"]["schema"] == SCHEMA
@@ -631,5 +641,10 @@ def test_record_writes_are_kernel_journal_events(items: Kernel) -> None:
         "collection": "items",
         "record_id": record["record_id"],
         "version": 1,
+        # Slice 3 adds the record's state and claim, so journal triggers can filter on
+        # them; record data never enters the journal.
+        "state": None,
+        "holder": None,
+        "claim_epoch": 0,
         "actor": "a1",
     }
