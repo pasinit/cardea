@@ -52,7 +52,15 @@ from cardea.service.confined import ConfinedAgentSession, WorkerFailed
 from cardea.service.database import Fault, Snapshot, borrow
 from cardea.service.kernel import TERMINAL, Kernel
 from cardea.service.logs import ATTEMPT_LOGS, attempt_log_file
-from cardea.service.models import BUILTIN_OPERATIONS, AgentRunRequest, InboundEvent, now
+from cardea.service.models import (
+    BUILTIN_OPERATIONS,
+    AgentRunRequest,
+    AnyOfExpectation,
+    Expectation,
+    InboundEvent,
+    matches,
+    now,
+)
 from cardea.service.operation_runtime import void_reason_for
 from cardea.service.operations import Handler, OperationContext, OperationRejected
 from cardea.service.policy import Policy
@@ -168,6 +176,29 @@ def event_block(event: InboundEvent) -> str:
 def _reason(result: HarnessResult) -> str:
     """Why an attempt did not complete: its failure reason, else the harness's stop detail."""
     return result.failure_reason or result.stop_reason
+
+
+def _expectation_state(expectation: Expectation, calls: list[OperationReceipt]) -> str:
+    """`met`, `unmet` or `exceeded` over a run's calls.
+
+    Count distinct applied effects, not calls: a deduplicated receipt replays an earlier
+    call in the same effect scope and shares its scope key, so it adds nothing. Calls
+    without a declared scope each count once.
+    """
+    count = len(
+        {
+            _effect_identity(c)
+            for c in calls
+            if c.request.name == expectation.operation
+            and c.state is OperationState.SUCCEEDED
+            and matches(expectation.match, c.request.arguments.get("arguments"))
+        }
+    )
+    if count < expectation.min_calls:
+        return "unmet"
+    if expectation.max_calls is not None and count > expectation.max_calls:
+        return "exceeded"
+    return "met"
 
 
 def _effect_identity(receipt: OperationReceipt) -> str:
@@ -1603,20 +1634,25 @@ class AgentRunRuntime:
     def _unmet(request: AgentRunRequest, calls: list[OperationReceipt]) -> list[tuple[str, str]]:
         problems = []
         for expectation in request.expect:
-            # Count distinct applied effects, not calls: a deduplicated receipt replays an
-            # earlier call in the same effect scope and shares its scope key, so it adds
-            # nothing. Calls without a declared scope each count once.
-            count = len(
-                {
-                    _effect_identity(c)
-                    for c in calls
-                    if c.request.name == expectation.operation
-                    and c.state is OperationState.SUCCEEDED
-                }
-            )
-            if count < expectation.min_calls:
+            if isinstance(expectation, AnyOfExpectation):
+                # Met when one alternative is met; exceeded only when every one is.
+                states = [_expectation_state(e, calls) for e in expectation.any_of]
+                if "met" in states:
+                    continue
+                if all(state == "exceeded" for state in states):
+                    problems.append(
+                        (
+                            "expectation_exceeded",
+                            f"Exceeds every option of {expectation.describe()}",
+                        )
+                    )
+                else:
+                    problems.append(("expectation_unmet", f"Needs {expectation.describe()}"))
+                continue
+            state = _expectation_state(expectation, calls)
+            if state == "unmet":
                 problems.append(("expectation_unmet", f"Needs {expectation.describe()}"))
-            elif expectation.max_calls is not None and count > expectation.max_calls:
+            elif state == "exceeded":
                 problems.append(("expectation_exceeded", f"Exceeds {expectation.describe()}"))
         return problems
 
