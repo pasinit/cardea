@@ -350,7 +350,8 @@ def apply_collection(
     at = now().isoformat()
     if existing is None:
         conn.exec_driver_sql(
-            "INSERT INTO collections VALUES (?,?,?,?,?,?,?,?)",
+            "INSERT INTO collections(namespace,name,supervisor_id,generation,spec_json,"
+            "spec_digest,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
             (namespace, name, principal, generation, json.dumps(spec), digest, at, at),
         )
     else:

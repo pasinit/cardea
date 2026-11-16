@@ -229,7 +229,8 @@ def _ensure_member(
         (principal, runtime),
     )
     conn.exec_driver_sql(
-        "INSERT INTO group_members VALUES (?,?,?,?,?,'active',?)",
+        "INSERT INTO group_members(principal_id,namespace,group_name,pool,ordinal,state,"
+        "created_at) VALUES (?,?,?,?,?,'active',?)",
         (principal, namespace, group, pool, ordinal, at.isoformat()),
     )
     return True
@@ -300,7 +301,9 @@ def _apply(
     generation = (0 if old is None else int(old["generation"])) + int(changed)
     if old is None:
         conn.exec_driver_sql(
-            "INSERT INTO agent_groups VALUES (?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO agent_groups(namespace,name,supervisor_id,generation,"
+            "observed_generation,spec_json,spec_sha256,created_at,updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
             (
                 namespace,
                 name,
