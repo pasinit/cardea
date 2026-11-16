@@ -123,7 +123,7 @@ kernel-demo: check-uv
 
 lint: lint-api
 
-REFERENCE_OPS := ../../packages/cardea-reference-ops/src ../../packages/cardea-vcs-ops/src ../../packages/cardea-coding-ops/src ../../examples
+REFERENCE_OPS := ../../packages/cardea-reference-ops/src ../../packages/cardea-vcs-ops/src ../../packages/cardea-coding-ops/src ../../packages/cardea-env-ops/src ../../examples
 
 fix-lint: check-uv
 	cd $(API_DIR) && "$(UV)" run ruff check . $(REFERENCE_OPS) --fix
@@ -136,7 +136,7 @@ lint-api: check-uv
 	cd $(API_DIR) && "$(UV)" run ruff format --check . $(REFERENCE_OPS)
 
 typecheck-api: check-uv
-	cd $(API_DIR) && "$(UV)" run mypy src tests ../../packages/cardea-reference-ops/src ../../packages/cardea-vcs-ops/src ../../packages/cardea-coding-ops/src ../../examples/teams
+	cd $(API_DIR) && "$(UV)" run mypy src tests ../../packages/cardea-reference-ops/src ../../packages/cardea-vcs-ops/src ../../packages/cardea-coding-ops/src ../../packages/cardea-env-ops/src ../../examples/teams
 
 typecheck: typecheck-api
 
