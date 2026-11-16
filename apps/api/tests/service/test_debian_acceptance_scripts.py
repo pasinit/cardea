@@ -24,7 +24,15 @@ from cardea.service.admin import initialize
 from cardea.service.repositories import Registry
 
 SCRIPTS = Path(__file__).resolve().parents[4] / "experiments" / "debian-acceptance"
-PROGRAMS = ("upgrade.py", "long_call.py", "groups.py", "teams.py", "events_tls.py", "launcher.py")
+PROGRAMS = (
+    "upgrade.py",
+    "long_call.py",
+    "groups.py",
+    "teams.py",
+    "events_tls.py",
+    "launcher.py",
+    "registry_egress.py",
+)
 
 
 @pytest.fixture
@@ -67,6 +75,7 @@ def test_every_script_parses(path: str) -> None:
         ["groups.py", "--help"],
         ["teams.py", "--help"],
         ["events_tls.py", "--help"],
+        ["registry_egress.py", "--help"],
         ["launcher.py", "--help"],
     ],
 )

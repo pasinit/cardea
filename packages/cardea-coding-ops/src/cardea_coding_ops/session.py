@@ -100,11 +100,41 @@ def fixed_env(values: object) -> dict[str, str]:
         raise OperationRejected("gate_env must be an object")
     env: dict[str, str] = {}
     for name, value in values.items():
-        if not re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", str(name)) or CREDENTIAL_NAMES.search(
-            str(name)
+        # Proxy variables come only from the profile, through `dependencies: registries`.
+        if (
+            not re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", str(name))
+            or CREDENTIAL_NAMES.search(str(name))
+            or str(name).endswith("_PROXY")
         ):
             raise OperationRejected(f"gate_env may not set {name}")
         env[str(name)] = str(value)
+    return env
+
+
+# How the gates get dependencies (ADR-037 question 8), chosen by `dependencies` in the
+# configuration:
+# - `cache` (the default, and the stricter option): no network at all for the gates; they
+#   use the read-only, pre-provisioned cache that `gate_env` points at;
+# - `registries`: the gates receive the worker's egress proxy variables, so they may reach
+#   the package registries the `coding` profile allows (its `registries`, port 443 only).
+#   The proxy, not this setting, decides which hosts that is.
+DEPENDENCIES = ("cache", "registries")
+PROXY_NAMES = ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy", "NO_PROXY", "no_proxy")
+# The helper's egress proxies listen on 127.0.10.0/24 (ADR-028); nothing else is accepted.
+PROXY_URL = re.compile(r"http://127\.0\.10\.\d{1,3}:\d{1,5}")
+
+
+def dependency_env(config: dict[str, Any]) -> dict[str, str]:
+    """The proxy variables the gates get: none for `cache`, the worker's for `registries`."""
+    mode = config.get("dependencies", "cache")
+    if mode not in DEPENDENCIES:
+        raise OperationRejected(f"dependencies must be one of {', '.join(DEPENDENCIES)}")
+    if mode == "cache":
+        return {}
+    env = {name: os.environ[name] for name in PROXY_NAMES if name in os.environ}
+    proxies = [v for k, v in env.items() if k.lower() in {"https_proxy", "http_proxy"}]
+    if not proxies or not all(PROXY_URL.fullmatch(v) for v in proxies):
+        raise OperationRejected("dependencies from registries need the profile's egress proxy")
     return env
 
 
@@ -283,7 +313,7 @@ def session(arguments: dict[str, JsonValue], config: dict[str, Any], scratch: Pa
 
     gates: list[JsonValue] = []
     passed: list[bool] = []
-    gate_env = environment(scratch) | fixed_env(config.get("gate_env", {}))
+    gate_env = environment(scratch) | dependency_env(config) | fixed_env(config.get("gate_env", {}))
     for gate in repository.get("gates", ()):
         result = _command(
             [str(part) for part in gate["argv"]],

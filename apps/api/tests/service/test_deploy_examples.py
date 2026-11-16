@@ -121,6 +121,26 @@ def test_proxy_enforces_the_same_hosts_as_each_profile() -> None:
         assert listed is not None and listed.group(1).split() == network["hosts"]
 
 
+def test_the_proxy_file_carries_every_profiles_egress_rules() -> None:
+    """Each profile's `hosts` and `registries` reach the proxy as the helper renders them,
+    and after the deny rules, so the host's own and private addresses stay refused."""
+    lines = [
+        line.strip()
+        for line in (KIT / "cardea" / "squid-workers.conf").read_text().splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    last_deny = max(i for i, line in enumerate(lines) if line.startswith("http_access deny non"))
+    profiles = json.loads((KIT / "cardea" / "cardea-host-workers.json").read_text())["profiles"]
+    for name, entry in profiles.items():
+        for rule in launcher.egress_rules(name, entry["network"]):
+            assert rule in lines, (name, rule)
+            if rule.startswith("http_access"):
+                assert lines.index(rule) > last_deny, rule
+    # Registries are allowed only by CONNECT to port 443, never for plain HTTP.
+    registries = [line for line in lines if "_registries" in line and "http_access" in line]
+    assert registries and all(line.endswith("CONNECT tls_port") for line in registries)
+
+
 def test_proxy_config_is_standalone_and_denies_by_default() -> None:
     """The kit replaces Debian's squid.conf, whose localhost allow and wildcard port would
     otherwise relay every destination for loopback clients."""
@@ -145,9 +165,13 @@ def test_proxy_config_is_standalone_and_denies_by_default() -> None:
     allows = [line for line in access if line.startswith("http_access allow")]
     for line in allows:
         paired = re.fullmatch(r"http_access allow ([a-z][a-z0-9-]*)_port \1_hosts", line)
+        # A profile's package registries: TLS only (ADR-037 question 8).
+        registries = re.fullmatch(
+            r"http_access allow ([a-z][a-z0-9-]*)_port \1_registries CONNECT tls_port", line
+        )
         unrestricted = re.fullmatch(r"http_access allow ([a-z][a-z0-9-]*)_port", line)
         # Only a public_web profile's port may allow without a host list.
-        assert paired or (unrestricted and unrestricted.group(1) in public), line
+        assert paired or registries or (unrestricted and unrestricted.group(1) in public), line
     first_allow = access.index(allows[0])
     for rule in (
         "deny to_localhost",
@@ -286,6 +310,8 @@ def test_coding_profile_fits_code_session() -> None:
     assert bundle + 262144 <= profile["output_kb"] * 1024 <= launcher.MAX_OUTPUT
     assert profile["network"]["policy"] == "model_api_only"
     assert profile["network"]["hosts"] == ["api.anthropic.com"] and "credential" in profile
+    # ADR-037 question 8: PyPI by default; other registries are the host owner's opt-in.
+    assert profile["network"]["registries"] == ["pypi.org", "files.pythonhosted.org"]
     coding = json.loads((KIT / "cardea" / "cardea-coding.json").read_text())
     assert worker["env"]["CARDEA_CODING_CONFIG"] == "/opt/cardea-code/coding.json"
     # Repositories live in the host's one registry, which the kernel reads too (ADR-037).
@@ -299,6 +325,12 @@ def test_coding_profile_fits_code_session() -> None:
         assert repository.source.startswith("/opt/cardea-code/")
     assert any(path == "/opt/cardea-code" for path in worker["read_only"])
     fixed_env(coding["gate_env"])
+    assert coding["dependencies"] == "registries"
+    # The stricter option, a read-only cache and no network for the gates, stays an example.
+    cache = json.loads((KIT / "cardea" / "cardea-coding.cache.json").read_text())
+    assert cache["dependencies"] == "cache" and cache["harness"] == coding["harness"]
+    offline = fixed_env(cache["gate_env"])
+    assert offline["UV_OFFLINE"] == "1" and offline["PIP_NO_INDEX"] == "1"
     harness = coding["harness"]
     assert harness["kind"] == "claude-code" and harness["credential_kind"] == "oauth_token"
     assert "--bare" not in claude_code.argv({**harness, "binary": "/opt/x/claude"})

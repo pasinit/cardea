@@ -120,6 +120,15 @@ DEFAULT_QUEUE_TIMEOUT = 600
 # addresses (private, loopback, link-local, CGNAT, multicast, reserved); there is no host list.
 NETWORK = {"none", "model_api_only", "allow_list", "public_web"}
 HOSTNAME = r"(\*\.)?[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+"
+# Package registries a profile may reach for dependencies (ADR-037 question 8): exact
+# hostnames only, reached over TLS on port 443. No wildcard, no port, no IP address (the
+# last label is alphabetic) and no single-label name such as `localhost`.
+REGISTRY_HOST = (
+    r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*"
+    r"\.[a-z]([a-z0-9-]{0,61}[a-z0-9])?"
+)
+MAX_REGISTRIES = 16
+NETWORK_KEYS = {"policy", "proxy", "hosts"}
 # Read-only binds may expose installed software and public trust roots, never service state.
 READ_ONLY_PREFIXES = ("/usr/", "/opt/", "/etc/ssl/", "/etc/fonts/")
 ENV_NAME = r"[A-Z][A-Z0-9_]{0,63}"
@@ -196,8 +205,10 @@ def validate_profile(entry: object) -> dict[str, Any]:
         _proxy(network["proxy"])
         return entry
     hosts = network.get("hosts")
+    registries = network.get("registries", [])
     if (
-        set(network) != {"policy", "proxy", "hosts"}
+        not NETWORK_KEYS <= set(network) <= {*NETWORK_KEYS, "registries"}
+        or not valid_registries(registries)
         or not isinstance(hosts, list)
         or not 1 <= len(hosts) <= 64
         or not all(isinstance(h, str) and re.fullmatch(HOSTNAME, h) for h in hosts)
@@ -205,6 +216,45 @@ def validate_profile(entry: object) -> dict[str, Any]:
         raise ValueError("invalid_network")
     _proxy(network["proxy"])
     return entry
+
+
+def valid_registries(registries: object) -> bool:
+    """A profile's optional registry allow-list: 1 to 16 distinct exact hostnames."""
+    if registries == []:
+        return True
+    return (
+        isinstance(registries, list)
+        and 1 <= len(registries) <= MAX_REGISTRIES
+        and len(set(registries)) == len(registries)
+        and all(
+            isinstance(h, str) and len(h) <= 253 and re.fullmatch(REGISTRY_HOST, h)
+            for h in registries
+        )
+    )
+
+
+def egress_rules(name: str, network: dict[str, Any]) -> list[str]:
+    """The egress proxy's rules for one networked profile, as squid.conf lines.
+
+    The unit reaches only its proxy (`IPAddressAllow`); these lines are what the proxy on
+    that port then allows. `hosts` are the profile's service hosts. `registries` may be
+    reached only by CONNECT to port 443, so a registry is TLS only. Every other destination,
+    the host's own and private addresses included, falls to the file's deny rules.
+    """
+    if network["policy"] == "none":
+        return []
+    if network["policy"] == "public_web":
+        return [f"http_access allow {name}_port"]
+    lines = [
+        f"acl {name}_hosts dstdomain {' '.join(network['hosts'])}",
+        f"http_access allow {name}_port {name}_hosts",
+    ]
+    if network.get("registries"):
+        lines += [
+            f"acl {name}_registries dstdomain {' '.join(network['registries'])}",
+            f"http_access allow {name}_port {name}_registries CONNECT tls_port",
+        ]
+    return lines
 
 
 def validate_worker(entry: object, profiles: dict[str, Any]) -> dict[str, Any]:
