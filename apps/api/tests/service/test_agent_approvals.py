@@ -4,6 +4,7 @@ DBOS is replaced by a client that records enqueued continuations; tests run each
 with `AgentRunRuntime.execute`, as the agent-run and continuation workflows would.
 """
 
+import asyncio
 import json
 import time
 from datetime import timedelta
@@ -24,6 +25,8 @@ from cardea.service.auth import Proof
 from cardea.service.database import Database, Fault, borrow
 from cardea.service.kernel import Kernel, provision
 from cardea.service.models import RIGHTS, AgentRunRequest, Provisioning, Signal, now
+from cardea.service.operation_runtime import OperationRuntime
+from cardea.service.operations import Reconciliation, Registry
 
 kernel, session, tools = runs.kernel, runs.session, runs.tools
 HOUR = timedelta(hours=1)
@@ -557,3 +560,96 @@ def test_event_payloads_carry_no_arguments(
     assert {r[0] for r in rows} >= {"approval.requested", "approval.decided"}
     for _, payload in rows:
         assert "arguments" not in json.loads(payload) and "user@example" not in payload
+
+
+# Concurrent runs on one runtime keep their own record of what each prompt reported
+
+
+def test_overlapping_attempts_do_not_share_what_was_reported(
+    kernel: Kernel, tools: Tools, session: FakeSession
+) -> None:
+    """One runtime serves every run on the agent-run queue. While run A's continuation
+    session is open (its prompt reported A's executed `apr-01`), run B starts and builds its
+    own prompt. A must still finish, not park again and re-tell the agent."""
+    setup(kernel)
+    runtime = AgentRunRuntime(kernel)
+    other = submit(kernel, request_id="other-run")
+
+    async def b_session(client: ClientSession, request: SessionRequest) -> SessionResult:
+        return SessionResult(text="B done.", is_error=False)
+
+    async def a_resumed(client: ClientSession, request: SessionRequest) -> SessionResult:
+        assert 'decision="approved"' in request.prompt
+        session.scripts.append(b_session)
+        # Run B's whole attempt overlaps A's open session on the same runtime.
+        assert await asyncio.to_thread(runtime.execute, other) == "succeeded"
+        return SessionResult(text="A sent the recap.", is_error=False)
+
+    session.scripts = [proposes, a_resumed]
+    task_id = submit(kernel)
+    assert runtime.execute(task_id) == "waiting"
+    decide(kernel, held_row(kernel, task_id))
+    assert runtime.execute(task_id) == "succeeded"
+    assert task_of(kernel, task_id).state is TaskState.SUCCEEDED
+    assert len(session.requests) == 3 and len(tools.sent) == 1
+
+
+# 7. Crash after the approved intent commits, before dispatch: reconciled, never replayed
+
+
+def test_crash_after_the_approved_intent_is_reconciled_not_replayed(
+    kernel: Kernel, tools: Tools, session: FakeSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(agent_run_runtime, "attempt_lease_seconds", lambda request: 4.0)
+    monkeypatch.setattr(agent_run_runtime, "LEASE_MARGIN", 1.0)
+    observed: list[str] = []
+
+    async def reconcile(arguments: dict[str, Any], context: Any) -> Reconciliation:
+        observed.append(context.receipt_id)
+        # The crash came before dispatch: the destination shows no message.
+        return Reconciliation(applied=False)
+
+    kernel.operations = Registry(
+        (
+            runs.descriptor(
+                "mail.send", "effect", idempotency_scope=["/to"], reconciler="test.reconcile"
+            ),
+            runs.descriptor("listings.search", "read"),
+        ),
+        {
+            "test.mail.send": tools.send,
+            "test.listings.search": tools.search,
+            "test.reconcile": reconcile,
+        },
+    )
+    setup(kernel)
+    session.scripts = [proposes]
+    task_id = submit(kernel)
+    assert AgentRunRuntime(kernel).execute(task_id) == "waiting"
+    row = held_row(kernel, task_id)
+    decide(kernel, row)
+
+    def dies(stage: str) -> None:
+        if stage == "agent_run.call_admitted":
+            raise Lost
+
+    kernel.fault = dies
+    with pytest.raises(Lost):
+        AgentRunRuntime(kernel).execute(task_id)
+    kernel.fault = lambda stage: None
+    assert held_row(kernel, task_id)["state"] == "executed"
+    (apr,) = calls(kernel, task_id)
+    assert apr.request.operation_id == "apr-01" and apr.state is OperationState.RUNNING
+    # The recovered continuation fences the attempt: the effect is in doubt, never re-run.
+    assert AgentRunRuntime(kernel).execute(task_id) == "failed"
+    task = task_of(kernel, task_id)
+    assert task.failure.code == "reconciliation_required"
+    assert calls(kernel, task_id)[0].state is OperationState.OUTCOME_UNKNOWN
+    assert AgentRunRuntime(kernel).execute(task_id) == "failed"
+    assert tools.sent == []
+    # The normal reconcile path settles the `apr-01` receipt from destination state.
+    assert OperationRuntime(kernel).reconcile(task_id, "apr-01") == "failed"
+    assert observed == [apr.receipt_id] and tools.sent == []
+    (block,) = AgentRunRuntime(kernel)._approval_blocks(task_id, set())
+    assert f'request="{row["request_id"]}"' in block and 'decision="approved"' in block
+    assert '"state": "failed"' in block and "approval_" not in block.split(">", 1)[1]
