@@ -114,6 +114,15 @@ Collections are shared, versioned records with a JSON Schema ([ADR-034](decision
 - **State machines.** A collection's `states`, `initial`, `terminal` and `transitions` drive `records.transition`, authorized by `record:<name>/<transition>`. Migration `m13_state_machines` adds the columns it needs. Removing a state that records occupy is refused with `409 state_occupied` unless the spec maps it with `migrate`; the PUT moves those records and records `migrated` history (preview it with `?dry_run=true`). A transition with `approval` waits for a principal holding the `approve` mode on `record:<name>/<transition>` (with a matching `platform` row); `approve` on `records.transition` itself does not decide it. Transitions, claims, expiry and migrations append `cardea.record.*` journal events.
 - **History.** `record_events` is append-only (SQLite triggers refuse `UPDATE` and `DELETE`), and records are never deleted. `GET /v0.2/collections/{name}/records/{record_id}/events` pages it for the supervisor and for holders of `record:<name>/read`.
 
+## Group spend and windowed expectations
+
+A group and each of its pools may set `spend: {usd, window: day|week, timezone}` ([ADR-034](decisions/034-agent-groups-and-shared-records.md), slice 9). Migration `m14_spend` adds `run_attempt_costs`, `spend_reservations` and `expect_window_reports`.
+
+- **Admission.** A member run reserves its `max_cost_usd` against the current window of both accounts, and is refused with `429 budget_exhausted` when either would exceed its ceiling. A refused trigger slot or journal event is recorded as refused.
+- **Settlement.** When the run has ended, its reservation settles to the cost its attempts reported, and the unused part is released. A run with an attempt of unknown cost (a lost attempt, or a harness that does not meter) keeps its full reservation (state `unknown`). A run with retries can settle above its reservation. Spend is metered, not a provider bill.
+- **Inspection.** `GET /v0.2/tasks/<id>/run` shows `spend`: each attempt's reported cost, the total and the reservation. Every agent run records its attempts' cost, in a group or not.
+- **Windowed expectations.** A pool's `expect_window` entries (`operation`, optional `transition` for `records.transition`, `min`/`max`, `window`, `timezone`) are checked by the minute tick (step `cardea.m8.groups.windows`) once each window has closed. A miss sends `expectation_unmet` or `expectation_exceeded` mail from the kernel runtime to the supervisor; nothing fails a run after the fact. Only the latest closed window is checked, so longer downtime skips earlier windows, and windows that began before the group existed are not checked.
+
 ## Approval waits
 
 Single-operation tasks and agent runs can wait for an approver before an effect runs ([ADR-036](decisions/036-approval-waits.md); worked example in [getting started](getting-started.md#4b-an-effect-that-waits-for-approval)).
