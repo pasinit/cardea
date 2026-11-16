@@ -489,12 +489,12 @@ def journal(
             namespace=namespace,
             event_type=f"cardea.record.{kind}",
             producer_id=producer,
-            correlation_id=f"{record['record_id']}.{record['version']}",
+            correlation_id=str(record["record_id"]),
             task_id=task_id,
             at=at,
             payload={
                 "specversion": "1.0",
-                "id": f"{record['record_id']}.{record['version']}.{kind}",
+                "id": f"{record['collection']}/{record['record_id']}.{record['version']}",
                 "source": f"cardea://{namespace}",
                 "type": f"cardea.record.{kind}",
                 "subject": f"{record['collection']}/{record['record_id']}",
@@ -506,6 +506,7 @@ def journal(
                     "state": record["state"],
                     "holder": record["holder"],
                     "claim_epoch": record["claim_epoch"],
+                    "actor": producer,
                     **data,
                 },
             },
@@ -1010,6 +1011,7 @@ class Records:
         old: Mapping[str, JsonValue] | None,
         new: Mapping[str, JsonValue],
         detail: Mapping[str, JsonValue] | None = None,
+        data: Mapping[str, JsonValue] | None = None,
     ) -> None:
         append_history(
             conn,
@@ -1021,6 +1023,17 @@ class Records:
             old,
             new,
             detail,
+        )
+        # The same change as a kernel journal event, in this transaction (decision 6).
+        journal(
+            conn,
+            context.namespace,
+            kind,
+            new,
+            caller,
+            context.task_id,
+            datetime.fromisoformat(str(new["updated_at"])),
+            data or {},
         )
 
     # Operations
@@ -1233,7 +1246,6 @@ class Records:
             }
             write_claim(conn, row, new)
             self._event(conn, context, holder, "claimed", old, new)
-            journal(conn, context.namespace, "claimed", new, holder, context.task_id, at, {})
         return {"record": new, "claim": claim_view(new)}
 
     async def release(
@@ -1260,16 +1272,14 @@ class Records:
             }
             self._fence(conn, context)
             write_claim(conn, row, new)
-            self._event(conn, context, str(caller["id"]), "released", old, new)
-            journal(
+            self._event(
                 conn,
-                context.namespace,
-                "released",
-                new,
+                context,
                 str(caller["id"]),
-                context.task_id,
-                now(),
-                {"previous_holder": caller["id"], "previous_epoch": row["claim_epoch"]},
+                "released",
+                old,
+                new,
+                data={"previous_holder": caller["id"], "previous_epoch": row["claim_epoch"]},
             )
         return {"record": new}
 
@@ -1382,16 +1392,15 @@ class Records:
                 "args": targs,
                 "receipt_id": receipt,
             }
-            self._event(conn, context, actor, "transitioned", old, new, detail)
-            journal(
+            self._event(
                 conn,
-                context.namespace,
-                "transitioned",
-                new,
+                context,
                 actor,
-                context.task_id,
-                at,
-                {"from": old["state"], "to": transition.to, "transition": name},
+                "transitioned",
+                old,
+                new,
+                detail,
+                data={"from": old["state"], "to": transition.to, "transition": name},
             )
         result: dict[str, JsonValue] = {"record": new}
         if new["holder"] is not None:

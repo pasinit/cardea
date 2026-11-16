@@ -10,8 +10,8 @@
 
 from alembic import op
 
-revision = "m12_state_machines"
-down_revision = "m11_mailboxes"
+revision = "m13_state_machines"
+down_revision = "m12_journal_triggers"
 branch_labels = None
 depends_on = None
 
