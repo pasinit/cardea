@@ -33,6 +33,7 @@ from typing import Any
 from pydantic import JsonValue
 
 from cardea.service.operations import OperationContext, OperationRejected, WithArtifacts
+from cardea_coding_ops import claude_code
 
 CONFIG = "CARDEA_CODING_CONFIG"
 BUNDLE = "change.bundle"
@@ -76,6 +77,29 @@ def environment(scratch: Path, passthrough: list[str] | None = None) -> dict[str
             raise OperationRejected(f"the harness may not receive {name}")
         if name in os.environ:
             env[name] = os.environ[name]
+    return env
+
+
+def model_credential() -> str | None:
+    """The profile's model credential, if the worker has one (ADR-028)."""
+    path = os.environ.get("CARDEA_CREDENTIAL")
+    if not path or not Path(path).is_file():
+        return None
+    return Path(path).read_text().strip() or None
+
+
+def fixed_env(values: object) -> dict[str, str]:
+    """Host-owner values for the gates, such as a read-only package cache with no network
+    (`UV_CACHE_DIR`, `UV_OFFLINE=1`, `PIP_NO_INDEX=1`); never a credential-shaped name."""
+    if not isinstance(values, dict):
+        raise OperationRejected("gate_env must be an object")
+    env: dict[str, str] = {}
+    for name, value in values.items():
+        if not re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", str(name)) or CREDENTIAL_NAMES.search(
+            str(name)
+        ):
+            raise OperationRejected(f"gate_env may not set {name}")
+        env[str(name)] = str(value)
     return env
 
 
@@ -133,6 +157,39 @@ def _command(
     }
 
 
+def _claude(
+    settings: dict[str, Any], repo: Path, scratch: Path, task: str, timeout: float
+) -> dict[str, JsonValue]:
+    """Run Claude Code headless on the task; its JSON result becomes the harness record."""
+    env = claude_code.environment(environment(scratch), scratch, settings)
+    started = time.monotonic()
+    try:
+        done = subprocess.run(
+            claude_code.argv(settings),
+            cwd=repo,
+            env=env,
+            input=task,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        exit_code: int | None = done.returncode
+        timed_out, stdout = False, done.stdout
+    except subprocess.TimeoutExpired:
+        exit_code, timed_out, stdout = None, True, ""
+    except OSError:
+        exit_code, timed_out, stdout = None, False, ""
+    # Only the parsed result is kept: stdout and stderr are not copied into the receipt.
+    return {
+        "kind": "claude-code",
+        "exit_code": exit_code,
+        "timed_out": timed_out,
+        "duration_ms": int((time.monotonic() - started) * 1000),
+        **claude_code.result(stdout),
+    }
+
+
 def session(arguments: dict[str, JsonValue], config: dict[str, Any], scratch: Path) -> Any:
     """The whole call in `scratch`; returns the output and, if anything changed, the bundle."""
     alias = str(arguments["repository"])
@@ -168,15 +225,20 @@ def session(arguments: dict[str, JsonValue], config: dict[str, Any], scratch: Pa
     base_sha = _git(repo, env, "rev-parse", "HEAD").strip()
 
     harness = config.get("harness", {})
-    harness_env = environment(scratch, list(harness.get("passthrough", ())))
-    harness_env["CARDEA_TASK"] = str(arguments["task"])
-    ran = _command(
-        [str(part) for part in harness["argv"]],
-        repo,
-        harness_env,
-        float(harness.get("timeout_seconds", DEFAULT_HARNESS_TIMEOUT)),
-        stdin=str(arguments["task"]),
-    )
+    timeout = float(harness.get("timeout_seconds", DEFAULT_HARNESS_TIMEOUT))
+    ran: dict[str, JsonValue]
+    if harness.get("kind") == "claude-code":
+        ran = _claude(harness, repo, scratch, str(arguments["task"]), timeout)
+    else:
+        harness_env = environment(scratch, list(harness.get("passthrough", ())))
+        harness_env["CARDEA_TASK"] = str(arguments["task"])
+        ran = _command(
+            [str(part) for part in harness["argv"]],
+            repo,
+            harness_env,
+            timeout,
+            stdin=str(arguments["task"]),
+        )
 
     _git(repo, env, "add", "--all")
     changed = bool(_git(repo, env, "status", "--porcelain").strip())
@@ -199,15 +261,30 @@ def session(arguments: dict[str, JsonValue], config: dict[str, Any], scratch: Pa
 
     gates: list[JsonValue] = []
     passed: list[bool] = []
+    gate_env = environment(scratch) | fixed_env(config.get("gate_env", {}))
     for gate in repository.get("gates", ()):
         result = _command(
             [str(part) for part in gate["argv"]],
             repo,
-            environment(scratch),
+            gate_env,
             float(gate.get("timeout_seconds", DEFAULT_GATE_TIMEOUT)),
         )
         passed.append(result["exit_code"] == 0)
         gates.append({"name": str(gate["name"]), "passed": passed[-1], **result})
+
+    # The model credential must not leave the worker in the change or any result text. The
+    # whole change is checked as text (`--text`), so binary files cannot hide it.
+    secret = model_credential()
+    if secret:
+        everything = json.dumps([ran, gates])
+        if changed:
+            everything += _git(repo, env, "diff", "--text", base_sha, str(head_sha))
+        if secret in everything:
+            raise OperationRejected(
+                "the change or a command's output contains the model credential; nothing is "
+                "returned",
+                "credential_in_change",
+            )
 
     output: dict[str, JsonValue] = {
         "repository": alias,

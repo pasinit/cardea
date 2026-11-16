@@ -4,6 +4,7 @@
 - **Status:** proposed, except the parts implemented portably on 2026-11-16 at the lead's direction:
   - the content gate (decision 4, implementation slice 6), selected and implemented; see [Content gate: implementation](#content-gate-implementation-2026-11-16) and [redaction and confined workers](#content-gate-redaction-and-confined-workers-2026-11-16);
   - implementation slices 2 and 3: the ADR-023 amendment and `code.session` with a fake harness and fake gates;
+  - the Claude Code harness, the `coding` profile and the Debian fit-test script, with portable tests against a fake `claude` (the fit test is written but has not run);
   - implementation slices 4 and 5, except credential minting, which waits on the owner's choice between a GitHub App and a personal access token (open question 7).
 
   See [Implementation status](#implementation-status). Open question 1 is decided by the lead and questions 2–4 carry the lead's recommendations, all subject to the owner's veto (see [Decisions](#decisions-lead-2026-11-16)). Nothing is verified on Debian or against a real repository host. Apart from the Gitleaks fit test recorded there, no fit test has run, and none with a real harness; every other "fit" is from documentation and says so. The owner's remaining questions are at the end.
@@ -214,7 +215,8 @@ Compose existing pieces into one operations package, `vcs.*` and `code.*`, insta
 The owner may veto either.
 
 1. **Question 9, long calls.** ADR-023's 600 s cap is raised for confined operations only, to the profile's declared wall time, with a hard maximum of two hours. `code.session` stays one call. See [ADR-023, Amendment (2026-11-16)](023-installed-operation-registry.md#amendment-2026-11-16-long-confined-operations).
-2. **Question 1, first harness.** Claude Code in `--bare` mode is the first harness for `code.session`, consistent with the subscription-token decision for agent runs.
+2. **Question 1, first harness.** Claude Code in `--bare` mode is the first harness for `code.session`, consistent with the subscription-token decision for agent runs. *These two parts conflict; see question 10.*
+3. **Question 8, network for gates: pending the owner.** The implementation assumes the lead's recommendation: no network beyond the model API, and dependencies from a pre-provisioned, read-only package cache bound into the sandbox. Allow-listing package registries is not implemented.
 
 ## Implementation status
 
@@ -225,7 +227,38 @@ The owner may veto either.
 - **In the worker:** a clone of `base_ref` with git hooks and global configuration off; the harness run in the checkout with the task; a commit of everything it changed; a diff summary; the gates; and the `change.bundle` artifact (`git bundle` of the commits on top of `base_ref`). The receipt holds the base and head commits, file and line counts, a diff excerpt of at most 16 KiB, each gate's exit status, duration and output tail, the harness's exit status and output tail, and the bundle's object references. The kernel stores the bundle in parts of at most 1 MiB.
 - **No repository-host credential.** Every command runs with an environment built from nothing (fixed `PATH`, scratch `HOME`, no global git configuration), plus the variables the harness entry names; names that could carry a repository-host credential (`GH_*`, `GITHUB_*`, `GIT_*`, `*ASKPASS*`, `*CREDENTIAL*`, `SSH_AUTH_SOCK`) cannot be passed through. A test plants such credentials in the worker's own environment and checks that neither the harness nor the gates see them, and that no receipt holds them.
 - **Tests** (`apps/api/tests/service/test_code_session.py`, 11 tests): a session against a local bare-repository fixture with a fake harness that applies a scripted change and fake gates with configurable exit status, producing a bounded receipt and a bundle that verifies and applies to a fresh clone; failing gates reported; no host credential reaching the harness, the gates or the receipt; a refused credential passthrough and an unknown repository; an oversized change refused and reconciled as not applied; a timeout beyond the profile's wall time refused; the hard timeout limits; and the heartbeat tests listed in the ADR-023 amendment.
-- **Not yet:** a real harness (Claude Code `--bare`) and its fit test, the `coding` profile's real network policy and read-only source, and everything in slices 4–7.
+- **Not yet (at that point):** a real harness and its fit test, and the `coding` profile; see the next section. Slices 4–7 are not implemented.
+
+### Claude Code harness and the `coding` profile (implemented 2026-11-16, portable tests only)
+
+- **Harness entry.** `harness.kind: "claude-code"` in the `code.session` configuration (`cardea_coding_ops/claude_code.py`). It runs the CLI bundled with the Agent SDK that ADR-033 pins (`claude-agent-sdk==0.2.163`, Claude Code 2.1.286), unless the entry names a `binary`. Claude Code runs headless in the checkout with the task on standard input:
+  - `-p --output-format json --model <model> --max-turns <n> --max-budget-usd <usd>`;
+  - tools `Bash,Read,Edit,Write,Glob,Grep`, with the file tools allowed only under the checkout (`Read(./**)` and the like);
+  - `--permission-mode dontAsk --permission-prompts none`, so anything else is denied without a prompt;
+  - `--setting-sources user` with an empty `CLAUDE_CONFIG_DIR` and `HOME` in the scratch, so no project or local settings, and so none of the repository's hooks or permission rules;
+  - `--settings '{"disableAllHooks": true}'`;
+  - `--strict-mcp-config --mcp-config '{"mcpServers": {}}'`, so no `.mcp.json` server;
+  - `--disable-slash-commands` and `--no-session-persistence`.
+  
+  With `credential_kind: "api_key"` it also passes `--bare`.
+- **Credential, the ADR-033 way.** The worker reads the profile's single credential at `$CARDEA_CREDENTIAL`; systemd loads it into the unit. Only the harness's environment receives it, as `CLAUDE_CODE_OAUTH_TOKEN` (`oauth_token`, the default) or `ANTHROPIC_API_KEY` (`api_key`), together with the proxy variables the helper set for the profile's model-API egress. Gates never see it. If the model credential appears in the change, as text with binary files included, or in any command's output, the call is refused with `credential_in_change` and returns nothing.
+- **Receipt.** The harness record holds the exit status, whether it timed out, the duration, the turns, the stop reason, the cost if reported, whether it errored, and a summary of at most 2 KiB. Claude Code's standard output and standard error are not copied.
+- **Gates and the package cache.** A `gate_env` object in the configuration gives the gates fixed variables, such as `UV_CACHE_DIR`, `UV_OFFLINE=1`, `PIP_NO_INDEX=1` and `PIP_FIND_LINKS`, pointing at the read-only cache. Credential-shaped names are refused, as for the harness.
+- **`coding` profile** (`deploy/small-host/cardea/cardea-host-workers.json`):
+  - `model_api_only` through its own proxy port `127.0.10.5`, allowing `api.anthropic.com` only (`squid-workers.conf`);
+  - 4 GiB of memory, 200 % CPU, 512 tasks, 4 GiB of scratch and 3600 s of wall time;
+  - `output_kb` 14336, which holds a 10 MiB bundle in base64 plus the receipt;
+  - concurrency 1;
+  - the credential `/etc/cardea/credentials/claude-code`.
+  
+  The `code-session` worker binds `/opt/cardea` (the kernel environment with the pinned CLI) and `/opt/cardea-code` read-only. The latter holds the host owner's bare repository mirrors, the package cache and `coding.json`, an example of which is `cardea/cardea-coding.json`.
+- **Tests:**
+  - `test_code_session_claude.py` (6 tests) runs against a fake `claude` that records its argv and environment, in a fixture repository whose `.claude/settings.json` declares hooks and permission rules and whose `.mcp.json` declares a server. It asserts the flags; that the configuration directory and `HOME` are in the scratch; the credential variable for each kind; the proxy; that no repository-host credential is present, including one planted in the worker; the parsed record; and the refusal of a change carrying the credential.
+  - `test_deploy_examples.py` checks that the profile fits the descriptor: wall time, output size and network.
+  - `test_code_session_fit_script.py` keeps the fit script consistent with the worker.
+  
+  The portable tests cannot show that the real CLI ignores the repository's configuration. The fit test checks that.
+- **Debian fit test, written, not run.** `experiments/code-session/` (`debian.sh`, `fit.py` and a README) runs one `code.session` through the root helper on a fixture repository with the real CLI. It records the unit's resource use, the harness record, the bundle, the proxy's answers, and whether the fixture's hooks or MCP server left marker files. It needs a subscription token file, the installed `coding` profile and the package cache.
 
 ### Slices 4 and 5 without credential minting (implemented 2026-11-16, portable tests only)
 
@@ -307,5 +340,10 @@ Revisit if:
 5. Content gate scope: added lines only, or the whole tree of the pushed branch? And should a refusal notify the supervisor by mail (ADR-034 decision 4) as well as failing the call?
 6. Change transport: what size cap and retention for change bundles stored as objects?
 7. Credentials for small deployments: is a GitHub App required, or is a fine-grained personal access token an accepted fallback (no per-call minting, longer-lived secret)?
-8. Network for gates: `make test` often installs packages. Allow-list the package registries in the `coding` profile, or require pre-provisioned caches and no network beyond the model API?
+8. *Pending the owner; the lead's recommendation is assumed (no network beyond the model API, a read-only pre-provisioned package cache).* Network for gates: `make test` often installs packages. Allow-list the package registries in the `coding` profile, or require pre-provisioned caches and no network beyond the model API?
 9. *Decided by the lead (2026-11-16): raise the cap for confined operations to the profile's wall time, at most two hours.* Long calls: raise ADR-023's 600 s cap for confined operations to the profile's wall time, or split a session into code and gate calls?
+10. `--bare` and the subscription token (raised 2026-11-16). Claude Code's documentation says bare mode does not read `CLAUDE_CODE_OAUTH_TOKEN`, and that a script passing `--bare` must authenticate with `ANTHROPIC_API_KEY` or an `apiKeyHelper` ([headless mode](https://code.claude.com/docs/en/headless), [authentication](https://code.claude.com/docs/en/authentication)). Question 1's decision, `--bare` with the subscription token, therefore cannot be met as written. The implementation supports both:
+    - with a subscription token (`oauth_token`, the default and the kit's setting), Claude Code runs without `--bare`, and the isolation comes from explicit flags ([CLI reference](https://code.claude.com/docs/en/cli-reference)): `--setting-sources user` with an empty configuration directory, `disableAllHooks`, an empty strict MCP configuration and no slash commands;
+    - with an API key (`api_key`), it also passes `--bare`.
+
+    Which should the first harness use: the subscription token without `--bare`, relying on those flags and on the fit test's evidence that repository hooks and MCP servers do not run, or an API key with `--bare`? Without `--bare`, Claude Code still reads the repository's `CLAUDE.md`. That is repository text the model reads, which is untrusted either way, and the fit test records whether the model follows it.
