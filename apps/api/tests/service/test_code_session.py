@@ -131,7 +131,7 @@ def kernel_for(
             delegate=True,
             expires_at=now() + timedelta(hours=1),
         )
-        for right in (*RIGHTS, operation)
+        for right in (*RIGHTS, operation, "repo:app")
     )
     principals = tuple(
         Principal(
@@ -155,7 +155,17 @@ def kernel_for(
     return Kernel(db, cast(Authentication, Auth()), operations=registry, workers=Workers(host))
 
 
-def submit(kernel: Kernel, operation: str, arguments: dict[str, Any], key: str = "one") -> str:
+def submit(
+    kernel: Kernel,
+    operation: str,
+    arguments: dict[str, Any],
+    key: str = "one",
+    grants: tuple[str, ...] | None = None,
+) -> str:
+    if grants is None:
+        # `code.session` needs the repository's `repo:<alias>` grant (ADR-037).
+        repository = arguments.get("repository")
+        grants = (f"repo:{repository}",) if isinstance(repository, str) else ()
     request = OperationTaskRequest.model_validate(
         {
             "request_id": f"call-{key}",
@@ -164,7 +174,7 @@ def submit(kernel: Kernel, operation: str, arguments: dict[str, Any], key: str =
             "objective": "One long call",
             "operation": operation,
             "arguments": arguments,
-            "grants": ["objects.read", "objects.write", operation],
+            "grants": ["objects.read", "objects.write", operation, *grants],
             "timeout_seconds": 3600,
         }
     )
@@ -226,32 +236,35 @@ def source(tmp_path: Path) -> Path:
     return bare
 
 
-def coding_config(tmp_path: Path, source: Path, gate_exit: int = 0, **harness: Any) -> Path:
+def coding_config(
+    tmp_path: Path, source: Path, gate_exit: int = 0, legacy: bool = False, **harness: Any
+) -> Path:
+    """`code.session`'s own file (the harness) and the host's repository registry beside it
+    (`repositories.json`, ADR-037). `legacy` puts the repositories in the coding file
+    instead, the deprecated layout."""
     scripts = tmp_path / "scripts"
     scripts.mkdir(exist_ok=True)
     (scripts / "harness.py").write_text(HARNESS)
     (scripts / "gate.py").write_text(GATE)
-    config = {
-        "repositories": {
-            "app": {
-                "source": str(source),
-                "gates": [
-                    {"name": "lint", "argv": [sys.executable, str(scripts / "gate.py"), "0"]},
-                    {
-                        "name": "test",
-                        "argv": [sys.executable, str(scripts / "gate.py"), str(gate_exit)],
-                    },
-                ],
-            }
-        },
+    gates = [
+        {"name": "lint", "argv": [sys.executable, str(scripts / "gate.py"), "0"]},
+        {"name": "test", "argv": [sys.executable, str(scripts / "gate.py"), str(gate_exit)]},
+    ]
+    entries = {"app": {"source": str(source), "gates": gates}}
+    config: dict[str, Any] = {
         "harness": {
             "argv": [sys.executable, str(scripts / "harness.py")],
             "passthrough": ["MODEL_API_KEY"],
             **harness,
         },
     }
+    if legacy:
+        config["repositories"] = entries
     path = tmp_path / "coding.json"
     path.write_text(json.dumps(config))
+    registry = tmp_path / "repositories.json"
+    registry.write_text(json.dumps({"repositories": entries}))
+    registry.chmod(0o600)
     return path
 
 
@@ -266,7 +279,12 @@ def coding_kernel(
     config = coding_config(tmp_path, source, gate_exit)
     host = LocalHost(
         profiles(wall_seconds),
-        {"CARDEA_CODING_CONFIG": str(config), "MODEL_API_KEY": "model-key", **PLANTED},
+        {
+            "CARDEA_CODING_CONFIG": str(config),
+            "CARDEA_REPOSITORIES": str(tmp_path / "repositories.json"),
+            "MODEL_API_KEY": "model-key",
+            **PLANTED,
+        },
     )
     registry = Registry((descriptor(**binding),), {})
     return kernel_for(tmp_path, host, monkeypatch, registry), host
@@ -320,6 +338,30 @@ def test_failing_gates_are_reported_not_hidden(
     assert output["gates_passed"] is False
 
 
+def test_a_call_without_the_repo_grant_is_refused_before_a_worker_starts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: Path
+) -> None:
+    """`code.session` needs `repo:<alias>` like `vcs.*` (ADR-037, rehearsal finding 2): the
+    kernel refuses the call from the descriptor's `resource` before any intent exists."""
+    kernel, host = coding_kernel(tmp_path, monkeypatch, source)
+    started: list[str] = []
+    real = host.start_confined
+
+    def recording(job: str, *args: Any) -> None:
+        started.append(job)
+        real(job, *args)
+
+    host.start_confined = recording  # type: ignore[method-assign,assignment]
+    task_id = submit(kernel, "code.session", change({"x.txt": "x\n"}), grants=())
+    assert OperationRuntime(kernel).execute(task_id) == "failed"
+    assert cast(Any, task(kernel, task_id).failure).code == "task_grant_denied"
+    with kernel.database.read() as conn, borrow(conn) as tx:
+        assert tx.list_operations(task_id) == []
+    assert started == []
+    granted = submit(kernel, "code.session", change({"x.txt": "x\n"}), key="two")
+    assert OperationRuntime(kernel).execute(granted) == "succeeded" and len(started) == 1
+
+
 def test_no_repository_host_credential_reaches_the_harness_or_gates(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: Path
 ) -> None:
@@ -346,13 +388,14 @@ def test_no_repository_host_credential_reaches_the_harness_or_gates(
 
 
 def test_a_harness_may_not_be_configured_to_receive_a_host_credential(
-    tmp_path: Path, source: Path
+    tmp_path: Path, source: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from cardea_coding_ops.session import session
 
     from cardea.service.operations import OperationRejected
 
     config = json.loads(coding_config(tmp_path, source).read_text())
+    monkeypatch.setenv("CARDEA_REPOSITORIES", str(tmp_path / "repositories.json"))
     config["harness"]["passthrough"] = ["GITHUB_TOKEN"]
     scratch = tmp_path / "scratch"
     scratch.mkdir()
@@ -360,6 +403,31 @@ def test_a_harness_may_not_be_configured_to_receive_a_host_credential(
         session(change({"a": "a"}), config, scratch)
     with pytest.raises(OperationRejected, match="not allowed"):
         session({**change({}), "repository": "other"}, config, scratch)
+
+
+def test_repositories_come_from_the_host_registry(
+    tmp_path: Path, source: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One registry (ADR-037 finding 3): the coding file's own `repositories` still work for
+    one release with a warning, and a coding file that disagrees with the registry is
+    refused before anything is cloned."""
+    from cardea_coding_ops.session import repository_entry
+
+    from cardea.service.operations import OperationRejected
+
+    config = json.loads(coding_config(tmp_path, source, legacy=True).read_text())
+    with pytest.warns(DeprecationWarning, match="CARDEA_CODING_CONFIG"):
+        legacy = repository_entry("app", config)
+    assert legacy is not None and legacy["source"] == str(source)
+    monkeypatch.setenv("CARDEA_REPOSITORIES", str(tmp_path / "repositories.json"))
+    entry = repository_entry("app", {"harness": config["harness"]})
+    assert entry is not None and [g["name"] for g in entry["gates"]] == ["lint", "test"]
+    with pytest.warns(DeprecationWarning):
+        assert repository_entry("app", config) == entry  # agreeing: the registry's
+    config["repositories"]["app"]["source"] = "/elsewhere.git"
+    with pytest.warns(DeprecationWarning), pytest.raises(OperationRejected) as refused:
+        repository_entry("app", config)
+    assert refused.value.code == "repositories_disagree"
 
 
 def test_an_oversized_change_is_refused_and_reconciles_as_not_applied(

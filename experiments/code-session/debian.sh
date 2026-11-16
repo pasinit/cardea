@@ -37,6 +37,10 @@ chmod -R a+rX "$CODE/repos/fixture.git"
 if [ -e "$CODE/coding.json" ]; then cp -a "$CODE/coding.json" "$CODE/coding.json.before-fit"; fi
 "$PY" -I "$HERE/fit.py" config > "$CODE/coding.json"
 chmod 0644 "$CODE/coding.json"
+# The host's repository registry (ADR-037): the fixture alias, read by the worker.
+if [ -e "$CODE/repositories.json" ]; then cp -a "$CODE/repositories.json" "$CODE/repositories.json.before-fit"; fi
+"$PY" -I "$HERE/fit.py" repositories > "$CODE/repositories.json"
+chmod 0644 "$CODE/repositories.json"
 
 mkdir -p "$OUT_DIR"
 # Proxy evidence: the coding port passes the model API only.
@@ -54,5 +58,6 @@ status=0
 sudo -u cardea-kernel "$PY" -I "$OUT_DIR/fit.py" run --out "$OUT_DIR/evidence.json" || status=$?
 
 if [ -e "$CODE/coding.json.before-fit" ]; then mv "$CODE/coding.json.before-fit" "$CODE/coding.json"; fi
+if [ -e "$CODE/repositories.json.before-fit" ]; then mv "$CODE/repositories.json.before-fit" "$CODE/repositories.json"; fi
 echo "evidence: $OUT_DIR/evidence.json and $OUT_DIR/proxy.txt (exit $status)"
 exit "$status"

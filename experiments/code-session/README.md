@@ -31,7 +31,7 @@ The script:
 
 1. installs the credential;
 2. writes the fixture as a bare repository at `/opt/cardea-code/repos/fixture.git`;
-3. installs the fit test's configuration as `/opt/cardea-code/coding.json`, after backing up any existing one;
+3. installs the fit test's configuration as `/opt/cardea-code/coding.json` and its repository registry as `/opt/cardea-code/repositories.json`, after backing up any existing ones;
 4. records which hosts the coding proxy passes;
 5. runs `fit.py run` as `cardea-kernel`, which starts the session through the helper exactly as the kernel's confined executor does;
 6. restores the previous configuration.
