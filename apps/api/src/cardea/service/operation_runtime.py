@@ -486,6 +486,20 @@ class OperationRuntime:
         started: float,
         operation_id: str = EXECUTE,
     ) -> str:
+        state = self._settle(task_id, output, error, started, operation_id)
+        if isinstance(error, invocation.Failure) and error.code == "content_refused":
+            # The redacted content must not survive in the write-ahead log either.
+            self.kernel.database.checkpoint()
+        return state
+
+    def _settle(
+        self,
+        task_id: str,
+        output: object,
+        error: str | invocation.Failure,
+        started: float,
+        operation_id: str = EXECUTE,
+    ) -> str:
         elapsed = max(0, int((time.monotonic() - started) * 1000))
         with self.kernel.database.engine.begin() as conn, borrow(conn) as tx:
             task = tx.get_task(task_id)

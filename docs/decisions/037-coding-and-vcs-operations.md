@@ -2,7 +2,7 @@
 
 - **Date / owner / milestones:** 2026-11-16; runtime, host-execution and API maintainers. Builds on [ADR-023](023-installed-operation-registry.md) (installed operations), [ADR-026](026-effect-idempotency-and-reconciliation.md) (effect scopes and reconciliation), [ADR-028](028-configurable-worker-profiles.md) (confined workers), [ADR-033](033-pluggable-agent-harnesses.md) (harnesses), [ADR-034](034-agent-groups-and-shared-records.md) (agent groups; its software-team example names `vcs.open_change`) and [ADR-036](036-approval-waits.md) (approval waits).
 - **Status:** proposed, except the parts implemented portably on 2026-11-16 at the lead's direction:
-  - the content gate (decision 4, implementation slice 6), selected and implemented; see [Content gate: implementation](#content-gate-implementation-2026-11-16);
+  - the content gate (decision 4, implementation slice 6), selected and implemented; see [Content gate: implementation](#content-gate-implementation-2026-11-16) and [redaction and confined workers](#content-gate-redaction-and-confined-workers-2026-11-16);
   - implementation slices 2 and 3: the ADR-023 amendment and `code.session` with a fake harness and fake gates;
   - implementation slices 4 and 5, except credential minting, which waits on the owner's choice between a GitHub App and a personal access token (open question 7).
 
@@ -167,6 +167,30 @@ Compose existing pieces into one operations package, `vcs.*` and `code.*`, insta
   - a denylisted term and a secret each refusing a call through an installed operation, with nothing sent, and neither the receipt's refusal nor the supervisor's mail containing the matched text;
   - the notice switched off;
   - no gate, or a malformed one, refusing the call.
+
+### Content gate: redaction and confined workers (2026-11-16)
+
+**Refused content is redacted from the store.** A `content_refused` call used to keep its arguments in its receipt and in the task's bound request. Now, in the transaction that records the refusal:
+- **Strings replaced.** Every argument string that is, or contains, a refused input or a matched line becomes `{"redacted": "content_refused", "sha256", "bytes"}`. The bound request (`task_bindings.request_json`) is scrubbed the same way. Matched lines shorter than six characters are not used to find copies.
+- **Identity kept.** The receipt's `request_digest` is unchanged. Its arguments gain `redaction: {reason, request_digest, arguments_sha256}`, so the call's identity and intent digest still hold.
+- **Kernel model rule.** `OperationReceipt` accepts a digest that differs from its request only for a failed `content_refused` receipt whose marker carries that digest. `KernelTransaction.redact_refused_operation` refuses any other receipt.
+- **Bound requests.** Migration `m17_content_redaction` narrows the `task_bindings` immutability trigger to allow exactly that rewrite. Every other column, the request digest included, must be unchanged; the new request must carry the marker; and the task must hold a `content_refused` receipt.
+- **No copies left behind.** Service connections run with `PRAGMA secure_delete=ON`, so freed pages are zeroed. A refusal truncates the write-ahead log (`wal_checkpoint(TRUNCATE)`, best effort: a busy reader leaves it to SQLite's next checkpoint).
+- **Never replayed.** A refused call is definite, never `outcome_unknown`. Its effect scope is `failed`, so it is neither reconciled nor replayed. Resubmitting the same request ID still finds its task.
+- **Agent runs.** A tool call refused in an agent run is redacted the same way. The attempt-log tool events carry no arguments. A retried attempt's journal prompt lists the call as `content_refused (<rule> at <location>; …)` with its redacted arguments. A call held for approval and run as `apr-NN` (ADR-036) also has its frozen intent (`approval_requests.arguments_json`) scrubbed. `m17` narrows `approval_intent_immutable` the same way: every other column and digest must be unchanged, the marker present, and the `apr-NN` receipt failed with `content_refused`.
+- **Event payloads** carry only digests, and the gate writes no object. Tests scan every file under the store's directory (the SQLite file, its log, objects and attempt logs), the kernel's logs and the mail for the denylist term and for a fake secret. Three paths are covered:
+  - an operation task;
+  - an agent run whose refused call is followed by a retried attempt, which also checks the retried prompt (`test_content_gate_agent_runs.py`);
+  - an agent run whose call was held for approval, approved, and refused as `apr-01`.
+
+**The gate inside confined workers.** An ADR-028 worker reaches the kernel through the channel a confined agent session already uses: a per-call loopback endpoint with a bearer token (`content_gate.GateEndpoint`).
+- **What the worker gets.** Only the endpoint's URL and token, in its job document. `cardea.hosts.operation_worker` turns them into `OperationContext.check_content`, which posts the diff and texts. The kernel runs the gate and answers `ok` or the refusal.
+- **What stays outside.** The gate's configuration, denylist and scanner binary never enter the sandbox.
+- **The refusal is the kernel's.**
+  - If the worker reports the refusal, the kernel raises its own recorded refusal, and the receipt is redacted as for an in-process call.
+  - If the worker reports success after a refusal, the effect is left in doubt (`content_refusal_ignored`, `outcome_unknown`), because it may have sent the content.
+- **When the callback cannot be reached.** Without a callback, or when it cannot be reached, the worker's check refuses with `content_gate_unavailable`. That covers a profile with no network, since only profiles that reach the loopback tool endpoint (`model_api_only`) can reach the gate.
+- **Tests.** `test_content_gate_confined.py` runs the real worker loop against the real endpoint. It covers a clean change, a refusal with redaction, a refusal the worker ignored, no gate, and no callback.
 
 ## Integration
 

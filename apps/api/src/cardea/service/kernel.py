@@ -547,6 +547,9 @@ class Kernel:
             descriptor.cardea.timeout_seconds,
             self.worker_watch,
             self._artifact_store(descriptor.cardea.max_artifact_bytes),
+            gate=lambda context: content_gate.GateEndpoint(
+                self.database, self.content_gate, context
+            ),
         )
 
     def _artifact_store(self, limit: int) -> StoreArtifacts | None:

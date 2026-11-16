@@ -30,6 +30,7 @@ from cardea.kernel.lifecycle import (
     transition_task,
 )
 from cardea.kernel.models import (
+    REDACTION,
     Checkpoint,
     DispatchLease,
     Document,
@@ -49,6 +50,7 @@ from cardea.kernel.models import (
     Timestamp,
     VerificationRecord,
     WaitCondition,
+    canonical_json,
 )
 
 APPLICATION_ID = 0x43415244
@@ -587,6 +589,38 @@ class KernelTransaction:
         self._fault("operation_written")
         self._operation_event(after)
         return after
+
+    @_mutation
+    def redact_refused_operation(
+        self, task_id: str, operation_id: str, arguments: Document, *, at: datetime
+    ) -> OperationReceipt:
+        """Replace a refused call's arguments with their redacted form (ADR-037).
+
+        Only for a receipt failed with `content_refused`. The request digest and a digest
+        of the original arguments are kept, so the call's identity and intent still hold.
+        """
+        receipt = self.get_operation(task_id, operation_id)
+        if (
+            receipt.state is not OperationState.FAILED
+            or receipt.failure is None
+            or receipt.failure.code != "content_refused"
+        ):
+            raise StoreError("not_refused", "Only a refused call can be redacted.")
+        marker = {
+            "reason": "content_refused",
+            "request_digest": receipt.request_digest,
+            "arguments_sha256": sha256(canonical_json(receipt.request.arguments)).hexdigest(),
+        }
+        request = receipt.request.model_dump() | {"arguments": {**arguments, REDACTION: marker}}
+        updated = OperationReceipt.model_validate(
+            receipt.model_dump()
+            | {
+                "request": request,
+                "revision": receipt.revision + 1,
+                "updated_at": max(_timestamp.validate_python(at), receipt.updated_at),
+            }
+        )
+        return self._save_operation(receipt, updated)
 
     def _operation_event(self, receipt: OperationReceipt) -> KernelEvent:
         return self.append_event(
