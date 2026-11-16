@@ -74,3 +74,102 @@ Checked 2026-11-16 against vendor documentation and release pages. Versions are 
 | [pre-commit](https://pre-commit.com/) hooks in the repository | MIT | Common in repositories. | Repository-owned and skippable; a gate must be kernel-owned. |
 
 **Selected for the proposal:** a kernel-owned gate that runs Gitleaks with the host owner's rules plus a plain denylist file (case-insensitive terms), on the change before push and on every text field before it is sent. The repository's own hooks are never trusted as the gate.
+
+## Decision (proposed)
+
+Compose existing pieces into one operations package, `vcs.*` and `code.*`, installed like any ADR-023 package. The custom parts are the operations' handlers, the credential minting and the content gate's wiring.
+
+### 1. Operations
+
+| Operation | Effect | Idempotency scope (ADR-026) | Reconciler (after `outcome_unknown`) |
+|---|---|---|---|
+| `code.session {repository, base_ref, task, task_key, harness?, model?, gates?}` | effect (publishes kernel objects; nothing leaves the host) | `/repository`, `/base_ref`, `/task_key` | the published change object exists for the call's effect key → applied; else not applied, so a retry runs a fresh session |
+| `vcs.read_change {repository, number}` | read | none | none |
+| `vcs.push_branch {repository, branch, change, expected_head?}` | effect | `/repository`, `/branch`, `/change` | the branch's head on the host equals the change's head commit → applied |
+| `vcs.open_change {repository, head, base, title, body, draft?}` | effect | `/repository`, `/head` | `GET .../pulls?head=<owner>:<head>&state=all` returns the pull request → applied, with its number and URL |
+| `vcs.comment {repository, number, body, client_key}` | effect | `/repository`, `/number`, `/client_key` | a comment on the pull request carries the marker `cardea:<effect_key>` → applied |
+| `vcs.review {repository, number, event, body, client_key}` | effect | `/repository`, `/number`, `/client_key` | a review by the app carries the marker → applied |
+
+- There is no `vcs.merge`. `vcs.review` accepts `COMMENT` and `REQUEST_CHANGES`; `APPROVE` is refused unless the host owner enables it (open question 2).
+- `code.session` returns, within the 64 KiB receipt: the base and head commits, file and line counts, a bounded diff excerpt, each gate's target, exit status, duration and output tail, and the agent's bounded summary, turns and cost. The whole change is a `git bundle` published as a task-owned kernel object (the ADR-014/015 publication path), which `vcs.push_branch` cites by exact version. Nothing else carries state between calls.
+- ADR-034 records cite these receipts: a `submit` transition can require a `vcs.open_change` receipt for the record (`requires_receipt`), as the ADR's worked example already does.
+
+### 2. Execution
+
+- **`code.session`** runs as an ADR-028 confined worker under a new host-owner profile (name it `coding`):
+  - a scratch workspace and no other writable path;
+  - network to the model API and to a read-only repository source only: either a host-side mirror served over the loopback, or the host's read endpoint with no credential for public repositories (open question 8 covers package registries for `make test`);
+  - no repository-host credential at all.
+
+  Inside it, the worker clones `base_ref` with hooks disabled for its own git commands, runs the selected harness non-interactively (for Claude Code: `--bare`, an explicit tool list, `--permission-prompts none` and a budget; for OpenCode: the pinned binary with its permissions set to the same effect), commits the result, runs the gate targets with their own timeouts, and publishes the bundle. The harness and model are an ADR-033 selection, granted like an agent run's (`harness:<id>`).
+- **`vcs.*` effects** run as confined workers under a second profile (`vcs`) whose network allow-list is the repository host's API and git endpoints. They never check out the change: `vcs.push_branch` fetches the bundle into an empty bare repository and pushes one ref, with hooks disabled.
+- **Timeouts.** ADR-023 caps an operation at 600 s, which a coding session plus a full test run can exceed. This needs a small ADR-023 amendment: a confined operation may declare up to the profile's wall-time limit (open question 9).
+
+### 3. Credentials
+
+- The host owner installs a GitHub App on the allowed repositories and gives the kernel its private key as a private file (like other credentials, ADR-010/028), plus the installation and repository ids.
+- For each `vcs.*` effect, the kernel mints an installation access token restricted to the single repository (`repository_ids`) and to the call's permissions (`contents: write` for a push, `pull_requests: write` or `issues: write` for the others), valid for at most an hour.
+- The token goes to the worker on its private input channel, outside the recorded arguments, and is used through a credential helper (`GIT_ASKPASS`) or an HTTP header. Receipts, outputs, attempt logs and error summaries never contain it (ADR-026's failure-reason rules already keep exception text out).
+- The coding session never receives a token.
+- **Second guard on the host:** a ruleset restricts the app to creating and updating branches matching the prefix, blocks force pushes and deletions elsewhere, and keeps the default branch behind required reviews that the app cannot bypass. The kernel checks at install time that the ruleset exists and reports drift as a failed readiness check; it cannot enforce it.
+
+### 4. Content gate
+
+- A kernel-owned configuration lists the secret rules (a Gitleaks configuration) and a denylist file (one term per line, case-insensitive), both host-owner files outside worker reach.
+- **Before push:** the `vcs.push_branch` worker scans the added lines of the change with Gitleaks and the denylist. A match fails the call with `content_refused` naming the rule and file, never the matched text.
+- **Before send:** titles, bodies, comments, review bodies and commit messages are checked by the same gate inside the call that sends them.
+- The gate runs before any network call, so a refusal sends nothing and is a definite failure, not `outcome_unknown`.
+
+### 5. Authority
+
+- Each operation is a grant (ADR-023). Repositories are resource-qualified like ADR-033's `harness:<id>`: a call names a repository alias from host configuration, and needs `repo:<alias>` in its grants and in the supervisor's live ceiling (open question 4).
+- Operations that leave the host can carry ADR-036 rules, for example "always" for `vcs.open_change` on a protected repository.
+- Branch names come from the operation, not the agent: `agent/<group>/<record or task>` by default, inside the configured prefix (open question 3).
+
+## Integration
+
+- **State.** No new kernel tables are expected: receipts, effect scopes, objects and the existing confined-worker bookkeeping hold everything. The package's configuration (repositories, App ids, gate files, profiles) is host-owner configuration.
+- **Compatibility.** Additive: a new package and two worker profiles. ADR-033's rule that agent-run harnesses have no built-in shell or edit tools is unchanged: the harness inside `code.session` is not an agent run's harness but an operation's implementation, confined by ADR-028, and its result is one receipt.
+- **Operational cost.** A coding session holds a confined-worker slot and model budget for minutes; profiles bound concurrency. Each effect mints one token (one host API call).
+- **Dependencies.** None new for the kernel. The package pins a Gitleaks binary by checksum (as `fetch_opencode.py` pins OpenCode) and uses the already-pinned `httpx` and harnesses.
+
+## Implementation plan (PR-sized slices, after selection)
+
+1. Fit tests, recorded as evidence: Claude Code `--bare` and OpenCode `run` inside an ADR-028 profile on a fixture repository (tool list, repository hooks ignored, no network beyond the allow-list); Gitleaks on fixture diffs; the GitHub calls against a test repository with an App, including the 422 on duplicate pull requests and the reconciliation reads.
+2. ADR-023 amendment for long confined operations.
+3. `code.session` with a fake harness and fake gates; change bundles as objects.
+4. Credential minting and injection; `vcs.push_branch` and `vcs.open_change` with reconcilers, against a fake host.
+5. `vcs.comment`, `vcs.review`, `vcs.read_change`.
+6. Content gate in both places.
+7. Debian acceptance with a real App on a test repository.
+
+## Verification
+
+None. This record is a proposal.
+
+## Limits
+
+- Confinement, not the coding agent's tool list, is what stops it; on hosts without the ADR-028 helper, `code.session` is refused.
+- The content gate finds known secret shapes and listed terms. It cannot find every piece of personal data.
+- Repository-host rules are configured outside Cardea; Cardea can check them but not enforce them.
+- A coding session's result depends on the model; its gates are evidence of the change's state, not of its correctness.
+
+## Revisit
+
+Revisit if:
+- the repository host adds idempotency keys for pull requests, comments or reviews, so reconciliation reads become unnecessary;
+- a headless coding agent ships a sandbox that meets ADR-028's requirements by itself;
+- a second forge is needed (the `vcs.*` names stay; a second package implements them);
+- tokens with narrower scopes than an installation token (for example per-branch) become available.
+
+## Open questions for the owner
+
+1. Which harness should `code.session` run first: Claude Code in `--bare` mode, or OpenCode with a configured provider? Both are already pinned for agent runs.
+2. May an agent submit an `APPROVE` review? The proposal refuses it by default, because an app's approval could satisfy the repository's review rule and amount to an unattended merge path.
+3. Branch naming: a fixed prefix (`agent/*`), or one per group (`agent/<group>/*`) so rulesets can separate teams?
+4. Repository authority: resource-qualified grants `repo:<alias>` with aliases in host configuration, or one installed package per repository?
+5. Content gate scope: added lines only, or the whole tree of the pushed branch? And should a refusal notify the supervisor by mail (ADR-034 decision 4) as well as failing the call?
+6. Change transport: what size cap and retention for change bundles stored as objects?
+7. Credentials for small deployments: is a GitHub App required, or is a fine-grained personal access token an accepted fallback (no per-call minting, longer-lived secret)?
+8. Network for gates: `make test` often installs packages. Allow-list the package registries in the `coding` profile, or require pre-provisioned caches and no network beyond the model API?
+9. Long calls: raise ADR-023's 600 s cap for confined operations to the profile's wall time, or split a session into code and gate calls?
