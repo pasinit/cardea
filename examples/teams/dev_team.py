@@ -31,7 +31,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
-import cardea
 import httpx2
 from cardea_vcs_ops import Vcs
 from cardea_vcs_ops import descriptors as vcs_descriptors
@@ -42,6 +41,7 @@ from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 from pydantic import SecretStr
 
+import cardea
 from cardea.runtime.agent_session import SessionRequest, SessionResult
 from cardea.service import kernel as kernel_module
 from cardea.service.agent_run_runtime import AgentRunRuntime
@@ -202,7 +202,8 @@ def git(cwd: Path, *args: str) -> str:
 
 def provisioning(group: AgentGroup) -> Provisioning:
     expires = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
-    rights = {*RIGHTS, "models.invoke", "groups.manage", *(g for p in group.spec.pools for g in p.grants)}
+    pooled = (g for p in group.spec.pools for g in p.grants)
+    rights = {*RIGHTS, "models.invoke", "groups.manage", *pooled}
     grant = {"namespace": NAMESPACE, "expires_at": expires}
     return Provisioning.model_validate(
         {
@@ -220,7 +221,9 @@ def provisioning(group: AgentGroup) -> Provisioning:
                 {"principal_id": SUPERVISOR, "operation": r, "delegate": True, **grant}
                 for r in sorted(rights)
             ],
-            "platform": [{"principal_id": "platform", "operation": r, **grant} for r in sorted(rights)],
+            "platform": [
+                {"principal_id": "platform", "operation": r, **grant} for r in sorted(rights)
+            ],
         }
     )
 
@@ -295,7 +298,8 @@ def world(directory: Path) -> Iterator[World]:
     database.migrate()
     provision(database, provisioning(AgentGroup.model_validate(document("group.json"))), registry)
     agents = ScriptedAgents()
-    catalog = Catalog({IMPLICIT_ID: implicit_entry("rehearsal-model")}, IMPLICIT_ID, implicit=IMPLICIT_ID)
+    entry = implicit_entry("rehearsal-model")
+    catalog = Catalog({IMPLICIT_ID: entry}, IMPLICIT_ID, implicit=IMPLICIT_ID)
     kernel = Kernel(
         database,
         cast(Authentication, Credentials()),
@@ -529,7 +533,8 @@ def group_overview(world: World) -> dict[str, Any]:
         print(f"    pool {pool['name']:<9} last runs {runs}")
     for collection in view["collections"]:
         counts = ", ".join(f"{k} {v}" for k, v in collection["by_state"].items()) or "empty"
-        print(f"    collection {collection['name']}: {counts}; {len(collection['claimed'])} claimed")
+        claimed = len(collection["claimed"])
+        print(f"    collection {collection['name']}: {counts}; {claimed} claimed")
     print(f"    spend: {json.dumps(view.get('spend'), sort_keys=True)[:160]}")
     return view
 
@@ -574,7 +579,8 @@ def check(world: World) -> dict[str, int]:
             "'vcs.push_branch' AND json_extract(snapshot,'$.failure.code')='content_refused'"
         ).scalar_one()
     assert refused == 1, refused
-    return {"runs": len(world.tasks), "gate_refusals": refused, "claims": sum(map(len, claimed.values()))}
+    claims = sum(map(len, claimed.values()))
+    return {"runs": len(world.tasks), "gate_refusals": refused, "claims": claims}
 
 
 # The rehearsal
@@ -608,7 +614,8 @@ def rehearse(world: World) -> dict[str, Any]:
     reviewed: dict[str, Any] = {}
     _, out = run(world, f"{GROUP}.principal.0", review(item, number, reviewed))
     assert "approve_refused" in reviewed["approve_review"]["error"]
-    print(f"  the principal read #{number}, was refused APPROVE, commented and approved: {out['record']['state']}")
+    state = out["record"]["state"]
+    print(f"  the principal read #{number}, was refused APPROVE, commented and approved: {state}")
     owner_merges(world, number)
     print(f"  the owner merged #{number} on the host (outside the team)")
 
@@ -616,11 +623,14 @@ def rehearse(world: World) -> dict[str, Any]:
     secret = {"client.py": f"API_TOKEN = '{PLANTED}'\n"}
     state, _ = run(world, f"{GROUP}.dev.2", implement(second, secret, blocked))
     assert state == "succeeded" and "content_refused" in blocked["push_refused"], blocked
-    print(f"  dev.2's change for {second} carried a secret: the gate refused the push; it told the lead")
+    print(f"  dev.2's change for {second} carried a secret: the gate refused the push")
+    print("  dev.2 told the lead it was blocked")
     overview = group_overview(world)
     checked = check(world)
-    print(f"  checks: {checked['runs']} runs, all with receipts and costs; no double claim; "
-          f"{checked['gate_refusals']} gate refusal")
+    print(
+        f"  checks: {checked['runs']} runs, all with receipts and costs; no double claim; "
+        f"{checked['gate_refusals']} gate refusal"
+    )
 
     print("  restructure by configuration: 2 developers and a security pool")
     result = apply(world, "group.restructured.json")
@@ -643,7 +653,8 @@ def rehearse(world: World) -> dict[str, Any]:
     assert out["record"]["state"] == "in_review", out
     third_number = int(again["change"]["number"])
     security: dict[str, Any] = {}
-    _, reviewed_by = run(world, f"{GROUP}.security.0", security_review(third, third_number, security))
+    script = security_review(third, third_number, security)
+    _, reviewed_by = run(world, f"{GROUP}.security.0", script)
     assert "review_id" in reviewed_by, reviewed_by
     final: dict[str, Any] = {}
     _, out = run(world, f"{GROUP}.principal.0", review(third, third_number, final))
