@@ -318,6 +318,10 @@
                   "maxLength": 160,
                   "pattern": "^approve:(?:[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+|record:[a-z][a-z0-9_-]{0,63}/[a-z][a-z0-9_]{0,63})$",
                   "type": "string"
+                },
+                {
+                  "pattern": "^repo:[a-z][a-z0-9-]{0,63}$",
+                  "type": "string"
                 }
               ]
             },
@@ -3065,6 +3069,10 @@
                   "maxLength": 160,
                   "pattern": "^approve:(?:[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+|record:[a-z][a-z0-9_-]{0,63}/[a-z][a-z0-9_]{0,63})$",
                   "type": "string"
+                },
+                {
+                  "pattern": "^repo:[a-z][a-z0-9-]{0,63}$",
+                  "type": "string"
                 }
               ]
             },
@@ -3176,6 +3184,10 @@
                 {
                   "maxLength": 160,
                   "pattern": "^approve:(?:[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+|record:[a-z][a-z0-9_-]{0,63}/[a-z][a-z0-9_]{0,63})$",
+                  "type": "string"
+                },
+                {
+                  "pattern": "^repo:[a-z][a-z0-9-]{0,63}$",
                   "type": "string"
                 }
               ]
@@ -4776,6 +4788,10 @@
                 {
                   "maxLength": 160,
                   "pattern": "^approve:(?:[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+|record:[a-z][a-z0-9_-]{0,63}/[a-z][a-z0-9_]{0,63})$",
+                  "type": "string"
+                },
+                {
+                  "pattern": "^repo:[a-z][a-z0-9-]{0,63}$",
                   "type": "string"
                 }
               ]
@@ -7059,6 +7075,10 @@
                   "maxLength": 160,
                   "pattern": "^approve:(?:[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+|record:[a-z][a-z0-9_-]{0,63}/[a-z][a-z0-9_]{0,63})$",
                   "type": "string"
+                },
+                {
+                  "pattern": "^repo:[a-z][a-z0-9-]{0,63}$",
+                  "type": "string"
                 }
               ]
             },
@@ -7199,6 +7219,10 @@
                 {
                   "maxLength": 160,
                   "pattern": "^approve:(?:[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+|record:[a-z][a-z0-9_-]{0,63}/[a-z][a-z0-9_]{0,63})$",
+                  "type": "string"
+                },
+                {
+                  "pattern": "^repo:[a-z][a-z0-9-]{0,63}$",
                   "type": "string"
                 }
               ]
