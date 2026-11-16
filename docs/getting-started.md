@@ -431,8 +431,9 @@ The same pool, with the rest of [ADR-034](decisions/034-agent-groups-and-shared-
 - **The content gate.** It checks what may leave the host. Operations that send to a repository host call it before any network request. The host owner configures it in the service configuration:
 
 ```json
-"content_gate": {"gitleaks_binary": "/usr/local/lib/cardea/gitleaks", "gitleaks_sha256": "<from packaging/fetch_gitleaks.py>",
-                 "denylist_file": "/etc/cardea/content-denylist", "notify_supervisor": true}
+{"content_gate": {"gitleaks_binary": "/usr/local/lib/cardea/gitleaks",
+                  "gitleaks_sha256": "<from packaging/fetch_gitleaks.py>",
+                  "denylist_file": "/etc/cardea/content-denylist", "notify_supervisor": true}}
 ```
 
 **You get:**

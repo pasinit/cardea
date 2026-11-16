@@ -459,7 +459,7 @@ spec:
 
 A crash between placing and transitioning leaves the order `approved`. The effect scope deduplicates a retried placement, and an expired claim returns the order to `approved` with a new epoch.
 
-## Acceptance tests (to write; none run)
+## Acceptance tests (portable tests written; none run on Debian)
 
 1. **Restructure by configuration only.** Apply example A and run one record through `open → … → in_review → in_progress → in_review → done`. Then change only the configuration:
    - set `dev` replicas to 4 and remove `product`;
@@ -722,7 +722,7 @@ Portable tests go in `apps/api/tests/service/`. Before the record is called veri
 
 ## Verification
 
-Slice 4 has portable tests only (above). Status moves to implemented when slices 1–10 pass portably, and to verified after the Debian runs.
+All slices have portable tests only. Acceptance tests 1–10 pass portably: 1 and 2 in `test_worked_examples.py`, 3 and 4 in `test_claims.py`, 5 in `test_mailboxes.py`, 6 in `test_groups.py`, 7 in `test_state_machines.py`, 8 in `test_group_spend.py`, 9 in `test_context_sources.py` and 10 in `test_journal_triggers.py`. The status moves to verified after the Debian runs in the [Debian acceptance checklist](../acceptance/debian-adr-034-037.md).
 
 **Slice 1 (2026-11-09), implemented, portable only.**
 - *Implemented:* migration `m10_records` (`down_revision = "m9_approvals"`); `Collection` documents with `PUT /v0.2/collections/{name}` (`groups.manage`, generation, `?dry_run=true`) and `GET`; JSON-Schema-validated records with labels and links; built-in `records.create`, `records.get`, `records.query` and `records.update` as in-process operations on the per-attempt tool endpoint and as operation tasks, receipted by the invocation core with an ADR-026 scope on create and a history-based reconciler for interrupted writes; compare-and-set on `version`; CEL write guards for `create` and `update` through `cardea.service.approvals.compile_condition` with the guard variables, failing closed; append-only `record_events` with `GET /v0.2/collections/{name}/records/{id}/events`; `record:<collection>/<action>` grants under the live ceiling.

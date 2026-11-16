@@ -10,6 +10,8 @@ from cardea.service.harnesses import Catalog, HarnessFile
 from cardea.service.models import (
     AgentGroup,
     AgentRunRequest,
+    ContentGateConfig,
+    GroupPool,
     InboundEvent,
     OperationTaskRequest,
     TriggerSpec,
@@ -22,13 +24,22 @@ GUIDE = Path(__file__).parents[4] / "docs" / "getting-started.md"
 
 def examples() -> list[dict[str, Any]]:
     blocks = re.findall(r"```json\n(.*?)```", GUIDE.read_text(), re.S)
-    pinned = (b.replace("<from packaging/fetch_opencode.py>", "0" * 64) for b in blocks)
+    pinned = (
+        b.replace("<from packaging/fetch_opencode.py>", "0" * 64).replace(
+            "<from packaging/fetch_gitleaks.py>", "0" * 64
+        )
+        for b in blocks
+    )
     return [json.loads(b.replace("<same>", "0" * 64)) for b in pinned]
 
 
 def test_every_example_validates() -> None:
     (single, run, trigger, on_event, event, effect, held, decision, *rest) = examples()
-    confined, research, registry, group, collection, create, update = rest
+    confined, research, registry, group, collection, create, update, pool, gate = rest
+    team = GroupPool.model_validate(pool)
+    assert team.spend is not None and team.expect_window
+    assert team.run.expect and team.run.context_max_bytes == 16384
+    ContentGateConfig.model_validate(gate["content_gate"])
     CollectionDocument.model_validate(collection)
     OperationTaskRequest.model_validate(create)
     OperationTaskRequest.model_validate(update)
