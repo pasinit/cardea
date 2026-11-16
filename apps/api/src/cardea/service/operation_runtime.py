@@ -709,7 +709,9 @@ class OperationRuntime:
         for task_id, operation_id, name in rows:
             if settled >= limit or name not in self.kernel.operations:
                 continue
-            if self.kernel.reconciler(str(name)) is None:
+            binding = self.kernel.operations.get(str(name)).cardea
+            # A confined operation with artifacts is reconciled from the store (ADR-023).
+            if binding.reconciler is None and not binding.max_artifact_bytes:
                 continue
             try:
                 self.reconcile(str(task_id), str(operation_id))
