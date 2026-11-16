@@ -66,8 +66,8 @@ HERE = Path(__file__).resolve().parent / "dev-team"
 GROUP, NAMESPACE, SUPERVISOR = "dev-team", "dev", "sup-dev"
 LEAD = "dev-team.lead.0"
 # The secret a developer's change carries by mistake; the gate's denylist names it.
-PLANTED = "ghp_PLANTEDDEMOSECRET0000000000000000"
-TOKEN = "ghs_" + "rehearsal" * 4  # the fake host's test token; never real
+PLANTED = "PLANTED-DEMO-SECRET-not-a-real-key"
+TOKEN = "fake-host-token-" + "rehearsal" * 2  # the fake host's test token; never real
 RUN_COST = 0.02  # what each scripted session reports spending
 Script = Callable[[ClientSession, SessionRequest], Awaitable[Any]]
 
