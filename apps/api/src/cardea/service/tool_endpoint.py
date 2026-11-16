@@ -24,6 +24,7 @@ from typing import Any
 import uvicorn
 from mcp import types
 from mcp.server.lowlevel import Server
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from cardea.service import loopback
@@ -175,7 +176,16 @@ class ToolEndpoint:
         server: Server[Any] = Server(
             "cardea", version="1", on_list_tools=list_tools, on_call_tool=call_tool
         )
-        app = server.streamable_http_app(json_response=True, stateless_http=True)
+        # DNS-rebinding protection for the address the endpoint listens on: the SDK enables
+        # it by itself only for 127.0.0.1 and localhost, and would refuse 127.0.11.1.
+        security = TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=[f"{self.host}:*"],
+            allowed_origins=[f"http://{self.host}:*"],
+        )
+        app = server.streamable_http_app(
+            json_response=True, stateless_http=True, host=self.host, transport_security=security
+        )
         return _Bearer(_Abandonment(app), self.token)
 
     def __enter__(self) -> "ToolEndpoint":
