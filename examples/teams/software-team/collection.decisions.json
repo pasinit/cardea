@@ -1,0 +1,26 @@
+{
+  "apiVersion": "cardea/v1alpha1",
+  "kind": "Collection",
+  "metadata": {
+    "name": "decisions",
+    "namespace": "eng"
+  },
+  "spec": {
+    "supervisor": "sup-eng",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "summary"
+      ]
+    }
+  }
+}

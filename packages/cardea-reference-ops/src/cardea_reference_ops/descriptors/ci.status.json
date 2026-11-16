@@ -1,0 +1,32 @@
+{
+  "tool": {
+    "name": "ci.status",
+    "description": "The CI result of a code change. Fake: in-memory only, no network.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "change_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": []
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "cardea": {
+    "version": 1,
+    "effect": "read",
+    "handler": "reference.ci.status",
+    "timeout_seconds": 10
+  }
+}

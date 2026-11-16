@@ -1,0 +1,34 @@
+{
+  "trigger_id": "desk-fills",
+  "supervisor_id": "sup-desk",
+  "event": {
+    "source": "broker",
+    "types": [
+      "fill"
+    ],
+    "secret_file": "/etc/cardea/secrets/broker-fills"
+  },
+  "template_kind": "agent-run",
+  "template": {
+    "agent_id": "desk.execution.0",
+    "namespace": "desk",
+    "objective": "Record a broker fill",
+    "instructions": "Record the fill this event reports.",
+    "operations": [
+      "records.transition"
+    ],
+    "grants": [
+      "objects.read",
+      "objects.write",
+      "models.invoke",
+      "record:orders/read",
+      "record:orders/fill",
+      "record:orders/place",
+      "record:orders/reconcile",
+      "broker.place_order",
+      "broker.fills"
+    ],
+    "max_attempts": 1,
+    "attempt_timeout_seconds": 300
+  }
+}
