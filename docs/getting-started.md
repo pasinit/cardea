@@ -304,7 +304,7 @@ A pool's `grants` are its runs' complete grants, and nothing is added. An agent 
 
 **You get:** two principals, `desk.analyst.0` and `desk.analyst.1`. They are bound to the kernel's runtime and have no external identity. Each has one trigger, `desk.analyst.<n>.t0`. Every slot runs full admission under the supervisor's live ceiling. A member runs one task at a time: a slot that arrives while its previous run is unfinished is recorded as `coalesced`. `GET /v0.2/groups/desk?namespace=team` returns the manifest with `status.members`.
 
-To restructure the group, change the manifest and apply it again. For example, set `replicas` to 3 or pick another `model`; no code change is needed. Scaling down, removing a pool (or renaming one) and `DELETE /v0.2/groups/desk?namespace=team` drain members: a draining member takes no new slots, claims or pool mail, its current run may finish until the pool's `drain_timeout_seconds` (then it is cancelled), and then its claims are released, its mail goes to its pool and its principal is disabled. `status.observedGeneration` catches up when nothing drains. Until slice 9 lands, `spend` and `expect_window` are refused with 422. A pool's `event` triggers read the group's own kernel journal (slice 7).
+To restructure the group, change the manifest and apply it again. For example, set `replicas` to 3 or pick another `model`; no code change is needed. Scaling down, removing a pool (or renaming one) and `DELETE /v0.2/groups/desk?namespace=team` drain members: a draining member takes no new slots, claims or pool mail, its current run may finish until the pool's `drain_timeout_seconds` (then it is cancelled), and then its claims are released, its mail goes to its pool and its principal is disabled. `status.observedGeneration` catches up when nothing drains. Pools may also set `spend` and `expect_window`, and wake on kernel journal events (use case 9).
 
 To see the group at a glance, `GET /v0.2/groups/desk/overview?namespace=team` returns one read snapshot (ADR-034's team overview amendment). It lists:
 - each pool's members, with their active and last runs and the claims they hold;
@@ -390,4 +390,54 @@ and later, from version 1 of the record:
 - Refusals: `transition_not_allowed`, `guard_refused`, `claim_lost`, `record_claimed`, `receipt_required`, `receipt_invalid`.
 - A transition with `approval` waits for an approver holding `approve` on `record:work/<transition>` (a single-operation task waits; in an agent run the call is held and the run waits, ADR-036 slice 4).
 - To remove a state that records occupy, add `"migrate": [{"from": "old", "to": "new"}]`.
-- The ADR's two worked examples run end to end in `apps/api/tests/service/test_worked_examples.py`.
+- The ADR's two worked examples run end to end in `apps/api/tests/service/test_worked_examples.py`. They are also files you can apply, in [`examples/teams`](../examples/teams/README.md) (`make teams`).
+
+## 9. A pool that wakes on mail, reads its context and stays within budget
+
+The same pool, with the rest of [ADR-034](decisions/034-agent-groups-and-shared-records.md): mail (slice 5), context sources and budgets (slice 6), journal triggers (slice 7), spend and windowed expectations (slice 9, with the ADR-029 amendment's `any_of` and `match`). It is the `dev` pool of [`examples/teams/software-team`](../examples/teams/software-team/group.json), where `vcs.open_change` is a fake from [`cardea-reference-ops`](../packages/cardea-reference-ops/README.md).
+
+```json
+{"name": "dev", "replicas": 3,
+ "grants": ["objects.read", "objects.write", "models.invoke", "record:work/read",
+            "record:work/start", "record:work/submit", "mailbox.send", "mailbox.inbox",
+            "mail:eng-team.lead", "runs.recent", "vcs.open_change"],
+ "spend": {"usd": 10, "window": "day"},
+ "run": {"instructions": "Take ready work, implement it and submit it for review.",
+         "operations": ["records.transition", "mailbox.send", "vcs.open_change"],
+         "context": [{"operation": "mailbox.inbox"},
+                     {"operation": "records.claimed", "arguments": {"collection": "work"}},
+                     {"operation": "runs.recent", "arguments": {"limit": 3}, "max_bytes": 2048}],
+         "context_max_bytes": 16384,
+         "expect": [{"any_of": [{"operation": "vcs.open_change"},
+                                {"operation": "mailbox.send", "match": {"/to/pool": "eng-team.lead"}}]}],
+         "bounds": {"max_cost_usd": 0.5, "attempts": 2, "timeout_seconds": 600}},
+ "triggers": [{"event": {"types": ["cardea.mailbox.sent"], "subjects": ["$member", "$pool"]}}],
+ "expect_window": [{"operation": "records.transition", "transition": "submit", "min": 1, "window": "day"}]}
+```
+
+**You get:**
+- **Mail.** A member sends with `mailbox.send` only to addresses it holds `mail:<address>` for. Its next runs receive mail as the `mailbox.inbox` block. Mail is consumed when a run succeeds and redelivered when one fails; after `max_deliveries` it is dead-lettered with a notice to the sender and the supervisor. A supervisor uses `POST /v0.2/mailbox` and `GET /v0.2/mailbox`.
+- **Waking on events.** Mail to a member or its pool wakes that member within about a minute. Events that a member's own actions caused never wake it, and while its run is unfinished further events coalesce.
+- **Context.** Context blocks come from one read snapshot and fit their budgets. The inbox and the member's claims are filled first and never dropped entirely. Lists drop their oldest entries and say how many in `truncated`; other output that does not fit is replaced by a size note.
+- **Spend.** Admission refuses with `429 budget_exhausted` when the pool's daily account would be exceeded.
+- **Expectations.** The run succeeds only if it opened a change or mailed the lead. The day's window mails the supervisor when no item was submitted.
+- **Overview.** `GET /v0.2/groups/eng-team/overview?namespace=eng` shows pools and members, collections, mail, open approvals, spend and recent journal events in one read snapshot, with its journal cursor.
+
+## 10. A coding session and the content gate
+
+[ADR-037](decisions/037-coding-and-vcs-operations.md) is a proposal, except two parts, which are implemented with portable tests only.
+
+- **The coding session.** `code.session` (package `packages/cardea-coding-ops`) runs a headless coding agent and the repository's gates in a confined worker. It returns the change as a stored artifact and the gate results in its receipt. It runs under the ADR-023 amendment: a confined call may last up to its profile's wall time, with a heartbeat lease.
+- **The content gate.** It checks what may leave the host. Operations that send to a repository host call it before any network request. The host owner configures it in the service configuration:
+
+```json
+"content_gate": {"gitleaks_binary": "/usr/lib/cardea/gitleaks", "gitleaks_sha256": "<from packaging/fetch_gitleaks.py>",
+                 "denylist_file": "/etc/cardea/content-denylist", "notify_supervisor": true}
+```
+
+**You get:**
+- A call whose diff or text matches a Gitleaks rule or a denylist term fails with `content_refused`, naming the rule and the location only. Nothing is sent, and the supervisor gets kernel mail.
+- The refused content is redacted from the receipt and the task's stored request; their digests are kept.
+- Without a working gate, every such call fails with `content_gate_unavailable`.
+
+Every error code the API can return, and every failure code a receipt or task can record, is listed in [error codes](error-codes.md).
