@@ -83,7 +83,8 @@ NO_NETWORK = (
 )
 
 
-def coding_config() -> dict[str, Any]:
+def repositories() -> dict[str, Any]:
+    """The host's repository registry (ADR-037), with the fixture as a read-only alias."""
     return {
         "repositories": {
             "fixture": {
@@ -101,7 +102,13 @@ def coding_config() -> dict[str, Any]:
                     },
                 ],
             }
-        },
+        }
+    }
+
+
+def coding_config() -> dict[str, Any]:
+    """`code.session`'s own file: the harness and the gates' environment."""
+    return {
         "harness": {
             "kind": "claude-code",
             "model": "sonnet",
@@ -252,6 +259,7 @@ def main(argv: list[str]) -> int:
     fixture = sub.add_parser("fixture")
     fixture.add_argument("dest", type=Path)
     sub.add_parser("config")
+    sub.add_parser("repositories")
     running = sub.add_parser("run")
     running.add_argument("--out", type=Path, required=True)
     running.add_argument("--poll", type=float, default=5.0)
@@ -261,6 +269,9 @@ def main(argv: list[str]) -> int:
         return 0
     if args.command == "config":
         print(json.dumps(coding_config(), indent=2))
+        return 0
+    if args.command == "repositories":
+        print(json.dumps(repositories(), indent=2))
         return 0
     return run(args.out, args.poll)
 

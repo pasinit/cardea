@@ -9,6 +9,8 @@ from types import ModuleType
 from cardea_coding_ops import claude_code
 from cardea_coding_ops.session import fixed_env
 
+from cardea.service.repositories import Registry
+
 FIT = Path(__file__).resolve().parents[4] / "experiments" / "code-session"
 
 
@@ -46,7 +48,9 @@ def test_fit_configuration_and_payload_match_the_worker() -> None:
     payload = module.payload("0" * 32)
     assert set(payload) == {"arguments", "context"}
     assert set(payload["arguments"]) == {"repository", "base_ref", "task", "task_key"}
-    assert payload["arguments"]["repository"] in config["repositories"]
+    assert "repositories" not in config
+    registry = Registry.model_validate(module.repositories())
+    assert payload["arguments"]["repository"] in registry.repositories
     assert (module.PROFILE, module.WORKER) == ("coding", "code-session")
 
 
