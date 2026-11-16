@@ -1094,6 +1094,39 @@
         "title": "ApprovalView",
         "type": "object"
       },
+      "AttemptCost": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the attempt reported; null is unknown.",
+            "title": "Cost Usd"
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "attempt",
+          "cost_usd"
+        ],
+        "title": "AttemptCost",
+        "type": "object"
+      },
       "AuthorityWait": {
         "additionalProperties": false,
         "properties": {
@@ -3058,7 +3091,7 @@
       },
       "GroupSpend": {
         "additionalProperties": false,
-        "description": "A spend account (ADR-034 decision 5.3; slice 9). Refused at apply until then.",
+        "description": "A spend account (ADR-034 decision 5.3): a ceiling in USD per calendar day or ISO\nweek on the wall clock of `timezone`, metered from the runs' reported cost.",
         "properties": {
           "timezone": {
             "default": "UTC",
@@ -5197,6 +5230,52 @@
         "title": "RunOutputCall",
         "type": "object"
       },
+      "RunSpend": {
+        "additionalProperties": false,
+        "properties": {
+          "attempts": {
+            "items": {
+              "$ref": "#/components/schemas/AttemptCost"
+            },
+            "title": "Attempts",
+            "type": "array"
+          },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Total reported cost of the run's attempts; null when any is unknown.",
+            "title": "Cost Usd"
+          },
+          "reservation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpendReservation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "attempts",
+          "cost_usd"
+        ],
+        "title": "RunSpend",
+        "type": "object"
+      },
       "RunTemplate-Input": {
         "additionalProperties": false,
         "description": "A pool's ADR-027 agent-run template; the kernel fills in the member, namespace,\ngrants and per-slot identity.",
@@ -5483,6 +5562,17 @@
             "title": "Schema Version",
             "type": "string"
           },
+          "spend": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunSpend"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per-attempt cost and any spend reservation (ADR-034)."
+          },
           "state": {
             "title": "State",
             "type": "string"
@@ -5620,6 +5710,77 @@
           "request_id"
         ],
         "title": "Signal",
+        "type": "object"
+      },
+      "SpendReservation": {
+        "additionalProperties": false,
+        "description": "A group member run's charge against its group and pool spend (ADR-034 5.3).",
+        "properties": {
+          "charged_usd": {
+            "title": "Charged Usd",
+            "type": "number"
+          },
+          "group": {
+            "title": "Group",
+            "type": "string"
+          },
+          "group_window": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Window"
+          },
+          "pool": {
+            "title": "Pool",
+            "type": "string"
+          },
+          "pool_window": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pool Window"
+          },
+          "reserved_usd": {
+            "title": "Reserved Usd",
+            "type": "number"
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "state": {
+            "description": "reserved while the run is open; settled to its reported cost; unknown when any attempt's cost is unknown, so the full reservation stays charged.",
+            "enum": [
+              "reserved",
+              "settled",
+              "unknown"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "group",
+          "pool",
+          "group_window",
+          "pool_window",
+          "reserved_usd",
+          "state",
+          "charged_usd"
+        ],
+        "title": "SpendReservation",
         "type": "object"
       },
       "StateMigration": {
@@ -6898,7 +7059,7 @@
       },
       "WindowExpectation": {
         "additionalProperties": false,
-        "description": "A windowed pool expectation (ADR-034 decision 5.4; slice 9). Refused until then.",
+        "description": "A windowed pool expectation (ADR-034 decision 5.4): successful receipted calls of\n`operation` (for `records.transition`, optionally of one named transition) across the\npool's members in each day or ISO week. Checked at window close; never fails a run.",
         "properties": {
           "max": {
             "anyOf": [
@@ -6930,6 +7091,13 @@
             "maxLength": 128,
             "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
             "title": "Operation",
+            "type": "string"
+          },
+          "timezone": {
+            "default": "UTC",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Timezone",
             "type": "string"
           },
           "transition": {
