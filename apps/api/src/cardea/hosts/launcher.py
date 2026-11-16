@@ -89,8 +89,16 @@ MAX_OUTPUT = 16 * 1048576
 # The output limit of a job that recorded none: the fixed M2 workers, and jobs staged before
 # per-job limits existed. It is the helper's former global limit.
 LEGACY_OUTPUT = 262144
-MAX_REQUEST = 262144
 MAX_CONFINED_INPUT = 131072
+# Staged inputs (ADR-037): object bytes the kernel hands a confined job, such as a change
+# bundle. Written as read-only files in the job's staging, bound read-only into the
+# sandbox, checked against their SHA-256, never recorded. Each profile's optional
+# `input_kb` (default 0: none) caps their total, within this ceiling.
+MAX_STAGED = 16 * 1048576
+MAX_STAGED_FILES = 8
+INPUTS = "/run/cardea/inputs"
+# A request carries its staged inputs base64-encoded.
+MAX_REQUEST = 262144 + 4 * (MAX_STAGED // 3 + 1) + 4096 * MAX_STAGED_FILES
 NAME = r"[a-z][a-z0-9-]{0,31}"
 LIMITS = {
     "memory_mb": (16, 16384),
@@ -115,7 +123,7 @@ HOSTNAME = r"(\*\.)?[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61
 # Read-only binds may expose installed software and public trust roots, never service state.
 READ_ONLY_PREFIXES = ("/usr/", "/opt/", "/etc/ssl/", "/etc/fonts/")
 ENV_NAME = r"[A-Z][A-Z0-9_]{0,63}"
-RESERVED_ENV = {"PATH", "HOME", "CARDEA_DEADLINE", "CARDEA_CREDENTIAL", "NO_PROXY"}
+RESERVED_ENV = {"PATH", "HOME", "CARDEA_DEADLINE", "CARDEA_CREDENTIAL", "CARDEA_INPUTS", "NO_PROXY"}
 CREDENTIAL = "/run/cardea/credential"
 
 
@@ -133,7 +141,14 @@ def _proxy(value: object) -> tuple[str, int]:
 def validate_profile(entry: object) -> dict[str, Any]:
     if not isinstance(entry, dict):
         raise ValueError("invalid_profile")
-    optional = {"jit", "credential", "concurrency", "queue_timeout_seconds"}
+    optional = {
+        "jit",
+        "credential",
+        "concurrency",
+        "queue_timeout_seconds",
+        "input_kb",
+        "kernel_callback",
+    }
     if not {*LIMITS, "network"} <= set(entry) <= {*LIMITS, "network", *optional}:
         raise ValueError("invalid_profile")
     for key, (low, high) in LIMITS.items():
@@ -141,6 +156,15 @@ def validate_profile(entry: object) -> dict[str, Any]:
         if type(value) is not int or not low <= value <= high:
             raise ValueError("invalid_profile")
     if type(entry.get("jit", False)) is not bool:
+        raise ValueError("invalid_profile")
+    inputs = entry.get("input_kb", 0)
+    if type(inputs) is not int or not 0 <= inputs <= MAX_STAGED // 1024:
+        raise ValueError("invalid_profile")
+    # The kernel's per-call loopback callback (the content gate) for an `allow_list`
+    # profile; `model_api_only` profiles always reach their loopback tool endpoint.
+    callback = entry.get("kernel_callback", False)
+    declared = entry["network"] if isinstance(entry["network"], dict) else {}
+    if type(callback) is not bool or (callback and declared.get("policy") != "allow_list"):
         raise ValueError("invalid_profile")
     concurrency = entry.get("concurrency", 1)
     if type(concurrency) is not int or not CONCURRENCY[0] <= concurrency <= CONCURRENCY[1]:
@@ -256,6 +280,7 @@ def installed_profiles() -> dict[str, Any]:
                 "concurrency": entry.get("concurrency", 1 if entry.get("jit") else None),
                 "queue_timeout_seconds": entry.get("queue_timeout_seconds", DEFAULT_QUEUE_TIMEOUT),
                 "credential": entry.get("credential") is not None,
+                "input_kb": entry.get("input_kb", 0),
                 "sha256": digest(entry),
             }
             for name, entry in config["profiles"].items()
@@ -266,7 +291,11 @@ def installed_profiles() -> dict[str, Any]:
 
 
 def confined_command(
-    job: str, deadline: float, profile: dict[str, Any], worker: dict[str, Any]
+    job: str,
+    deadline: float,
+    profile: dict[str, Any],
+    worker: dict[str, Any],
+    inputs: bool = False,
 ) -> list[str]:
     """The M2 systemd + bubblewrap composition, parameterized only by host-owner values."""
     directory = ROOT / job
@@ -297,8 +326,8 @@ def confined_command(
         props["SystemCallFilter"] = "~@debug @reboot @swap @obsolete @raw-io"
         # Egress only to the host-owner proxy, which enforces the hostname allow-list.
         allowed = [f"{address}/32"]
-        if network["policy"] == "model_api_only":
-            allowed.append("127.0.0.1/32")  # the per-attempt Cardea tool endpoint
+        if network["policy"] == "model_api_only" or profile.get("kernel_callback"):
+            allowed.append("127.0.0.1/32")  # the per-attempt Cardea tool or gate endpoint
         props["IPAddressDeny"] = "any"
         props["IPAddressAllow"] = " ".join(allowed)
         url = f"http://{address}:{port}"
@@ -311,6 +340,9 @@ def confined_command(
         props["LoadCredential"] = f"cardea:{profile['credential']}"
         binds += ["--ro-bind", f"/run/credentials/{unit}/cardea", CREDENTIAL]
         environment["CARDEA_CREDENTIAL"] = CREDENTIAL
+    if inputs:
+        binds += ["--ro-bind", str(directory / "inputs"), INPUTS]
+        environment["CARDEA_INPUTS"] = INPUTS
     for path in worker.get("read_only", []):
         binds += ["--ro-bind", path, path]
     environment |= worker.get("env", {})
@@ -636,9 +668,38 @@ def admit_start(job: str, request: dict[str, Any]) -> bytes:
     return content
 
 
+def admit_inputs(listed: object, profile: dict[str, Any]) -> list[bytes]:
+    """Decode a job's staged inputs: each checked against its SHA-256, all together
+    within the profile's `input_kb`."""
+    if listed is None:
+        return []
+    if not isinstance(listed, list) or not 1 <= len(listed) <= MAX_STAGED_FILES:
+        raise ValueError("invalid_request")
+    limit = profile.get("input_kb", 0) * 1024
+    decoded: list[bytes] = []
+    for entry in listed:
+        if (
+            not isinstance(entry, dict)
+            or set(entry) != {"sha256", "data"}
+            or not isinstance(entry["data"], str)
+            or not isinstance(entry["sha256"], str)
+            or not re.fullmatch(r"[0-9a-f]{64}", entry["sha256"])
+        ):
+            raise ValueError("invalid_request")
+        if len(entry["data"]) > 4 * (limit // 3 + 1):
+            raise ValueError("inputs_too_large")
+        data = base64.b64decode(entry["data"], validate=True)
+        if hashlib.sha256(data).hexdigest() != entry["sha256"]:
+            raise ValueError("input_digest_mismatch")
+        decoded.append(data)
+        if sum(len(d) for d in decoded) > limit:
+            raise ValueError("inputs_too_large")
+    return decoded
+
+
 def admit_confined(
     job: str, request: dict[str, Any]
-) -> tuple[bytes, dict[str, Any], dict[str, Any]]:
+) -> tuple[bytes, dict[str, Any], dict[str, Any], list[bytes]]:
     preflight()
     config = worker_config()
     profile = config["profiles"].get(request["profile"])
@@ -653,15 +714,22 @@ def admit_confined(
     content = base64.b64decode(request["input"], validate=True)
     if len(content) > MAX_CONFINED_INPUT:
         raise ValueError("input_too_large")
+    staged = admit_inputs(request.get("inputs"), profile)
     if retired(job):
         raise ValueError("retired_job")
     if sum(1 for p in ROOT.iterdir() if p.is_dir()) >= 256:
         raise ValueError("spool_capacity")
-    return content, profile, worker
+    return content, profile, worker, staged
 
 
-def stage(directory: Path, content: bytes, output_limit: int = LEGACY_OUTPUT) -> None:
-    """Stage a job: its input, and the largest output `status` will accept from it."""
+def stage(
+    directory: Path,
+    content: bytes,
+    output_limit: int = LEGACY_OUTPUT,
+    staged: list[bytes] | None = None,
+) -> None:
+    """Stage a job: its input, its staged input files, and the largest output `status`
+    will accept from it."""
     # Exclusive creation is a durable no-relaunch fence; a partial start is never retried.
     directory.mkdir(mode=0o711)
     directory.chmod(0o711)
@@ -677,7 +745,18 @@ def stage(directory: Path, content: bytes, output_limit: int = LEGACY_OUTPUT) ->
         stream.flush()
         os.fsync(stream.fileno())
     (directory / "input/data").chmod(0o444)
-    for path in (directory / "input", directory, ROOT):
+    synced = [directory / "input", directory, ROOT]
+    if staged:
+        (directory / "inputs").mkdir(mode=0o755)
+        (directory / "inputs").chmod(0o755)
+        for index, data in enumerate(staged):
+            with (directory / "inputs" / str(index)).open("xb") as stream:
+                stream.write(data)
+                stream.flush()
+                os.fsync(stream.fileno())
+            (directory / "inputs" / str(index)).chmod(0o444)
+        synced.insert(0, directory / "inputs")
+    for path in synced:
         fd = os.open(path, os.O_DIRECTORY)
         try:
             os.fsync(fd)
@@ -704,6 +783,7 @@ def handle(request: dict[str, Any]) -> dict[str, Any]:
         {"action", "job", "input", "operation", "deadline"}
         if action == "start"
         else {"action", "job", "input", "profile", "worker", "deadline"}
+        | ({"inputs"} if "inputs" in request else set())
         if action == "start_confined"
         else {"action", "job"}
     )
@@ -724,14 +804,14 @@ def handle(request: dict[str, Any]) -> dict[str, Any]:
         return {"started": True}
     if action == "start_confined":
         try:
-            content, profile, worker = admit_confined(job, request)
+            content, profile, worker, staged = admit_confined(job, request)
         except Exception as error:
             raise refusal(error) from error
         # The job may return at most its profile's `output_kb`, whatever the global ceiling.
-        stage(directory, content, profile["output_kb"] * 1024)
+        stage(directory, content, profile["output_kb"] * 1024, staged)
         if request["deadline"] <= time.time():
             raise ValueError("expired_authority")
-        run(confined_command(job, request["deadline"], profile, worker))
+        run(confined_command(job, request["deadline"], profile, worker, bool(staged)))
         return {"started": True}
     if action == "status":
         return status(job)
