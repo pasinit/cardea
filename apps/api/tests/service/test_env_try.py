@@ -1,0 +1,379 @@
+"""`env.try` (ADR-038): a commit's scenarios in a throwaway confined worker, the run window,
+forced reruns and the receipt-result guard; portable, with a fake helper that runs the real
+worker command as a local process."""
+
+import base64
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+import pytest
+from cardea_env_ops import descriptors
+from cardea_env_ops.try_ import scrub
+from test_code_session import kernel_for, receipt, submit, task
+
+import cardea
+from cardea.kernel.models import OperationState
+from cardea.service import artifacts
+from cardea.service.database import Fault
+from cardea.service.kernel import Kernel
+from cardea.service.operation_runtime import OperationRuntime
+from cardea.service.operations import Registry
+
+PLANTED = {"GITHUB_TOKEN": "ghs_planted0000000000000000000000000000", "AWS_SECRET": "planted"}
+
+
+class EnvHost:
+    """The helper's interface for the `try` profile, running the worker locally."""
+
+    def __init__(self, env: dict[str, str]) -> None:
+        self.env = env
+        self.outputs: dict[str, bytes] = {}
+        self.started: list[str] = []
+
+    def profiles(self) -> dict[str, Any]:
+        return {
+            "profiles": {
+                "try": {
+                    "wall_seconds": 3600,
+                    "network": {"policy": "none"},
+                    "concurrency": 1,
+                    "sha256": "p-try",
+                }
+            },
+            "workers": {"env-try": ["try"]},
+            "sha256": "config",
+        }
+
+    def start_confined(
+        self, job: str, content: bytes, deadline: float, profile: str, worker: str
+    ) -> None:
+        self.started.append(job)
+        done = subprocess.run(
+            [sys.executable, "-m", "cardea.hosts.operation_worker", "env.try"],
+            input=content,
+            capture_output=True,
+            env={
+                **os.environ,
+                "PYTHONPATH": str(Path(cardea.__file__).parents[1]),
+                **PLANTED,
+                **self.env,
+            },
+            timeout=120,
+            check=False,
+        )
+        self.outputs[job] = done.stdout
+
+    def status(self, job: str) -> dict[str, Any]:
+        return {
+            "state": "finished",
+            "result": "success",
+            "exit_status": "0",
+            "output": base64.b64encode(self.outputs[job]).decode(),
+        }
+
+    def stop(self, job: str) -> dict[str, Any]:
+        return {}
+
+    def cleanup(self, job: str) -> dict[str, Any]:
+        return {}
+
+
+SCENARIO = """
+import json, os, pathlib, sys
+mode = pathlib.Path("mode").read_text().strip()
+print("scenario", sys.argv[1], "mode", mode)
+print("token ghp_" + "a" * 30)
+pathlib.Path("out").mkdir(exist_ok=True)
+pathlib.Path("out/report.json").write_text(json.dumps({"mode": mode, "env": sorted(os.environ)}))
+pathlib.Path("out/big.bin").write_bytes(b"x" * 300000)
+sys.exit(0 if mode == "good" else 3)
+"""
+
+
+def git(cwd: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+@pytest.fixture
+def repo(tmp_path: Path) -> dict[str, Any]:
+    """A source with a good and a bad commit; the scenario reads `mode` from the tree."""
+    work = tmp_path / "work"
+    work.mkdir()
+    git(work, "init", "--quiet", "--initial-branch=main")
+    (work / "mode").write_text("good\n")
+    git(work, "add", "mode")
+    git(work, "commit", "--quiet", "-m", "good")
+    good = git(work, "rev-parse", "HEAD")
+    (work / "mode").write_text("bad\n")
+    git(work, "commit", "--quiet", "-am", "bad")
+    bad = git(work, "rev-parse", "HEAD")
+    bare = tmp_path / "source.git"
+    git(tmp_path, "clone", "--quiet", "--bare", str(work), str(bare))
+    return {"source": bare, "good": good, "bad": bad}
+
+
+def registry_file(tmp_path: Path, source: Path, **environment: Any) -> Path:
+    script = tmp_path / "scenario.py"
+    script.write_text(SCENARIO)
+    catalog = {
+        "scenarios": {
+            "try": {
+                "argv": [sys.executable, str(script), "try"],
+                "timeout_seconds": 60,
+                "artifacts": ["out/report.json", "out/big.bin", "missing.txt"],
+            },
+            "teams": {"argv": [sys.executable, str(script), "teams"], "timeout_seconds": 60},
+            "boot": {"argv": ["/bin/true"], "tier": "init"},
+        },
+        **environment,
+    }
+    path = tmp_path / "repositories.json"
+    path.write_text(
+        json.dumps({"repositories": {"app": {"source": str(source), "environment": catalog}}})
+    )
+    path.chmod(0o644)
+    return path
+
+
+@pytest.fixture
+def env_kernel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo: dict[str, Any]
+) -> tuple[Kernel, EnvHost]:
+    registry = registry_file(tmp_path, repo["source"])
+    # The kernel reads the registry for the run key; the worker reads it to run.
+    monkeypatch.setenv("CARDEA_REPOSITORIES", str(registry))
+    host = EnvHost({"CARDEA_REPOSITORIES": str(registry)})
+    kernel = kernel_for(tmp_path, host, monkeypatch, Registry(descriptors(), {}), "env.try")
+    return kernel, host
+
+
+def call(kernel: Kernel, key: str, **arguments: Any) -> tuple[str, Any]:
+    task_id = submit(kernel, "env.try", {"repo": "app", **arguments}, key=key, grants=("repo:app",))
+    state = OperationRuntime(kernel).execute(task_id)
+    return state, receipt(kernel, task_id)
+
+
+def output(settled: Any) -> dict[str, Any]:
+    assert settled.state is OperationState.SUCCEEDED, settled.failure
+    result: dict[str, Any] = settled.result["output"]
+    return result
+
+
+def test_a_passing_and_a_failing_commit(
+    env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
+) -> None:
+    kernel, _ = env_kernel
+    _, good = call(kernel, "good", commit=repo["good"], scenarios=["try", "teams"])
+    passed = output(good)
+    assert passed["passed"] is True and passed["cached"] is False
+    assert [(s["name"], s["outcome"], s["exit_code"]) for s in passed["scenarios"]] == [
+        ("try", "pass", 0),
+        ("teams", "pass", 0),
+    ]
+    first = passed["scenarios"][0]
+    assert "scenario try mode good" in first["log_tail"]
+    # Credential-shaped text is scrubbed from the log tail.
+    assert "ghp_" not in first["log_tail"] and "[redacted]" in first["log_tail"]
+    # One artifact kept; the large file and the missing path were dropped.
+    assert [a["path"] for a in first["artifacts"]] == ["out/report.json"]
+    assert passed["dropped"]["artifacts"] == 2
+    (listed,) = passed["artifacts"]
+    report = json.loads(artifacts.read(kernel.database, listed))
+    assert report["mode"] == "good"
+    # The scenario's environment was built from nothing: no planted credential.
+    assert not {"GITHUB_TOKEN", "AWS_SECRET"} & set(report["env"])
+    _, bad = call(kernel, "bad", commit=repo["bad"], scenarios=["try"])
+    failed = output(bad)
+    assert failed["passed"] is False
+    assert (failed["scenarios"][0]["outcome"], failed["scenarios"][0]["exit_code"]) == ("fail", 3)
+
+
+def test_the_same_inputs_return_the_same_result_without_running(
+    env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
+) -> None:
+    kernel, host = env_kernel
+    _, first = call(kernel, "a", commit=repo["good"], scenarios=["try", "teams"])
+    started = len(host.started)
+    # The same scenarios in another order are the same run.
+    _, again = call(kernel, "b", commit=repo["good"], scenarios=["teams", "try"])
+    cached = output(again)
+    assert len(host.started) == started
+    assert cached["cached"] is True and cached["cached_receipt_id"] == first.receipt_id
+    assert again.result.get("deduplicated") is True
+    # Other scenarios, another commit, or a forced rerun run again.
+    call(kernel, "c", commit=repo["good"], scenarios=["try"])
+    call(kernel, "d", commit=repo["bad"], scenarios=["try", "teams"])
+    _, forced = call(kernel, "e", commit=repo["good"], scenarios=["try", "teams"], rerun=True)
+    assert len(host.started) == started + 3
+    assert output(forced)["cached"] is False
+    run = forced.request.arguments["run"]
+    assert run["rerun_of"] == first.receipt_id
+
+
+def test_a_changed_catalog_is_a_different_run(
+    env_kernel: tuple[Kernel, EnvHost],
+    repo: dict[str, Any],
+    tmp_path: Path,
+) -> None:
+    kernel, host = env_kernel
+    call(kernel, "a", commit=repo["good"], scenarios=["try"])
+    started = len(host.started)
+    registry_file(tmp_path, repo["source"], env={"FIXED": "1"})
+    _, again = call(kernel, "b", commit=repo["good"], scenarios=["try"])
+    assert output(again)["cached"] is False and len(host.started) == started + 1
+
+
+def test_forced_reruns_are_limited_per_commit_and_day(
+    env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
+) -> None:
+    kernel, host = env_kernel
+    for n in range(3):
+        state, _ = call(kernel, f"r{n}", commit=repo["good"], scenarios=["try"], rerun=True)
+        assert state == "succeeded"
+    started = len(host.started)
+    with pytest.raises(Fault) as refused:
+        submit_and_run(kernel, "r3", commit=repo["good"], scenarios=["teams"], rerun=True)
+    assert refused.value.code == "env_rerun_limit"
+    assert len(host.started) == started
+    # Another commit has its own allowance.
+    assert call(kernel, "other", commit=repo["bad"], scenarios=["try"], rerun=True)[0] == (
+        "succeeded"
+    )
+
+
+def submit_and_run(kernel: Kernel, key: str, **arguments: Any) -> str:
+    """For refusals at admission, which the runtime reports as a failed task."""
+    task_id = submit(kernel, "env.try", {"repo": "app", **arguments}, key=key, grants=("repo:app",))
+    state = OperationRuntime(kernel).execute(task_id)
+    if state == "failed":
+        failure = task(kernel, task_id).failure
+        raise Fault(failure.code, "refused", 409)
+    return state
+
+
+def test_an_identical_call_while_one_runs_is_refused(
+    env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
+) -> None:
+    kernel, host = env_kernel
+    # Run once, then mark that run as still in progress.
+    call(kernel, "first", commit=repo["good"], scenarios=["try"])
+    with kernel.database.engine.begin() as conn:
+        conn.exec_driver_sql(
+            "UPDATE env_runs SET state='running',expires_at='2999-01-01T00:00:00+00:00'"
+        )
+    started = len(host.started)
+    with pytest.raises(Fault) as refused:
+        submit_and_run(kernel, "second", commit=repo["good"], scenarios=["try"])
+    assert refused.value.code == "env_run_in_progress" and len(host.started) == started
+    # A running row past its call's deadline no longer blocks.
+    with kernel.database.engine.begin() as conn:
+        conn.exec_driver_sql("UPDATE env_runs SET expires_at='2000-01-01T00:00:00+00:00'")
+    assert call(kernel, "third", commit=repo["good"], scenarios=["try"])[0] == "succeeded"
+
+
+def test_a_failed_run_is_not_reused(
+    env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
+) -> None:
+    kernel, host = env_kernel
+    state, refused = call(kernel, "x", commit="f" * 40, scenarios=["try"])
+    assert state == "failed" and refused.failure.code == "env_commit_unknown"
+    with kernel.database.read() as conn:
+        assert conn.exec_driver_sql("SELECT COUNT(*) FROM env_runs").scalar_one() == 0
+
+
+@pytest.mark.parametrize(
+    ("arguments", "code"),
+    [
+        ({"scenarios": ["nope"]}, "env_scenario_unknown"),
+        ({"scenarios": ["boot"]}, "env_tier_unavailable"),
+    ],
+)
+def test_unknown_scenarios_and_unavailable_tiers_are_refused(
+    env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any], arguments: Any, code: str
+) -> None:
+    kernel, _ = env_kernel
+    state, refused = call(kernel, code, commit=repo["good"], **arguments)
+    assert state == "failed" and refused.failure.code == code
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"commit": "main", "scenarios": ["try"]},
+        {"commit": "abc123", "scenarios": ["try"]},
+        {"commit": "f" * 40, "scenarios": ["try"], "argv": ["sh"]},
+        {"commit": "f" * 40, "scenarios": ["try"], "url": "https://example.org/x.git"},
+    ],
+)
+def test_names_refs_and_command_lines_are_refused_before_anything_starts(
+    env_kernel: tuple[Kernel, EnvHost], arguments: Any
+) -> None:
+    kernel, host = env_kernel
+    with pytest.raises(Fault) as refused:
+        submit(kernel, "env.try", {"repo": "app", **arguments}, grants=("repo:app",))
+    assert refused.value.code == "invalid_arguments" and not host.started
+
+
+def test_the_repository_grant_is_required(
+    env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
+) -> None:
+    kernel, host = env_kernel
+    task_id = submit(
+        kernel, "env.try", {"repo": "app", "commit": repo["good"], "scenarios": ["try"]}, grants=()
+    )
+    assert OperationRuntime(kernel).execute(task_id) == "failed"
+    assert not host.started
+
+
+def test_scrub_hides_credential_shapes() -> None:
+    text = "a ghs_" + "b" * 30 + " Bearer " + "c" * 20 + " AKIA" + "D" * 16 + " ok"
+    cleaned = scrub(text)
+    assert cleaned.count("[redacted]") == 3 and cleaned.endswith(" ok")
+
+
+def test_the_descriptor_declares_the_run_window() -> None:
+    (descriptor,) = descriptors()
+    window = descriptor.cardea.run_window
+    assert window is not None and window.seconds == 24 * 3600 and window.reruns_per_day == 3
+    assert descriptor.cardea.effect == "read" and descriptor.cardea.resource is not None
+    executor = descriptor.cardea.executor
+    assert executor is not None and (executor.profile, executor.worker) == ("try", "env-try")
+
+
+@pytest.mark.parametrize("path", ["../escape", "/etc/passwd", "a/../../b"])
+def test_artifact_paths_outside_the_checkout_are_refused_in_the_registry(path: str) -> None:
+    from pydantic import ValidationError
+
+    from cardea.service.repositories import Scenario
+
+    with pytest.raises(ValidationError):
+        Scenario.model_validate({"argv": ["/bin/true"], "artifacts": [path]})
+
+
+def test_only_a_passing_run_satisfies_the_records_guard(
+    env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
+) -> None:
+    """ADR-038 decision 3: `requires_receipt: {operation: env.try, result: ...}`."""
+    from cardea.service.operations import OperationRejected
+    from cardea.service.records import check_result
+
+    kernel, _ = env_kernel
+    _, good = call(kernel, "good", commit=repo["good"], scenarios=["try"])
+    _, bad = call(kernel, "bad", commit=repo["bad"], scenarios=["try"])
+    check_result("result.passed == true", good)
+    with pytest.raises(OperationRejected) as refused:
+        check_result("result.passed == true", bad)
+    assert refused.value.code == "receipt_result_refused"
+    # A cached answer carries the same verdict.
+    _, cached = call(kernel, "again", commit=repo["good"], scenarios=["try"])
+    check_result("result.passed == true && result.cached == true", cached)
