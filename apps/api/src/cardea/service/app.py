@@ -25,6 +25,7 @@ from cardea.service import (
     mailbox,
     pages,
     records,
+    spend,
 )
 from cardea.service import events as intake
 from cardea.service.auth import Proof
@@ -632,6 +633,7 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
                     document = None
                 documents[suffix], truncated[suffix] = pages.bounded_document(document)
             consumed = mailbox.consumed_by(conn, task_id)
+            costs = spend.view(conn, task_id)
             # In the order they were made: an agent run's context calls come first.
             receipts = sorted(
                 tx.list_operations(task_id), key=lambda r: (r.created_at, r.request.operation_id)
@@ -645,6 +647,7 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
             "updated_at": task.updated_at.isoformat(),
             "attempt": task.checkpoint.state.get("attempt") if task.checkpoint else None,
             "messages_consumed": consumed,
+            "spend": costs,
             "output": documents["output"],
             "output_truncated": truncated["output"],
             "verification": documents["verification"],
