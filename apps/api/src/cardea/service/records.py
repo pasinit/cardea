@@ -28,7 +28,6 @@ import sqlalchemy as sa
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 from pydantic import (
-    AfterValidator,
     ConfigDict,
     Field,
     JsonValue,
@@ -37,11 +36,12 @@ from pydantic import (
     model_validator,
 )
 
-from cardea.kernel.models import Identifier
-from cardea.service.approvals import compile_condition, execute_condition
+from cardea.kernel.models import Identifier, OperationReceipt, OperationState
+from cardea.service.approvals import execute_condition
 from cardea.service.database import Database, Fault, borrow
 from cardea.service.models import (
     COLLECTION_NAME,
+    RECORD_ACTION,
     CollectionName,
     GroupPool,
     GroupSpec,
@@ -58,9 +58,21 @@ from cardea.service.operations import (
     Reconciliation,
 )
 from cardea.service.policy import Policy
+from cardea.service.record_states import (
+    GUARD_VARIABLES,
+    MAX_STATES,
+    MAX_TRANSITIONS,
+    GuardSource,
+    ReceiptRequirement,
+    StateMigration,
+    StateName,
+    Transition,
+    approval_rule,
+    check_table,
+    claiming_grants,
+)
 
 API_VERSION = "cardea/v1alpha1"
-GUARD_VARIABLES = frozenset({"record", "args", "caller"})
 MAX_LABELS = 16
 MAX_LINKS = 32
 DEFAULT_RECORD_BYTES = 16384
@@ -72,14 +84,6 @@ FIELD = r"^[A-Za-z_][A-Za-z0-9_]{0,63}$"
 
 Label = Annotated[str, Field(strict=True, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/=-]{0,63}$")]
 Text = Annotated[str, Field(strict=True, min_length=1, max_length=256)]
-
-
-def _guard(source: str) -> str:
-    compile_condition(source, GUARD_VARIABLES)
-    return source
-
-
-GuardSource = Annotated[str, Field(strict=True), AfterValidator(_guard)]
 
 
 class Guards(Record):
@@ -124,12 +128,15 @@ def lease_bound(attempts: int, timeout_seconds: int) -> int:
     return 2 * attempts * timeout_seconds + LEASE_BOUND_MARGIN_SECONDS
 
 
-def check_lease(collection: str, claims: "ClaimsConfig | None", pools: Iterable[GroupPool]) -> None:
-    """Refuse a lease shorter than `lease_bound` for any pool granted `record:<C>/claim`."""
+def check_lease(collection: str, spec: "CollectionSpec", pools: Iterable[GroupPool]) -> None:
+    """Refuse a lease shorter than `lease_bound` for any pool that may hold a record: one
+    granted `record:<C>/claim` or an acquiring transition."""
+    claims = spec.claims
     if claims is None:
         return
+    claiming = claiming_grants(collection, spec.transitions)
     for pool in pools:
-        if record_grant(collection, "claim") not in pool.grants:
+        if not claiming & set(pool.grants):
             continue
         bound = lease_bound(pool.run.bounds.attempts, pool.run.bounds.timeout_seconds)
         if claims.lease_seconds < bound:
@@ -164,6 +171,33 @@ class CollectionSpec(Record):
     )
     guards: Guards = Guards()
     claims: ClaimsConfig | None = None
+    # A flat state machine (decision 3); absent means plain records.
+    states: Annotated[tuple[StateName, ...], Field(min_length=1, max_length=MAX_STATES)] | None = (
+        None
+    )
+    initial: StateName | None = None
+    terminal: Annotated[tuple[StateName, ...], Field(max_length=MAX_STATES)] = ()
+    transitions: Annotated[tuple[Transition, ...], Field(max_length=MAX_TRANSITIONS)] = ()
+    # Where records in states this generation removes go (decision 3.3).
+    migrate: Annotated[tuple[StateMigration, ...], Field(max_length=MAX_STATES)] = ()
+
+    def transition(self, name: str) -> Transition | None:
+        return next((t for t in self.transitions if t.name == name), None)
+
+    @model_validator(mode="after")
+    def valid_table(self) -> Self:
+        check_table(
+            self.states,
+            self.initial,
+            self.terminal,
+            self.transitions,
+            self.migrate,
+            self.claims is not None,
+        )
+        for transition in self.transitions:
+            # Compiles the gate's rule now, so its CEL limits are checked at apply.
+            approval_rule("c", transition)
+        return self
 
     @model_validator(mode="after")
     def valid_schema(self) -> Self:
@@ -182,7 +216,7 @@ class CollectionMetadata(Record):
 
 
 class CollectionDocument(Record):
-    """`kind: Collection` (ADR-034 decision 2). State machines are slice 3."""
+    """`kind: Collection` (ADR-034 decisions 2 and 3)."""
 
     apiVersion: Literal["cardea/v1alpha1"] = "cardea/v1alpha1"  # noqa: N815 - Kubernetes shape
     kind: Literal["Collection"] = "Collection"
@@ -204,6 +238,9 @@ class CollectionDocument(Record):
         for action in ("claim", "release"):
             if guards.get(action) is None:
                 guards.pop(action, None)
+        for key in ("states", "initial", "terminal", "transitions", "migrate"):
+            if spec.get(key) in (None, []):
+                spec.pop(key, None)
         return spec
 
     @property
@@ -280,14 +317,20 @@ def apply_collection(
         raise Fault("collection_supervisor", "The collection belongs to another supervisor")
     # A shorter lease must still fit every group pool that may claim (decision 2.4).
     for group in referencing_groups(conn, namespace, name):
-        check_lease(name, document.spec.claims, group.pools)
+        check_lease(name, document.spec, group.pools)
     if existing is None:
         change, generation = "created", 1
     elif existing["spec_digest"] == digest:
         change, generation = "unchanged", int(existing["generation"])
     else:
         change, generation = "updated", int(existing["generation"]) + 1
-    plan = {"change": change, "generation": generation, "dry_run": dry_run}
+    moves = plan_moves(conn, namespace, name, document.spec)
+    plan: dict[str, Any] = {
+        "change": change,
+        "generation": generation,
+        "dry_run": dry_run,
+        "migrated": [{"from": old, "to": new, "records": n} for old, new, n in moves],
+    }
     if dry_run or change == "unchanged":
         view = (
             _document_view(existing, _count(conn, namespace, name))
@@ -316,9 +359,158 @@ def apply_collection(
             "WHERE namespace=? AND name=?",
             (generation, json.dumps(spec), digest, at, namespace, name),
         )
+    apply_moves(conn, namespace, name, moves, principal, generation)
     row = _row(conn, namespace, name)
     assert row is not None
     return {**_document_view(row, _count(conn, namespace, name)), "plan": plan}
+
+
+Move = tuple[str | None, str, int]
+
+
+def plan_moves(
+    conn: sa.Connection, namespace: str, name: str, spec: "CollectionSpec"
+) -> list[Move]:
+    """Records this generation moves to another state (decision 3.3).
+
+    A state that records still occupy may be removed only with a `migrate` entry. Records
+    without a state join the `initial` state when a collection gains a state machine.
+    """
+    states = set(spec.states or ())
+    migrate = {m.from_: m.to for m in spec.migrate}
+    moves: list[Move] = []
+    for state, count in conn.exec_driver_sql(
+        "SELECT state, COUNT(*) FROM records WHERE namespace=? AND collection=? "
+        "GROUP BY state ORDER BY state",
+        (namespace, name),
+    ):
+        if state is None:
+            if spec.initial is not None:
+                moves.append((None, spec.initial, int(count)))
+            continue
+        if state in states:
+            continue
+        if state not in migrate:
+            raise Fault(
+                "state_occupied",
+                f"{count} record(s) are in state {state}; remove it with migrate "
+                f"{{from: {state}, to: <state>}}",
+                409,
+            )
+        moves.append((str(state), migrate[state], int(count)))
+    return moves
+
+
+def apply_moves(
+    conn: sa.Connection,
+    namespace: str,
+    name: str,
+    moves: list[Move],
+    actor: str,
+    generation: int,
+) -> None:
+    """Move records as recorded `migrated` changes; their history is kept."""
+    at = now()
+    for source, target, _ in moves:
+        rows = (
+            conn.exec_driver_sql(
+                "SELECT * FROM records WHERE namespace=? AND collection=? AND state IS ?",
+                (namespace, name, source),
+            )
+            .mappings()
+            .all()
+        )
+        for row in rows:
+            old = record_view(row)
+            new = {
+                **old,
+                "state": target,
+                "version": int(row["version"]) + 1,
+                "updated_at": at.isoformat(),
+            }
+            conn.exec_driver_sql(
+                "UPDATE records SET state=?,version=?,updated_at=? WHERE seq=?",
+                (target, new["version"], new["updated_at"], row["seq"]),
+            )
+            detail: dict[str, JsonValue] = {"from": source, "to": target, "generation": generation}
+            append_history(conn, namespace, "migrated", actor, None, None, old, new, detail)
+            journal(conn, namespace, "migrated", new, actor, None, at, detail)
+
+
+def append_history(
+    conn: sa.Connection,
+    namespace: str,
+    kind: str,
+    actor: str,
+    task_id: str | None,
+    receipt_id: str | None,
+    old: Mapping[str, JsonValue] | None,
+    new: Mapping[str, JsonValue],
+    detail: Mapping[str, JsonValue] | None = None,
+) -> None:
+    """One append-only history row for a change of one record."""
+    conn.exec_driver_sql(
+        "INSERT INTO record_events(namespace,collection,record_id,version,kind,actor,"
+        "task_id,receipt_id,old_json,new_json,at,detail_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            namespace,
+            new["collection"],
+            new["record_id"],
+            new["version"],
+            kind,
+            actor,
+            task_id,
+            receipt_id,
+            json.dumps(old) if old is not None else None,
+            json.dumps(new),
+            new["updated_at"],
+            json.dumps(detail) if detail is not None else None,
+        ),
+    )
+
+
+def journal(
+    conn: sa.Connection,
+    namespace: str,
+    kind: str,
+    record: Mapping[str, JsonValue],
+    producer: str,
+    task_id: str | None,
+    at: datetime,
+    data: Mapping[str, JsonValue],
+) -> None:
+    """A kernel journal event in CloudEvents 1.0 shape, in the change's transaction.
+
+    `type` is `cardea.record.<kind>` and `subject` `<collection>/<record_id>` (decision 6), so
+    slice 7 can match transitions, claims and expiry like any ADR-035 event.
+    """
+    with borrow(conn) as tx:
+        tx.append_event(
+            namespace=namespace,
+            event_type=f"cardea.record.{kind}",
+            producer_id=producer,
+            correlation_id=str(record["record_id"]),
+            task_id=task_id,
+            at=at,
+            payload={
+                "specversion": "1.0",
+                "id": f"{record['collection']}/{record['record_id']}.{record['version']}",
+                "source": f"cardea://{namespace}",
+                "type": f"cardea.record.{kind}",
+                "subject": f"{record['collection']}/{record['record_id']}",
+                "time": at.isoformat(),
+                "data": {
+                    "collection": record["collection"],
+                    "record_id": record["record_id"],
+                    "version": record["version"],
+                    "state": record["state"],
+                    "holder": record["holder"],
+                    "claim_epoch": record["claim_epoch"],
+                    "actor": producer,
+                    **data,
+                },
+            },
+        )
 
 
 def read_access(conn: sa.Connection, principal: str, namespace: str, name: str) -> sa.RowMapping:
@@ -477,8 +669,18 @@ def check_guard(
     args: Mapping[str, JsonValue],
     caller: Mapping[str, JsonValue],
 ) -> None:
-    """Fail closed: a false guard, or one that errors, refuses the call (ADR-034 2.3)."""
-    source = getattr(spec.guards, action, None)
+    """A collection's write guard for one action (decision 2.3); fails closed."""
+    check_condition(getattr(spec.guards, action, None), action, record, args, caller)
+
+
+def check_condition(
+    source: str | None,
+    label: str,
+    record: Mapping[str, JsonValue],
+    args: Mapping[str, JsonValue],
+    caller: Mapping[str, JsonValue],
+) -> None:
+    """Fail closed: a false guard, or one that errors, refuses the call (decisions 2.3, 3.1)."""
     if source is None:
         return
     value, error = execute_condition(
@@ -487,15 +689,90 @@ def check_guard(
         GUARD_VARIABLES,
     )
     if error is not None:
-        raise OperationRejected(f"{action} guard failed to evaluate: {error}", "guard_refused")
+        raise OperationRejected(f"{label} guard failed to evaluate: {error}", "guard_refused")
     if value is not True:
-        raise OperationRejected(f"{action} guard refused this call", "guard_refused")
+        raise OperationRejected(f"{label} guard refused this call", "guard_refused")
+
+
+def _names_record(receipt: OperationReceipt, record_id: str) -> bool:
+    """A call was made for a record: its `record_id` argument, or a claim idempotency
+    context `<record_id>.<epoch>`."""
+    recorded = receipt.request.arguments
+    called = recorded.get("arguments")
+    provenance = recorded.get("context")
+    return (isinstance(called, dict) and called.get("record_id") == record_id) or (
+        isinstance(provenance, dict)
+        and str(provenance.get("idempotency_context") or "").startswith(f"{record_id}.")
+    )
+
+
+def _latest_receipt(
+    conn: sa.Connection, task_id: str, operation: str, record_id: str
+) -> str | None:
+    rows = conn.exec_driver_sql(
+        "SELECT snapshot FROM operations WHERE task_id=? AND state='succeeded' "
+        "AND json_extract(snapshot,'$.request.name')=? ORDER BY rowid DESC",
+        (task_id, operation),
+    ).fetchall()
+    for (snapshot,) in rows:
+        receipt = OperationReceipt.model_validate_json(snapshot)
+        if _names_record(receipt, record_id):
+            return receipt.receipt_id
+    return None
+
+
+def check_receipt(
+    conn: sa.Connection,
+    need: ReceiptRequirement,
+    arguments: Mapping[str, JsonValue],
+    context: OperationContext,
+    caller: str,
+    record_id: str,
+) -> str:
+    """The evidence a transition needs (decision 3.1): the cited receipt is a successful,
+    or reconciled-applied, call of the named operation, made by the caller's task (or, for
+    `same_caller`, by the caller within the window), for this record.
+
+    An agent sees operation outputs, not receipt IDs, so with `same_task` an omitted
+    `receipt_id` cites the task's latest successful call of the operation for this record.
+    """
+    receipt_id = arguments.get("receipt_id")
+    if receipt_id is None and need.within == "same_task":
+        receipt_id = _latest_receipt(conn, context.task_id, need.operation, record_id)
+    if not isinstance(receipt_id, str):
+        raise OperationRejected(
+            f"This transition needs receipt_id of a {need.operation} call", "receipt_required"
+        )
+    row = conn.exec_driver_sql(
+        "SELECT o.snapshot, b.agent_id FROM operations o JOIN task_bindings b USING(task_id) "
+        "WHERE o.receipt_id=?",
+        (receipt_id,),
+    ).first()
+    receipt = OperationReceipt.model_validate_json(row[0]) if row is not None else None
+    if receipt is None or receipt.request.name != need.operation:
+        raise OperationRejected(f"Cite a receipt of {need.operation}", "receipt_invalid")
+    if receipt.state is not OperationState.SUCCEEDED:
+        raise OperationRejected("The cited call did not succeed", "receipt_invalid")
+    if need.within == "same_task":
+        if receipt.request.task_id != context.task_id:
+            raise OperationRejected("The cited call belongs to another task", "receipt_invalid")
+    else:
+        assert need.window_seconds is not None
+        if row is None or row[1] != caller:
+            raise OperationRejected("The cited call was made by someone else", "receipt_invalid")
+        if receipt.updated_at < now() - timedelta(seconds=need.window_seconds):
+            raise OperationRejected("The cited call is outside the window", "receipt_invalid")
+    if not _names_record(receipt, record_id):
+        raise OperationRejected("The cited call was not made for this record", "receipt_invalid")
+    return receipt_id
 
 
 # Claims (ADR-034 decision 2.4)
 
 # Built-in operations that change a record; their reconciler reads the history.
-WRITES = frozenset({"records.create", "records.update", "records.claim", "records.release"})
+WRITES = frozenset(
+    {"records.create", "records.update", "records.claim", "records.release", "records.transition"}
+)
 
 
 def stamp(at: datetime) -> str:
@@ -585,15 +862,30 @@ def check_write(
         raise OperationRejected("Another principal holds this record", "record_claimed")
 
 
-def write_claim(conn: sa.Connection, row: sa.RowMapping, new: Mapping[str, JsonValue]) -> None:
-    """Store a claim change; any holder event restarts the follow-up count."""
+def write_claim(
+    conn: sa.Connection,
+    row: sa.RowMapping,
+    new: Mapping[str, JsonValue],
+    claim_transition: str | None = None,
+    *,
+    holder_event: bool = True,
+) -> None:
+    """Store a claim or state change; any holder event restarts the follow-up count.
+
+    `claim_transition` names the transition that acquired the claim (its
+    `on_claim_expiry` applies later); a claim taken by `records.claim` has none.
+    """
     changed = conn.exec_driver_sql(
-        "UPDATE records SET holder=?,claim_epoch=?,lease_expires_at=?,followups=0,version=?,"
-        "updated_at=? WHERE seq=? AND version=?",
+        "UPDATE records SET state=?,holder=?,claim_epoch=?,lease_expires_at=?,"
+        "followups=CASE WHEN ? THEN 0 ELSE followups END,"
+        "claim_transition=?,version=?,updated_at=? WHERE seq=? AND version=?",
         (
+            new["state"],
             new["holder"],
             new["claim_epoch"],
             new["lease_expires_at"],
+            int(holder_event),
+            claim_transition if new["holder"] is not None else None,
             new["version"],
             new["updated_at"],
             row["seq"],
@@ -617,52 +909,43 @@ def renew(conn: sa.Connection, row: sa.RowMapping, until: datetime) -> dict[str,
 
 
 def expire(
-    conn: sa.Connection, row: sa.RowMapping, at: datetime, *, actor: str, reason: str
+    conn: sa.Connection,
+    row: sa.RowMapping,
+    at: datetime,
+    *,
+    actor: str,
+    reason: str,
+    spec: "CollectionSpec | None" = None,
 ) -> None:
-    """Return a lapsed claim to the pool: holder cleared, epoch incremented, history and a
-    kernel journal event appended, all in the caller's transaction."""
+    """Return a lapsed claim to the pool: holder cleared, epoch incremented, and the state
+    set to the acquiring transition's `on_claim_expiry`, with history and a journal event,
+    all in the caller's transaction."""
     old = record_view(row)
+    acquired = (
+        spec.transition(row["claim_transition"]) if spec and row["claim_transition"] else None
+    )
+    state = acquired.on_claim_expiry if acquired and acquired.on_claim_expiry else old["state"]
     new: dict[str, JsonValue] = {
         **old,
+        "state": state,
         "holder": None,
         "lease_expires_at": None,
         "claim_epoch": int(row["claim_epoch"]) + 1,
-        # TODO(ADR-034 slice 3): set `state` to the acquiring transition's on_claim_expiry.
         "version": int(row["version"]) + 1,
         "updated_at": at.isoformat(),
     }
     write_claim(conn, row, new)
-    conn.exec_driver_sql(
-        "INSERT INTO record_events(namespace,collection,record_id,version,kind,actor,"
-        "task_id,receipt_id,old_json,new_json,at) "
-        "VALUES (?,?,?,?,'claim_expired',?,NULL,NULL,?,?,?)",
-        (
-            row["namespace"],
-            row["collection"],
-            row["record_id"],
-            new["version"],
-            actor,
-            json.dumps(old),
-            json.dumps(new),
-            new["updated_at"],
-        ),
-    )
-    with borrow(conn) as tx:
-        tx.append_event(
-            namespace=str(row["namespace"]),
-            event_type="record.claim_expired",
-            producer_id=actor,
-            correlation_id=claim_context(str(row["record_id"]), int(row["claim_epoch"])),
-            at=at,
-            payload={
-                "collection": row["collection"],
-                "record_id": row["record_id"],
-                "holder": row["holder"],
-                "claim_epoch": row["claim_epoch"],
-                "followups": row["followups"],
-                "reason": reason,
-            },
-        )
+    detail: dict[str, JsonValue] = {
+        "reason": reason,
+        "previous_holder": row["holder"],
+        "previous_epoch": row["claim_epoch"],
+        "followups": row["followups"],
+        "from": old["state"],
+        "to": state,
+    }
+    namespace = str(row["namespace"])
+    append_history(conn, namespace, "claim_expired", actor, None, None, old, new, detail)
+    journal(conn, namespace, "claim_expired", new, actor, None, at, detail)
 
 
 class Records:
@@ -679,6 +962,7 @@ class Records:
             "records.release": self.release,
             "records.claimed": self.claimed,
             "records.summary": self.summary,
+            "records.transition": self.transition,
         }
 
     def handler(self, name: str) -> Handler:
@@ -727,50 +1011,31 @@ class Records:
         kind: str,
         old: Mapping[str, JsonValue] | None,
         new: Mapping[str, JsonValue],
+        detail: Mapping[str, JsonValue] | None = None,
+        data: Mapping[str, JsonValue] | None = None,
     ) -> None:
-        conn.exec_driver_sql(
-            "INSERT INTO record_events(namespace,collection,record_id,version,kind,actor,"
-            "task_id,receipt_id,old_json,new_json,at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-            (
-                context.namespace,
-                new["collection"],
-                new["record_id"],
-                new["version"],
-                kind,
-                caller,
-                context.task_id,
-                context.receipt_id,
-                json.dumps(old) if old is not None else None,
-                json.dumps(new),
-                new["updated_at"],
-            ),
+        append_history(
+            conn,
+            context.namespace,
+            kind,
+            caller,
+            context.task_id,
+            context.receipt_id,
+            old,
+            new,
+            detail,
         )
-        # The same change as a kernel journal event, in this transaction (ADR-034
-        # decision 6): CloudEvents-shaped, no record data, so it can wake a journal trigger.
-        subject = f"{new['collection']}/{new['record_id']}"
-        with borrow(conn) as tx:
-            tx.append_event(
-                namespace=context.namespace,
-                event_type=f"cardea.record.{kind}",
-                producer_id=caller,
-                correlation_id=str(new["record_id"]),
-                task_id=context.task_id,
-                at=datetime.fromisoformat(str(new["updated_at"])),
-                payload={
-                    "specversion": "1.0",
-                    "id": f"{subject}.{new['version']}",
-                    "source": f"cardea://{context.namespace}",
-                    "type": f"cardea.record.{kind}",
-                    "subject": subject,
-                    "time": str(new["updated_at"]),
-                    "data": {
-                        "collection": new["collection"],
-                        "record_id": new["record_id"],
-                        "version": new["version"],
-                        "actor": caller,
-                    },
-                },
-            )
+        # The same change as a kernel journal event, in this transaction (decision 6).
+        journal(
+            conn,
+            context.namespace,
+            kind,
+            new,
+            caller,
+            context.task_id,
+            datetime.fromisoformat(str(new["updated_at"])),
+            data or {},
+        )
 
     # Operations
 
@@ -787,8 +1052,8 @@ class Records:
                 "data": _data(spec, arguments["data"]),
                 "labels": _labels(arguments.get("labels", [])),
                 "links": _links(arguments.get("links", [])),
-                # Collections with a state machine (slice 3) set the initial state here.
-                "state": None,
+                # A record starts in its collection's initial state (decision 3).
+                "state": spec.initial,
                 "holder": None,
                 "claim_epoch": 0,
                 "lease_expires_at": None,
@@ -801,8 +1066,8 @@ class Records:
             self._fence(conn, context)
             conn.exec_driver_sql(
                 "INSERT INTO records(namespace,collection,record_id,data_json,labels_json,"
-                "links_json,version,created_by,created_at,updated_at) "
-                "VALUES (?,?,?,?,?,?,1,?,?,?)",
+                "links_json,state,version,created_by,created_at,updated_at) "
+                "VALUES (?,?,?,?,?,?,?,1,?,?,?)",
                 (
                     context.namespace,
                     collection,
@@ -810,6 +1075,7 @@ class Records:
                     json.dumps(record["data"]),
                     json.dumps(record["labels"]),
                     json.dumps(record["links"]),
+                    record["state"],
                     caller["id"],
                     at,
                     at,
@@ -949,7 +1215,7 @@ class Records:
             self._fence(conn, context)
             if row["holder"] is not None and expired(row, at):
                 # A lapsed claim the sweep has not reached yet is released first.
-                expire(conn, row, at, actor=holder, reason="lease_expired")
+                expire(conn, row, at, actor=holder, reason="lease_expired", spec=spec)
                 row = _record_row(conn, context.namespace, collection, record_id)
                 assert row is not None
             if row["holder"] == holder:
@@ -1007,7 +1273,15 @@ class Records:
             }
             self._fence(conn, context)
             write_claim(conn, row, new)
-            self._event(conn, context, str(caller["id"]), "released", old, new)
+            self._event(
+                conn,
+                context,
+                str(caller["id"]),
+                "released",
+                old,
+                new,
+                data={"previous_holder": caller["id"], "previous_epoch": row["claim_epoch"]},
+            )
         return {"record": new}
 
     async def claimed(
@@ -1042,13 +1316,28 @@ class Records:
     ) -> dict[str, JsonValue]:
         """Counts by state and label, and up to 50 unclaimed records, titles only.
 
-        Without a state machine every record counts under the state `null`.
-        TODO(ADR-034 slice 3): limit `available` to states the caller may transition from.
+        Without a state machine every record counts under the state `null` and every
+        unclaimed record is available. With one, only records in a state some transition
+        the caller holds the live grant for may leave (ADR-034 decision 5.1).
         """
         collection = str(arguments["collection"])
         with self.database.read() as conn:
-            self._authorize(conn, context, collection, "read")
+            spec, _ = self._authorize(conn, context, collection, "read")
             scope = (context.namespace, collection)
+            free = "namespace=? AND collection=? AND (holder IS NULL OR lease_expires_at<=?)"
+            values: tuple[Any, ...] = (*scope, stamp(now()))
+            if spec.transitions:
+                policy = Policy(conn)
+                leaving: set[str] = set()
+                for transition in spec.transitions:
+                    try:
+                        policy.ceiling(context.task_id, record_grant(collection, transition.name))
+                    except Fault:
+                        continue
+                    leaving.update(transition.from_)
+                ordered = sorted(leaving)
+                free += f" AND state IN ({','.join('?' * len(ordered))})" if ordered else " AND 0"
+                values = (*values, *ordered)
             by_state = {
                 str(state) if state is not None else "null": int(count)
                 for state, count in conn.exec_driver_sql(
@@ -1065,8 +1354,6 @@ class Records:
                     scope,
                 )
             }
-            free = "namespace=? AND collection=? AND (holder IS NULL OR lease_expires_at<=?)"
-            values = (*scope, stamp(now()))
             rows = conn.exec_driver_sql(
                 "SELECT record_id,state,json_extract(data_json,'$.title') FROM records "
                 f"WHERE {free} ORDER BY seq LIMIT 50",
@@ -1090,6 +1377,125 @@ class Records:
             "available": available,
             "truncated": waiting - len(rows),
         }
+
+    async def transition(
+        self, arguments: dict[str, JsonValue], context: OperationContext
+    ) -> dict[str, JsonValue]:
+        """Move a record along its collection's table (decision 3.1), in one transaction:
+        the live grant `record:<C>/<transition>`, the from state, the guard, the claim
+        effect and the receipt evidence; then the state, history and journal event."""
+        collection = str(arguments["collection"])
+        record_id = str(arguments["record_id"])
+        name = str(arguments["transition"])
+        targs = arguments.get("args", {})
+        assert isinstance(targs, dict)
+        with self.database.engine.begin() as conn:
+            spec, caller = self._authorize(conn, context, collection, name)
+            transition = spec.transition(name)
+            if transition is None:
+                raise OperationRejected(
+                    f"Collection {collection} has no transition {name}", "transition_unknown"
+                )
+            row = _record_row(conn, context.namespace, collection, record_id)
+            if row is None:
+                raise OperationRejected("No such record", "record_not_found")
+            at = now()
+            actor = str(caller["id"])
+            self._fence(conn, context)
+            if row["holder"] is not None and expired(row, at):
+                # A lapsed claim is released first, as the sweep would, state included.
+                expire(conn, row, at, actor=actor, reason="lease_expired", spec=spec)
+                row = _record_row(conn, context.namespace, collection, record_id)
+                assert row is not None
+            if row["state"] not in transition.from_:
+                raise OperationRejected(
+                    f"Transition {name} needs state {' or '.join(transition.from_)}; the "
+                    f"record is in {row['state']}",
+                    "transition_not_allowed",
+                )
+            old = record_view(row)
+            check_condition(transition.guard, name, old, targs, caller)
+            new: dict[str, JsonValue] = {
+                **old,
+                "state": transition.to,
+                "version": int(row["version"]) + 1,
+                "updated_at": at.isoformat(),
+            }
+            acquired = row["claim_transition"]
+            if transition.claim == "acquire":
+                assert spec.claims is not None, "checked at apply"
+                if row["holder"] is not None and row["holder"] != actor:
+                    raise OperationRejected("Another principal holds this record", "record_claimed")
+                if row["holder"] == actor:
+                    if "claim_epoch" in arguments:
+                        check_holder(row, caller, arguments["claim_epoch"])
+                else:
+                    self._check_limit(conn, context.namespace, collection, actor, spec, at)
+                    new["claim_epoch"] = int(row["claim_epoch"]) + 1
+                new["holder"] = actor
+                new["lease_expires_at"] = stamp(at + timedelta(seconds=spec.claims.lease_seconds))
+                acquired = name
+            elif transition.claim == "holder":
+                check_holder(row, caller, arguments.get("claim_epoch"))
+            elif transition.claim == "release":
+                # The holder releases with its epoch; another principal may close the work
+                # when its grant and the guard allow, e.g. a reviewer approving it.
+                if row["holder"] == actor:
+                    check_holder(row, caller, arguments.get("claim_epoch"))
+                new["holder"] = None
+                new["lease_expires_at"] = None
+            receipt = None
+            if transition.requires_receipt is not None:
+                receipt = check_receipt(
+                    conn, transition.requires_receipt, arguments, context, actor, record_id
+                )
+            write_claim(
+                conn, row, new, acquired, holder_event=actor in (row["holder"], new["holder"])
+            )
+            detail: dict[str, JsonValue] = {
+                "transition": name,
+                "from": old["state"],
+                "to": transition.to,
+                "claim": transition.claim,
+                "args": targs,
+                "receipt_id": receipt,
+            }
+            self._event(
+                conn,
+                context,
+                actor,
+                "transitioned",
+                old,
+                new,
+                detail,
+                data={"from": old["state"], "to": transition.to, "transition": name},
+            )
+        result: dict[str, JsonValue] = {"record": new}
+        if new["holder"] is not None:
+            result["claim"] = claim_view(new)
+        return result
+
+    @staticmethod
+    def _check_limit(
+        conn: sa.Connection,
+        namespace: str,
+        collection: str,
+        holder: str,
+        spec: CollectionSpec,
+        at: datetime,
+    ) -> None:
+        assert spec.claims is not None
+        held = conn.exec_driver_sql(
+            "SELECT COUNT(*) FROM records WHERE namespace=? AND collection=? AND holder=? "
+            "AND lease_expires_at>?",
+            (namespace, collection, holder, stamp(at)),
+        ).scalar_one()
+        if held >= spec.claims.max_per_holder:
+            raise OperationRejected(
+                f"The holder already has {held} claim(s); the collection allows "
+                f"{spec.claims.max_per_holder}",
+                "claim_limit",
+            )
 
     async def reconcile(
         self, arguments: dict[str, JsonValue], context: OperationContext
@@ -1299,6 +1705,28 @@ DESCRIPTORS: tuple[OperationDescriptor, ...] = (
         {"record_id": _RECORD_ID, "claim_epoch": _EPOCH},
         ["record_id", "claim_epoch"],
         _ONE,
+        reconciler="cardea.records.reconcile",
+    ),
+    _descriptor(
+        "records.transition",
+        "Move a record along its collection's state machine (grant action: the transition's name)",
+        "effect",
+        {
+            "record_id": _RECORD_ID,
+            "transition": {"type": "string", "pattern": f"^{RECORD_ACTION}$"},
+            # Needed by claim: holder and by the holder for claim: release.
+            "claim_epoch": _EPOCH,
+            # A receipt of the operation the transition requires, when it requires one.
+            "receipt_id": {"type": "string", "minLength": 1, "maxLength": 128},
+            # The transition's own arguments; guards see them as `args`.
+            "args": {"type": "object", "maxProperties": 32},
+        },
+        ["record_id", "transition"],
+        {
+            "type": "object",
+            "properties": {"record": _RECORD, "claim": _CLAIM},
+            "required": ["record"],
+        },
         reconciler="cardea.records.reconcile",
     ),
     _descriptor(

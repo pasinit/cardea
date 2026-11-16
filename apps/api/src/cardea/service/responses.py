@@ -8,7 +8,7 @@ that belong to an operation or a client stay `JsonValue`, described where they a
 
 from typing import Literal
 
-from pydantic import Field, JsonValue
+from pydantic import ConfigDict, Field, JsonValue
 
 from cardea.kernel.models import KernelFailure, ObjectVersion, OperationReceipt
 from cardea.service.models import GroupSpec, Record, Wire
@@ -459,10 +459,23 @@ class CollectionStatus(Record):
     records: int
 
 
+class StateMove(Record):
+    """Records this generation moves to another state (ADR-034 decision 3.3)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
+
+    from_: str | None = Field(alias="from", description="Null for records without a state.")
+    to: str
+    records: int
+
+
 class CollectionPlan(Record):
     change: Literal["created", "updated", "unchanged"]
     generation: int
     dry_run: bool
+    migrated: list[StateMove] = Field(
+        default_factory=list, description="State moves; recorded as `migrated` history."
+    )
 
 
 class CollectionView(Record):

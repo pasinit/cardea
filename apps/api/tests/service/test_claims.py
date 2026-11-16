@@ -174,7 +174,7 @@ def test_an_expired_claim_returns_to_the_pool_and_fences_the_old_holder(items: K
     assert stored["holder"] is None and stored["lease_expires_at"] is None
     assert stored["claim_epoch"] == 2
     assert [e[0] for e in events(items, record["record_id"])][-1] == "claim_expired"
-    assert journal(items, "record.claim_expired")[-1]["reason"] == "lease_expired"
+    assert journal(items, "cardea.record.claim_expired")[-1]["data"]["reason"] == "lease_expired"
     # The old holder is fenced at its next holder-only call.
     assert call(items, "records.release", record, claim_epoch=1)[2] == "claim_lost"
     fenced = call(
@@ -390,8 +390,8 @@ def test_an_idle_holder_keeps_its_claim_until_follow_ups_run_out(
     tick(3700)  # the lease runs out: the claim lapses and is escalated
     stored = row(kernel, record_id)
     assert stored["holder"] is None and stored["claim_epoch"] == 2
-    lapsed = journal(kernel, "record.claim_expired")[-1]
-    assert lapsed["reason"] == "followups_exhausted" and lapsed["holder"] == MEMBER
+    lapsed = journal(kernel, "cardea.record.claim_expired")[-1]["data"]
+    assert lapsed["reason"] == "followups_exhausted" and lapsed["previous_holder"] == MEMBER
     # The supervisor is told by mail, committed with the expiry.
     with kernel.database.read() as conn:
         mail = conn.exec_driver_sql(

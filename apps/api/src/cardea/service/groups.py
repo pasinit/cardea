@@ -270,7 +270,7 @@ def _apply(
                 f"Collection {collection} does not exist in this namespace under this supervisor",
                 422,
             )
-        check_lease(collection, CollectionSpec.model_validate_json(row[1]).claims, spec.pools)
+        check_lease(collection, CollectionSpec.model_validate_json(row[1]), spec.pools)
     at = now()
     old = (
         conn.exec_driver_sql(

@@ -228,7 +228,7 @@ The lead reviewer decided these open questions on 2026-11-08. The project owner 
 
 ## Amendment (2026-11-09): resource-qualified approve
 
-Decided by the lead on 2026-11-09 for [ADR-034](034-agent-groups-and-shared-records.md); the owner may veto. Not implemented.
+Decided by the lead on 2026-11-09 for [ADR-034](034-agent-groups-and-shared-records.md); the owner may veto. Implemented for single-operation tasks with ADR-034 slice 3 (2026-11-09): requests record `approval_resource`, decisions and execution check `approve` on it, and the ceiling check uses the record grant. Portable tests only.
 
 - **Why.** ADR-034 routes every record state transition through one built-in operation, `records.transition`. An `approve` row on `(namespace, records.transition)` would let its holder approve every transition of every collection. Approvers must instead be scoped to one transition of one collection: approving `orders/approve` must not also approve `work/approve`.
 - **What changes.** The `approve` mode (item 2) may also be granted on a resource-qualified grant of the form `<kind>:<resource>`, written like ADR-033's `harness:<id>`. The row `(P, namespace, record:orders/approve, approve)` means "P may decide approval requests for the `approve` transition of collection `orders` in this namespace". It needs a matching `platform` row, as every right does.

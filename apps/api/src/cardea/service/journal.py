@@ -2,7 +2,7 @@
 
 The kernel appends journal events in the same transaction as the change they report:
 mailbox `cardea.mailbox.sent|delivered|dead`, record `cardea.record.created|updated|
-claimed|released|claim_expired` and
+claimed|released|claim_expired|transitioned|migrated` and
 approval `cardea.approval.requested|decided|void|expired|withdrawn`. A journal trigger
 reads its own namespace's journal through a cursor and admits its template for each
 matching event, exactly as an ADR-035 delivery does:
@@ -76,7 +76,7 @@ def adapt(
     elif row["event_type"] in APPROVALS:
         kind, subject, data = APPROVALS[row["event_type"]], payload.get("request_id"), payload
     elif row["event_type"] == "record.claim_expired":
-        # The claim sweep's journal event (slice 2), as the record events are typed.
+        # Rows written by slice 2's claim sweep before claim expiry became a CloudEvent.
         kind = "cardea.record.claim_expired"
         subject, data = f"{payload.get('collection')}/{payload.get('record_id')}", payload
     else:
