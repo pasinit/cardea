@@ -1,7 +1,7 @@
 # ADR-029: Supervisor Schedules, Run Expectations and Run Evidence
 
 - **Date / owner / milestones:** 2026-10-15; runtime and API maintainers; ADR-022 gaps #7, #8 and #11 (C4, C5).
-- **Status:** selected and implemented; portable tests pass.
+- **Status:** selected and implemented; portable tests pass. Amended 2026-11-16 (expectation alternatives and argument match, see [Amendment](#amendment-2026-11-16-alternatives-and-argument-match)): decided by the lead, the owner may veto; implemented with portable tests.
 - **Requirement:** a client application (Telos) manages its users' recurring work without host-owner access: create, update, disable and remove a schedule under the user's own live authority.
   - A scheduled run is a versioned definition: trigger, instructions, exposed operations, bounds and completion conditions. It is checked when installed and again at every slot.
   - A run is complete only when its declared effects actually happened.
@@ -48,6 +48,16 @@ Every API response is capped at 256 KiB. A realistic agent run broke that: `GET 
 - **`GET /agent-receipts` pages by size** (`?after=&limit=`, `next`), with whole receipts in operation-ID order.
 - **`GET /output`** returns the document inline when it fits. Otherwise it returns `content: null` with `content_omitted`, `content_bytes` and `content_sha256`, and `GET /v0.2/tasks/{id}/output/content?offset=` serves the stored bytes as base64 chunks of 128 KiB.
 - **Every page is built against a 240 KiB budget** under the 256 KiB cap. A page always includes at least one item; one call summary or receipt is far below the budget. `test_large_runs_stay_under_the_response_cap_and_page_everything` checks this: 60 calls with about 64 KiB of arguments and result each, plus an over-large result and a 300 KB reply. Every response stays under the cap, and paging returns every call and receipt plus the whole output.
+
+## Amendment (2026-11-16): alternatives and argument match
+
+Decided by the lead on 2026-11-16 for ADR-034 pools; the owner may veto. Implemented with portable tests (`apps/api/tests/service/test_expectations_any_of.py`, and `test_group_spend.py` for windows).
+
+- **Why.** A role often has several acceptable outcomes. For example, a run must open a pull request or tell the team lead why it is blocked. With one operation per condition, that could not be said.
+- **`any_of`.** An `expect` entry may be `{"any_of": [entry, ...]}` with 2 to 8 single-operation entries. It is met when at least one alternative is met. While none is met it is unmet, so the run is retried while attempts remain and then fails with `expectation_unmet`. It is `expectation_exceeded` (an immediate failure) only when every alternative is exceeded, because a run that has exceeded one alternative may still meet another. Alternatives do not nest.
+- **`match`.** Any single entry, inside `any_of` or not, may add `match`: RFC 6901 pointers into the call's arguments with the exact values a counted call must have (at most 8). For example `{"operation": "mailbox.send", "match": {"/to/instance": "team.lead.0"}}`. A missing pointer does not match. Counting still uses distinct applied effects (item 3).
+- **Where.** Per-run `expect` in agent-run requests, trigger templates and ADR-034 pool run templates, and ADR-034 `expect_window` entries (as `any_of` of counts with `min`/`max`, and `match`).
+- **Compatibility.** `match` and `any_of` are left out of a dump when unset, so requests, trigger definitions and group specs without them keep their digests.
 
 ## Candidates considered
 
