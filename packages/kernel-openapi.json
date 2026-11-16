@@ -1112,12 +1112,6 @@
             ],
             "description": "What the attempt reported; null is unknown.",
             "title": "Cost Usd"
-          },
-          "schema_version": {
-            "const": "0.2",
-            "default": "0.2",
-            "title": "Schema Version",
-            "type": "string"
           }
         },
         "required": [
@@ -5261,12 +5255,6 @@
                 "type": "null"
               }
             ]
-          },
-          "schema_version": {
-            "const": "0.2",
-            "default": "0.2",
-            "title": "Schema Version",
-            "type": "string"
           }
         },
         "required": [
@@ -5753,12 +5741,6 @@
           "reserved_usd": {
             "title": "Reserved Usd",
             "type": "number"
-          },
-          "schema_version": {
-            "const": "0.2",
-            "default": "0.2",
-            "title": "Schema Version",
-            "type": "string"
           },
           "state": {
             "description": "reserved while the run is open; settled to its reported cost; unknown when any attempt's cost is unknown, so the full reservation stays charged.",

@@ -110,7 +110,7 @@ def test_unused_reservation_is_released_and_unknown_cost_is_kept(
     )
     assert view.status_code == 200, view.text
     charged = view.json()["spend"]
-    assert charged["attempts"] == [{"schema_version": "0.2", "attempt": 1, "cost_usd": None}]
+    assert charged["attempts"] == [{"attempt": 1, "cost_usd": None}]
     assert charged["cost_usd"] is None
     reservation = charged["reservation"]
     assert reservation["state"] == "unknown" and reservation["charged_usd"] == 0.5

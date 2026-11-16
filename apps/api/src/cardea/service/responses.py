@@ -329,12 +329,12 @@ class AgentRunVerification(Record):
     output_digest: str
 
 
-class AttemptCost(Wire):
+class AttemptCost(Record):
     attempt: int
     cost_usd: float | None = Field(description="What the attempt reported; null is unknown.")
 
 
-class SpendReservation(Wire):
+class SpendReservation(Record):
     """A group member run's charge against its group and pool spend (ADR-034 5.3)."""
 
     group: str
@@ -349,7 +349,7 @@ class SpendReservation(Wire):
     charged_usd: float
 
 
-class RunSpend(Wire):
+class RunSpend(Record):
     attempts: list[AttemptCost]
     cost_usd: float | None = Field(
         description="Total reported cost of the run's attempts; null when any is unknown."
