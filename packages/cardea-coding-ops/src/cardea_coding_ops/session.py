@@ -80,6 +80,14 @@ def environment(scratch: Path, passthrough: list[str] | None = None) -> dict[str
     return env
 
 
+def model_credential() -> str | None:
+    """The profile's model credential, if the worker has one (ADR-028)."""
+    path = os.environ.get("CARDEA_CREDENTIAL")
+    if not path or not Path(path).is_file():
+        return None
+    return Path(path).read_text().strip() or None
+
+
 def fixed_env(values: object) -> dict[str, str]:
     """Host-owner values for the gates, such as a read-only package cache with no network
     (`UV_CACHE_DIR`, `UV_OFFLINE=1`, `PIP_NO_INDEX=1`); never a credential-shaped name."""
@@ -263,6 +271,20 @@ def session(arguments: dict[str, JsonValue], config: dict[str, Any], scratch: Pa
         )
         passed.append(result["exit_code"] == 0)
         gates.append({"name": str(gate["name"]), "passed": passed[-1], **result})
+
+    # The model credential must not leave the worker in the change or any result text. The
+    # whole change is checked as text (`--text`), so binary files cannot hide it.
+    secret = model_credential()
+    if secret:
+        everything = json.dumps([ran, gates])
+        if changed:
+            everything += _git(repo, env, "diff", "--text", base_sha, str(head_sha))
+        if secret in everything:
+            raise OperationRejected(
+                "the change or a command's output contains the model credential; nothing is "
+                "returned",
+                "credential_in_change",
+            )
 
     output: dict[str, JsonValue] = {
         "repository": alias,
