@@ -66,6 +66,24 @@
       "jit": true,
       "concurrency": 1,
       "credential": "/etc/cardea/credentials/openrouter"
+    },
+    "coding": {
+      "memory_mb": 4096,
+      "cpu_percent": 200,
+      "tasks": 512,
+      "wall_seconds": 3600,
+      "scratch_mb": 4096,
+      "output_kb": 14336,
+      "network": {
+        "policy": "model_api_only",
+        "proxy": "127.0.10.5:3128",
+        "hosts": [
+          "api.anthropic.com"
+        ]
+      },
+      "jit": true,
+      "concurrency": 1,
+      "credential": "/etc/cardea/credentials/claude-code"
     }
   },
   "workers": {
@@ -123,6 +141,25 @@
       "env": {
         "CARDEA_HARNESS_KIND": "opencode",
         "CARDEA_OPENCODE_BINARY": "/opt/cardea/opencode/opencode"
+      }
+    },
+    "code-session": {
+      "argv": [
+        "/opt/cardea/apps/api/.venv/bin/python",
+        "-I",
+        "-m",
+        "cardea.hosts.operation_worker",
+        "coding.code.session"
+      ],
+      "profiles": [
+        "coding"
+      ],
+      "read_only": [
+        "/opt/cardea",
+        "/opt/cardea-code"
+      ],
+      "env": {
+        "CARDEA_CODING_CONFIG": "/opt/cardea-code/coding.json"
       }
     }
   }
