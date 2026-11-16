@@ -15,13 +15,19 @@ from collections.abc import MutableMapping
 from typing import Any, cast
 
 import pytest
+from test_agent_runs import FakeSession, kernel, routine, session, submit, tools
 
 from cardea.hosts import launcher
 from cardea.service import loopback
+from cardea.service.agent_run_runtime import AgentRunRuntime
 from cardea.service.content_gate import GateEndpoint
 from cardea.service.database import Database
+from cardea.service.kernel import Kernel
 from cardea.service.operations import OperationContext
 from cardea.service.tool_endpoint import ToolEndpoint
+
+# Fixtures shared with the agent-run tests.
+__all__ = ["kernel", "session", "tools"]
 
 LINUX = pytest.mark.skipif(
     not sys.platform.startswith("linux"), reason="only Linux has all of 127.0.0.0/8 locally"
@@ -100,3 +106,15 @@ def test_the_gate_callback_binds_only_the_dedicated_address() -> None:
         assert gate.url == f"http://{launcher.ENDPOINT_ADDRESS}:{gate.port}/check"
         assert status(gate.url) == 401
         assert refused("127.0.0.1", gate.port)
+
+
+@LINUX
+def test_an_agent_run_under_host_execution_gets_the_dedicated_address(
+    kernel: Kernel, session: FakeSession
+) -> None:
+    """The kernel's `endpoint_host` (set by the daemon under host execution) is where the
+    attempt's tool endpoint listens, and the run works through it."""
+    kernel.endpoint_host = launcher.ENDPOINT_ADDRESS
+    session.scripts = [routine]
+    assert AgentRunRuntime(kernel).execute(submit(kernel)) == "succeeded"
+    assert session.requests[0].mcp_url.startswith(f"http://{launcher.ENDPOINT_ADDRESS}:")
