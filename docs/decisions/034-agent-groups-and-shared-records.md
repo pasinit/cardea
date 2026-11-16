@@ -645,7 +645,17 @@ Portable tests go in `apps/api/tests/service/`. Before the record is called veri
   - **Reference package.** The fake `vcs.*`, `ci.status`, `risk.check`, `market.quotes` and `broker.*` operations are the installable reference package `packages/cardea-reference-ops`. It has ADR-023 descriptors, `cardea.operations` entry points, and an idempotency scope and an in-memory reconciler on every effect. It has no network.
   - **Examples as files.** Both worked examples are files in `examples/teams`: collections, group manifests and the fill trigger. `make teams` walks through them on a throwaway kernel, and `make teams-test` keeps the walkthrough working.
   - **Tests.** `test_worked_examples.py` and `test_state_machines.py` load the package and the files. A test installs the package as a host would, with descriptors in a private `operations_dir` and handlers and reconcilers resolved from the installed entry points.
-- **Not done: acceptance test 1** (restructure by configuration only). It needs slice 8's drain and deletion, which are not on main.
+- **Acceptance test 1** (restructure by configuration only), now that slice 8 is on main. `test_software_team_review_gate_then_restructure` runs a work item through `open → ready → in_progress → in_review → in_progress → in_review → done`, then changes only the configuration:
+  - `dev` goes to 4 replicas and `product` is removed;
+  - a state `blocked` is added with two transitions;
+  - `cancelled` is removed with `migrate` to `done`.
+
+  The two dry-run plans list exactly those changes and write nothing. On apply:
+  - the cancelled record migrates, with a `migrated` history event;
+  - `product.0` drains while its in-flight run finishes with its bound request unchanged;
+  - the tick reconciler removes and disables `product.0`, and `observedGeneration` converges.
+
+  No code changes between the two configurations.
 
 ## Verification
 

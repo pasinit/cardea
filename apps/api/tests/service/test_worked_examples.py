@@ -1,4 +1,4 @@
-"""ADR-034's two worked examples as executable tests (acceptance test 2; test 1 in part).
+"""ADR-034's two worked examples as executable tests (acceptance tests 1 and 2).
 
 Both use only the kernel's generic primitives (collections, records, state machines, claims,
 agent groups, approvals, mailboxes, event triggers), the configuration in `examples/teams`
@@ -36,6 +36,7 @@ from cardea.service.app import create_app
 from cardea.service.auth import Authentication, Proof
 from cardea.service.database import Database, Fault
 from cardea.service.groups import apply as apply_group
+from cardea.service.groups import reconcile_all as reconcile_groups
 from cardea.service.harnesses import IMPLICIT_ID, Catalog, Harnesses, ModelEntry, implicit_entry
 from cardea.service.kernel import Kernel, provision
 from cardea.service.models import (
@@ -354,7 +355,9 @@ def test_held_transition_reexecution_keeps_the_resource_qualified_check(
 # A. Software team: a review gate built from transitions, grants and guards
 
 
-def test_software_team_review_gate(setup: tuple[Kernel, Any, Fakes]) -> None:
+def test_software_team_review_gate_then_restructure(
+    setup: tuple[Kernel, Any, Fakes],
+) -> None:
     kernel, session, _ = setup
     group = example_group("software-team")
     configure(kernel, "eng", "sup-eng", example_collections("software-team"), group)
@@ -502,6 +505,118 @@ def test_software_team_review_gate(setup: tuple[Kernel, Any, Fakes]) -> None:
             )
         ]
     assert path == ["ready", "in_progress", "in_review", "in_progress", "in_review", "done"]
+
+    # Acceptance test 1: restructure by configuration only. Another item is cancelled, so
+    # removing the `cancelled` state has a record to migrate.
+    async def file_other(client: ClientSession) -> Any:
+        return await tool(
+            client,
+            "records-create",
+            collection="work",
+            client_key="old-idea",
+            data={"title": "An idea nobody wants"},
+        )
+
+    other = step("eng-team.product.0", ["records.create"], file_other)["record"]["record_id"]
+    step("eng-team.lead.0", ["records.transition"], transition(other, "cancel"))
+    assert state_of(kernel, other)[0] == "cancelled"
+    # A product run is in flight (admitted, not yet run) when its pool is removed.
+    product = example_group("software-team").spec.pools
+    in_flight = AgentRunRequest.model_validate(
+        {
+            "request_id": "eng-team.product.0.in-flight",
+            "agent_id": "eng-team.product.0",
+            "namespace": "eng",
+            "objective": "Exercise the product",
+            "instructions": "Exercise the product and file the work you find.",
+            "operations": ["records.create"],
+            "grants": list(next(p for p in product if p.name == "product").grants),
+            "model": "model-a",
+            "max_attempts": 1,
+            "attempt_timeout_seconds": 60,
+        }
+    )
+    flight = kernel.submit(kernel.auth.validate("sup-eng"), in_flight).task.task_id
+
+    # The new configuration: four developers, no product pool; a `blocked` state with two
+    # transitions; `cancelled` removed, its records migrated to `done`.
+    manifest_doc = example("software-team", "group.json")
+    pools_doc = [p for p in manifest_doc["spec"]["pools"] if p["name"] != "product"]
+    next(p for p in pools_doc if p["name"] == "dev")["replicas"] = 4
+    manifest_doc["spec"]["pools"] = pools_doc
+    restructured = AgentGroup.model_validate(manifest_doc)
+    work_doc = example("software-team", "collection.work.json")
+    spec = work_doc["spec"]
+    spec["states"] = [s for s in spec["states"] if s != "cancelled"] + ["blocked"]
+    spec["terminal"] = ["done"]
+    spec["transitions"] = [t for t in spec["transitions"] if t["name"] != "cancel"] + [
+        {"name": "block", "from": ["in_progress"], "to": "blocked", "claim": "holder"},
+        {"name": "unblock", "from": ["blocked"], "to": "in_progress", "claim": "holder"},
+    ]
+    spec["migrate"] = [{"from": "cancelled", "to": "done"}]
+    collection = CollectionDocument.model_validate(work_doc)
+
+    def counts() -> tuple[int, ...]:
+        with kernel.database.read() as conn:
+            return tuple(
+                conn.exec_driver_sql(f"SELECT COUNT(*) FROM {table}").scalar_one()
+                for table in ("principals", "group_members", "record_events", "triggers")
+            )
+
+    # The dry-run plans list exactly these changes and change nothing.
+    before = counts()
+    with kernel.database.engine.begin() as conn:
+        planned = apply_collection(conn, "sup-eng", collection, dry_run=True)["plan"]
+    assert planned["change"] == "updated"
+    assert planned["migrated"] == [{"from": "cancelled", "to": "done", "records": 1}]
+    proof = kernel.auth.validate("sup-eng")
+    dry = apply_group(kernel, proof, "eng-team", restructured, True)
+    assert dry["dry_run"] and dry["plan"]["members_added"] == ["eng-team.dev.3"]
+    assert dry["plan"]["members_draining"] == ["eng-team.product.0"]
+    assert {t.rsplit(".", 1)[0] for t in dry["plan"]["triggers_installed"]} == {"eng-team.dev.3"}
+    assert {t.rsplit(".", 1)[0] for t in dry["plan"]["triggers_removed"]} == {"eng-team.product.0"}
+    assert counts() == before
+
+    # Applied: records migrate with history, the removed pool drains, the in-flight run
+    # keeps its bound request, and observedGeneration converges once it has finished.
+    with kernel.database.engine.begin() as conn:
+        apply_collection(conn, "sup-eng", collection, dry_run=False)
+    assert state_of(kernel, other)[0] == "done"
+    with kernel.database.read() as conn:
+        assert (
+            conn.exec_driver_sql(
+                "SELECT COUNT(*) FROM record_events WHERE record_id=? AND kind='migrated'", (other,)
+            ).scalar_one()
+            == 1
+        )
+    applied = apply_group(kernel, proof, "eng-team", restructured, False)
+    status = applied["group"]["status"]
+    assert status["observedGeneration"] < applied["generation"]
+    members = {m["principal_id"]: m["state"] for m in status["members"]}
+    assert members["eng-team.product.0"] == "draining" and members["eng-team.dev.3"] == "active"
+    played: list[str] = []
+
+    async def exercise(client: ClientSession, request: SessionRequest) -> SessionResult:
+        played.append(request.prompt)
+        return SessionResult(text="Exercised the product.", is_error=False, turns=1)
+
+    session.scripts = [exercise]
+    assert AgentRunRuntime(kernel).execute(flight) == "succeeded"
+    with kernel.database.read() as conn:
+        bound = conn.exec_driver_sql(
+            "SELECT request_json FROM task_bindings WHERE task_id=?", (flight,)
+        ).scalar_one()
+    assert AgentRunRequest.model_validate_json(bound) == in_flight
+    assert "Exercise the product" in played[0]
+    reconcile_groups(kernel)
+    view = apply_group(kernel, proof, "eng-team", restructured, True)["group"]
+    assert view["status"]["observedGeneration"] == view["metadata"]["generation"]
+    with kernel.database.read() as conn:
+        removed = conn.exec_driver_sql(
+            "SELECT m.state,p.disabled FROM group_members m JOIN principals p USING(principal_id) "
+            "WHERE m.principal_id='eng-team.product.0'"
+        ).one()
+    assert tuple(removed) == ("removed", 1)
 
 
 # B. Trading desk: propose, approve (human), place, fill, reconcile
