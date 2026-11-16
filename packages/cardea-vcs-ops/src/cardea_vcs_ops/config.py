@@ -1,18 +1,25 @@
 """Host-owner configuration of the vcs operations (ADR-037).
 
-One private JSON file, named by `CARDEA_VCS_CONFIG`, lists the repository aliases callers
-may name, the branch prefix, whether `APPROVE` reviews are allowed, and the credential
+One JSON file, named by `CARDEA_VCS_CONFIG`, lists the repository aliases callers may
+name, the branch prefix, whether `APPROVE` reviews are allowed, and the credential
 provider. Callers name an alias; they never send a URL, a token or a host.
+
+In the `vcs` confined worker (ADR-037) the file holds no secret: the provider is
+`profile_credential`, the worker profile's own credential, which systemd loads into
+the unit. Such a file may be a shared, read-only host-owner file (root-owned, not
+writable by others), bound read-only into the sandbox. A file that holds a token must
+be private to the reading account.
 """
 
 import os
 import re
+import stat
 from pathlib import Path
 from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
-from cardea.service.database import private_file
+from cardea.service.database import Fault, private_file
 
 Alias = Annotated[str, Field(strict=True, pattern=r"^[a-z][a-z0-9-]{0,63}$")]
 Name = Annotated[str, Field(strict=True, pattern=r"^[A-Za-z0-9_.-]{1,100}$")]
@@ -41,6 +48,13 @@ class FixedTokenConfig(Record):
     token: Annotated[SecretStr, Field(min_length=8, max_length=512)]
 
 
+class ProfileCredentialConfig(Record):
+    """The confined worker profile's credential, read per call from `$CARDEA_CREDENTIAL`
+    (ADR-028): a token for now; a GitHub App key once the minter exists."""
+
+    kind: Literal["profile_credential"]
+
+
 class VcsConfig(Record):
     repositories: dict[Alias, Repository]
     # Pushed branches must start with this, after `{group}` is replaced by the caller's
@@ -50,7 +64,7 @@ class VcsConfig(Record):
     )
     # `APPROVE` reviews are refused unless the host owner enables them (open question 2).
     allow_approve: bool = False
-    credentials: FixedTokenConfig
+    credentials: Annotated[FixedTokenConfig | ProfileCredentialConfig, Field(discriminator="kind")]
 
     @model_validator(mode="after")
     def prefix_names_the_group(self) -> Self:
@@ -62,6 +76,33 @@ class VcsConfig(Record):
 
 
 def load(path: Path | None = None) -> VcsConfig:
-    """Read the host-owner file: private, root- or service-owned, not world-readable."""
+    """Read the host-owner file: private to this account, or, when it holds no secret,
+    a read-only shared file that only root or this account can change."""
     location = path or Path(os.environ.get("CARDEA_VCS_CONFIG", "/etc/cardea/vcs.json"))
-    return VcsConfig.model_validate_json(private_file(location))
+    try:
+        return VcsConfig.model_validate_json(private_file(location))
+    except Fault as refused:
+        if refused.code != "unsafe_file":
+            raise
+    config = VcsConfig.model_validate_json(shared_file(location))
+    if not isinstance(config.credentials, ProfileCredentialConfig):
+        raise Fault("unsafe_file", "A vcs configuration with a token must be private", 500)
+    return config
+
+
+def shared_file(path: Path) -> bytes:
+    """A regular file owned by root or this account that nobody else may change."""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(fd)
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid not in (0, os.getuid())
+            or info.st_mode & 0o022
+            or info.st_size > 262144
+        ):
+            raise Fault("unsafe_file", "The vcs configuration may not be shared writable", 500)
+        with os.fdopen(fd, "rb", closefd=False) as stream:
+            return stream.read(262145)
+    finally:
+        os.close(fd)

@@ -23,7 +23,7 @@
   "cardea": {
     "version": 1,
     "effect": "effect",
-    "handler": "vcs.comment",
+    "executor": {"kind": "confined", "profile": "vcs", "worker": "vcs-comment"},
     "timeout_seconds": 60,
     "idempotency_scope": ["/repository", "/number", "/client_key"],
     "reconciler": "vcs.find_comment",

@@ -41,10 +41,17 @@ from cardea.service.models import (
     Provisioning,
     now,
 )
-from cardea.service.operations import Registry
+from cardea.service.operations import OperationDescriptor, Registry
 
 TOKEN = "ghs_TEST" + "x7Q2" * 8  # recognisable, never expected outside the host
-OPERATIONS = ("vcs.push_branch", "vcs.open_change", "vcs.comment", "vcs.review", "vcs.read_change")
+OPERATIONS = (
+    "vcs.push_branch",
+    "vcs.open_change",
+    "vcs.comment",
+    "vcs.review",
+    "vcs.read_change",
+    "vcs.check_repository",
+)
 RUN_GRANTS = (*RIGHTS, "models.invoke", *OPERATIONS, "repo:cardea")
 STEPS = count()
 
@@ -105,6 +112,17 @@ def policy() -> Provisioning:
     )
 
 
+def in_process() -> tuple[OperationDescriptor, ...]:
+    """The package's descriptors run in the service process: the handler logic alone. The
+    installed descriptors run in the `vcs` confined worker (test_vcs_confined.py)."""
+    return tuple(
+        d.model_copy(
+            update={"cardea": d.cardea.model_copy(update={"executor": None, "handler": d.name})}
+        )
+        for d in descriptors()
+    )
+
+
 @pytest.fixture
 def host(tmp_path: Path) -> FakeGitHub:
     return FakeGitHub(tmp_path / "host")
@@ -131,7 +149,7 @@ def kernel(
 ) -> Iterator[Kernel]:
     monkeypatch.setattr(handlers, "DBOSClient", FakeClient)
     monkeypatch.setattr(agent_run_runtime, "POLL_SECONDS", 0.05)
-    registry = Registry(descriptors(), vcs.handlers())
+    registry = Registry(in_process(), vcs.handlers())
     db = Database(tmp_path / "data")
     db.migrate()
     provision(db, policy(), registry)

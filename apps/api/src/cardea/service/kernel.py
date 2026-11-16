@@ -559,7 +559,6 @@ class Kernel:
             gate=lambda context: content_gate.GateEndpoint(
                 self.database, self.content_gate, context
             ),
-            entry=descriptor.cardea.handler,
         )
 
     def _artifact_store(self, limit: int) -> StoreArtifacts | None:

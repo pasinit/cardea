@@ -10,6 +10,9 @@ its reconciler, which reads the host and never sends again:
 | `vcs.comment`     | a comment carrying the marker `cardea:<effect key>` |
 | `vcs.review`      | a review carrying the same marker                  |
 
+`vcs.check_repository` is a read: it reports whether the repository's rules are what
+the agent team relies on, and enforces nothing.
+
 Rules checked here, before any network call:
 - the repository is an alias from host configuration (its `repo:<alias>` grant is checked
   by the kernel, from the descriptor's `resource`);
@@ -28,7 +31,13 @@ from pydantic import JsonValue
 
 from cardea.service.operations import OperationContext, OperationRejected, Reconciliation
 from cardea_vcs_ops.config import Repository, VcsConfig
-from cardea_vcs_ops.credentials import Permission, RepositoryCredentials, provider
+from cardea_vcs_ops.credentials import (
+    Credential,
+    CredentialUnavailable,
+    Permission,
+    RepositoryCredentials,
+    provider,
+)
 from cardea_vcs_ops.git import BundleInvalid, Pusher, PushRejected, Workspace, push
 from cardea_vcs_ops.github import DuplicatePull, GitHub, HostRefused
 
@@ -36,6 +45,9 @@ BRANCH = re.compile(r"^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$")
 MAX_BODY = 4096
 MAX_REVIEW_BODY = 500
 REVIEW_EVENTS = ("COMMENT", "REQUEST_CHANGES", "APPROVE")
+# A branch name probed for the rules on each side of the agent prefix; never created.
+PROBE = "cardea-readiness-probe"
+BLOCKS_PUSH = ("creation", "update")
 
 
 def marker(context: OperationContext) -> str:
@@ -106,8 +118,17 @@ class Vcs:
             )
         context.check_content(operation=operation, diff=diff, texts=texts)
 
+    async def credential(
+        self, repository: Repository, permissions: tuple[Permission, ...]
+    ) -> Credential:
+        try:
+            return await self.credentials.credential(repository, permissions)
+        except CredentialUnavailable as missing:
+            # Nothing was sent: a definite refusal, not an uncertain effect.
+            raise OperationRejected(str(missing), "credential_unavailable") from None
+
     async def client(self, repository: Repository, *permissions: Permission) -> GitHub:
-        credential = await self.credentials.credential(repository, permissions)
+        credential = await self.credential(repository, permissions)
         return GitHub(repository, credential, self.transport)
 
     # vcs.push_branch
@@ -121,7 +142,7 @@ class Vcs:
         bundle = context.inputs.get("/change")
         if bundle is None:
             raise OperationRejected("The change bundle was not staged", "change_invalid")
-        credential = await self.credentials.credential(repository, ("contents:write",))
+        credential = await self.credential(repository, ("contents:write",))
         done: dict[str, JsonValue] = {
             "repository": str(arguments["repository"]),
             "branch": branch,
@@ -327,6 +348,38 @@ class Vcs:
             "comments": len(comments),
         }
 
+    # vcs.check_repository
+
+    async def check_repository(
+        self, arguments: dict[str, JsonValue], context: OperationContext
+    ) -> dict[str, JsonValue]:
+        """Whether the host's rules hold what the team relies on (ADR-037): a human review
+        on the default branch, and pushes only under the agent prefix. Reports only."""
+        repository = self.repository(arguments["repository"])
+        root = self.config.branch_prefix.split("{group}", 1)[0] or "agent/"
+        inside = self.config.branch_prefix.format(group=context.group or "readiness") + PROBE
+        async with await self.client(repository, "metadata:read") as host:
+            try:
+                default = str((await host.metadata()).get("default_branch") or "main")
+                on_default = await host.branch_rules(default)
+                outside = await host.branch_rules(PROBE)
+                on_agent = await host.branch_rules(inside)
+            except HostRefused as refused:
+                raise OperationRejected(str(refused), "host_refused") from None
+        checks = readiness(default, root, on_default, outside, on_agent)
+        missing: list[JsonValue] = [c["name"] for c in checks if c["required"] and not c["ok"]]
+        return {
+            "repository": str(arguments["repository"]),
+            "default_branch": default,
+            "ready": not missing,
+            "checks": list(checks),
+            "missing": missing,
+            "not_checked": [
+                "bypass actors: the App or token must not be able to bypass these rules",
+                "classic branch protection, which this read does not list",
+            ],
+        }
+
     def handlers(self) -> dict[str, Any]:
         """Entry-point name to handler, bound to this instance."""
         return {
@@ -339,4 +392,66 @@ class Vcs:
             "vcs.review": self.review,
             "vcs.find_review": self.find_review,
             "vcs.read_change": self.read_change,
+            "vcs.check_repository": self.check_repository,
         }
+
+
+def _rule(rules: list[dict[str, Any]], kind: str) -> dict[str, Any] | None:
+    return next((r for r in rules if r.get("type") == kind), None)
+
+
+def readiness(
+    default: str,
+    root: str,
+    on_default: list[dict[str, Any]],
+    outside: list[dict[str, Any]],
+    on_agent: list[dict[str, Any]],
+) -> list[dict[str, JsonValue]]:
+    """The checks `vcs.check_repository` reports, from the rules that apply to the default
+    branch, to a branch outside the agent prefix and to one inside it."""
+    review = _rule(on_default, "pull_request")
+    parameters = (review or {}).get("parameters") or {}
+    approvals = parameters.get("required_approving_review_count", 0)
+    count = approvals if isinstance(approvals, int) else 0
+    blocked = [kind for kind in BLOCKS_PUSH if _rule(outside, kind) is None]
+    open_inside = [kind for kind in BLOCKS_PUSH if _rule(on_agent, kind) is not None]
+
+    def check(name: str, required: bool, ok: bool, detail: str) -> dict[str, JsonValue]:
+        return {"name": name, "required": required, "ok": ok, "detail": detail}
+
+    return [
+        check(
+            "default_branch_requires_review",
+            True,
+            review is not None and count >= 1,
+            f"{default}: a pull request with at least one approving review"
+            + ("" if review is not None else " (no pull_request rule applies)")
+            + (f" (requires {count})" if review is not None else ""),
+        ),
+        check(
+            "pushes_outside_agent_prefix_blocked",
+            True,
+            not blocked,
+            f"branches outside {root}* may not be created or updated"
+            + (f" (missing: {', '.join(blocked)})" if blocked else ""),
+        ),
+        check(
+            "agent_prefix_pushable",
+            True,
+            not open_inside,
+            f"branches under {root}* may be created and updated by the agent team"
+            + (f" (blocked by: {', '.join(open_inside)})" if open_inside else ""),
+        ),
+        check(
+            "default_branch_last_push_approval",
+            False,
+            parameters.get("require_last_push_approval") is True,
+            "the most recent push must be approved by someone other than its pusher",
+        ),
+        check(
+            "agent_prefix_no_force_push",
+            False,
+            _rule(on_agent, "non_fast_forward") is not None,
+            f"branches under {root}* may not be force-pushed",
+        ),
+    ]

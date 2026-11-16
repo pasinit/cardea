@@ -423,7 +423,6 @@ def confined_handler(
     watch: Callable[[str, str], str | None],
     store_artifacts: StoreArtifacts | None = None,
     gate: Callable[[OperationContext], Any] | None = None,
-    entry: str | None = None,
 ) -> Handler:
     """A handler with the in-process signature whose code runs in a confined worker.
 
@@ -433,8 +432,7 @@ def confined_handler(
     `gate` opens the call's content-gate callback (ADR-037), a context manager with `url`,
     `token` and the `refusal` it recorded, handed to the worker as its `check_content`.
 
-    `entry` names the handler's entry point for a worker that serves several (ADR-037);
-    the context's group and staged inputs go to the worker too (`stage_inputs`).
+    The context's group and staged inputs go to the worker too (`stage_inputs`, ADR-037).
     """
 
     async def run(arguments: dict[str, JsonValue], context: OperationContext) -> Any:
@@ -465,7 +463,7 @@ def confined_handler(
         callback: dict[str, str] | None,
     ) -> Any:
         manifest, staged = stage_inputs(context)
-        payload = job_document(arguments, context, entry)
+        payload = job_document(arguments, context, None)
         if callback is not None:
             payload["context"]["content_gate"] = callback
         if manifest:

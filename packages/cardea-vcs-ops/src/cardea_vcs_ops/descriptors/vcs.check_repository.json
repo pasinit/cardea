@@ -1,0 +1,46 @@
+{
+  "tool": {
+    "name": "vcs.check_repository",
+    "title": "Check a repository's rules",
+    "description": "Report whether an allowed repository's rules are what an agent team relies on: the default branch needs a human's approving review, and branches may be pushed only under the agent prefix. Reports what is missing; changes nothing. Needs repo:<alias>.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repository": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"}
+      },
+      "required": ["repository"]
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "repository": {"type": "string"},
+        "default_branch": {"type": "string"},
+        "ready": {"type": "boolean"},
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {"type": "string"},
+              "required": {"type": "boolean"},
+              "ok": {"type": "boolean"},
+              "detail": {"type": "string"}
+            },
+            "required": ["name", "required", "ok", "detail"]
+          }
+        },
+        "missing": {"type": "array", "items": {"type": "string"}},
+        "not_checked": {"type": "array", "items": {"type": "string"}}
+      },
+      "required": ["repository", "default_branch", "ready", "checks", "missing"]
+    }
+  },
+  "cardea": {
+    "version": 1,
+    "effect": "read",
+    "executor": {"kind": "confined", "profile": "vcs", "worker": "vcs-check-repository"},
+    "timeout_seconds": 30,
+    "resource": {"grant": "repo", "argument": "/repository"}
+  }
+}

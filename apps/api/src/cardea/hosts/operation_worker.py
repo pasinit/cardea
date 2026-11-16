@@ -7,10 +7,10 @@ in-process registry resolves it. Arguments and context arrive on stdin as JSON; 
 document leaves on stdout: ``{"output": {...}}`` or ``{"rejected": "...", "code": "..."}``.
 Any other exit is a failed worker, which the kernel treats as an uncertain effect.
 
-A worker may serve several entry points of one package (ADR-037), for example an
-operation's handler and its reconciler: ``... operation_worker vcs.push_branch
-vcs.find_branch``. The job names its ``entry``; a reconcile job (``"reconcile": true``)
-must name a listed one, so a worker never runs a handler when asked to reconcile.
+A worker serves one operation: its first entry point is the handler; any others are its
+reconcilers (ADR-037), for example ``... operation_worker vcs.push_branch
+vcs.find_branch``. A reconcile job (``"reconcile": true``) names its ``entry``, which must
+be listed, so a worker never runs the handler when asked to reconcile.
 
 Staged inputs (ADR-037) are read-only files under ``$CARDEA_INPUTS``; the job's manifest
 names each one's file, size and SHA-256, and a mismatch refuses the job.
@@ -66,8 +66,7 @@ def choose(listed: list[str], document: dict[str, Any]) -> str | None:
         return str(wanted)
     if document.get("reconcile") is True:
         return None  # Never run something else when asked to reconcile.
-    # A one-entry worker runs its entry, as before jobs named one.
-    return listed[0] if len(listed) == 1 else None
+    return listed[0]
 
 
 def staged_inputs(manifest: object) -> dict[str, bytes]:

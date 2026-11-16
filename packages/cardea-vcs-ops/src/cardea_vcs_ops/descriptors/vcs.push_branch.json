@@ -147,7 +147,7 @@
   "cardea": {
     "version": 1,
     "effect": "effect",
-    "handler": "vcs.push_branch",
+    "executor": {"kind": "confined", "profile": "vcs", "worker": "vcs-push-branch"},
     "timeout_seconds": 120,
     "idempotency_scope": [
       "/repository",
