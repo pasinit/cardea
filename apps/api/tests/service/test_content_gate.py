@@ -16,9 +16,11 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+import sqlalchemy as sa
 from pydantic import JsonValue
 from test_records import FakeClient
 
+from cardea.kernel.store import StoreError
 from cardea.service import content_gate, operation_runtime
 from cardea.service import kernel as handlers
 from cardea.service.auth import Authentication, Proof
@@ -339,9 +341,9 @@ def test_a_denylisted_term_refuses_the_call_without_echoing_it(
     recorded = receipt.model_dump_json()
     summary = str(receipt.failure.details["summary"])
     assert "denylist:2 at docs/notes.md:1" in summary and "denylist:2 at commit_message" in summary
-    # The receipt keeps the call's own arguments, but its refusal never quotes them.
+    # Neither the refusal nor the stored receipt keeps the refused content.
     assert TERM.casefold() not in summary.casefold()
-    assert recorded.count(TERM) == 2  # the diff and the message, as the caller sent them
+    assert TERM.casefold() not in recorded.casefold()
     # The supervisor is told by kernel mail: the rules and locations, never the text.
     ((sender, to, parts),) = mail(kernel)
     assert (sender, to) == ("runtime", "supervisor")
@@ -398,3 +400,87 @@ def test_content_gate_settings_need_absolute_paths(tmp_path: Path) -> None:
             {"gitleaks_binary": "gitleaks", "gitleaks_sha256": "0" * 64}
         )
     assert content_gate.MAX_FINDINGS_SHOWN >= 1
+
+
+def leaves(directory: Path) -> bytes:
+    """Every byte the kernel stored: the SQLite file, its log, objects and attempt logs."""
+    return b"".join(path.read_bytes() for path in sorted(directory.rglob("*")) if path.is_file())
+
+
+@pytest.mark.parametrize("leak", ["denylist", "secret"])
+def test_a_refused_call_leaves_no_copy_anywhere(
+    kernel: Kernel,
+    remote: Remote,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    leak: str,
+) -> None:
+    if leak == "secret" and not GITLEAKS:
+        pytest.skip("set CARDEA_TEST_GITLEAKS to the pinned Gitleaks binary")
+    kernel.content_gate = config(
+        tmp_path, real=True, denylist_file=str(private(tmp_path / "deny", f"{TERM}\n"))
+    )
+    needle = TERM if leak == "denylist" else FAKE_KEY
+    leaked = DIFF.replace('+REGION = "eu-west-1"', f"+NOTE = '{needle}'")
+    caplog.set_level("DEBUG")
+    request = OperationTaskRequest.model_validate(
+        {
+            "request_id": f"leak-{leak}",
+            "agent_id": "coder",
+            "namespace": "test",
+            "objective": "Push a change",
+            "operation": "vcs.push_branch",
+            "arguments": {"diff": leaked, "message": f"Ship {needle}"},
+            # `tasks.inspect` lets the supervisor resubmit the same request ID.
+            "grants": ["objects.read", "objects.write", "tasks.inspect", "vcs.push_branch"],
+        }
+    )
+    supervisor = kernel.auth.validate("supervisor")
+    view = kernel.submit(supervisor, request)
+    assert OperationRuntime(kernel).execute(view.task.task_id) == "failed"
+    assert remote.pushed == []
+    # Identity holds: the receipt keeps its request digest and a digest of what it
+    # replaced, and the same request ID still names the same task (ADR-026).
+    with kernel.database.engine.begin() as conn, borrow(conn) as tx:
+        receipt = tx.get_operation(view.task.task_id, "execute")
+        bound = conn.exec_driver_sql(
+            "SELECT request_digest,request_json FROM task_bindings WHERE task_id=?",
+            (view.task.task_id,),
+        ).one()
+    assert receipt.redacted() and receipt.failure is not None
+    marker = receipt.request.arguments["redaction"]
+    assert isinstance(marker, dict) and marker["request_digest"] == receipt.request_digest
+    arguments = receipt.request.arguments["arguments"]
+    assert isinstance(arguments, dict)
+    assert arguments["diff"] == {
+        "redacted": "content_refused",
+        "sha256": hashlib.sha256(leaked.encode()).hexdigest(),
+        "bytes": len(leaked.encode()),
+    }
+    assert bound[0] == view.request_digest and '"redacted": "content_refused"' in bound[1]
+    assert kernel.submit(supervisor, request).task.task_id == view.task.task_id
+    # Nothing stored, logged or mailed contains the refused content.
+    kernel.database.close()
+    stored = leaves(tmp_path / "data")
+    assert needle.encode() not in stored
+    assert needle.casefold().encode() not in stored.lower()
+    assert needle not in caplog.text
+    assert len(stored) > 0
+
+
+def test_only_a_refused_call_may_be_redacted(kernel: Kernel, tmp_path: Path) -> None:
+    kernel.content_gate = config(tmp_path)
+    state, receipt = push(kernel, DIFF)
+    assert state == "succeeded"
+    with (
+        pytest.raises(StoreError) as refused,
+        kernel.database.engine.begin() as conn,
+        borrow(conn) as tx,
+    ):
+        tx.redact_refused_operation(receipt.request.task_id, "execute", {}, at=now())
+    assert refused.value.code in {"not_refused", "transaction_aborted"}
+    with kernel.database.engine.begin() as conn, pytest.raises(sa.exc.IntegrityError):
+        conn.exec_driver_sql(
+            "UPDATE task_bindings SET request_json=? WHERE task_id=?",
+            ('{"redacted": "content_refused"}', receipt.request.task_id),
+        )

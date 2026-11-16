@@ -337,14 +337,44 @@ def confined_handler(
     timeout_seconds: int,
     watch: Callable[[str, str], str | None],
     store_artifacts: StoreArtifacts | None = None,
+    gate: Callable[[OperationContext], Any] | None = None,
 ) -> Handler:
     """A handler with the in-process signature whose code runs in a confined worker.
 
     With `store_artifacts`, the worker may return artifacts beside its output; they are
     stored as kernel objects and the output carries their references (ADR-037).
+
+    `gate` opens the call's content-gate callback (ADR-037), a context manager with `url`,
+    `token` and the `refusal` it recorded, handed to the worker as its `check_content`.
     """
 
     async def run(arguments: dict[str, JsonValue], context: OperationContext) -> Any:
+        if gate is None:
+            return await _run(arguments, context, None)
+        with gate(context) as endpoint:
+            try:
+                output = await _run(
+                    arguments, context, {"url": endpoint.url, "token": endpoint.token}
+                )
+            except OperationRejected:
+                if endpoint.refusal is not None:
+                    # The kernel's own refusal, with what it must redact, not the worker's.
+                    raise endpoint.refusal from None
+                raise
+            if endpoint.refusal is not None:
+                # Refused, yet the worker reports success: it may have sent the content.
+                raise WorkerFailed(
+                    "content_refusal_ignored",
+                    "error",
+                    "the worker continued after the content gate refused",
+                )
+            return output
+
+    async def _run(
+        arguments: dict[str, JsonValue],
+        context: OperationContext,
+        callback: dict[str, str] | None,
+    ) -> Any:
         payload = {
             "arguments": arguments,
             "context": {
@@ -356,6 +386,7 @@ def confined_handler(
                 "agent_id": context.agent_id,
                 "idempotency_context": context.idempotency_context,
                 "slot_time": context.slot_time,
+                **({"content_gate": callback} if callback is not None else {}),
             },
         }
         status = await workers.status_of(

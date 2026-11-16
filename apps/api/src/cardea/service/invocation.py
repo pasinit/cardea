@@ -4,9 +4,10 @@ These functions run inside the caller's transaction and lease. They are shared b
 single-operation task and by any runtime that dispatches several operations in one task.
 """
 
+import hashlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 import sqlalchemy as sa
@@ -28,6 +29,7 @@ from cardea.service.confined import CallAbandoned, ExecutorBusy, WorkerFailed, W
 from cardea.service.database import Fault
 from cardea.service.models import now
 from cardea.service.operations import (
+    ContentRefused,
     OperationContext,
     OperationRejected,
     Registry,
@@ -66,6 +68,8 @@ class Failure:
     reason: str
     summary: str = ""
     retryable: bool = False
+    # Content the gate refused (ADR-037): redacted from the receipt, never recorded.
+    redact: tuple[str, ...] = field(default=(), repr=False, compare=False)
 
     def details(self) -> dict[str, JsonValue]:
         return {"reason": self.reason, "summary": bounded(self.summary)}
@@ -86,6 +90,8 @@ def classify(error: BaseException, timeout: float) -> Failure:
         return Failure("call_abandoned", "abandoned", str(error), retryable=True)
     if isinstance(error, WorkerNotStarted):
         return Failure("operation_rejected", "worker_refused", str(error))
+    if isinstance(error, ContentRefused):
+        return Failure(error.code, "rejected", str(error), redact=error.refused)
     if isinstance(error, OperationRejected):
         return Failure(error.code, "rejected", str(error))
     if isinstance(error, WorkerFailed):
@@ -307,7 +313,85 @@ def settle(
         usage=ResourceUsage(steps=1, tool_milliseconds=elapsed_ms, output_bytes=len(content)),
     )
     _scope(conn, task.task_id, operation_id, "succeeded" if not error else "failed")
+    if failure is not None and failure.code == "content_refused" and failure.redact:
+        redact(conn, tx, task.task_id, operation_id, failure.redact)
     return failure, content
+
+
+MARKER = "content_refused"
+# Matched lines shorter than this are not used to find copies, so they cannot redact
+# unrelated values; the refused inputs themselves are always redacted whole.
+MIN_NEEDLE = 6
+
+
+def scrub(value: JsonValue, refused: tuple[str, ...]) -> tuple[JsonValue, bool]:
+    """`value` with every string that is, or contains, refused content replaced by a
+    marker holding only its SHA-256 and length."""
+    if isinstance(value, str):
+        hit = any(value == needle for needle in refused) or any(
+            len(needle) >= MIN_NEEDLE and needle in value for needle in refused
+        )
+        if not hit:
+            return value, False
+        data = value.encode()
+        marked: JsonValue = {
+            "redacted": MARKER,
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "bytes": len(data),
+        }
+        return marked, True
+    if isinstance(value, dict):
+        changed = False
+        out: dict[str, JsonValue] = {}
+        for key, item in value.items():
+            out[key], hit = scrub(item, refused)
+            changed |= hit
+        return out, changed
+    if isinstance(value, list):
+        items = [scrub(item, refused) for item in value]
+        return [item for item, _ in items], any(hit for _, hit in items)
+    return value, False
+
+
+def redact(
+    conn: sa.Connection,
+    tx: KernelTransaction,
+    task_id: str,
+    operation_id: str,
+    refused: tuple[str, ...],
+) -> None:
+    """Remove refused content from the receipt and the task's bound request (ADR-037).
+
+    Both keep their digests, so identity and idempotency hold; a refused call is
+    definite, so it is never replayed from these arguments.
+    """
+    needles = tuple(n for n in dict.fromkeys(refused) if n)
+    receipt = tx.get_operation(task_id, operation_id)
+    arguments, changed = scrub(dict(receipt.request.arguments), needles)
+    if changed and isinstance(arguments, dict):
+        tx.redact_refused_operation(task_id, operation_id, arguments, at=now())
+    row = conn.exec_driver_sql(
+        "SELECT request_json FROM task_bindings WHERE task_id=?", (task_id,)
+    ).first()
+    if row is not None:
+        request, bound = scrub(json.loads(row[0]), needles)
+        if bound:
+            conn.exec_driver_sql(
+                "UPDATE task_bindings SET request_json=? WHERE task_id=?",
+                (json.dumps(request), task_id),
+            )
+    # A call held for approval and run as `apr-NN` (ADR-036) froze its arguments there.
+    held = conn.exec_driver_sql(
+        "SELECT arguments_json FROM approval_requests WHERE task_id=? AND operation_id=?",
+        (task_id, operation_id),
+    ).first()
+    if held is not None:
+        frozen, hit = scrub(json.loads(held[0]), needles)
+        if hit:
+            conn.exec_driver_sql(
+                "UPDATE approval_requests SET arguments_json=? WHERE task_id=? AND operation_id=?",
+                (json.dumps(frozen), task_id, operation_id),
+            )
 
 
 def uncertain(

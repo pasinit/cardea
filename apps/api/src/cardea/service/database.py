@@ -60,7 +60,7 @@ def shared(snapshot: Snapshot | None, fresh: sa.Connection) -> sa.Connection:
 
 
 # Latest Alembic revision this release runs against; older stores need migration.
-SCHEMA_HEAD = "m16_member_disable"
+SCHEMA_HEAD = "m17_content_redaction"
 
 
 def private_file(path: Path) -> bytes:
@@ -135,6 +135,8 @@ class Database:
             connection.execute("PRAGMA journal_mode=WAL")
             connection.execute("PRAGMA synchronous=FULL")
             connection.execute("PRAGMA busy_timeout=10000")
+            # Freed space is zeroed, so redacted content (ADR-037) leaves no copy behind.
+            connection.execute("PRAGMA secure_delete=ON")
 
         @sa.event.listens_for(self.engine, "begin")
         def begin(connection: sa.Connection) -> None:
@@ -174,6 +176,20 @@ class Database:
                 yield snapshot
             finally:
                 snapshot.open = False
+
+    def checkpoint(self) -> None:
+        """Copy the write-ahead log into the store and truncate it, best effort.
+
+        After a redaction (ADR-037) the log still holds the pages written before it; a
+        busy reader leaves them until the next checkpoint, which SQLite runs on its own.
+        """
+        try:
+            # Outside any transaction: a checkpoint cannot run inside one.
+            with closing(sqlite3.connect(self.path, isolation_level=None)) as raw:
+                raw.execute("PRAGMA busy_timeout=2000")
+                raw.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except sqlite3.Error:
+            pass
 
     def migrate(self) -> None:
         config = Config()

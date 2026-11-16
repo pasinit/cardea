@@ -17,22 +17,33 @@ gate fails closed: if the gate is missing or misconfigured, or the scanner fails
 is refused too. Denylist terms are never logged and never echoed.
 """
 
+import asyncio
 import hashlib
 import json
 import logging
 import re
+import secrets
 import subprocess
 import tempfile
-from collections.abc import Mapping
-from dataclasses import dataclass
+import threading
+import time
+import urllib.request
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import sqlalchemy as sa
+import uvicorn
 from pydantic import JsonValue
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.routing import Route
 
 from cardea.service.database import Database, Fault, borrow, private_file
 from cardea.service.models import ContentGateConfig, now
-from cardea.service.operations import OperationContext, OperationRejected
+from cardea.service.operations import ContentRefused, OperationContext, OperationRejected
 
 log = logging.getLogger(__name__)
 
@@ -58,10 +69,11 @@ SCANNER_FLAGS = (
 
 @dataclass(frozen=True)
 class Finding:
-    """A rule that matched, and where. Deliberately without the matched text."""
+    """A rule that matched, and where. Its line stays in memory only, to redact copies."""
 
     rule: str
     location: str
+    line: str = field(default="", repr=False, compare=False)
 
     def describe(self) -> str:
         return f"{self.rule} at {self.location}"
@@ -109,10 +121,10 @@ def added_lines(diff: str) -> list[tuple[str, str]]:
 def text_lines(texts: Mapping[str, str]) -> list[tuple[str, str]]:
     """`(location, text)` for every line of every field; one-line fields are named alone."""
     found: list[tuple[str, str]] = []
-    for field, value in texts.items():
+    for name, value in texts.items():
         lines = value.splitlines() or [""]
         for number, text in enumerate(lines, start=1):
-            found.append((field if len(lines) == 1 else f"{field}:{number}", text))
+            found.append((name if len(lines) == 1 else f"{name}:{number}", text))
     return found
 
 
@@ -163,10 +175,10 @@ class Denylist:
             folded = text.casefold()
             for rule, term in self.terms:
                 if term in folded:
-                    findings.append(Finding(rule, location))
+                    findings.append(Finding(rule, location, text))
             for rule, pattern in self.patterns:
                 if pattern.search(text):
-                    findings.append(Finding(rule, location))
+                    findings.append(Finding(rule, location, text))
         return findings
 
 
@@ -191,6 +203,7 @@ class Scanner:
         if not units:
             return []
         locations = [location for location, _ in units]
+        lines = [text for _, text in units]
         content = "\n".join(text for _, text in units) + "\n"
         with tempfile.TemporaryDirectory(prefix="cardea-gate-") as scratch:
             command = [str(self.config.gitleaks_binary), *SCANNER_FLAGS, "-i", scratch]
@@ -214,7 +227,11 @@ class Scanner:
         try:
             report = json.loads(done.stdout or b"[]")
             findings = [
-                Finding(str(item["RuleID"]), locations[int(item["StartLine"]) - 1])
+                Finding(
+                    str(item["RuleID"]),
+                    locations[int(item["StartLine"]) - 1],
+                    lines[int(item["StartLine"]) - 1],
+                )
                 for item in report
             ]
         except (ValueError, KeyError, IndexError, TypeError):
@@ -317,4 +334,140 @@ def enforce(
     shown = "; ".join(f.describe() for f in found[:MAX_FINDINGS_SHOWN])
     hidden = len(found) - MAX_FINDINGS_SHOWN
     more = f" (and {hidden} more)" if hidden > 0 else ""
-    raise OperationRejected(f"Refused by the content gate: {shown}{more}", "content_refused")
+    # Everything this call offered to send, and each matched line, so that the kernel can
+    # redact them (and any copy) from the receipt.
+    offered = (diff,) if diff else ()
+    refused = (*offered, *(texts or {}).values(), *(f.line for f in found))
+    raise ContentRefused(f"Refused by the content gate: {shown}{more}", refused)
+
+
+# The gate for confined workers (ADR-028): a kernel callback on the loopback
+
+
+MAX_CHECK_BYTES = 1048576
+
+
+class GateEndpoint:
+    """A per-call loopback endpoint through which a confined worker asks the kernel to
+    run the gate. The gate's files and binary stay outside the sandbox.
+
+    It is the channel a confined agent session already uses for its tools: loopback HTTP
+    with a per-call bearer token. `POST /check` takes `{"operation", "diff", "texts"}` and
+    answers `{"ok": true}` or `{"refused": {"code", "message"}}`. The kernel keeps any
+    refusal, so a worker cannot turn it into a success.
+    """
+
+    def __init__(
+        self, database: Database, config: ContentGateConfig | None, context: OperationContext
+    ) -> None:
+        self.database, self.config, self.context = database, config, context
+        self.token = secrets.token_urlsafe(32)
+        self.refusal: OperationRejected | None = None
+        self.port = 0
+        self._server: uvicorn.Server | None = None
+        self._thread: threading.Thread | None = None
+
+    @property
+    def url(self) -> str:
+        return f"http://127.0.0.1:{self.port}/check"
+
+    def _check(self, document: object) -> dict[str, Any]:
+        if not isinstance(document, dict) or not isinstance(document.get("operation"), str):
+            return {"refused": {"code": "invalid_arguments", "message": "Malformed gate request"}}
+        diff = document.get("diff")
+        texts = document.get("texts") or {}
+        if (diff is not None and not isinstance(diff, str)) or not (
+            isinstance(texts, dict) and all(isinstance(v, str) for v in texts.values())
+        ):
+            return {"refused": {"code": "invalid_arguments", "message": "Malformed gate request"}}
+        try:
+            enforce(
+                self.database,
+                self.config,
+                self.context,
+                operation=str(document["operation"])[:128],
+                diff=diff,
+                texts={str(k)[:64]: str(v) for k, v in texts.items()},
+            )
+        except OperationRejected as refused:
+            self.refusal = refused
+            return {"refused": {"code": refused.code, "message": str(refused)}}
+        return {"ok": True}
+
+    def _app(self) -> Any:
+        token = self.token
+
+        async def check(request: Request) -> JSONResponse:
+            if request.headers.get("authorization") != f"Bearer {token}":
+                return JSONResponse({"error": "unauthorized"}, status_code=401)
+            body = await request.body()
+            if len(body) > MAX_CHECK_BYTES:
+                return JSONResponse({"error": "too_large"}, status_code=413)
+            try:
+                document = json.loads(body)
+            except ValueError:
+                document = None
+            return JSONResponse(await asyncio.to_thread(self._check, document))
+
+        return Starlette(routes=[Route("/check", check, methods=["POST"])])
+
+    def __enter__(self) -> "GateEndpoint":
+        config = uvicorn.Config(self._app(), host="127.0.0.1", port=0, log_level="error")
+        self._server = uvicorn.Server(config)
+        self._thread = threading.Thread(target=self._server.run, name="cardea-gate", daemon=True)
+        self._thread.start()
+        deadline = time.monotonic() + 10
+        while not self._server.started:
+            if time.monotonic() > deadline or not self._thread.is_alive():
+                raise RuntimeError("content gate endpoint failed to start")
+            time.sleep(0.01)
+        self.port = self._server.servers[0].sockets[0].getsockname()[1]
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        if self._server is not None:
+            self._server.should_exit = True
+        if self._thread is not None:
+            self._thread.join(timeout=10)
+
+
+def remote_check(gate: object, timeout: float = 60.0) -> Callable[..., None]:
+    """Inside a confined worker: `check_content` that asks the kernel over its callback.
+
+    Without a callback, or when the kernel cannot be reached, the check refuses with
+    `content_gate_unavailable`: a worker never sends unchecked content.
+    """
+
+    def unavailable() -> OperationRejected:
+        return OperationRejected("The content gate is unreachable", "content_gate_unavailable")
+
+    def check(
+        *, operation: str, diff: str | None = None, texts: Mapping[str, str] | None = None
+    ) -> None:
+        if not isinstance(gate, dict) or not {"url", "token"} <= set(gate):
+            raise unavailable()
+        body = json.dumps({"operation": operation, "diff": diff, "texts": dict(texts or {})})
+        request = urllib.request.Request(  # noqa: S310 - the kernel's loopback callback
+            str(gate["url"]),
+            data=body.encode(),
+            headers={
+                "Authorization": f"Bearer {gate['token']}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
+                answer = json.loads(response.read(65536))
+        except (OSError, ValueError):
+            raise unavailable() from None
+        if isinstance(answer, dict) and answer.get("ok") is True:
+            return
+        refused = answer.get("refused") if isinstance(answer, dict) else None
+        if isinstance(refused, dict):
+            raise OperationRejected(
+                str(refused.get("message", ""))[:512], str(refused.get("code", "content_refused"))
+            )
+        raise unavailable()
+
+    return check
