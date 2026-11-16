@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling==1.29.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cardea-coding-ops"
+version = "0.1.0"
+description = "Coding operations for Cardea agent teams (ADR-037): code.session, run in a confined worker"
+requires-python = ">=3.12"
+# Installed into the worker's read-only environment, which provides `cardea` and `pydantic`.
+dependencies = []
+
+# ADR-023: a descriptor's `handler` names an entry point in this group; for a confined
+# operation the worker command resolves it (`cardea.hosts.operation_worker`).
+[project.entry-points."cardea.operations"]
+"coding.code.session" = "cardea_coding_ops.session:run"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cardea_coding_ops"]

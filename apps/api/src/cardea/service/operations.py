@@ -115,6 +115,18 @@ class OperationContext:
 
 
 @dataclass(frozen=True)
+class WithArtifacts:
+    """A confined handler's output plus named artifacts (ADR-037).
+
+    Only a worker (`operation_worker`) can return it; the kernel stores the artifacts as
+    task-owned objects when the operation declares `max_artifact_bytes`.
+    """
+
+    output: dict[str, JsonValue]
+    artifacts: dict[str, bytes]
+
+
+@dataclass(frozen=True)
 class Reconciliation:
     """A reconciler's observation of destination state for an uncertain effect."""
 

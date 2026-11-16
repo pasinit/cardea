@@ -1,0 +1,45 @@
+{
+  "tool": {
+    "name": "code.session",
+    "description": "Check out a branch of an allowed repository, run a headless coding agent on the task, run the repository's gates, and return the change (a git bundle stored as kernel objects) with the gate results. Pushes nothing.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repository": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"},
+        "base_ref": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$"},
+        "task": {"type": "string", "minLength": 1, "maxLength": 32768},
+        "task_key": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"}
+      },
+      "required": ["repository", "base_ref", "task", "task_key"]
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "repository": {"type": "string"},
+        "base_ref": {"type": "string"},
+        "base_sha": {"type": "string"},
+        "head_sha": {"type": ["string", "null"]},
+        "changed": {"type": "boolean"},
+        "files_changed": {"type": "integer"},
+        "insertions": {"type": "integer"},
+        "deletions": {"type": "integer"},
+        "diff_excerpt": {"type": "string"},
+        "diff_truncated": {"type": "boolean"},
+        "harness": {"type": "object"},
+        "gates": {"type": "array", "items": {"type": "object"}},
+        "gates_passed": {"type": "boolean"},
+        "artifacts": {"type": "array", "items": {"type": "object"}}
+      },
+      "required": ["repository", "base_sha", "changed", "gates", "gates_passed", "harness"]
+    }
+  },
+  "cardea": {
+    "version": 1,
+    "effect": "effect",
+    "executor": {"kind": "confined", "profile": "coding", "worker": "code-session"},
+    "timeout_seconds": 3600,
+    "idempotency_scope": ["/repository", "/base_ref", "/task_key"],
+    "max_artifact_bytes": 10485760
+  }
+}
