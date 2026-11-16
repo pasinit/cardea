@@ -170,14 +170,14 @@ def test_session_profile_gets_one_credential_and_the_tool_endpoint(
     job = "c" * 32
     launcher.handle(start(job, "session", "agent"))
     props = properties(configured[0])
-    assert props["IPAddressAllow"] == "127.0.10.2/32 127.0.0.1/32"
+    assert props["IPAddressAllow"] == "127.0.10.2/32 127.0.11.1/32"
     assert props["LoadCredential"] == "cardea:/etc/cardea/credentials/claude"
     command = configured[0]
     source = f"/run/credentials/cardea-host-{job}.service/cardea"
     assert command[command.index(source) + 1] == launcher.CREDENTIAL
     env = environment(command)
     assert env["CARDEA_CREDENTIAL"] == launcher.CREDENTIAL
-    assert env["NO_PROXY"] == "127.0.0.1,localhost"
+    assert env["NO_PROXY"] == "127.0.11.1,localhost"
 
 
 def test_none_profile_keeps_the_m2_network_denial(configured: list[list[str]]) -> None:
@@ -641,7 +641,7 @@ def test_staged_inputs_are_read_only_files_bound_read_only(
     assert command[at - 1 : at + 2] == ["--ro-bind", str(files), launcher.INPUTS]
     assert environment(command)["CARDEA_INPUTS"] == launcher.INPUTS
     # The gate callback is reachable; nothing else on loopback is named.
-    assert properties(command)["IPAddressAllow"] == "127.0.10.6/32 127.0.0.1/32"
+    assert properties(command)["IPAddressAllow"] == "127.0.10.6/32 127.0.11.1/32"
 
 
 def test_a_job_without_inputs_binds_none(with_vcs: None, configured: list[list[str]]) -> None:
@@ -691,3 +691,36 @@ def test_kernel_callback_is_only_for_allow_list_profiles() -> None:
         with pytest.raises(ValueError, match="invalid_profile"):
             launcher.validate_profile(bad)
     assert launcher.MAX_REQUEST > 4 * launcher.MAX_STAGED // 3
+
+
+# Workers reach one dedicated loopback address, never 127.0.0.1 (ADR-028)
+
+
+@pytest.mark.parametrize(("profile", "worker"), [("session", "agent"), ("vcs", "vcs")])
+def test_endpoint_profiles_allow_only_the_dedicated_loopback_address(
+    with_vcs: None, configured: list[list[str]], profile: str, worker: str
+) -> None:
+    launcher.handle(start("b2" * 16, profile, worker))
+    command = configured[-1]
+    allowed = properties(command)["IPAddressAllow"].split()
+    assert f"{launcher.ENDPOINT_ADDRESS}/32" in allowed
+    assert not any(a.startswith("127.0.0.1") or a == "127.0.0.0/8" for a in allowed)
+    assert properties(command)["IPAddressDeny"] == "any"
+    assert "127.0.0.1" not in " ".join(arg for arg in command if arg.startswith("--property="))
+    assert environment(command)["NO_PROXY"].split(",")[0] == launcher.ENDPOINT_ADDRESS
+
+
+def test_the_endpoint_address_is_apart_from_proxies_and_cannot_be_one() -> None:
+    assert launcher.ENDPOINT_ADDRESS != "127.0.0.1"
+    assert not launcher.ENDPOINT_ADDRESS.startswith("127.0.10.")
+    with pytest.raises(ValueError, match="invalid_proxy"):
+        network = {**cast(dict[str, Any], VCS["network"])}
+        network["proxy"] = f"{launcher.ENDPOINT_ADDRESS}:3128"
+        launcher.validate_profile({**VCS, "network": network})
+
+
+def test_allow_list_profiles_without_the_callback_reach_no_loopback_endpoint(
+    configured: list[list[str]],
+) -> None:
+    launcher.handle(start("b3" * 16, "browser", "fetch"))
+    assert properties(configured[-1])["IPAddressAllow"] == "127.0.10.1/32"

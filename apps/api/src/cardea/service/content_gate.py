@@ -25,8 +25,6 @@ import re
 import secrets
 import subprocess
 import tempfile
-import threading
-import time
 import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -41,6 +39,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
+from cardea.service import loopback
 from cardea.service.database import Database, Fault, borrow, private_file
 from cardea.service.models import ContentGateConfig, now
 from cardea.service.operations import ContentRefused, OperationContext, OperationRejected
@@ -358,18 +357,23 @@ class GateEndpoint:
     """
 
     def __init__(
-        self, database: Database, config: ContentGateConfig | None, context: OperationContext
+        self,
+        database: Database,
+        config: ContentGateConfig | None,
+        context: OperationContext,
+        host: str = loopback.DEFAULT_HOST,
     ) -> None:
+        # The one loopback address a confined worker may reach (ADR-028).
+        self.host = host
         self.database, self.config, self.context = database, config, context
         self.token = secrets.token_urlsafe(32)
         self.refusal: OperationRejected | None = None
         self.port = 0
         self._server: uvicorn.Server | None = None
-        self._thread: threading.Thread | None = None
 
     @property
     def url(self) -> str:
-        return f"http://127.0.0.1:{self.port}/check"
+        return f"http://{self.host}:{self.port}/check"
 
     def _check(self, document: object) -> dict[str, Any]:
         if not isinstance(document, dict) or not isinstance(document.get("operation"), str):
@@ -412,23 +416,11 @@ class GateEndpoint:
         return Starlette(routes=[Route("/check", check, methods=["POST"])])
 
     def __enter__(self) -> "GateEndpoint":
-        config = uvicorn.Config(self._app(), host="127.0.0.1", port=0, log_level="error")
-        self._server = uvicorn.Server(config)
-        self._thread = threading.Thread(target=self._server.run, name="cardea-gate", daemon=True)
-        self._thread.start()
-        deadline = time.monotonic() + 10
-        while not self._server.started:
-            if time.monotonic() > deadline or not self._thread.is_alive():
-                raise RuntimeError("content gate endpoint failed to start")
-            time.sleep(0.01)
-        self.port = self._server.servers[0].sockets[0].getsockname()[1]
+        self._server, self.port = loopback.start(self._app(), self.host, "cardea-gate")
         return self
 
     def __exit__(self, *exc: object) -> None:
-        if self._server is not None:
-            self._server.should_exit = True
-        if self._thread is not None:
-            self._thread.join(timeout=10)
+        loopback.stop(self._server)
 
 
 def remote_check(gate: object, timeout: float = 60.0) -> Callable[..., None]:

@@ -22,6 +22,7 @@ from cardea.service import (
     content_gate,
     context_sources,
     host_budget,
+    loopback,
     spend,
 )
 from cardea.service.approval_requests import waiting_for, withdraw
@@ -325,6 +326,9 @@ class Kernel:
         run_preview_bytes: int = 2048,
     ) -> None:
         self.database, self.auth, self.fault = database, auth, fault
+        # Where per-call endpoints for confined workers listen (`cardea.service.loopback`):
+        # the helper's dedicated address under host execution, else 127.0.0.1.
+        self.endpoint_host = loopback.DEFAULT_HOST
         self.max_task_request_bytes = max_task_request_bytes
         self.run_preview_bytes = run_preview_bytes
         self.host = host
@@ -557,7 +561,7 @@ class Kernel:
             self.worker_watch,
             self._artifact_store(descriptor.cardea.max_artifact_bytes),
             gate=lambda context: content_gate.GateEndpoint(
-                self.database, self.content_gate, context
+                self.database, self.content_gate, context, self.endpoint_host
             ),
         )
 
