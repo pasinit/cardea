@@ -37,7 +37,7 @@ from cardea.kernel.store import KernelTransaction
 from cardea.runtime import activity as activities
 from cardea.runtime.activity import AttemptActivity, OutputLimits
 from cardea.runtime.harness import Harness, HarnessRequest, HarnessResult
-from cardea.service import approval_requests, claims, confined, invocation, mailbox
+from cardea.service import approval_requests, claims, confined, invocation, mailbox, spend
 from cardea.service.approvals import ApprovalRequirement
 from cardea.service.confined import ConfinedAgentSession, WorkerFailed
 from cardea.service.database import Fault, borrow
@@ -1425,6 +1425,8 @@ class AgentRunRuntime:
     ) -> str:
         with self.kernel.database.engine.begin() as conn, borrow(conn) as tx:
             task = tx.get_task(task_id)
+            # What the attempt spent, whatever happens next (ADR-033 metering; ADR-034 5.3).
+            spend.record_attempt(conn, task_id, attempt, result.cost_usd, now())
             if task.state in TERMINAL:
                 return task.state.value
             if task.lease is None or task.lease.lease_id != lease.lease_id:
