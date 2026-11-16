@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling==1.29.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cardea-reference-ops"
+version = "0.1.0"
+description = "Fake reference operations packages (vcs, ci, risk, quotes, broker) for Cardea's ADR-034 worked examples"
+requires-python = ">=3.12"
+# Installed into the kernel's own environment, which provides `cardea` and `pydantic`.
+dependencies = []
+
+# ADR-023: a descriptor's `handler` and `reconciler` name entry points in this group.
+[project.entry-points."cardea.operations"]
+"reference.vcs.open_change" = "cardea_reference_ops:open_change"
+"reference.vcs.find_change" = "cardea_reference_ops:find_change"
+"reference.vcs.read_change" = "cardea_reference_ops:read_change"
+"reference.vcs.comment" = "cardea_reference_ops:comment"
+"reference.vcs.find_comment" = "cardea_reference_ops:find_comment"
+"reference.ci.status" = "cardea_reference_ops:ci_status"
+"reference.risk.check" = "cardea_reference_ops:risk_check"
+"reference.market.quotes" = "cardea_reference_ops:market_quotes"
+"reference.broker.place_order" = "cardea_reference_ops:place_order"
+"reference.broker.find_order" = "cardea_reference_ops:find_order"
+"reference.broker.fills" = "cardea_reference_ops:fills"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cardea_reference_ops"]

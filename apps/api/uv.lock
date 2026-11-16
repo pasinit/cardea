@@ -194,6 +194,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "authlib" },
+    { name = "cardea-reference-ops" },
     { name = "cryptography" },
     { name = "httpx" },
     { name = "mypy" },
@@ -232,6 +233,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "authlib", specifier = "==1.8.0" },
+    { name = "cardea-reference-ops", editable = "../../packages/cardea-reference-ops" },
     { name = "cryptography", specifier = "==50.0.1" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "mypy", specifier = ">=1.10.0" },
@@ -243,6 +245,11 @@ dev = [
     { name = "types-jsonschema", specifier = ">=4.26.0.20260518" },
     { name = "types-protobuf", specifier = ">=7.35.1.20260906" },
 ]
+
+[[package]]
+name = "cardea-reference-ops"
+version = "0.1.0"
+source = { editable = "../../packages/cardea-reference-ops" }
 
 [[package]]
 name = "casbin"

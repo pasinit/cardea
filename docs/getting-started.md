@@ -304,7 +304,11 @@ A pool's `grants` are its runs' complete grants, and nothing is added. An agent 
 
 **You get:** two principals, `desk.analyst.0` and `desk.analyst.1`. They are bound to the kernel's runtime and have no external identity. Each has one trigger, `desk.analyst.<n>.t0`. Every slot runs full admission under the supervisor's live ceiling. A member runs one task at a time: a slot that arrives while its previous run is unfinished is recorded as `coalesced`. `GET /v0.2/groups/desk?namespace=team` returns the manifest with `status.members`.
 
-To restructure the group, change the manifest and apply it again. For example, set `replicas` to 3 or pick another `model`; no code change is needed. Scaling down, removing a pool (or renaming one) and `DELETE /v0.2/groups/desk?namespace=team` drain members: a draining member takes no new slots, claims or pool mail, its current run may finish until the pool's `drain_timeout_seconds` (then it is cancelled), and then its claims are released, its mail goes to its pool and its principal is disabled. `status.observedGeneration` catches up when nothing drains. Until their slices land, `spend`, `expect_window` and `event` triggers are refused with 422.
+To restructure the group, change the manifest and apply it again. For example, set `replicas` to 3 or pick another `model`; no code change is needed. Scaling down, removing a pool (or renaming one) and `DELETE /v0.2/groups/desk?namespace=team` drain members: a draining member takes no new slots, claims or pool mail, its current run may finish until the pool's `drain_timeout_seconds` (then it is cancelled), and then its claims are released, its mail goes to its pool and its principal is disabled. `status.observedGeneration` catches up when nothing drains. Until slice 9 lands, `spend` and `expect_window` are refused with 422. A pool's `event` triggers read the group's own kernel journal (slice 7).
+
+## 7b. Two whole teams from configuration
+
+[`examples/teams`](../examples/teams/README.md) holds ADR-034's two worked examples as files: a software team with a review gate, and a trading desk whose orders need a human approver, survive a crash without a second placement and are filled by a signed broker webhook. Their operations come from the fake reference package [`cardea-reference-ops`](../packages/cardea-reference-ops/README.md). Run `make teams` to watch both on a throwaway kernel.
 
 ## 8. A shared collection of records
 
