@@ -148,9 +148,7 @@ def vcs(host: FakeGitHub) -> Vcs:
 def kernel(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, session: FakeSession, vcs: Vcs
 ) -> Iterator[Kernel]:
-    instance = build_kernel(
-        tmp_path, monkeypatch, session, Registry(in_process(), vcs.handlers())
-    )
+    instance = build_kernel(tmp_path, monkeypatch, session, Registry(in_process(), vcs.handlers()))
     try:
         yield instance
     finally:
