@@ -60,7 +60,7 @@ def shared(snapshot: Snapshot | None, fresh: sa.Connection) -> sa.Connection:
 
 
 # Latest Alembic revision this release runs against; older stores need migration.
-SCHEMA_HEAD = "m14_group_drain"
+SCHEMA_HEAD = "m15_spend"
 
 
 def private_file(path: Path) -> bytes:
