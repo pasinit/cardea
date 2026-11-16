@@ -589,7 +589,11 @@ Portable tests go in `apps/api/tests/service/`. Before the record is called veri
   - `records.summary` (3 KiB, new): counts by state (`null` without a state machine) and by label, and up to 50 unclaimed records, titles only, needing `record:<collection>/read`. With a state machine, only records in a state that a transition the caller holds the live grant for may leave are listed as available.
   - `records.query` (2 KiB).
   - Installed read operations share only the total.
-- **One snapshot.** The built-in sources of one attempt read through one SQLite read snapshot, taken before the first context call, through `Database.snapshot()`, which nested `read()` calls share. Each of their blocks carries `as_of` and the journal `cursor` of that snapshot as tag attributes: `<context operation="…" status="ok" as_of="…" cursor="N">`. A record committed while the context is being fetched appears in none of them.
+- **One snapshot.** The built-in sources of one attempt read through one SQLite read snapshot, taken before the first context call (`Database.snapshot()`).
+  - The snapshot is handed explicitly, through `OperationContext.snapshot`, to those sources only: `records.summary`, `records.query`, `records.claimed` and `runs.recent`. They read their authority fresh and their data from the snapshot. The inbox shows the mail leased in the checkpoint transaction.
+  - Nothing else reads through it. Admission, policy, cancellation and lease polls, and installed operations all keep fresh reads.
+  - It is usable only on the thread that opened it and only while it is open; elsewhere a source falls back to a fresh read.
+  - Each of their blocks carries `as_of` and the journal `cursor` of that snapshot as tag attributes: `<context operation="…" status="ok" as_of="…" cursor="N">`. A record committed while the context is being fetched appears in none of them.
 - **Fitting.** Blocks are filled in priority order: `mailbox.inbox`, then `records.claimed`, then the rest in request order. The prompt lists them in that order. Each block gets the smaller of its own budget and what is left of the total.
   - A list source drops its oldest entries and reports how many in `truncated`.
   - Any other output that does not fit becomes `{"omitted": true, "bytes", "max_bytes"}`.
@@ -606,7 +610,14 @@ Portable tests go in `apps/api/tests/service/`. Before the record is called veri
   - sources refused without the read grant;
   - `runs.recent` scoped to the caller, excluding the current run and another agent's run, with tail and touched records;
   - `runs.recent` needs its grant;
-  - priority order in the prompt.
+  - priority order in the prompt;
+  - the snapshot is explicit and bound to its thread: ordinary reads stay fresh while it is open, and another thread or a closed snapshot gets no connection (`test_context_sources.py`);
+  - a cancel issued during an in-flight context call is seen (`test_agent_runs.py`);
+  - `records.summary`'s `available` follows the caller's live transition grants (`test_state_machines.py`).
+
+- **Decisions in review (lead, 2026-11-16; the owner may veto).**
+  1. `runs.recent` keeps its explicit `runs.recent` grant: least privilege, consistent with the other sources.
+  2. An installed operation's output over budget is replaced by a size note, not cut in the middle. A cut would produce broken JSON and could split a structure the agent relies on.
 
   Acceptance test 9 is covered portably. Not run on Debian.
 

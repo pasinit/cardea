@@ -1179,3 +1179,30 @@ def test_oversized_tool_arguments_are_refused(kernel: Kernel, session: FakeSessi
     task_id = submit(kernel)
     assert AgentRunRuntime(kernel).execute(task_id) == "succeeded"
     assert calls(kernel, task_id) == []
+
+
+def test_a_cancel_during_a_context_call_is_seen(kernel: Kernel, session: FakeSession) -> None:
+    """Reads during context fetching are fresh: only built-in sources get the snapshot."""
+    from cardea.service.models import Signal
+
+    seen: list[str | None] = []
+
+    async def watching(
+        arguments: dict[str, JsonValue], context: OperationContext
+    ) -> dict[str, JsonValue]:
+        supervisor = kernel.auth.validate("supervisor")
+        kernel.control(supervisor, context.task_id, Signal(request_id="stop"), "cancel")
+        # What a confined worker polls while it runs.
+        seen.append(kernel.worker_watch(context.task_id, context.lease_id))
+        return {"listings": 0}
+
+    kernel.operations.handlers["test.listings.search"] = watching
+
+    async def waits(client: ClientSession, request: SessionRequest) -> SessionResult:
+        await asyncio.sleep(2)
+        return SessionResult(text="Too late.", is_error=False)
+
+    session.scripts = [waits]
+    task_id = submit(kernel, context=[{"operation": "listings.search"}])
+    assert AgentRunRuntime(kernel).execute(task_id) == "cancelled"
+    assert seen == ["cancel_requested"]

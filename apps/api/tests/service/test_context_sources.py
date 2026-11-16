@@ -1,7 +1,9 @@
 """Context sources and budgets (ADR-034 slice 6; ADR-031 as amended)."""
 
+import asyncio
 import json
 import re
+import threading
 from typing import Any
 
 import pytest
@@ -18,6 +20,7 @@ from test_records import (
 from cardea.runtime.agent_session import SessionRequest, SessionResult
 from cardea.service.agent_run_runtime import AgentRunRuntime, Outcome, context_block
 from cardea.service.context_sources import DEFAULT_BYTES, Fetched, fit, trim
+from cardea.service.database import shared
 from cardea.service.kernel import Kernel, provision
 from cardea.service.models import (
     DEFAULT_CONTEXT_BYTES,
@@ -284,3 +287,26 @@ def test_priority_sources_render_first(team: tuple[Kernel, runs.FakeSession]) ->
     assert AgentRunRuntime(kernel).execute(task_id) == "succeeded"
     prompt = session.requests[0].prompt
     assert prompt.index('operation="records.claimed"') < prompt.index('operation="records.query"')
+
+
+def test_the_snapshot_is_explicit_and_bound_to_its_thread(items: Kernel) -> None:
+    created(items)
+    count = "SELECT COUNT(*) FROM records"
+    with items.database.snapshot() as snapshot:
+        connection = snapshot.connection()
+        assert connection is not None
+        assert connection.exec_driver_sql(count).scalar_one() == 1
+        insert(items, "after")
+        # Ordinary reads stay fresh while a snapshot is open; only `shared` uses it.
+        with items.database.read() as fresh:
+            assert fresh.exec_driver_sql(count).scalar_one() == 2
+            assert shared(snapshot, fresh).exec_driver_sql(count).scalar_one() == 1
+        # Another thread never gets the connection, so it falls back to a fresh read.
+        elsewhere: list[object] = []
+        worker = threading.Thread(target=lambda: elsewhere.append(snapshot.connection()))
+        worker.start()
+        worker.join()
+        assert elsewhere == [None]
+        assert asyncio.run(asyncio.to_thread(snapshot.connection)) is None
+    # Closed, it is unusable everywhere.
+    assert snapshot.connection() is None
