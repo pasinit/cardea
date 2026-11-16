@@ -159,7 +159,8 @@
         "/opt/cardea-code"
       ],
       "env": {
-        "CARDEA_CODING_CONFIG": "/opt/cardea-code/coding.json"
+        "CARDEA_CODING_CONFIG": "/opt/cardea-code/coding.json",
+        "CARDEA_REPOSITORIES": "/opt/cardea-code/repositories.json"
       }
     }
   }
