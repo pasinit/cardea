@@ -72,15 +72,23 @@ HARNESS = (
 )
 
 
-def coding_config(source: str) -> dict[str, Any]:
-    """The `code.session` configuration `long_call.sh` installs for this test."""
+def repositories(source: str) -> dict[str, Any]:
+    """The repository registry (ADR-037) `long_call.sh` installs for this test: the fixture
+    as a read-only alias."""
     return {
         "repositories": {
             REPOSITORY_ALIAS: {
                 "source": source,
                 "gates": [{"name": "true", "argv": ["/bin/true"], "timeout_seconds": 60}],
             }
-        },
+        }
+    }
+
+
+def coding_config(source: str) -> dict[str, Any]:
+    """The `code.session` configuration `long_call.sh` installs for this test; its
+    repositories are in `repositories(source)`."""
+    return {
         "harness": {"argv": ["/usr/bin/python3", "-I", "-c", HARNESS], "timeout_seconds": 3500},
     }
 
@@ -159,7 +167,7 @@ def prepare(store: Path) -> None:
             delegate=True,
             expires_at=now() + timedelta(days=1),
         )
-        for right in (*RIGHTS, "code.session")
+        for right in (*RIGHTS, "code.session", f"repo:{REPOSITORY_ALIAS}")
     )
     principals = (
         Principal(
@@ -213,7 +221,12 @@ def submit(
                     "task": json.dumps({"sleep": sleep, "bytes": size, "token": token}),
                     "task_key": f"{key}-{token[:8]}",
                 },
-                "grants": ["objects.read", "objects.write", "code.session"],
+                "grants": [
+                    "objects.read",
+                    "objects.write",
+                    "code.session",
+                    f"repo:{REPOSITORY_ALIAS}",
+                ],
                 "timeout_seconds": 3600,
             }
         )
@@ -456,6 +469,8 @@ def main(argv: list[str]) -> int:
     running.add_argument("--oversize-mib", type=float, default=10.3)
     config = commands.add_parser("config", help="print the code.session configuration")
     config.add_argument("source", help="the fixture repository's path")
+    registry = commands.add_parser("repositories", help="print the repository registry")
+    registry.add_argument("source", help="the fixture repository's path")
     serving = commands.add_parser("serve", help="(internal) the service child")
     serving.add_argument("--work", type=Path, required=True)
     serving.add_argument("--task", required=True)
@@ -463,6 +478,9 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
     if args.command == "config":
         print(json.dumps(coding_config(args.source), indent=2))
+        return 0
+    if args.command == "repositories":
+        print(json.dumps(repositories(args.source), indent=2))
         return 0
     if args.command == "serve":
         use_kernel(args.cardea_lib)

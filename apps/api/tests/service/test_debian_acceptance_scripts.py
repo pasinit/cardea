@@ -21,6 +21,7 @@ import pytest
 from standardwebhooks.webhooks import Webhook
 
 from cardea.service.admin import initialize
+from cardea.service.repositories import Registry
 
 SCRIPTS = Path(__file__).resolve().parents[4] / "experiments" / "debian-acceptance"
 PROGRAMS = ("upgrade.py", "long_call.py", "groups.py", "teams.py", "events_tls.py", "launcher.py")
@@ -177,7 +178,11 @@ def test_the_upgrade_check_finds_append_only_triggers(tmp_path: Path, scripts: N
 def test_the_long_call_configuration_names_only_the_fixture(scripts: None) -> None:
     long_call = load("long_call")
     config = long_call.coding_config("/opt/cardea-code/repos/acceptance.git")
-    (alias,) = config["repositories"]
-    assert alias == long_call.REPOSITORY_ALIAS
+    assert "repositories" not in config  # they live in the host registry (ADR-037)
+    registry = Registry.model_validate(
+        long_call.repositories("/opt/cardea-code/repos/acceptance.git")
+    )
+    (alias,) = registry.repositories
+    assert alias == long_call.REPOSITORY_ALIAS and not registry.repositories[alias].hosted
     assert config["harness"]["argv"][:2] == ["/usr/bin/python3", "-I"]
     assert "CARDEA_TASK" in config["harness"]["argv"][3]
