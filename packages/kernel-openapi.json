@@ -263,7 +263,14 @@
           "expect": {
             "default": [],
             "items": {
-              "$ref": "#/components/schemas/Expectation"
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Expectation-Input"
+                },
+                {
+                  "$ref": "#/components/schemas/AnyOfExpectation-Input"
+                }
+              ]
             },
             "maxItems": 16,
             "title": "Expect",
@@ -538,6 +545,46 @@
           "output_digest"
         ],
         "title": "AgentRunVerification",
+        "type": "object"
+      },
+      "AnyOfExpectation-Input": {
+        "additionalProperties": false,
+        "description": "Alternatives (ADR-029 amendment, 2026-11-16): met when at least one is met, for\nexample a pull request opened, or a message sent to the team lead.",
+        "properties": {
+          "any_of": {
+            "items": {
+              "$ref": "#/components/schemas/Expectation-Input"
+            },
+            "maxItems": 8,
+            "minItems": 2,
+            "title": "Any Of",
+            "type": "array"
+          }
+        },
+        "required": [
+          "any_of"
+        ],
+        "title": "AnyOfExpectation",
+        "type": "object"
+      },
+      "AnyOfExpectation-Output": {
+        "additionalProperties": false,
+        "description": "Alternatives (ADR-029 amendment, 2026-11-16): met when at least one is met, for\nexample a pull request opened, or a message sent to the team lead.",
+        "properties": {
+          "any_of": {
+            "items": {
+              "$ref": "#/components/schemas/Expectation-Output"
+            },
+            "maxItems": 8,
+            "minItems": 2,
+            "title": "Any Of",
+            "type": "array"
+          }
+        },
+        "required": [
+          "any_of"
+        ],
+        "title": "AnyOfExpectation",
         "type": "object"
       },
       "ApprovalDecided": {
@@ -2398,10 +2445,31 @@
         "title": "EventWait",
         "type": "object"
       },
-      "Expectation": {
+      "Expectation-Input": {
         "additionalProperties": false,
-        "description": "A completion condition on a run's successful calls of one operation (ADR-029).",
+        "description": "A completion condition on a run's successful calls of one operation (ADR-029).\n\n`match` (ADR-029 amendment, 2026-11-16) counts only calls whose arguments have these\nexact values, for example `{\"/to/instance\": \"team.lead.0\"}`.",
         "properties": {
+          "match": {
+            "anyOf": [
+              {
+                "maxProperties": 8,
+                "minProperties": 1,
+                "patternProperties": {
+                  "^(/([^~/]|~[01])*)+$": {
+                    "$ref": "#/components/schemas/JsonValue"
+                  }
+                },
+                "propertyNames": {
+                  "maxLength": 256
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match"
+          },
           "max_calls": {
             "anyOf": [
               {
@@ -2435,6 +2503,7 @@
         "title": "Expectation",
         "type": "object"
       },
+      "Expectation-Output": {},
       "FailureDetails": {
         "additionalProperties": false,
         "description": "Why a call failed (ADR-026): a fixed reason and a bounded, sanitized summary.",
@@ -2878,6 +2947,14 @@
             "title": "Members Added",
             "type": "array"
           },
+          "members_disabled": {
+            "description": "Active members whose principal an operator disabled; it stays disabled and their runs are refused.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Members Disabled",
+            "type": "array"
+          },
           "members_draining": {
             "description": "Members this generation drains: scale-down or pool removal.",
             "items": {
@@ -2940,7 +3017,7 @@
           "expect_window": {
             "default": [],
             "items": {
-              "$ref": "#/components/schemas/WindowExpectation"
+              "$ref": "#/components/schemas/WindowExpectation-Input"
             },
             "maxItems": 16,
             "title": "Expect Window",
@@ -3052,7 +3129,7 @@
           "expect_window": {
             "default": [],
             "items": {
-              "$ref": "#/components/schemas/WindowExpectation"
+              "$ref": "#/components/schemas/WindowExpectation-Output"
             },
             "maxItems": 16,
             "title": "Expect Window",
@@ -6106,7 +6183,14 @@
           "expect": {
             "default": [],
             "items": {
-              "$ref": "#/components/schemas/Expectation"
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Expectation-Input"
+                },
+                {
+                  "$ref": "#/components/schemas/AnyOfExpectation-Input"
+                }
+              ]
             },
             "maxItems": 16,
             "title": "Expect",
@@ -6210,7 +6294,14 @@
           "expect": {
             "default": [],
             "items": {
-              "$ref": "#/components/schemas/Expectation"
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Expectation-Output"
+                },
+                {
+                  "$ref": "#/components/schemas/AnyOfExpectation-Output"
+                }
+              ]
             },
             "maxItems": 16,
             "title": "Expect",
@@ -7861,10 +7952,31 @@
         "title": "VerificationRecord",
         "type": "object"
       },
-      "WindowExpectation": {
+      "WindowAlternative-Input": {
         "additionalProperties": false,
-        "description": "A windowed pool expectation (ADR-034 decision 5.4): successful receipted calls of\n`operation` (for `records.transition`, optionally of one named transition) across the\npool's members in each day or ISO week. Checked at window close; never fails a run.",
+        "description": "What one windowed count covers: successful calls of `operation` (for\n`records.transition`, optionally of one named `transition`; optionally only calls whose\narguments `match`), bounded by `min` and/or `max`.",
         "properties": {
+          "match": {
+            "anyOf": [
+              {
+                "maxProperties": 8,
+                "minProperties": 1,
+                "patternProperties": {
+                  "^(/([^~/]|~[01])*)+$": {
+                    "$ref": "#/components/schemas/JsonValue"
+                  }
+                },
+                "propertyNames": {
+                  "maxLength": 256
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match"
+          },
           "max": {
             "anyOf": [
               {
@@ -7897,6 +8009,106 @@
             "title": "Operation",
             "type": "string"
           },
+          "transition": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transition"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "title": "WindowAlternative",
+        "type": "object"
+      },
+      "WindowAlternative-Output": {},
+      "WindowExpectation-Input": {
+        "additionalProperties": false,
+        "description": "A windowed pool expectation (ADR-034 decision 5.4): counts of the pool members'\nsuccessful receipted calls in each day or ISO week, checked at window close; it never\nfails a run. Either one count (`operation`, `transition`, `match`, `min`, `max`) or\n`any_of` alternatives, met when at least one is (ADR-029 amendment, 2026-11-16).",
+        "properties": {
+          "any_of": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/WindowAlternative-Input"
+                },
+                "maxItems": 8,
+                "minItems": 2,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Any Of"
+          },
+          "match": {
+            "anyOf": [
+              {
+                "maxProperties": 8,
+                "minProperties": 1,
+                "patternProperties": {
+                  "^(/([^~/]|~[01])*)+$": {
+                    "$ref": "#/components/schemas/JsonValue"
+                  }
+                },
+                "propertyNames": {
+                  "maxLength": 256
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match"
+          },
+          "max": {
+            "anyOf": [
+              {
+                "maximum": 100000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max"
+          },
+          "min": {
+            "anyOf": [
+              {
+                "maximum": 100000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min"
+          },
+          "operation": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation"
+          },
           "timezone": {
             "default": "UTC",
             "maxLength": 64,
@@ -7926,12 +8138,12 @@
           }
         },
         "required": [
-          "operation",
           "window"
         ],
         "title": "WindowExpectation",
         "type": "object"
-      }
+      },
+      "WindowExpectation-Output": {}
     },
     "securitySchemes": {
       "HTTPBearer": {

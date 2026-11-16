@@ -151,13 +151,14 @@ def _unsupported(spec: GroupSpec, namespace: str) -> None:
     journal_source = f"cardea://{namespace}"
     for pool in spec.pools:
         for entry in pool.expect_window:
-            if entry.operation not in pool.run.operations:
-                raise Fault(
-                    "invalid_template",
-                    f"Pool {pool.name}: a windowed expectation names {entry.operation}, "
-                    "which its runs do not expose",
-                    422,
-                )
+            for operation in entry.operations():
+                if operation not in pool.run.operations:
+                    raise Fault(
+                        "invalid_template",
+                        f"Pool {pool.name}: a windowed expectation names {operation}, "
+                        "which its runs do not expose",
+                        422,
+                    )
         for trigger in pool.triggers:
             # Group event triggers read the group's own journal; inbound HTTP sources need
             # a host-owner secret, so they stay host-owned (ADR-035).
@@ -226,13 +227,18 @@ def _ensure_member(
             )
         if row["state"] == "active":
             return False
-        # Scaling back up (or re-creating a deleted group) reuses the member principal.
+        # Scaling back up (or re-creating a deleted group) reuses the member principal. Only
+        # a principal the drain disabled is re-enabled; one an operator disabled, for example
+        # as a kill switch, stays disabled (its runs are refused) and the plan reports it.
+        if row["disabled_by_drain"]:
+            conn.exec_driver_sql(
+                "UPDATE principals SET disabled=0 WHERE principal_id=?", (principal,)
+            )
         conn.exec_driver_sql(
-            "UPDATE group_members SET state='active',drain_deadline=NULL,drain_generation=NULL "
-            "WHERE principal_id=?",
+            "UPDATE group_members SET state='active',drain_deadline=NULL,drain_generation=NULL,"
+            "disabled_by_drain=0 WHERE principal_id=?",
             (principal,),
         )
-        conn.exec_driver_sql("UPDATE principals SET disabled=0 WHERE principal_id=?", (principal,))
         return True
     if conn.exec_driver_sql("SELECT 1 FROM principals WHERE principal_id=?", (principal,)).first():
         raise Fault(
@@ -355,6 +361,13 @@ def _apply(
             member = member_id(name, pool.name, ordinal)
             if _ensure_member(conn, kernel.runtime_id, namespace, name, pool.name, ordinal, at):
                 plan["members_added"].append(member)
+            if conn.exec_driver_sql(
+                "SELECT disabled FROM principals WHERE principal_id=?", (member,)
+            ).scalar_one():
+                # An operator disabled this member: it gets no triggers until it is enabled
+                # and the group is applied again (it is listed in `members_disabled`).
+                plan["triggers_removed"] += _remove_triggers(conn, member, at)
+                continue
             for index in range(len(pool.triggers)):
                 trigger = compile_trigger(spec, namespace, pool, member, index, name)
                 request = trigger.request(f"{trigger.trigger_id}.{slot_key(at)}")
@@ -386,6 +399,16 @@ def _apply(
     # Converge what can be converged now; draining members finish on later ticks.
     outcome = converge(kernel, conn, namespace, name, at)
     plan["members_removed"] = outcome["members_removed"]
+    # Members of this spec whose principal is disabled by an operator: their runs are refused.
+    plan["members_disabled"] = [
+        str(r[0])
+        for r in conn.exec_driver_sql(
+            "SELECT m.principal_id FROM group_members m JOIN principals p USING(principal_id) "
+            "WHERE m.namespace=? AND m.group_name=? AND m.state='active' AND p.disabled=1 "
+            "ORDER BY m.pool, m.ordinal",
+            (namespace, name),
+        )
+    ]
     if changed:
         with borrow(conn) as tx:
             tx.append_event(
@@ -664,10 +687,15 @@ def _finish(
     open_pool = group["state"] == "active" and mailbox.member_pool_open(conn, namespace, pool)
     mailbox.readdress(conn, tx, namespace, principal, pool if open_pool else None, runtime, at)
     _remove_triggers(conn, principal, at)
+    # Record whether the drain disabled the principal, so reactivation re-enables only that.
+    already = conn.exec_driver_sql(
+        "SELECT disabled FROM principals WHERE principal_id=?", (principal,)
+    ).scalar_one()
     conn.exec_driver_sql("UPDATE principals SET disabled=1 WHERE principal_id=?", (principal,))
     conn.exec_driver_sql(
-        "UPDATE group_members SET state='removed',drain_deadline=NULL WHERE principal_id=?",
-        (principal,),
+        "UPDATE group_members SET state='removed',drain_deadline=NULL,disabled_by_drain=? "
+        "WHERE principal_id=?",
+        (0 if already else 1, principal),
     )
     tx.append_event(
         namespace="kernel.authority",
