@@ -29,6 +29,7 @@ from cardea.service import agent_run_runtime
 from cardea.service import kernel as handlers
 from cardea.service.agent_run_runtime import AgentRunRuntime
 from cardea.service.auth import Authentication, Proof
+from cardea.service.confined import Workers
 from cardea.service.database import Database, Fault, borrow
 from cardea.service.groups import apply
 from cardea.service.harnesses import IMPLICIT_ID, Catalog, Harnesses, ModelEntry, implicit_entry
@@ -147,9 +148,25 @@ def vcs(host: FakeGitHub) -> Vcs:
 def kernel(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, session: FakeSession, vcs: Vcs
 ) -> Iterator[Kernel]:
+    instance = build_kernel(
+        tmp_path, monkeypatch, session, Registry(in_process(), vcs.handlers())
+    )
+    try:
+        yield instance
+    finally:
+        instance.database.close()
+
+
+def build_kernel(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    session: FakeSession,
+    registry: Registry,
+    workers: Workers | None = None,
+) -> Kernel:
+    """A kernel with the `eng` group (one `dev` member) and the content gate."""
     monkeypatch.setattr(handlers, "DBOSClient", FakeClient)
     monkeypatch.setattr(agent_run_runtime, "POLL_SECONDS", 0.05)
-    registry = Registry(in_process(), vcs.handlers())
     db = Database(tmp_path / "data")
     db.migrate()
     provision(db, policy(), registry)
@@ -157,7 +174,13 @@ def kernel(
     harnesses = Harnesses(
         {IMPLICIT_ID: session}, Catalog({IMPLICIT_ID: entry}, IMPLICIT_ID, implicit=IMPLICIT_ID)
     )
-    instance = Kernel(db, cast(Authentication, Auth()), operations=registry, harnesses=harnesses)
+    instance = Kernel(
+        db,
+        cast(Authentication, Auth()),
+        operations=registry,
+        harnesses=harnesses,
+        workers=workers,
+    )
     instance.content_gate = gate_config(tmp_path)
     group = {
         "apiVersion": "cardea/v1alpha1",
@@ -190,10 +213,7 @@ def kernel(
         AgentGroup.model_validate(group),
         False,
     )
-    try:
-        yield instance
-    finally:
-        db.close()
+    return instance
 
 
 DENIED = "project-nightjar"
