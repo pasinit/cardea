@@ -2,38 +2,146 @@
   "tool": {
     "name": "vcs.push_branch",
     "title": "Push a change to an agent branch",
-    "description": "Push the commit of a change bundle (a kernel object) to a branch of an allowed repository, without force. The branch must start with the group's prefix (agent/<group>/). Needs repo:<alias>.",
+    "description": "Push the commit of a change bundle to a branch of an allowed repository, without force. The change is the change.bundle artifact code.session returns (or one object version). The branch must start with the group prefix (agent/<group>/). Needs repo:<alias>.",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "repository": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"},
-        "branch": {"type": "string", "minLength": 1, "maxLength": 200},
-        "change": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "schema_version": {"const": "0.1"},
-            "namespace": {"type": "string"},
-            "resource_id": {"type": "string"},
-            "version": {"type": "integer", "minimum": 1},
-            "content_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
-          },
-          "required": ["namespace", "resource_id", "version", "content_digest"]
+        "repository": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
         },
-        "head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
-        "expected_head": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"}
+        "branch": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "change": {
+          "description": "The change bundle: one object version, or the change.bundle artifact entry that code.session returns.",
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "schema_version": {
+                  "const": "0.1"
+                },
+                "namespace": {
+                  "type": "string"
+                },
+                "resource_id": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "content_digest": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "required": [
+                "namespace",
+                "resource_id",
+                "version",
+                "content_digest"
+              ]
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "bytes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "parts": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 16,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "schema_version": {
+                        "const": "0.1"
+                      },
+                      "namespace": {
+                        "type": "string"
+                      },
+                      "resource_id": {
+                        "type": "string"
+                      },
+                      "version": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "content_digest": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$"
+                      }
+                    },
+                    "required": [
+                      "namespace",
+                      "resource_id",
+                      "version",
+                      "content_digest"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "sha256",
+                "parts"
+              ]
+            }
+          ]
+        },
+        "head": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "expected_head": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{40}$"
+        }
       },
-      "required": ["repository", "branch", "change", "head"]
+      "required": [
+        "repository",
+        "branch",
+        "change",
+        "head"
+      ]
     },
     "outputSchema": {
       "type": "object",
       "properties": {
-        "repository": {"type": "string"},
-        "branch": {"type": "string"},
-        "head": {"type": "string"}
+        "repository": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "head": {
+          "type": "string"
+        }
       },
-      "required": ["repository", "branch", "head"]
+      "required": [
+        "repository",
+        "branch",
+        "head"
+      ]
     }
   },
   "cardea": {
@@ -41,9 +149,18 @@
     "effect": "effect",
     "handler": "vcs.push_branch",
     "timeout_seconds": 120,
-    "idempotency_scope": ["/repository", "/branch", "/head"],
+    "idempotency_scope": [
+      "/repository",
+      "/branch",
+      "/head"
+    ],
     "reconciler": "vcs.find_branch",
-    "resource": {"grant": "repo", "argument": "/repository"},
-    "inputs": ["/change"]
+    "resource": {
+      "grant": "repo",
+      "argument": "/repository"
+    },
+    "inputs": [
+      "/change"
+    ]
   }
 }

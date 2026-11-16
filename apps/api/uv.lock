@@ -194,6 +194,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "authlib" },
+    { name = "cardea-coding-ops" },
     { name = "cardea-reference-ops" },
     { name = "cardea-vcs-ops" },
     { name = "cryptography" },
@@ -234,6 +235,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "authlib", specifier = "==1.8.0" },
+    { name = "cardea-coding-ops", editable = "../../packages/cardea-coding-ops" },
     { name = "cardea-reference-ops", editable = "../../packages/cardea-reference-ops" },
     { name = "cardea-vcs-ops", editable = "../../packages/cardea-vcs-ops" },
     { name = "cryptography", specifier = "==50.0.1" },
@@ -247,6 +249,11 @@ dev = [
     { name = "types-jsonschema", specifier = ">=4.26.0.20260518" },
     { name = "types-protobuf", specifier = ">=7.35.1.20260906" },
 ]
+
+[[package]]
+name = "cardea-coding-ops"
+version = "0.1.0"
+source = { editable = "../../packages/cardea-coding-ops" }
 
 [[package]]
 name = "cardea-reference-ops"

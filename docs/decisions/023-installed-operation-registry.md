@@ -75,6 +75,16 @@ The increment ships with portable tests:
 
 Result (2026-10-15, macOS, Python 3.13, DBOS 3.0.0): 28 new tests in `apps/api/tests/service/test_operations.py` pass, and the full `make test`, `make lint` and `make typecheck` pass. Not covered: an end-to-end DBOS workflow run of an installed operation inside the real daemon. The workflow is registered and the `make try` daemon starts with it, but no test submits an operation task through it yet. Debian acceptance is not needed for in-process operations.
 
+## Amendment (2026-11-16): long confined operations
+
+Decided by the lead for [ADR-037](037-coding-and-vcs-operations.md) (its question 9); the owner may veto.
+
+- **Timeout.** An in-process operation still declares at most 600 s. A confined operation (ADR-028) may declare up to its profile's `wall_seconds`, with a hard maximum of 7200 s (two hours); the helper's `wall_seconds` limit rises to match. A descriptor whose timeout exceeds the installed profile's wall time is refused at admission and dispatch with `409 operation_timeout_exceeds_profile`.
+- **Lease.** A confined call longer than five minutes holds a five-minute lease that a heartbeat renews every minute, up to the call's own limit, through the new store transaction `renew_lease`. Only the current holder can renew, only before the lease expires and never past the task's deadline. A refused renewal stops the heartbeat; the worker's watch then sees the lost lease and stops the process tree, and the call becomes `outcome_unknown` as before. A crashed service is therefore recovered within one lease, not one call. Agent-run attempts keep their own attempt lease, which still bounds a call made from a run.
+- **Artifacts.** A confined operation may declare `max_artifact_bytes` (at most 11 MiB). Its worker may return named artifacts beside its output; the kernel stores them, and the output, as task-owned objects in parts of at most 1 MiB (the object store's limit) in one transaction fenced by the call's receipt. The receipt's output carries the objects' references and digests. Such an operation without its own reconciler is reconciled from the store: the stored output means it completed. To carry artifacts, the helper's global output ceiling rises from 256 KiB to 16 MiB, and the helper reads the output once the worker has finished rather than at every poll. Each job's own limit is its profile's `output_kb`, recorded when the job is staged and enforced when the output is read: a larger output is refused with `invalid_output`, so only a profile configured for it (for example `coding`) gets the larger limit. Jobs without a recorded limit, including the fixed M2 workers, keep 256 KiB. The output is read to end of file in a loop, and a size that differs from the file's size at open is refused, so a short read never truncates it silently.
+- **Digests.** Descriptors without artifacts keep their digest.
+- **Tests.** `apps/api/tests/service/test_code_session.py`: a renewed lease keeps a long call alive; a refused renewal stops and fences it; only the live holder can renew; timeouts beyond the profile or the hard maximum are refused; artifacts are stored and read back by digest; an oversized artifact stores nothing and reconciles as not applied. Not run on Debian.
+
 ## Revisit
 
 Revisit if:

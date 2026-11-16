@@ -19,6 +19,7 @@ Rules checked here, before any network call:
   (`OperationContext.check_content`, ADR-037 slice 6), which fails closed.
 """
 
+import asyncio
 import re
 from typing import Any
 
@@ -28,7 +29,7 @@ from pydantic import JsonValue
 from cardea.service.operations import OperationContext, OperationRejected, Reconciliation
 from cardea_vcs_ops.config import Repository, VcsConfig
 from cardea_vcs_ops.credentials import Permission, RepositoryCredentials, provider
-from cardea_vcs_ops.git import BundleInvalid, Pusher, PushRejected, change_content, push_bundle
+from cardea_vcs_ops.git import BundleInvalid, Pusher, PushRejected, Workspace, push
 from cardea_vcs_ops.github import DuplicatePull, GitHub, HostRefused
 
 BRANCH = re.compile(r"^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$")
@@ -54,7 +55,7 @@ class Vcs:
         credentials: RepositoryCredentials | None = None,
         *,
         transport: httpx.AsyncBaseTransport | None = None,
-        pusher: Pusher = push_bundle,
+        pusher: Pusher = push,
     ) -> None:
         self.config = config
         self.credentials = credentials or provider(config.credentials)
@@ -120,30 +121,38 @@ class Vcs:
         bundle = context.inputs.get("/change")
         if bundle is None:
             raise OperationRejected("The change bundle was not staged", "change_invalid")
-        try:
-            diff, messages = await change_content(bundle, head)
-        except BundleInvalid as invalid:
-            raise OperationRejected(str(invalid), "change_invalid") from None
-        # The added lines and every commit message, before the credential is even asked for.
-        self.gate(context, "vcs.push_branch", diff=diff, texts=messages)
         credential = await self.credentials.credential(repository, ("contents:write",))
-        try:
-            async with GitHub(repository, credential, self.transport) as host:
-                current = await host.branch_head(branch)
-            if current == head:
-                # Already there (an earlier attempt or another task): nothing to send.
-                return {"repository": str(arguments["repository"]), "branch": branch, "head": head}
-            expected = arguments.get("expected_head")
-            if expected is not None and current != expected:
-                raise OperationRejected("The branch moved since the caller read it", "branch_moved")
-            await self.pusher(bundle, head, repository.git_url, branch, credential)
-        except HostRefused as refused:
-            raise OperationRejected(str(refused), "host_refused") from None
-        except BundleInvalid as invalid:
-            raise OperationRejected(str(invalid), "change_invalid") from None
-        except PushRejected as rejected:
-            raise OperationRejected(str(rejected), "push_rejected") from None
-        return {"repository": str(arguments["repository"]), "branch": branch, "head": head}
+        done: dict[str, JsonValue] = {
+            "repository": str(arguments["repository"]),
+            "branch": branch,
+            "head": head,
+        }
+        with Workspace(bundle, head, repository.git_url, credential) as workspace:
+            try:
+                # Reads only: the host's heads (a thin bundle's base) and the bundle itself.
+                await asyncio.to_thread(workspace.prepare)
+                diff, messages = await asyncio.to_thread(workspace.content)
+            except BundleInvalid as invalid:
+                raise OperationRejected(str(invalid), "change_invalid") from None
+            # The new commits' added lines and messages, before anything is sent.
+            self.gate(context, "vcs.push_branch", diff=diff, texts=messages)
+            try:
+                async with GitHub(repository, credential, self.transport) as host:
+                    current = await host.branch_head(branch)
+                if current == head:
+                    # Already there (an earlier attempt or another task): nothing to send.
+                    return done
+                expected = arguments.get("expected_head")
+                if expected is not None and current != expected:
+                    raise OperationRejected(
+                        "The branch moved since the caller read it", "branch_moved"
+                    )
+                await self.pusher(workspace, branch)
+            except HostRefused as refused:
+                raise OperationRejected(str(refused), "host_refused") from None
+            except PushRejected as rejected:
+                raise OperationRejected(str(rejected), "push_rejected") from None
+        return done
 
     async def find_branch(
         self, arguments: dict[str, JsonValue], context: OperationContext

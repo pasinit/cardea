@@ -18,7 +18,7 @@ import pytest
 from cardea_vcs_ops import Vcs, descriptors
 from cardea_vcs_ops.config import FixedTokenConfig, VcsConfig
 from cardea_vcs_ops.fake import FakeGitHub
-from cardea_vcs_ops.git import push_bundle
+from cardea_vcs_ops.git import push
 from mcp.client.session import ClientSession
 from pydantic import SecretStr
 from test_agent_runs import FakeSession, call
@@ -471,7 +471,7 @@ def test_push_crash_is_reconciled_from_the_branch_head(
     branch = "agent/eng/crash"
 
     async def pushes_then_drops(*args: Any) -> None:
-        await push_bundle(*args)
+        await push(*args)
         raise ConnectionError("connection dropped after the push")
 
     vcs.pusher = pushes_then_drops
@@ -663,3 +663,61 @@ def test_without_a_configured_gate_nothing_is_sent(
     )
     assert refused.is_error and "content_gate_unavailable" in text(refused)
     assert untouched(host, before)
+
+
+def fixture_git(work: Path, *args: str) -> str:
+    identity = ["-c", "user.name=agent", "-c", "user.email=agent@example.invalid"]
+    done = subprocess.run(
+        ["git", *identity, "-C", str(work), *args], capture_output=True, text=True, check=True
+    )
+    return done.stdout.strip()
+
+
+def test_a_thin_bundle_artifact_from_code_session_pushes(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path
+) -> None:
+    """`code.session` returns `base..HEAD` as an artifact of object parts. The push fetches the
+    host's base, and the gate scans only the new commit: the base already on the host may
+    hold text the gate would refuse, and it is not sent again."""
+    repo = host.repositories["acme/cardea"]
+    work = tmp_path / "thin"
+    subprocess.run(["git", "init", "-q", "-b", "main", str(work)], check=True)
+    (work / "base.txt").write_text(f"old notes about {DENIED}\n")
+    fixture_git(work, "add", ".")
+    fixture_git(work, "commit", "-q", "-m", "Base")
+    fixture_git(work, "push", "-q", str(repo.path), "main")
+    base = fixture_git(work, "rev-parse", "HEAD")
+    (work / "fix.txt").write_text("the fix\n")
+    fixture_git(work, "add", ".")
+    fixture_git(work, "commit", "-q", "-m", "Fix")
+    head = fixture_git(work, "rev-parse", "HEAD")
+    target = tmp_path / "thin.bundle"
+    fixture_git(work, "bundle", "create", "-q", str(target), f"{base}..HEAD")
+    content = target.read_bytes()
+    half = len(content) // 2
+    with kernel.database.engine.begin() as conn, borrow(conn) as tx:
+        parts = [
+            tx.put_object(
+                ResourceRef(namespace="eng", resource_id=f"thin-part-{i}"),
+                chunk,
+                expected_version=0,
+                producer_id="supervisor",
+                at=now(),
+            ).model_dump(mode="json")
+            for i, chunk in enumerate((content[:half], content[half:]))
+        ]
+    artifact = {
+        "name": "change.bundle",
+        "bytes": len(content),
+        "sha256": hashlib.sha256(content).hexdigest(),
+        "parts": parts,
+    }
+    branch = "agent/eng/thin"
+    push_thin = {"repository": "cardea", "branch": branch, "change": artifact, "head": head}
+    _, state, (pushed,) = run_calls(kernel, session, [("vcs-push_branch", push_thin)])
+    assert state == "succeeded" and not pushed.is_error, text(pushed)
+    assert repo.head(branch) == head
+    # A listing whose parts do not match its digest is refused before anything runs.
+    tampered = {**push_thin, "branch": "agent/eng/t2", "change": {**artifact, "sha256": "0" * 64}}
+    _, _, (refused,) = run_calls(kernel, session, [("vcs-push_branch", tampered)])
+    assert refused.is_error and "input_digest_mismatch" in text(refused)

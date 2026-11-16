@@ -8,6 +8,7 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from hashlib import sha256
 
 import jsonpointer  # type: ignore[import-untyped]  # ships no type information
 import sqlalchemy as sa
@@ -127,24 +128,33 @@ def _stage_inputs(
 ) -> dict[str, bytes]:
     """Read the objects a call's declared inputs name, under the caller's live ceiling.
 
-    Only objects of the call's own namespace, at an exact version whose digest the call
-    names, are staged; the store verifies the digest when it reads them.
+    An input is one object version, or a confined operation's artifact listing
+    (`{sha256, parts: [object versions]}`, as `code.session` returns its change bundle),
+    whose parts are joined and checked against `sha256`. Only objects of the call's own
+    namespace, at exact versions, are staged; the store verifies each part's digest.
     """
     staged: dict[str, bytes] = {}
     for pointer in descriptor.cardea.inputs or ():
+        value = _argument(arguments, pointer)
+        expected = value.get("sha256") if isinstance(value, dict) else None
+        listed = value.get("parts") if isinstance(value, dict) and "parts" in value else [value]
         try:
-            reference = ObjectVersion.model_validate(_argument(arguments, pointer))
+            if not isinstance(listed, list) or not 1 <= len(listed) <= 16:
+                raise ValueError("an input lists 1 to 16 parts")
+            references = [ObjectVersion.model_validate(part) for part in listed]
         except ValueError:
             raise Fault(
                 "invalid_arguments", f"Input {pointer} must name an object version", 422
             ) from None
-        if reference.namespace != namespace:
+        if any(reference.namespace != namespace for reference in references):
             raise Fault("input_namespace", "Inputs must be objects of the call's namespace", 403)
         policy.ceiling(task.task_id, "objects.read")
         try:
-            content = tx.read_object(reference)
+            content = b"".join(tx.read_object(reference) for reference in references)
         except StoreError as error:
             raise Fault("input_unavailable", f"Input {pointer}: {error.code}", 409) from None
+        if expected is not None and sha256(content).hexdigest() != expected:
+            raise Fault("input_digest_mismatch", f"Input {pointer} does not match its sha256", 409)
         staged[pointer] = content
         if sum(len(v) for v in staged.values()) > MAX_INPUT_BYTES:
             raise Fault("input_too_large", "Inputs exceed 16 MiB", 413)

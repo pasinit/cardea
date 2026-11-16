@@ -9,6 +9,7 @@ is a failed worker, which the kernel treats as an uncertain effect.
 """
 
 import asyncio
+import base64
 import json
 import sys
 from datetime import datetime
@@ -18,6 +19,7 @@ from cardea.service.operations import (
     ENTRY_POINT_GROUP,
     OperationContext,
     OperationRejected,
+    WithArtifacts,
     http_status,
 )
 
@@ -53,6 +55,11 @@ def main(argv: list[str]) -> int:
     except Exception as error:
         # Describe the failure without its message, which may carry URLs or secrets.
         print(json.dumps({"error": {"type": type(error).__name__, "status": http_status(error)}}))
+        return 0
+    if isinstance(output, WithArtifacts):
+        # Large results travel beside the output; the kernel stores them (ADR-037).
+        encoded = {name: base64.b64encode(data).decode() for name, data in output.artifacts.items()}
+        print(json.dumps({"output": output.output, "artifacts": encoded}))
         return 0
     print(json.dumps({"output": output}))
     return 0
