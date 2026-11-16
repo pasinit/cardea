@@ -778,7 +778,13 @@ def _notify(
     if row["kind"] != "message":
         return
     for target in dict.fromkeys((row["sender_id"], row["supervisor_id"])):
-        if target == runtime_id:
+        if (
+            target == runtime_id
+            or conn.exec_driver_sql(
+                "SELECT disabled FROM principals WHERE principal_id=?", (target,)
+            ).scalar()
+        ):
+            # A disabled principal, such as a removed group member, gets no notice.
             continue
         send(
             conn,
@@ -915,3 +921,73 @@ def consumed_by(conn: sa.Connection, task_id: str) -> list[str]:
             (task_id,),
         )
     ]
+
+
+def member_pool_open(conn: sa.Connection, namespace: str, pool: str) -> bool:
+    """A pool address `<group>.<pool>` still has an active member to deliver to."""
+    return (
+        conn.exec_driver_sql(
+            "SELECT 1 FROM group_members WHERE namespace=? AND group_name || '.' || pool = ? "
+            "AND state='active' LIMIT 1",
+            (namespace, pool),
+        ).first()
+        is not None
+    )
+
+
+def readdress(
+    conn: sa.Connection,
+    tx: KernelTransaction,
+    namespace: str,
+    principal: str,
+    pool: str | None,
+    runtime_id: str,
+    at: datetime,
+) -> int:
+    """A removed group member's undelivered mail (ADR-034 decision 1.5).
+
+    Instance mail goes to the member's pool while it has active members; pool mail bound
+    to the member is unbound for another member. With no pool left, the delivery is
+    dead-lettered and the sender and supervisor are notified, as for any dead letter.
+    """
+    rows = (
+        conn.exec_driver_sql(
+            "SELECT d.delivery_id,d.pool AS delivery_pool,d.deliveries,m.* "
+            "FROM mailbox_deliveries d JOIN mailbox_messages m USING(message_id) "
+            "WHERE d.namespace=? AND d.recipient_id=? AND d.state='pending' "
+            "ORDER BY d.delivery_id",
+            (namespace, principal),
+        )
+        .mappings()
+        .all()
+    )
+    for row in rows:
+        delivery_id = int(row["delivery_id"])
+        target = row["delivery_pool"] or pool
+        if target is not None and member_pool_open(conn, namespace, str(target)):
+            conn.exec_driver_sql(
+                "UPDATE mailbox_deliveries SET recipient_id=NULL,pool=?,updated_at=? "
+                "WHERE delivery_id=?",
+                (target, at.isoformat(), delivery_id),
+            )
+            _history(conn, delivery_id, "released", at)
+            continue
+        conn.exec_driver_sql(
+            "UPDATE mailbox_deliveries SET state='dead',updated_at=? WHERE delivery_id=?",
+            (at.isoformat(), delivery_id),
+        )
+        _history(conn, delivery_id, "dead", at)
+        _event(
+            tx,
+            kind="dead",
+            namespace=namespace,
+            message_id=row["message_id"],
+            delivery_id=delivery_id,
+            subject=principal,
+            producer=runtime_id,
+            task_id=None,
+            at=at,
+            data={"reason": "recipient_removed", "deliveries": row["deliveries"]},
+        )
+        _notify(conn, tx, row, principal, runtime_id, at)
+    return len(rows)

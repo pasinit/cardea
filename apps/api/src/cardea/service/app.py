@@ -603,8 +603,8 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
     def delete_group(
         name: GroupPath, namespace: Namespace, proof: Credential, dry_run: bool = False
     ) -> dict[str, Any]:
-        """Deleting drains every member (ADR-034 slice 8); until then it is refused with
-        409 `group_drain_unsupported`."""
+        """Deleting drains every member (ADR-034 decision 1.5): the group is `deleting`
+        until the last member is removed, then `deleted`."""
         return groups.delete(kernel, proof, namespace, name, dry_run)
 
     @app.get("/v0.2/tasks/{task_id}/run", response_model=RunView)

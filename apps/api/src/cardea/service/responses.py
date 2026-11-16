@@ -182,7 +182,11 @@ class GroupMember(Record):
 
 class GroupStatus(Record):
     observedGeneration: int = Field(  # The Kubernetes field name.
-        description="The newest generation the reconciler converged."
+        description="The newest generation the reconciler converged; below `generation` "
+        "while members drain."
+    )
+    state: Literal["active", "deleting", "deleted"] = Field(
+        description="`deleting` while a deleted group's members drain."
     )
     members: list[GroupMember]
 
@@ -207,6 +211,12 @@ class GroupView(Wire):
 
 class GroupPlan(Record):
     members_added: list[str]
+    members_draining: list[str] = Field(
+        description="Members this generation drains: scale-down or pool removal."
+    )
+    members_removed: list[str] = Field(
+        description="Drained members removed in this transaction (they had no run)."
+    )
     triggers_installed: list[str]
     triggers_updated: list[str]
     triggers_removed: list[str]
@@ -223,11 +233,19 @@ class GroupApplied(Wire):
 
 
 class GroupDeleted(Wire):
-    """`DELETE /v0.2/groups/{name}`: the drained group (ADR-034 slice 8; refused until then)."""
+    """`DELETE /v0.2/groups/{name}`: every member drains (ADR-034 decision 1.5)."""
 
     name: str
     namespace: str
-    change: Literal["removed"]
+    dry_run: bool
+    change: Literal["deleting", "deleted"] = Field(
+        description="`deleted` once every member is removed; until then `deleting`."
+    )
+    members_draining: list[str] = Field(description="Members this deletion started draining.")
+    members_removed: list[str]
+    waiting: list[str] = Field(
+        description="Draining members whose run is unfinished; removed by a later tick."
+    )
 
 
 # Runs

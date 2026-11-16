@@ -265,6 +265,10 @@ class Scheduler:
 
         # Claim expiry and follow-up wakes share the one clock (ADR-034 decision 2.4).
         upkeep(self.kernel, self.clock())
+        from cardea.service.groups import reconcile_all
+
+        # Group drains converge on the same clock (ADR-034 decision 1.5).
+        reconcile_all(self.kernel, self.clock())
         return outcomes
 
     def _state(self, conn: sa.Connection, trigger_id: str) -> sa.RowMapping | None:
