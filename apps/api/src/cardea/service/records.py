@@ -678,6 +678,7 @@ class Records:
             "records.claim": self.claim,
             "records.release": self.release,
             "records.claimed": self.claimed,
+            "records.summary": self.summary,
         }
 
     def handler(self, name: str) -> Handler:
@@ -1036,6 +1037,61 @@ class Records:
             claims.append({**claim_view(view), "record": view})
         return {"claims": claims}
 
+    async def summary(
+        self, arguments: dict[str, JsonValue], context: OperationContext
+    ) -> dict[str, JsonValue]:
+        """Counts by state and label, and up to 50 unclaimed records, titles only.
+
+        Without a state machine every record counts under the state `null`.
+        TODO(ADR-034 slice 3): limit `available` to states the caller may transition from.
+        """
+        collection = str(arguments["collection"])
+        with self.database.read() as conn:
+            self._authorize(conn, context, collection, "read")
+            scope = (context.namespace, collection)
+            by_state = {
+                str(state) if state is not None else "null": int(count)
+                for state, count in conn.exec_driver_sql(
+                    "SELECT state,COUNT(*) FROM records WHERE namespace=? AND collection=? "
+                    "GROUP BY state ORDER BY state",
+                    scope,
+                )
+            }
+            by_label = {
+                str(label): int(count)
+                for label, count in conn.exec_driver_sql(
+                    "SELECT j.value,COUNT(*) FROM records r, json_each(r.labels_json) j "
+                    "WHERE r.namespace=? AND r.collection=? GROUP BY j.value ORDER BY j.value",
+                    scope,
+                )
+            }
+            free = "namespace=? AND collection=? AND (holder IS NULL OR lease_expires_at<=?)"
+            values = (*scope, stamp(now()))
+            rows = conn.exec_driver_sql(
+                "SELECT record_id,state,json_extract(data_json,'$.title') FROM records "
+                f"WHERE {free} ORDER BY seq LIMIT 50",
+                values,
+            ).fetchall()
+            waiting = int(
+                conn.exec_driver_sql(f"SELECT COUNT(*) FROM records WHERE {free}", values).scalar_one()
+            )
+        available: list[JsonValue] = [
+            {
+                "record_id": record_id,
+                "state": state,
+                "title": title[:200] if isinstance(title, str) else None,
+            }
+            for record_id, state, title in rows
+        ]
+        return {
+            "collection": collection,
+            "total": sum(by_state.values()),
+            "by_state": dict(by_state),
+            "by_label": dict(by_label),
+            "available": available,
+            "truncated": waiting - len(rows),
+        }
+
     async def reconcile(
         self, arguments: dict[str, JsonValue], context: OperationContext
     ) -> Reconciliation:
@@ -1265,6 +1321,26 @@ DESCRIPTORS: tuple[OperationDescriptor, ...] = (
                 }
             },
             "required": ["claims"],
+        },
+    ),
+    _descriptor(
+        "records.summary",
+        "Counts of a collection's records by state and label, and the unclaimed records "
+        "available to take, titles only (grant action: read)",
+        "read",
+        {},
+        [],
+        {
+            "type": "object",
+            "properties": {
+                "collection": {"type": "string"},
+                "total": {"type": "integer"},
+                "by_state": {"type": "object"},
+                "by_label": {"type": "object"},
+                "available": {"type": "array"},
+                "truncated": {"type": "integer"},
+            },
+            "required": ["collection", "total", "by_state", "by_label", "available"],
         },
     ),
 )

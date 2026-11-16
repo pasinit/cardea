@@ -6,6 +6,7 @@ import sqlite3
 import stat
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -32,6 +33,9 @@ class Fault(Exception):
         # Extra machine-readable fields of the error body, e.g. a request's current state.
         self.details = details or {}
 
+
+# The read snapshot `Database.snapshot()` shares with nested `read()` calls.
+SNAPSHOT: ContextVar[sa.Connection | None] = ContextVar("cardea_read_snapshot", default=None)
 
 # Latest Alembic revision this release runs against; older stores need migration.
 SCHEMA_HEAD = "m12_journal_triggers"
@@ -131,9 +135,30 @@ class Database:
 
     @contextmanager
     def read(self) -> Iterator[sa.Connection]:
-        """Fresh, read-only WAL snapshot for policy and data in the same transaction."""
+        """Fresh, read-only WAL snapshot for policy and data in the same transaction.
+
+        Inside `snapshot()` every read shares that one snapshot instead (ADR-034 5.1).
+        """
+        shared = SNAPSHOT.get()
+        if shared is not None:
+            yield shared
+            return
         with self.read_engine.begin() as connection:
             yield connection
+
+    @contextmanager
+    def snapshot(self) -> Iterator[sa.Connection]:
+        """One read snapshot shared by every `read()` in this context until it closes.
+
+        An agent run's built-in context sources read through it, so their blocks agree
+        with each other and with the journal cursor they report.
+        """
+        with self.read_engine.begin() as connection:
+            token = SNAPSHOT.set(connection)
+            try:
+                yield connection
+            finally:
+                SNAPSHOT.reset(token)
 
     def migrate(self) -> None:
         config = Config()

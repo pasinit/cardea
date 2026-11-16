@@ -35,6 +35,7 @@ from cardea.service import mailbox
 from cardea.service.auth import Proof
 from cardea.service.database import Fault, borrow
 from cardea.service.models import (
+    DEFAULT_CONTEXT_BYTES,
     MAX_POOL_TRIGGERS,
     AgentGroup,
     AgentRunRequest,
@@ -82,7 +83,7 @@ def compile_trigger(
         "instructions": run.instructions,
         "operations": list(run.operations),
         "grants": list(pool.grants),
-        "context": [c.model_dump(mode="json") for c in run.context],
+        "context": [c.model_dump(mode="json", exclude_none=True) for c in run.context],
         "expect": [e.model_dump(mode="json") for e in run.expect],
         "harness": run.harness,
         "model": run.model,
@@ -114,6 +115,9 @@ def compile_trigger(
                 "include_own": trigger.event.include_own,
             }
         }
+    if run.context_max_bytes != DEFAULT_CONTEXT_BYTES:
+        # Only when set, so templates compiled before the budget existed keep their digest.
+        template["context_max_bytes"] = run.context_max_bytes
     try:
         return TriggerSpec.model_validate(
             {

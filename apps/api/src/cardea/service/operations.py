@@ -48,8 +48,10 @@ RESERVED_PREFIXES = (
     "records.",
     # Built-in mailbox operations (ADR-034); they run inside their settle transaction.
     "mailbox.",
+    # Built-in context sources (ADR-034 decision 5).
+    "runs.",
 )
-BUILTIN_PREFIXES = ("mailbox.",)
+BUILTIN_PREFIXES = ("mailbox.", "runs.")
 # Room in a receipt's 64 KiB result document for the output and its wrapper keys.
 MAX_RECORDED_OUTPUT_BYTES = MAX_DOCUMENT_BYTES - 64
 _NAME = TypeAdapter(OperationName)
@@ -232,7 +234,9 @@ class Registry:
             if descriptor.name in self.descriptors:
                 raise Fault("operation_duplicate", "Operation is installed twice", 500)
             self.descriptors[descriptor.name] = descriptor
-        for builtin in mailbox.descriptors():
+        from cardea.service import context_sources
+
+        for builtin in (*mailbox.descriptors(), *context_sources.DESCRIPTORS):
             # Always present; a copy of another registry's descriptors may carry them.
             self.descriptors.setdefault(builtin.name, builtin)
         self.handlers: dict[str, Any] = dict(handlers or {})
