@@ -325,3 +325,25 @@ def test_an_approval_continuation_does_not_start_once_the_account_is_spent(
     assert rows(kernel, "SELECT COUNT(*) FROM operations WHERE task_id=?", task_id) == [(0,)]
     (notice,) = stopped_mail(kernel)
     assert notice["task_id"] == task_id
+
+
+def test_windowed_any_of_is_met_by_one_alternative(
+    kernel: Kernel, session: FakeSession, today: datetime
+) -> None:
+    to_user = {"operation": "mail.send", "match": {"/to": "user@example.invalid"}, "min": 1}
+    to_lead = {"operation": "mail.send", "match": {"/to": "lead@example.invalid"}, "min": 1}
+    searches = {"operation": "listings.search", "min": 1}
+    expectations = [
+        {"any_of": [searches, to_user], "window": "day"},  # met by the mail to the user
+        {"any_of": [searches, to_lead], "window": "day"},  # neither alternative holds
+    ]
+    put(kernel, spending(None, expect_window=expectations))
+    task_id = admit(kernel, "desk.worker.0")
+    session.scripts = [costing(0.1, send=True)]
+    assert AgentRunRuntime(kernel).execute(task_id) == "succeeded"
+    closed = today + timedelta(days=1, seconds=30)
+    assert sorted(group_windows.tick(kernel, closed).values()) == ["expectation_unmet", "met"]
+    (parts,) = supervisor_mail(kernel)
+    data = parts[1]["data"]
+    assert data["code"] == "expectation_unmet" and data["observed"] == [0, 0]
+    assert "one of:" in parts[0]["text"]
