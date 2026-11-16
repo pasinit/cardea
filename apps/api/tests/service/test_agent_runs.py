@@ -864,7 +864,7 @@ def test_context_operations_must_be_granted_installed_and_read_only(kernel: Kern
             context=CONTEXT[:1],
         )
     with pytest.raises(ValidationError):
-        run_request(context=CONTEXT * 3)
+        run_request(context=CONTEXT * 5)  # more than eight entries (ADR-034 5.2)
     with pytest.raises(Fault) as effect:
         submit(kernel, context=[{"operation": "mail.send", "arguments": {}}])
     assert effect.value.code == "context_not_read_only"

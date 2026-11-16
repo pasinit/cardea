@@ -83,6 +83,10 @@ class Fetched:
     block: Callable[[Any], str]
 
 
+def _measure(block: Callable[[Any], str]) -> Callable[[Any], int]:
+    return lambda output: len(block(output).encode())
+
+
 def fit(fetched: list[Fetched], total: int) -> list[str]:
     """Render blocks priority first, each within its own and the remaining total budget."""
     order = sorted(
@@ -105,9 +109,7 @@ def fit(fetched: list[Fetched], total: int) -> list[str]:
         else:
             own = item.max_bytes or DEFAULT_BYTES.get(item.name) or total
             budget = min(own, left)
-            output, _ = trim(
-                item.name, item.output, max(budget, 0), lambda o: len(item.block(o).encode())
-            )
+            output, _ = trim(item.name, item.output, max(budget, 0), _measure(item.block))
             if item.name == CLAIMED and isinstance(output, dict) and output.get("omitted"):
                 # Claims are never dropped entirely: at least how many there are.
                 claims = item.output.get("claims", []) if isinstance(item.output, dict) else []
@@ -217,4 +219,3 @@ DESCRIPTORS: tuple[OperationDescriptor, ...] = (
         context={"builtin": True},
     ),
 )
-

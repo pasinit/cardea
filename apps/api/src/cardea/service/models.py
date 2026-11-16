@@ -305,9 +305,9 @@ class AgentRunRequest(TaskRequest):
     # Read-only operations invoked before each attempt's session; outputs go into the prompt.
     context: Annotated[tuple[ContextCall, ...], Field(max_length=MAX_CONTEXT_ENTRIES)] = ()
     # All context blocks together; blocks beyond it are trimmed (ADR-034 decision 5.2).
-    context_max_bytes: Annotated[
-        int, Field(strict=True, ge=1024, le=MAX_CONTEXT_BYTES)
-    ] = DEFAULT_CONTEXT_BYTES
+    context_max_bytes: Annotated[int, Field(strict=True, ge=1024, le=MAX_CONTEXT_BYTES)] = (
+        DEFAULT_CONTEXT_BYTES
+    )
     # The harness and model to run (ADR-033); defaults come from the host's registry.
     harness: HarnessID | None = None
     model: ModelID | None = None
@@ -829,9 +829,9 @@ class RunTemplate(Record):
     operations: Annotated[tuple[OperationName, ...], Field(min_length=1, max_length=32)]
     context: Annotated[tuple[ContextCall, ...], Field(max_length=MAX_CONTEXT_ENTRIES)] = ()
     # All context blocks together; blocks beyond it are trimmed (ADR-034 decision 5.2).
-    context_max_bytes: Annotated[
-        int, Field(strict=True, ge=1024, le=MAX_CONTEXT_BYTES)
-    ] = DEFAULT_CONTEXT_BYTES
+    context_max_bytes: Annotated[int, Field(strict=True, ge=1024, le=MAX_CONTEXT_BYTES)] = (
+        DEFAULT_CONTEXT_BYTES
+    )
     harness: HarnessID | None = None
     model: ModelID | None = None
     bounds: RunBounds = RunBounds()

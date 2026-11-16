@@ -1072,9 +1072,8 @@ class Records:
                 f"WHERE {free} ORDER BY seq LIMIT 50",
                 values,
             ).fetchall()
-            waiting = int(
-                conn.exec_driver_sql(f"SELECT COUNT(*) FROM records WHERE {free}", values).scalar_one()
-            )
+            count = f"SELECT COUNT(*) FROM records WHERE {free}"
+            waiting = int(conn.exec_driver_sql(count, values).scalar_one())
         available: list[JsonValue] = [
             {
                 "record_id": record_id,
