@@ -30,7 +30,13 @@ from pydantic import (
 from cardea.kernel.models import MAX_DOCUMENT_BYTES, OperationName, canonical_json
 from cardea.service.approvals import OperationApproval
 from cardea.service.database import Fault, private_file
-from cardea.service.models import RECORD_GRANT_PREFIX, RECORD_OPERATIONS, Record, Right
+from cardea.service.models import (
+    APPROVE_GRANT_PREFIX,
+    BUILTIN_OPERATIONS,
+    RECORD_GRANT_PREFIX,
+    Record,
+    Right,
+)
 
 ENTRY_POINT_GROUP = "cardea.operations"
 KERNEL_RIGHTS: frozenset[str] = frozenset(get_args(Right))
@@ -50,6 +56,8 @@ RESERVED_PREFIXES = (
     "mailbox.",
     # Built-in context sources (ADR-034 decision 5).
     "runs.",
+    # Built-in approval operations (ADR-036 slice 4).
+    "approvals.",
 )
 BUILTIN_PREFIXES = ("mailbox.", "runs.")
 # Room in a receipt's 64 KiB result document for the output and its wrapper keys.
@@ -225,11 +233,14 @@ class Registry:
         handlers: Mapping[str, Handler | Reconciler] | None = None,
     ) -> None:
         from cardea.service import mailbox
+        from cardea.service.approval_requests import DECIDE_DESCRIPTOR
         from cardea.service.records import DESCRIPTORS
 
-        # Built-in record operations (ADR-034) are always installed; the kernel binds
-        # their handlers, so they are not entry points.
-        self.descriptors: dict[str, OperationDescriptor] = {d.name: d for d in DESCRIPTORS}
+        # Built-in record (ADR-034) and approval (ADR-036) operations are always installed;
+        # the kernel binds their handlers, so they are not entry points.
+        self.descriptors: dict[str, OperationDescriptor] = {
+            d.name: d for d in (*DESCRIPTORS, DECIDE_DESCRIPTOR)
+        }
         for descriptor in descriptors:
             if descriptor.name in self.descriptors:
                 raise Fault("operation_duplicate", "Operation is installed twice", 500)
@@ -248,7 +259,9 @@ class Registry:
     def entry_points(self) -> set[str]:
         names = set()
         for descriptor in self.descriptors.values():
-            if descriptor.name in RECORD_OPERATIONS or descriptor.name.startswith(BUILTIN_PREFIXES):
+            if descriptor.name in BUILTIN_OPERATIONS or descriptor.name.startswith(
+                BUILTIN_PREFIXES
+            ):
                 continue
             if descriptor.cardea.handler:
                 names.add(descriptor.cardea.handler)
@@ -333,8 +346,13 @@ class Registry:
         for grant in grants:
             # Harness grants (ADR-033) are checked against the installed harnesses. Record
             # grants (ADR-034) name collections, which are documents checked at each call;
-            # mail grants name addresses, resolved when mail is sent.
-            if grant not in KERNEL_RIGHTS and not grant.startswith(
+            # mail grants name addresses, resolved when mail is sent. An approve grant
+            # (ADR-036) names an installed operation.
+            if grant.startswith(APPROVE_GRANT_PREFIX):
+                resource = grant.removeprefix(APPROVE_GRANT_PREFIX)
+                if not resource.startswith(RECORD_GRANT_PREFIX):
+                    self.get(resource)
+            elif grant not in KERNEL_RIGHTS and not grant.startswith(
                 ("harness:", "mail:", RECORD_GRANT_PREFIX)
             ):
                 self.get(grant)
