@@ -641,5 +641,10 @@ def test_record_writes_are_kernel_journal_events(items: Kernel) -> None:
         "collection": "items",
         "record_id": record["record_id"],
         "version": 1,
+        # Slice 3 adds the record's state and claim, so journal triggers can filter on
+        # them; record data never enters the journal.
+        "state": None,
+        "holder": None,
+        "claim_epoch": 0,
         "actor": "a1",
     }
