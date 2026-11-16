@@ -694,20 +694,21 @@ def check_condition(
         raise OperationRejected(f"{label} guard refused this call", "guard_refused")
 
 
-def _names_record(receipt: OperationReceipt, record_id: str) -> bool:
-    """A call was made for a record: its `record_id` argument, or a claim idempotency
-    context `<record_id>.<epoch>`."""
+def _names_record(receipt: OperationReceipt, record_id: str, epoch: int) -> bool:
+    """A call was made for a record: its `record_id` argument, or the idempotency context
+    `<record_id>.<epoch>` of the record's current claim epoch, so evidence gathered under a
+    claim that was lost and later reacquired does not count (lead, 2026-11-16)."""
     recorded = receipt.request.arguments
     called = recorded.get("arguments")
     provenance = recorded.get("context")
     return (isinstance(called, dict) and called.get("record_id") == record_id) or (
         isinstance(provenance, dict)
-        and str(provenance.get("idempotency_context") or "").startswith(f"{record_id}.")
+        and provenance.get("idempotency_context") == claim_context(record_id, epoch)
     )
 
 
 def _latest_receipt(
-    conn: sa.Connection, task_id: str, operation: str, record_id: str
+    conn: sa.Connection, task_id: str, operation: str, record_id: str, epoch: int
 ) -> str | None:
     rows = conn.exec_driver_sql(
         "SELECT snapshot FROM operations WHERE task_id=? AND state='succeeded' "
@@ -716,7 +717,7 @@ def _latest_receipt(
     ).fetchall()
     for (snapshot,) in rows:
         receipt = OperationReceipt.model_validate_json(snapshot)
-        if _names_record(receipt, record_id):
+        if _names_record(receipt, record_id, epoch):
             return receipt.receipt_id
     return None
 
@@ -728,6 +729,7 @@ def check_receipt(
     context: OperationContext,
     caller: str,
     record_id: str,
+    epoch: int,
 ) -> str:
     """The evidence a transition needs (decision 3.1): the cited receipt is a successful,
     or reconciled-applied, call of the named operation, made by the caller's task (or, for
@@ -738,7 +740,7 @@ def check_receipt(
     """
     receipt_id = arguments.get("receipt_id")
     if receipt_id is None and need.within == "same_task":
-        receipt_id = _latest_receipt(conn, context.task_id, need.operation, record_id)
+        receipt_id = _latest_receipt(conn, context.task_id, need.operation, record_id, epoch)
     if not isinstance(receipt_id, str):
         raise OperationRejected(
             f"This transition needs receipt_id of a {need.operation} call", "receipt_required"
@@ -762,7 +764,7 @@ def check_receipt(
             raise OperationRejected("The cited call was made by someone else", "receipt_invalid")
         if receipt.updated_at < now() - timedelta(seconds=need.window_seconds):
             raise OperationRejected("The cited call is outside the window", "receipt_invalid")
-    if not _names_record(receipt, record_id):
+    if not _names_record(receipt, record_id, epoch):
         raise OperationRejected("The cited call was not made for this record", "receipt_invalid")
     return receipt_id
 
@@ -1379,7 +1381,13 @@ class Records:
             receipt = None
             if transition.requires_receipt is not None:
                 receipt = check_receipt(
-                    conn, transition.requires_receipt, arguments, context, actor, record_id
+                    conn,
+                    transition.requires_receipt,
+                    arguments,
+                    context,
+                    actor,
+                    record_id,
+                    int(row["claim_epoch"]),
                 )
             write_claim(
                 conn, row, new, acquired, holder_event=actor in (row["holder"], new["holder"])
