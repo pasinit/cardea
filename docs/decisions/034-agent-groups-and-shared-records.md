@@ -479,6 +479,30 @@ A crash between placing and transitioning leaves the order `approved`. The effec
 
 Portable tests go in `apps/api/tests/service/`. Before the record is called verified, tests 3–5 also run on Debian with a real daemon restart.
 
+## Amendment (2026-11-16): team overview
+
+- **Requirement.** A supervisor needs one view of a group's state: who is working on what, what is stuck and what it costs. It must use the rights the supervisor already has and add no team concept to the kernel. Today that view takes many reads: the group, each collection, the mailbox, approvals, runs and the journal. Those reads are taken at different moments, so their numbers can disagree.
+- **Candidates.**
+
+  | Candidate | Fit |
+  |---|---|
+  | Kubernetes-style `status` on the group (`kubectl describe`) | The group already has `status.members` (decision 1). Folding claims, mail, approvals and spend into it would make every `GET` heavy, and would mix observed state with the spec's status. The shape is reused: a status-like, read-only document. |
+  | A metrics stack (Prometheus and Grafana) | Good for time series, but it needs a second service, and it cannot apply Cardea's live authority to a record or a message. Revisit for history and alerting. |
+  | Separate reads that the client joins | Already possible. It cannot give one snapshot, and every client would re-implement the join. |
+- **Decision.** Add one read-only `GET /v0.2/groups/{name}/overview?namespace=`.
+  - **Who may read it.** Exactly who may read the group (`GET /v0.2/groups/{name}`): its supervisor, holding `groups.manage` in the namespace. There is no new grant, and anyone else gets the same `404 group_not_found`.
+  - **One snapshot.** Every section is read in one SQLite read transaction, so the counts agree with each other. The response carries `as_of` and the journal `cursor` of that snapshot.
+  - **Sections.** It aggregates only what the earlier slices store:
+    - each pool's members: state, active run, claims held, and last run outcome;
+    - for each listed collection: counts by state, and the claimed records with holder, epoch and age;
+    - mailbox counts by address and delivery state (pending, in flight, dead);
+    - open approval requests of the group's runs;
+    - each spend account's current window (used against ceiling), and the last closed `expect_window` results;
+    - the latest journal events produced by members or their runs.
+  - **Bounds.** Every list is bounded and says how many entries it left out (`truncated`).
+  - **No new storage.** It needs no migration, no index and no new state.
+- **No page.** The kernel serves no static pages, and adding a web UI is out of scope. The walkthrough (`make teams`) prints the software team's overview at the end of its run.
+
 ## Implementation plan (PR-sized slices, dependency order)
 
 1. **Collections and records:** the migration, the `Collection` model, `PUT/GET` of collections, `records.create/get/query/update` with compare-and-set, write guards and history.
