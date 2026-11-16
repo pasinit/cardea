@@ -12,7 +12,7 @@ import threading
 import time
 from collections.abc import Callable, Iterator, Set
 from contextlib import ExitStack, contextmanager, suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from functools import partial
 from typing import Any, Literal
@@ -48,7 +48,7 @@ from cardea.service import (
 )
 from cardea.service.approvals import ApprovalRequirement
 from cardea.service.confined import ConfinedAgentSession, WorkerFailed
-from cardea.service.database import Fault, borrow
+from cardea.service.database import Fault, Snapshot, borrow
 from cardea.service.kernel import TERMINAL, Kernel
 from cardea.service.logs import ATTEMPT_LOGS, attempt_log_file
 from cardea.service.models import BUILTIN_OPERATIONS, AgentRunRequest, InboundEvent, now
@@ -567,18 +567,30 @@ class AgentRunRuntime:
         """Invoke the run's context operations in order, as receipts ``ctx-NN``, and fit
         their blocks to the run's budgets (ADR-034 decision 5).
 
-        Built-in sources read through one shared snapshot, taken here, so their blocks
-        agree with each other and with the journal cursor they report.
+        Built-in sources read their data through one snapshot, taken here and handed to
+        them alone, so their blocks agree with each other and with the journal cursor
+        they report. Admission, policy and every other read stay fresh.
         """
         fetched: list[context_sources.Fetched] = []
         with self.kernel.database.snapshot() as snapshot:
+            connection = snapshot.connection()
+            assert connection is not None, "opened on this thread"
             cursor = int(
-                snapshot.exec_driver_sql("SELECT COALESCE(MAX(cursor),0) FROM events").scalar_one()
+                connection.exec_driver_sql(
+                    "SELECT COALESCE(MAX(cursor),0) FROM events"
+                ).scalar_one()
             )
             taken = (now().isoformat(), cursor)
             for call in request.context:
+                builtin = call.operation in context_sources.SNAPSHOT_SOURCES
                 outcome = await self._invoke(
-                    task_id, lease_id, request, call.operation, dict(call.arguments), "ctx"
+                    task_id,
+                    lease_id,
+                    request,
+                    call.operation,
+                    dict(call.arguments),
+                    "ctx",
+                    snapshot=snapshot if builtin else None,
                 )
                 if outcome.code == "stale_session":
                     break
@@ -888,8 +900,11 @@ class AgentRunRuntime:
         arguments: dict[str, Any],
         kind: Literal["call", "ctx"],
         abandoned: Callable[[], bool] | None = None,
+        snapshot: Snapshot | None = None,
     ) -> Outcome:
-        """One receipted invocation under this attempt's lease: a tool call or context call."""
+        """One receipted invocation under this attempt's lease: a tool call or context call.
+
+        `snapshot` is the run's context snapshot, handed only to a built-in source."""
         registry = self.kernel.operations
         try:
             with self.kernel.database.engine.begin() as conn, borrow(conn) as tx:
@@ -976,7 +991,7 @@ class AgentRunRuntime:
                 arguments,
                 descriptor.cardea.effect == "effect",
                 handler,
-                admitted.context,
+                replace(admitted.context, snapshot=snapshot),
                 timeout,
                 abandoned,
             )

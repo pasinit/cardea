@@ -29,7 +29,7 @@ from pydantic import (
 
 from cardea.kernel.models import MAX_DOCUMENT_BYTES, OperationName, canonical_json
 from cardea.service.approvals import OperationApproval
-from cardea.service.database import Fault, private_file
+from cardea.service.database import Fault, Snapshot, private_file
 from cardea.service.models import (
     APPROVE_GRANT_PREFIX,
     BUILTIN_OPERATIONS,
@@ -104,6 +104,8 @@ class OperationContext:
     idempotency_context: str | None = None
     # ISO 8601 scheduled slot time with its trigger's UTC offset; None outside triggers.
     slot_time: str | None = None
+    # The run's context read snapshot, for built-in context sources only (ADR-034 5.1).
+    snapshot: Snapshot | None = None
 
 
 @dataclass(frozen=True)

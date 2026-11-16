@@ -38,7 +38,7 @@ from pydantic import (
 
 from cardea.kernel.models import Identifier, OperationReceipt, OperationState
 from cardea.service.approvals import execute_condition
-from cardea.service.database import Database, Fault, borrow
+from cardea.service.database import Database, Fault, borrow, shared
 from cardea.service.models import (
     COLLECTION_NAME,
     RECORD_ACTION,
@@ -1123,8 +1123,10 @@ class Records:
         limit = int(arguments.get("limit", 20))  # type: ignore[arg-type]
         with self.database.read() as conn:
             self._authorize(conn, context, collection, "read")
+            # Authority is read fresh; the data comes from the run's context snapshot.
+            data = shared(context.snapshot, conn)
             rows = (
-                conn.exec_driver_sql(
+                data.exec_driver_sql(
                     f"SELECT * FROM records WHERE {' AND '.join(clauses)} ORDER BY seq LIMIT ?",
                     (*values, limit + 1),
                 )
@@ -1292,8 +1294,9 @@ class Records:
         collection = str(arguments["collection"])
         with self.database.read() as conn:
             _, caller = self._authorize(conn, context, collection, "read")
+            data = shared(context.snapshot, conn)
             rows = (
-                conn.exec_driver_sql(
+                data.exec_driver_sql(
                     "SELECT * FROM records WHERE namespace=? AND collection=? AND holder=? "
                     "AND lease_expires_at>? ORDER BY seq LIMIT 64",
                     (context.namespace, collection, caller["id"], stamp(now())),
@@ -1323,6 +1326,7 @@ class Records:
         collection = str(arguments["collection"])
         with self.database.read() as conn:
             spec, _ = self._authorize(conn, context, collection, "read")
+            data = shared(context.snapshot, conn)
             scope = (context.namespace, collection)
             free = "namespace=? AND collection=? AND (holder IS NULL OR lease_expires_at<=?)"
             values: tuple[Any, ...] = (*scope, stamp(now()))
@@ -1340,7 +1344,7 @@ class Records:
                 values = (*values, *ordered)
             by_state = {
                 str(state) if state is not None else "null": int(count)
-                for state, count in conn.exec_driver_sql(
+                for state, count in data.exec_driver_sql(
                     "SELECT state,COUNT(*) FROM records WHERE namespace=? AND collection=? "
                     "GROUP BY state ORDER BY state",
                     scope,
@@ -1348,19 +1352,19 @@ class Records:
             }
             by_label = {
                 str(label): int(count)
-                for label, count in conn.exec_driver_sql(
+                for label, count in data.exec_driver_sql(
                     "SELECT j.value,COUNT(*) FROM records r, json_each(r.labels_json) j "
                     "WHERE r.namespace=? AND r.collection=? GROUP BY j.value ORDER BY j.value",
                     scope,
                 )
             }
-            rows = conn.exec_driver_sql(
+            rows = data.exec_driver_sql(
                 "SELECT record_id,state,json_extract(data_json,'$.title') FROM records "
                 f"WHERE {free} ORDER BY seq LIMIT 50",
                 values,
             ).fetchall()
             count = f"SELECT COUNT(*) FROM records WHERE {free}"
-            waiting = int(conn.exec_driver_sql(count, values).scalar_one())
+            waiting = int(data.exec_driver_sql(count, values).scalar_one())
         available: list[JsonValue] = [
             {
                 "record_id": record_id,

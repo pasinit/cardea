@@ -22,7 +22,7 @@ from pydantic import JsonValue
 
 from cardea.kernel.models import ResourceRef
 from cardea.kernel.store import StoreError
-from cardea.service.database import Database, borrow
+from cardea.service.database import Database, borrow, shared
 from cardea.service.operations import OperationContext, OperationDescriptor
 
 RECENT = "runs.recent"
@@ -136,7 +136,11 @@ class RecentRuns:
         limit = arguments.get("limit", 5)
         tail = arguments.get("tail_bytes", 400)
         assert isinstance(limit, int) and isinstance(tail, int)
-        with self.database.read() as conn, borrow(conn) as tx:
+        # The run's own history, read from its context snapshot when one is passed.
+        with (
+            self.database.read() as fresh,
+            borrow(conn := shared(context.snapshot, fresh)) as tx,
+        ):
             agent = conn.exec_driver_sql(
                 "SELECT agent_id FROM task_bindings WHERE task_id=?", (context.task_id,)
             ).scalar_one()

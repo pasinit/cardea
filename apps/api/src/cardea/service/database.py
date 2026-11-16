@@ -4,9 +4,9 @@ import fcntl
 import os
 import sqlite3
 import stat
+import threading
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
-from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -34,8 +34,30 @@ class Fault(Exception):
         self.details = details or {}
 
 
-# The read snapshot `Database.snapshot()` shares with nested `read()` calls.
-SNAPSHOT: ContextVar[sa.Connection | None] = ContextVar("cardea_read_snapshot", default=None)
+class Snapshot:
+    """One read-only WAL snapshot, handed explicitly to the reads that must share it.
+
+    It is usable only on the thread that opened it and only while it is open; anywhere
+    else `connection()` is None and the caller reads fresh state instead. Nothing reads
+    through it implicitly: admission, policy and polls always take fresh reads.
+    """
+
+    def __init__(self, connection: sa.Connection) -> None:
+        self._connection = connection
+        self._thread = threading.get_ident()
+        self.open = True
+
+    def connection(self) -> sa.Connection | None:
+        if self.open and threading.get_ident() == self._thread:
+            return self._connection
+        return None
+
+
+def shared(snapshot: Snapshot | None, fresh: sa.Connection) -> sa.Connection:
+    """The snapshot's connection where it may be used, else `fresh`."""
+    connection = snapshot.connection() if snapshot is not None else None
+    return connection if connection is not None else fresh
+
 
 # Latest Alembic revision this release runs against; older stores need migration.
 SCHEMA_HEAD = "m13_state_machines"
@@ -135,30 +157,23 @@ class Database:
 
     @contextmanager
     def read(self) -> Iterator[sa.Connection]:
-        """Fresh, read-only WAL snapshot for policy and data in the same transaction.
-
-        Inside `snapshot()` every read shares that one snapshot instead (ADR-034 5.1).
-        """
-        shared = SNAPSHOT.get()
-        if shared is not None:
-            yield shared
-            return
+        """Fresh, read-only WAL snapshot for policy and data in the same transaction."""
         with self.read_engine.begin() as connection:
             yield connection
 
     @contextmanager
-    def snapshot(self) -> Iterator[sa.Connection]:
-        """One read snapshot shared by every `read()` in this context until it closes.
+    def snapshot(self) -> Iterator[Snapshot]:
+        """One read snapshot for an agent run's built-in context sources (ADR-034 5.1).
 
-        An agent run's built-in context sources read through it, so their blocks agree
-        with each other and with the journal cursor they report.
+        It is passed to them explicitly, so their blocks agree with each other and with
+        the journal cursor they report; no other read is affected.
         """
         with self.read_engine.begin() as connection:
-            token = SNAPSHOT.set(connection)
+            snapshot = Snapshot(connection)
             try:
-                yield connection
+                yield snapshot
             finally:
-                SNAPSHOT.reset(token)
+                snapshot.open = False
 
     def migrate(self) -> None:
         config = Config()

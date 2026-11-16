@@ -11,6 +11,7 @@ import json
 import logging
 import time
 from datetime import timedelta
+from typing import Any
 from uuid import uuid4
 
 import rfc8785
@@ -570,17 +571,16 @@ class OperationRuntime:
             scope_key = recorded.get("scope_key")
             caller = recorded.get("context")
             provenance = caller if isinstance(caller, dict) else {}
+            recorded_fields: dict[str, Any] = {
+                k: str(v) for k, v in provenance.items() if k in CONTEXT_FIELDS and v is not None
+            }
             context = OperationContext(
                 task_id=task_id,
                 namespace=receipt.request.resource.namespace,
                 receipt_id=receipt.receipt_id,
                 deadline=receipt.request.deadline,
                 effect_key=str(scope_key) if scope_key else receipt.receipt_id,
-                **{
-                    k: str(v)
-                    for k, v in provenance.items()
-                    if k in CONTEXT_FIELDS and v is not None
-                },
+                **recorded_fields,
             )
             timeout = float(self.kernel.operations.get(name).cardea.timeout_seconds)
         if reconciler is not None:
