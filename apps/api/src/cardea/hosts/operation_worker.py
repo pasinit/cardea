@@ -13,7 +13,9 @@ import json
 import sys
 from datetime import datetime
 from importlib.metadata import entry_points
+from typing import Any
 
+from cardea.service.content_gate import remote_check
 from cardea.service.operations import (
     ENTRY_POINT_GROUP,
     OperationContext,
@@ -34,6 +36,12 @@ def main(argv: list[str]) -> int:
         return 2
     handler = points[0].load()
     document = json.loads(sys.stdin.buffer.read(MAX_INPUT + 1)[:MAX_INPUT])
+    print(json.dumps(run(handler, document)))
+    return 0
+
+
+def run(handler: Any, document: dict[str, Any]) -> dict[str, Any]:
+    """Run the handler on one job document; returns the document the worker prints."""
     recorded = document["context"]
     context = OperationContext(
         task_id=recorded["task_id"],
@@ -44,18 +52,18 @@ def main(argv: list[str]) -> int:
         agent_id=recorded.get("agent_id"),
         idempotency_context=recorded.get("idempotency_context"),
         slot_time=recorded.get("slot_time"),
+        # The kernel's content gate over its loopback callback (ADR-037); the gate's files
+        # and binary never enter the sandbox.
+        check_content=remote_check(recorded.get("content_gate")),
     )
     try:
         output = asyncio.run(handler(document["arguments"], context))
     except OperationRejected as rejected:
-        print(json.dumps({"rejected": str(rejected)[:256]}))
-        return 0
+        return {"rejected": str(rejected)[:256]}
     except Exception as error:
         # Describe the failure without its message, which may carry URLs or secrets.
-        print(json.dumps({"error": {"type": type(error).__name__, "status": http_status(error)}}))
-        return 0
-    print(json.dumps({"output": output}))
-    return 0
+        return {"error": {"type": type(error).__name__, "status": http_status(error)}}
+    return {"output": output}
 
 
 if __name__ == "__main__":

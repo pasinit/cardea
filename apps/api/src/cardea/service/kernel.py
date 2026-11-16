@@ -525,7 +525,13 @@ class Kernel:
         self.executor_record(name)
         assert self.workers is not None
         return confined_handler(
-            self.workers, executor, descriptor.cardea.timeout_seconds, self.worker_watch
+            self.workers,
+            executor,
+            descriptor.cardea.timeout_seconds,
+            self.worker_watch,
+            gate=lambda context: content_gate.GateEndpoint(
+                self.database, self.content_gate, context
+            ),
         )
 
     def _gated(self, handler: Handler) -> Handler:
