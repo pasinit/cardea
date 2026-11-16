@@ -339,7 +339,8 @@ def show_overview(kernel: Kernel, group: str, namespace: str, supervisor: str) -
         print(f"    pool {pool['name']:<9} last runs {' '.join(runs)}")
     for collection in view["collections"]:
         counts = ", ".join(f"{k} {v}" for k, v in collection["by_state"].items()) or "empty"
-        print(f"    collection {collection['name']}: {counts}; {len(collection['claimed'])} claimed")
+        claimed = len(collection["claimed"])
+        print(f"    collection {collection['name']}: {counts}; {claimed} claimed")
     mail = sum(a["consumed"] for a in view["mailbox"]["addresses"])
     print(f"    mail consumed {mail}; open approvals {len(view['approvals']['items'])}")
     for event in view["journal"]["events"]:
