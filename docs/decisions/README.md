@@ -39,7 +39,7 @@ Each record states the requirement, the open-source candidates considered, fit e
 | [034](034-agent-groups-and-shared-records.md) | Agent Groups, Shared Records, State Machines and Mailboxes (implemented: all eleven slices and the team overview; portable tests only) |
 | [035](035-event-triggers.md) | Event Triggers (slice 1 implemented, plus journal triggers from ADR-034; portable tests only) |
 | [036](036-approval-waits.md) | Approval Waits and Per-Operation Autonomy (slices 1–4 implemented, slices 5–6 pending; portable tests only) |
-| [037](037-coding-and-vcs-operations.md) | Coding and Version-Control Operations for an Agent Team (proposed; implemented: the content gate with redaction, long confined calls, `code.session` with fakes; portable tests only) |
+| [037](037-coding-and-vcs-operations.md) | Coding and Version-Control Operations for an Agent Team (proposed; implemented: the content gate with redaction, long confined calls, `code.session` with the Claude Code harness entry and `coding` profile; portable tests only, Debian fit test written but not run) |
 | [038](038-throwaway-test-environments.md) | Throwaway Test Environments for Agent Teams (proposed) |
 
 **Verified on Debian** means a run on the supported Debian host, recorded as evidence in the ADR. The milestone ADRs up to ADR-019 record their own Debian evidence. From ADR-023 on, nothing is verified on Debian yet: "portable tests only" above means the tests pass on the development platforms and in CI, and nothing more. The [Debian acceptance checklist](../acceptance/debian-adr-034-037.md) lists what must run to verify ADR-034, ADR-035, ADR-036 and the ADR-023 amendment.

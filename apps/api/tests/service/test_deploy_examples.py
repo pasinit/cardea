@@ -260,3 +260,39 @@ def test_make_tls_certificates_pass_strict_verification(tmp_path: Path) -> None:
             assert tls.version() == "TLSv1.3"
             tls.sendall(b"x")
         thread.join(timeout=5)
+
+
+def test_coding_profile_fits_code_session() -> None:
+    """The `coding` profile and its worker carry code.session (ADR-037): the descriptor's
+    timeout and artifact size, the model API only, and read-only host-owner inputs."""
+    from cardea_coding_ops import claude_code, descriptors
+    from cardea_coding_ops.session import fixed_env
+
+    from cardea.service.operations import OperationDescriptor
+
+    workers = json.loads((KIT / "cardea" / "cardea-host-workers.json").read_text())
+    profile = workers["profiles"]["coding"]
+    worker = workers["workers"]["code-session"]
+    (path,) = [p for p in descriptors() if p.name == "code.session.json"]
+    descriptor = OperationDescriptor.model_validate_json(path.read_text())
+    executor = descriptor.cardea.executor
+    assert executor is not None
+    assert (executor.profile, executor.worker) == ("coding", "code-session")
+    assert worker["profiles"] == ["coding"]
+    assert descriptor.cardea.timeout_seconds <= profile["wall_seconds"]
+    # The bundle is base64 in the output document, plus room for the summary.
+    bundle = 4 * descriptor.cardea.max_artifact_bytes // 3
+    assert bundle + 262144 <= profile["output_kb"] * 1024 <= launcher.MAX_OUTPUT
+    assert profile["network"]["policy"] == "model_api_only"
+    assert profile["network"]["hosts"] == ["api.anthropic.com"] and "credential" in profile
+    coding = json.loads((KIT / "cardea" / "cardea-coding.json").read_text())
+    assert worker["env"]["CARDEA_CODING_CONFIG"] == "/opt/cardea-code/coding.json"
+    for repository in coding["repositories"].values():
+        assert repository["source"].startswith("/opt/cardea-code/")
+    assert any(path == "/opt/cardea-code" for path in worker["read_only"])
+    fixed_env(coding["gate_env"])
+    harness = coding["harness"]
+    assert harness["kind"] == "claude-code" and harness["credential_kind"] == "oauth_token"
+    assert "--bare" not in claude_code.argv({**harness, "binary": "/opt/x/claude"})
+    gates = sum(g["timeout_seconds"] for r in coding["repositories"].values() for g in r["gates"])
+    assert harness["timeout_seconds"] + gates <= descriptor.cardea.timeout_seconds

@@ -427,7 +427,7 @@ The same pool, with the rest of [ADR-034](decisions/034-agent-groups-and-shared-
 
 [ADR-037](decisions/037-coding-and-vcs-operations.md) is a proposal, except two parts, which are implemented with portable tests only.
 
-- **The coding session.** `code.session` (package `packages/cardea-coding-ops`) runs a headless coding agent and the repository's gates in a confined worker. It returns the change as a stored artifact and the gate results in its receipt. It runs under the ADR-023 amendment: a confined call may last up to its profile's wall time, with a heartbeat lease.
+- **The coding session.** `code.session` (package `packages/cardea-coding-ops`) runs a headless coding agent (Claude Code, with the repository's own settings, hooks and MCP servers turned off) and the repository's gates in a confined worker. It returns the change as a stored artifact and the gate results in its receipt. It runs under the ADR-023 amendment: a confined call may last up to its profile's wall time, with a heartbeat lease.
 - **The content gate.** It checks what may leave the host. Operations that send to a repository host call it before any network request. The host owner configures it in the service configuration:
 
 ```json

@@ -204,6 +204,8 @@ errors answer 409. A request that fails schema validation answers
 
 What a receipt's or a task's `failure.code` can hold. These are not request errors:
 a run or an operation task records them, and the run view and receipts show them.
+Codes raised in `cardea_coding_ops` come from that operations package, and codes
+raised in `cardea_reference_ops` from the fake reference package used by the examples.
 
 | Code | Meaning | Raised in |
 |---|---|---|
@@ -219,6 +221,7 @@ a run or an operation task records them, and the run view and receipts show them
 | `content_gate_unavailable` | The content gate is unreachable | `cardea.service.content_gate` |
 | `content_refusal_ignored` | the worker continued after the content gate refused | `cardea.service.confined` |
 | `content_refused` | The content gate refused a call (ADR-037 decision 4). | `cardea.service.operations` |
+| `credential_in_change` | the change or a command's output contains the model credential; nothing is returned | `cardea_coding_ops.session` |
 | `deadline_exceeded` | Task deadline elapsed. | `cardea.kernel.store` |
 | `effect_not_applied` | Destination shows no effect | `cardea.service.operation_runtime` |
 | `executor_busy` | — | `cardea.service.invocation` |
@@ -237,6 +240,7 @@ a run or an operation task records them, and the run view and receipts show them
 | `record_invalid` | labels must be distinct; data must be an object; data does not match the collection schema at {…} ({…}) (and 2 more) | `cardea.service.records` |
 | `record_not_found` | No such record | `cardea.service.records` |
 | `record_too_large` | data is {…} bytes; the collection allows {…} | `cardea.service.records` |
+| `risk_limit` | The order would breach the desk limit | `cardea_reference_ops.__init__` |
 | `snapshot_restored` | Historical execution sealed by snapshot recovery. | `cardea.service.admin` |
 | `stale_call` | This call is no longer running | `cardea.service.approval_requests`, `cardea.service.records` |
 | `transition_not_allowed` | Transition {…} needs state {…}; the record is in {…} | `cardea.service.records` |

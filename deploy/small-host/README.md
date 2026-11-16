@@ -161,6 +161,23 @@ python3 /opt/cardea/packaging/fetch_opencode.py /opt/cardea/opencode
    - `sha256sum /opt/cardea/opencode/opencode` matches the registry.
    - The kernel starts. On a mismatched pin it refuses with `harness_pin_mismatch`, and on a missing profile or worker with `worker_profile_not_installed` at the first admission.
 
+8. Optional: `code.session` ([ADR-037](../../docs/decisions/037-coding-and-vcs-operations.md)), a coding agent that changes a repository in a scratch checkout and runs its gates. It has no repository-host credential and pushes nothing. Network access beyond the model API is pending the owner (ADR-037 question 8). This kit follows the lead's recommendation: the model API only, and dependencies from a read-only, pre-provisioned package cache.
+   1. Lay out the read-only inputs under `/opt/cardea-code` (owned by root, readable by `cardea-worker`):
+      - `/opt/cardea-code/repos/<alias>.git`: a bare mirror of each allowed repository. Keep it current from outside the sandbox, for example with `git fetch` from a timer.
+      - `/opt/cardea-code/cache/`: the package caches the gates use offline (`uv`, wheels, `npm`).
+      - `/opt/cardea-code/coding.json`: `cardea/cardea-coding.json`, edited for your repositories, gates and cache paths.
+   2. The `coding` profile and the `code-session` worker are in `cardea/cardea-host-workers.json`.
+      - The profile allows up to an hour of wall time and 4 GiB each of memory and scratch.
+      - Its `output_kb` is sized for a 10 MiB change bundle.
+      - Its proxy port `127.0.10.5` allows only `api.anthropic.com`.
+      - Its credential is a Claude subscription token from `claude setup-token`, stored as `/etc/cardea/credentials/claude-code` (`0600 root`).
+      - The worker binds `/opt/cardea`, which holds the Claude Code CLI pinned by the Agent SDK, and `/opt/cardea-code`.
+   3. Install the operation: copy `packages/cardea-coding-ops/src/cardea_coding_ops/descriptors/code.session.json` into the kernel's `operations_dir`, and install `packages/cardea-coding-ops` into `/opt/cardea/apps/api/.venv`. Then provision `code.session` for the platform and the supervisors that may use it, and restart.
+
+   Checks:
+   - `curl -s -o /dev/null -w '%{http_connect}\n' -x http://127.0.10.5:3128 https://api.anthropic.com/` prints 200; any other host prints 403.
+   - `experiments/code-session/debian.sh` runs one session on a fixture repository and records evidence (see its README).
+
 ## 5. Telos host
 
 1. Run a SPIRE agent with `spire/agent-telos.conf` (replace `CARDEA_PRIVATE_IP`), using the second join token. Its socket must be at `/run/spire/agent.sock`.

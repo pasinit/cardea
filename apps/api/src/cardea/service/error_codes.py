@@ -19,7 +19,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 SOURCE = Path(__file__).resolve().parents[1]
-DOCUMENT = Path(__file__).resolve().parents[5] / "docs" / "error-codes.md"
+REPOSITORY = Path(__file__).resolve().parents[5]
+DOCUMENT = REPOSITORY / "docs" / "error-codes.md"
 MAX_MEANINGS = 3
 
 
@@ -66,8 +67,11 @@ def _argument(call: ast.Call, index: int, name: str) -> ast.expr | None:
 def collect() -> tuple[dict[str, Entry], dict[str, Entry]]:
     api: dict[str, Entry] = defaultdict(Entry)
     failures: dict[str, Entry] = defaultdict(Entry)
-    for path in sorted(SOURCE.rglob("*.py")):
-        module = ".".join(path.relative_to(SOURCE.parent).with_suffix("").parts)
+    # The kernel, then the first-party operation packages, whose failures receipts record.
+    roots = [SOURCE, *sorted(p for p in REPOSITORY.glob("packages/*/src/*") if p.is_dir())]
+    paths = [(root, path) for root in roots for path in sorted(root.rglob("*.py"))]
+    for root, path in paths:
+        module = ".".join(path.relative_to(root.parent).with_suffix("").parts)
         tree = ast.parse(path.read_text())
         # The base class of the class each `super().__init__` call is made in.
         parents: dict[int, str] = {}
@@ -172,6 +176,8 @@ def render() -> str:
         "",
         "What a receipt's or a task's `failure.code` can hold. These are not request errors:",
         "a run or an operation task records them, and the run view and receipts show them.",
+        "Codes raised in `cardea_coding_ops` come from that operations package, and codes",
+        "raised in `cardea_reference_ops` from the fake reference package used by the examples.",
         "",
         *_table(failures, statuses=False),
         "",
