@@ -104,6 +104,23 @@
       "kernel_callback": true,
       "concurrency": 2,
       "credential": "/etc/cardea/credentials/github"
+    },
+    "try": {
+      "memory_mb": 4096,
+      "cpu_percent": 200,
+      "tasks": 512,
+      "wall_seconds": 3600,
+      "scratch_mb": 6144,
+      "output_kb": 2048,
+      "network": {
+        "policy": "allow_list",
+        "proxy": "127.0.10.7:3128",
+        "hosts": [
+          "pypi.org",
+          "files.pythonhosted.org"
+        ]
+      },
+      "concurrency": 1
     }
   },
   "workers": {
@@ -310,6 +327,27 @@
       ],
       "env": {
         "CARDEA_VCS_CONFIG": "/opt/cardea-vcs/vcs.json",
+        "CARDEA_REPOSITORIES": "/opt/cardea-code/repositories.json"
+      }
+    },
+    "env-try": {
+      "argv": [
+        "/opt/cardea/apps/api/.venv/bin/python",
+        "-I",
+        "-m",
+        "cardea.hosts.operation_worker",
+        "env.try"
+      ],
+      "profiles": [
+        "try"
+      ],
+      "read_only": [
+        "/opt/cardea",
+        "/opt/cardea-code/repositories.json",
+        "/opt/cardea-code/repos",
+        "/opt/cardea-try/toolchain"
+      ],
+      "env": {
         "CARDEA_REPOSITORIES": "/opt/cardea-code/repositories.json"
       }
     }

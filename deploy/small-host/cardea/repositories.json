@@ -27,7 +27,45 @@
           ],
           "timeout_seconds": 900
         }
-      ]
+      ],
+      "environment": {
+        "tiers": [
+          "process"
+        ],
+        "toolchain": {
+          "path": "/opt/cardea-try/toolchain/0000000000000000000000000000000000000000000000000000000000000000",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "scenarios": {
+          "try": {
+            "argv": [
+              "/usr/bin/make",
+              "try"
+            ],
+            "timeout_seconds": 1200
+          },
+          "teams": {
+            "argv": [
+              "/usr/bin/make",
+              "teams"
+            ],
+            "timeout_seconds": 900
+          },
+          "getting-started": {
+            "argv": [
+              "/usr/bin/make",
+              "test"
+            ],
+            "timeout_seconds": 1500,
+            "artifacts": [
+              "apps/api/.pytest-report.xml"
+            ]
+          }
+        },
+        "env": {
+          "UV_LINK_MODE": "copy"
+        }
+      }
     }
   }
 }
