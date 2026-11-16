@@ -18,7 +18,7 @@ Use `systemctl restart cardea-kernel` or reboot the host. DBOS recovers the **cu
 
 ## Upgrade
 
-The verified compatibility path is package `0.1.0-1` / schema `m4_001` to `0.1.0-2` / schema `m5_001`, keeping DBOS `3.0.0` and workflow version `cardea-m1-v1`. Older service schema migrations have portable regression coverage. Arbitrary future dependencies, runtime versions and host versions require another fit test.
+The verified compatibility path is package `0.1.0-1` / schema `m4_001` to `0.1.0-2` / schema `m5_001`, keeping DBOS `3.0.0` and workflow version `cardea-m1-v1`. Later service schemas, up to the current head `m17_content_redaction`, have portable migration tests only; no package upgrade across them has run on Debian (see the [Debian acceptance checklist](acceptance/debian-adr-034-037.md)). Arbitrary future dependencies, runtime versions and host versions require another fit test.
 
 1. Arrange a maintenance window, stop admissions and reconcile outstanding work. Stop with `systemctl stop cardea-kernel`.
 2. As `cardea-kernel`, run `cardea backup /private/path/pre-upgrade.sqlite3 --config /etc/cardea/config.json`. The destination must not already exist.
@@ -137,6 +137,36 @@ Single-operation tasks and agent runs can wait for an approver before an effect 
 - **Agent runs.** A held tool call returns `{"status": "approval_pending", "request_id", "expires_at"}` at once (as an MCP error result, so output schemas do not apply), creates no receipt and uses no tool-call budget. A run has at most one open request: the same call while it is pending returns it again, a different held call is refused with `approval_pending`, and more than `max_approval_waits` requests (default 4, at most 16) with `approval_limit`. When the attempt ends with a request open, or with one that closed during the attempt, the run waits (`waiting`, log line `run parked for approval`) instead of finishing; expectations are evaluated only once no request is open. A closed request enqueues the continuation workflow `cardea.m6.agent_run.approval` on the agent-run queue; that attempt runs an approved call as `apr-NN` first, then the session gets one `<approval>` block per closed request (decision, approver, time, reason, and the result of `apr-NN`). A continuation attempt does not use a retry; an attempt that parks after a successful session uses none either, a failed one still does. If an attempt loses its lease after proposing, the next attempt parks again without a session. Parking settles the attempt's leased mail: consumed if the session succeeded, released for redelivery if it failed. `approval_wait_seconds` (at most 30 days) is added to the run's deadline at admission; `expires_at` never exceeds the deadline. Cancelling a waiting run cancels it at once and withdraws its request.
 - **Agent approvers.** An agent run may decide requests through the built-in tool `approvals.decide` (list it in `operations`). Each call is checked live: the run's agent needs the `approve` row on the operation, the run must be granted `approve:<operation>`, and its supervisor (and every ancestor's) must hold `approve` and `delegate` on it, as the platform allows; the requester exclusion applies. Admission checks the same `approve:<operation>` grant against the supervisor.
 - **Not yet.** Per-grant rules in agent-run requests and triggers (ADR-036 slice 5). A snapshot restore voids open requests (`snapshot_restored`).
+
+## Mailboxes, context and journal triggers
+
+These are the rest of [ADR-034](decisions/034-agent-groups-and-shared-records.md) (slices 5–7; worked example in [getting started](getting-started.md#9-a-pool-that-wakes-on-mail-reads-its-context-and-stays-within-budget)). Migrations `m11_mailboxes` and `m12_journal_triggers` add their tables.
+
+- **Mail.** Addresses are an instance, a pool `<group>.<pool>` or a group. A sender needs `mail:<address>`, and the platform must allow it there. A message is leased to a run when its attempt checkpoints. It is consumed when the run succeeds and released when it fails or is cancelled. After `max_deliveries` (1–10, default 3) it is dead-lettered, and the sender and the supervisor get a notice. The kernel's own notices (dead letters, spend, windowed expectations, content refusals) come from the kernel runtime.
+- **Context.** A run's context blocks are read in one snapshot. Each block is cut to its `max_bytes`, and all of them together to `context_max_bytes` (default 24 KiB, at most 64 KiB). The inbox (default 6 KiB) and the caller's claims are never dropped entirely.
+- **Journal triggers.** A pool's `event` triggers read the group's own kernel journal (`cardea://<namespace>`): `cardea.mailbox.*`, `cardea.record.*` and `cardea.approval.*` events. The minute schedule (`cardea-triggers`, step `cardea.m6.journal_triggers.tick`) admits each matching event once, through the same admission and live ceiling as any trigger. A member is not woken by its own actions unless `include_own` is set. While its run is unfinished, further events coalesce into one follow-up admission.
+- **Overview.** `GET /v0.2/groups/{name}/overview?namespace=` gives the supervisor one read snapshot of the group: pools and members, collections, mail, open approvals, spend and recent journal events.
+
+## Long confined operations and `code.session`
+
+[ADR-023's amendment](decisions/023-installed-operation-registry.md#amendment-2026-11-16-long-confined-operations) lets a confined operation run up to its profile's `wall_seconds`, at most two hours. A call longer than five minutes holds a five-minute lease that a heartbeat renews every minute. If a renewal is refused, the worker stops and the call becomes `outcome_unknown`. A descriptor whose timeout exceeds the installed profile's wall time is refused with `409 operation_timeout_exceeds_profile`. Artifacts (`max_artifact_bytes`, at most 11 MiB) are stored as task-owned objects of at most 1 MiB each.
+
+`code.session` ([ADR-037](decisions/037-coding-and-vcs-operations.md) slice 3, package `packages/cardea-coding-ops`) is the first such operation. The host owner names a read-only JSON file in `CARDEA_CODING_CONFIG`. It lists repositories by alias, each with a read-only `source` and its `gates`, and the harness command. The operation needs the confined profile `coding`; on a host without the ADR-028 helper it is refused. Its commands run with an environment built from nothing, so no repository-host credential reaches the harness or the gates. Only fakes have run it so far: a real harness, the profile's network policy and the repository-host operations (slices 4–7) are not implemented.
+
+## Content gate
+
+The content gate ([ADR-037](decisions/037-coding-and-vcs-operations.md) decision 4) checks what an operation sends to a repository host before it sends it. Configure it under `content_gate` in the service configuration:
+
+- `gitleaks_binary` and `gitleaks_sha256`: the pinned Gitleaks binary and its digest. `python3 packaging/fetch_gitleaks.py <dir>` downloads it, checks the release archive and prints both. The Debian package does not ship it.
+- `gitleaks_config` (optional): a Gitleaks TOML file. Gitleaks's built-in rules apply without one.
+- `denylist_file` (optional): one case-insensitive term per line, or `re:<pattern>`, with blank lines and `#` comments ignored. Keep it private (mode `0600`, owned by the kernel account). Terms are never logged or echoed: a finding names only `denylist:<line>`.
+- `notify_supervisor` (default true) mails the run's supervisor on a refusal. `timeout_seconds` (1–300, default 30) bounds one scan.
+
+The gate fails closed. A finding fails the call with `content_refused`. A missing or misconfigured gate, or a scanner that fails, fails it with `content_gate_unavailable`. A refused call's matching argument strings are replaced in its receipt, in the task's bound request and in a held approval's frozen intent, with `{"redacted": "content_refused", "sha256", "bytes"}`; digests are kept. Service connections use `secure_delete`, and a refusal truncates the write-ahead log. Confined workers reach the gate through a per-call loopback callback, so its configuration and denylist never enter the sandbox; a profile that cannot reach the loopback endpoint is refused with `content_gate_unavailable`.
+
+## Error codes
+
+[Error codes](error-codes.md) lists every code an API request can answer with, and every failure code a receipt or task can record, with its HTTP status and meaning. It is generated from the source (`make error-codes`), and a test keeps it current.
 
 ## Retention and deletion
 
