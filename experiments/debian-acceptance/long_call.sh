@@ -3,6 +3,9 @@
 # Runs as root on a Debian 13 dev host with the small-host kit's confined workers installed
 # (deploy/small-host/README.md, section 4, including the `coding` profile and the
 # `code-session` worker). It spends no model usage: the harness is a sleeping command.
+# Phase 6 checks the loopback fence (ADR-028): from inside the worker 127.0.0.1 is closed
+# and only the dedicated endpoint address answers; pass `-- --kernel-port <port>` to probe
+# the daemon's own listener.
 #
 #   sudo sh experiments/debian-acceptance/long_call.sh [WORK_DIR] [-- long_call.py options]
 #

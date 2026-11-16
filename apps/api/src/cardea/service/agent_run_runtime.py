@@ -780,7 +780,7 @@ class AgentRunRuntime:
             (lease.expires_at - now()).total_seconds() - LEASE_MARGIN,
         )
         tool_timeout = self._tool_timeout(request, lease, timeout)
-        with ToolEndpoint(tools, call) as endpoint:
+        with ToolEndpoint(tools, call, self.kernel.endpoint_host) as endpoint:
             # Defence in depth: the token is never logged, and is scrubbed from harness output.
             self._current(task_id).redact(endpoint.token)
             session_request = HarnessRequest(

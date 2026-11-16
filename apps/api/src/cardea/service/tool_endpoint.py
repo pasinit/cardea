@@ -16,8 +16,6 @@ import asyncio
 import hmac
 import json
 import secrets
-import threading
-import time
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
 from types import TracebackType
@@ -26,7 +24,10 @@ from typing import Any
 import uvicorn
 from mcp import types
 from mcp.server.lowlevel import Server
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.types import ASGIApp, Receive, Scope, Send
+
+from cardea.service import loopback
 
 # A call: tool name, arguments, and whether its client has given up on it.
 CallTool = Callable[[str, dict[str, Any], Callable[[], bool]], Awaitable[types.CallToolResult]]
@@ -135,7 +136,11 @@ def _never() -> bool:
 
 
 class ToolEndpoint:
-    def __init__(self, tools: list[types.Tool], call: CallTool) -> None:
+    def __init__(
+        self, tools: list[types.Tool], call: CallTool, host: str = loopback.DEFAULT_HOST
+    ) -> None:
+        # The one loopback address a confined session may reach (ADR-028).
+        self.host = host
         self.token = secrets.token_urlsafe(32)
         self.tools = tools
         self.call = call
@@ -144,11 +149,10 @@ class ToolEndpoint:
         # connected to its tools (ADR-033).
         self.listings = 0
         self._server: uvicorn.Server | None = None
-        self._thread: threading.Thread | None = None
 
     @property
     def url(self) -> str:
-        return f"http://127.0.0.1:{self.port}/mcp"
+        return f"http://{self.host}:{self.port}/mcp"
 
     def _app(self) -> ASGIApp:
         tools = self.tools
@@ -172,24 +176,22 @@ class ToolEndpoint:
         server: Server[Any] = Server(
             "cardea", version="1", on_list_tools=list_tools, on_call_tool=call_tool
         )
-        app = server.streamable_http_app(json_response=True, stateless_http=True)
+        # DNS-rebinding protection for the address the endpoint listens on: the SDK enables
+        # it by itself only for 127.0.0.1 and localhost, and would refuse 127.0.11.1.
+        security = TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=[f"{self.host}:*"],
+            allowed_origins=[f"http://{self.host}:*"],
+        )
+        app = server.streamable_http_app(
+            json_response=True, stateless_http=True, host=self.host, transport_security=security
+        )
         return _Bearer(_Abandonment(app), self.token)
 
     def __enter__(self) -> "ToolEndpoint":
-        config = uvicorn.Config(
-            self._app(), host="127.0.0.1", port=0, log_level="error", lifespan="on"
+        self._server, self.port = loopback.start(
+            self._app(), self.host, "cardea-tool-endpoint", lifespan="on"
         )
-        self._server = uvicorn.Server(config)
-        self._thread = threading.Thread(
-            target=self._server.run, name="cardea-tool-endpoint", daemon=True
-        )
-        self._thread.start()
-        deadline = time.monotonic() + 10
-        while not self._server.started:
-            if time.monotonic() > deadline or not self._thread.is_alive():
-                raise RuntimeError("tool endpoint failed to start")
-            time.sleep(0.01)
-        self.port = self._server.servers[0].sockets[0].getsockname()[1]
         return self
 
     def __exit__(
@@ -198,7 +200,4 @@ class ToolEndpoint:
         error: BaseException | None,
         trace: TracebackType | None,
     ) -> None:
-        if self._server is not None:
-            self._server.should_exit = True
-        if self._thread is not None:
-            self._thread.join(timeout=10)
+        loopback.stop(self._server)

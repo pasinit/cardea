@@ -125,6 +125,11 @@ READ_ONLY_PREFIXES = ("/usr/", "/opt/", "/etc/ssl/", "/etc/fonts/")
 ENV_NAME = r"[A-Z][A-Z0-9_]{0,63}"
 RESERVED_ENV = {"PATH", "HOME", "CARDEA_DEADLINE", "CARDEA_CREDENTIAL", "CARDEA_INPUTS", "NO_PROXY"}
 CREDENTIAL = "/run/cardea/credential"
+# The one loopback address a confined worker may reach (ADR-028): the kernel's per-attempt
+# tool endpoint and content-gate callback listen there, never on 127.0.0.1, so a worker
+# (and an agent's own commands in it) cannot reach the kernel API or any other service on
+# the host's loopback. It is outside 127.0.10.0/24, where the egress proxy ports live.
+ENDPOINT_ADDRESS = "127.0.11.1"
 
 
 def _proxy(value: object) -> tuple[str, int]:
@@ -132,8 +137,8 @@ def _proxy(value: object) -> tuple[str, int]:
     if match is None or any(int(part) > 255 for part in match.groups()[1:4]):
         raise ValueError("invalid_proxy")
     address, port = match.group(1), int(match.group(5))
-    # 127.0.0.1 carries agent tool endpoints; a proxy there would open every loopback port.
-    if address == "127.0.0.1" or not 0 < port < 65536:
+    # A proxy on 127.0.0.1 or the endpoint address would open what the fence closes.
+    if address in {"127.0.0.1", ENDPOINT_ADDRESS} or not 0 < port < 65536:
         raise ValueError("invalid_proxy")
     return address, port
 
@@ -327,13 +332,13 @@ def confined_command(
         # Egress only to the host-owner proxy, which enforces the hostname allow-list.
         allowed = [f"{address}/32"]
         if network["policy"] == "model_api_only" or profile.get("kernel_callback"):
-            allowed.append("127.0.0.1/32")  # the per-attempt Cardea tool or gate endpoint
+            allowed.append(f"{ENDPOINT_ADDRESS}/32")  # the per-attempt tool or gate endpoint
         props["IPAddressDeny"] = "any"
         props["IPAddressAllow"] = " ".join(allowed)
         url = f"http://{address}:{port}"
         for key in ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"):
             environment[key] = url
-        environment["NO_PROXY"] = environment["no_proxy"] = "127.0.0.1,localhost"
+        environment["NO_PROXY"] = environment["no_proxy"] = f"{ENDPOINT_ADDRESS},localhost"
     binds: list[str] = []
     if profile.get("credential"):
         # systemd reads the root-only file; only this unit's user sees its copy.

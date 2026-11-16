@@ -28,7 +28,7 @@ Checked 2026-10-15. Versions are the pinned Debian 13 packages from ADR-012 unle
 
 ### How hostname allow-lists stay correct
 
-systemd's IP filters work on addresses. A worker under `allow_list` or `model_api_only` may connect only to its profile's proxy (a dedicated `127.x.y.z` other than `127.0.0.1`). `model_api_only` also allows `127.0.0.1`, for the tool endpoint. DNS is unavailable: there is no resolver configuration, and port 53 on any address is outside the allowed IPs. So name resolution happens only at the proxy, which admits `CONNECT host:443` only for listed hostnames. The profile's `hosts` list is the single source for the proxy ACL.
+systemd's IP filters work on addresses. A worker under `allow_list` or `model_api_only` may connect only to its profile's proxy (a dedicated `127.x.y.z` other than `127.0.0.1`). `model_api_only` also allows the dedicated endpoint address `127.0.11.1`, for the tool endpoint, and so does an `allow_list` profile with `kernel_callback` (the content gate's callback); see [Amendment (2026-11-16)](#amendment-2026-11-16-a-dedicated-endpoint-address). DNS is unavailable: there is no resolver configuration, and port 53 on any address is outside the allowed IPs. So name resolution happens only at the proxy, which admits `CONNECT host:443` only for listed hostnames. The profile's `hosts` list is the single source for the proxy ACL.
 
 `public_web` profiles have a `proxy` and no `hosts`; any other key is `invalid_network`. The worker gets the same unit settings as `allow_list`: `IPAddressDeny=any` and `IPAddressAllow=<proxy>/32`, with no direct path anywhere else. The proxy then decides the destination, and **the host proxy must deny every non-public destination**: private (RFC 1918), loopback, link-local (cloud metadata), CGNAT, multicast, reserved and documentation ranges, and their IPv6 equivalents. It must check the addresses the requested name resolves to, not only literal IPs, and it must refuse CONNECT to ports other than 443. The kit's standalone `squid.conf` does this with a `non_public` destination ACL that is denied before any allow rule. A `public_web` profile is meant for read-only operations: it widens where a worker can read, not what it is allowed to do. A host owner who changes one without the other is detectable by the Debian allow-list probe.
 
@@ -38,7 +38,7 @@ Residual: domain fronting. A client can `CONNECT` an allowed CDN hostname and th
 
 1. **Profiles and workers are root-owned host configuration** in `/etc/cardea-host-workers.json`, which must be owned by root and not group- or world-writable. The root helper validates it strictly:
    - limits within fixed bounds;
-   - proxies only on loopback, never on `127.0.0.1`;
+   - proxies only on loopback, never on `127.0.0.1` or the endpoint address `127.0.11.1`;
    - credentials only under `/etc/cardea/credentials/`;
    - worker `argv[0]` and read-only binds only under `/usr/`, `/opt/`, `/etc/ssl/` or `/etc/fonts/`;
    - no overrides of reserved variables or proxy variables.
@@ -50,7 +50,7 @@ Residual: domain fronting. A client can `CONNECT` an allowed CDN hostname and th
    - The scratch tmpfs size and `LimitFSIZE`.
    - `StandardInput=file:` and `StandardOutput=file:` in the job directory.
    - `MemoryDenyWriteExecute=no` only for profiles that declare `jit`, which Chromium and Node need.
-   - For networked policies: `IPAddressDeny=any` plus `IPAddressAllow` for the proxy (and `127.0.0.1` for `model_api_only`), and proxy environment variables. `PrivateNetwork` and the `@network-io` seccomp denial are dropped.
+   - For networked policies: `IPAddressDeny=any` plus `IPAddressAllow` for the proxy (and `127.0.11.1`, the dedicated endpoint address, for `model_api_only` and `kernel_callback` profiles), and proxy environment variables. `PrivateNetwork` and the `@network-io` seccomp denial are dropped.
    - Optionally, one `LoadCredential`.
 
    bubblewrap keeps its minimal read-only root, `--clearenv`, `--disable-userns`, `--cap-drop ALL` and uid 65534.
@@ -130,9 +130,19 @@ Debian-only: `tests/hosts/test_confined_debian.py`, skipped unless `CARDEA_CONFI
 - Headless Chromium under bubblewrap. It will need `--no-sandbox` (nested user namespaces are disabled), `--disable-dev-shm-usage` and its fonts bound read-only. TasksMax and memory sizing for it are unmeasured.
 - Proxy package versions and their ACL behaviour; native performance.
 
+## Amendment (2026-11-16): a dedicated endpoint address
+
+Allowing `127.0.0.1/32` let a worker reach every listener on the host's loopback: the kernel API, a metrics port, anything an operator runs there. In `code.session` the agent's own commands run in the worker, so agent-controlled code could reach them.
+
+- **One address.** The kernel's per-call endpoints for confined workers, the agent session's tool endpoint (`ToolEndpoint`) and the content gate's callback (`GateEndpoint`), listen on `127.0.11.1` (`cardea.hosts.launcher.ENDPOINT_ADDRESS`) when host execution is on. That address is outside `127.0.10.0/24`, where the proxy ports live, so allowing it opens no other profile's proxy. Without host execution they keep `127.0.0.1`, which every platform has.
+- **Unit properties.** `IPAddressAllow` names the profile's proxy and, for `model_api_only` and `kernel_callback` profiles, `127.0.11.1/32`, and never `127.0.0.1`. `NO_PROXY` names `127.0.11.1` so clients reach the endpoint directly. The helper refuses a proxy on `127.0.0.1` or on the endpoint address.
+- **Endpoints refuse other addresses.** Each endpoint binds only its address, and refuses any request whose local address is another one (403 `wrong_address`), so a listener bound more widely by mistake still answers nobody else (`cardea.service.loopback`).
+- **Tests.** The launcher tests check that the unit properties name `127.0.11.1/32` and contain no `127.0.0.1`, and that an allow-list profile without the callback reaches no endpoint address. `test_loopback.py` checks the refusal on any other local address; on Linux it checks that both endpoints bind only the dedicated address and that nothing listens for them on `127.0.0.1`.
+- **Debian.** `experiments/debian-acceptance/long_call.sh`, phase 6: from inside a `coding` worker, a connection to `127.0.0.1` at the kernel's port fails while a real tool endpoint on `127.0.11.1` answers. It has not run.
+
 ## Limits and open items
 
-- **Loopback exposure.** `model_api_only` allows every TCP port on `127.0.0.1`, so a session can reach other loopback listeners. Other attempts' tool endpoints need their random bearer token, but unrelated host services bound to `127.0.0.1` are reachable. Narrowing to the endpoint port needs nftables `socket cgroupv2` rules (revisit).
+- **Loopback exposure.** Narrowed by the [2026-11-16 amendment](#amendment-2026-11-16-a-dedicated-endpoint-address): workers reach only `127.0.11.1`, where only Cardea's per-call endpoints listen, and no longer `127.0.0.1`. Every port on that address is still reachable, so a worker can connect to another attempt's endpoint, which refuses it without that attempt's random bearer token. Narrowing to one port needs nftables `socket cgroupv2` rules (revisit).
 - **Cleanup tracking.** If cleanup of a finished job fails, its spool entry stays until a later reap. There is no periodic sweep for confined jobs yet, and the 256-entry spool cap is shared with M2 jobs.
 - **Profile changes need a restart.** The kernel caches the installed-profile listing at first use. The same applies to concurrency limits.
 - **No aggregate memory cap.** Concurrency bounds how many workers of each profile run at once, but there is no shared memory ceiling across profiles. A systemd slice for worker units would provide one, but the helper's cleanup checks assume units live in `system.slice`, so the slice is deferred.

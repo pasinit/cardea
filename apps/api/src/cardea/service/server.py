@@ -15,6 +15,7 @@ import uvicorn
 from dbos import DBOS
 from starlette.types import ASGIApp
 
+from cardea.hosts import launcher
 from cardea.hosts.debian import DebianHost
 from cardea.runtime.agent_session import ClaudeAgentSession
 from cardea.runtime.harness import Harness
@@ -261,6 +262,9 @@ def serve(
                 max_task_request_bytes=config.max_task_request_bytes,
                 run_preview_bytes=config.run_preview_bytes,
             )
+            if config.host_execution:
+                # Confined workers may reach only this loopback address (ADR-028).
+                kernel.endpoint_host = launcher.ENDPOINT_ADDRESS
             kernel.attempt_logging = config.attempt_logging
             kernel.agent_tools = config.agent_tools
             kernel.event_triggers = config.event_triggers
