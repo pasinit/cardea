@@ -7,33 +7,82 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "repository": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"},
-        "head": {"type": "string", "minLength": 1, "maxLength": 200},
-        "base": {"type": "string", "minLength": 1, "maxLength": 200},
-        "title": {"type": "string", "minLength": 1, "maxLength": 256},
-        "body": {"type": "string", "maxLength": 16000},
-        "draft": {"type": "boolean"}
+        "repository": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "head": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "base": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "body": {
+          "type": "string",
+          "maxLength": 16000
+        },
+        "draft": {
+          "type": "boolean"
+        },
+        "record_id": {
+          "type": "string",
+          "pattern": "^rec-[0-9a-f]{32}$",
+          "description": "The work record this call is for (ADR-034 receipt evidence). Recorded in the receipt only; never sent to the host."
+        }
       },
-      "required": ["repository", "head", "base", "title"]
+      "required": [
+        "repository",
+        "head",
+        "base",
+        "title"
+      ]
     },
     "outputSchema": {
       "type": "object",
       "properties": {
-        "number": {"type": "integer"},
-        "url": {"type": "string"},
-        "state": {"type": "string"},
-        "head": {"type": "string"}
+        "number": {
+          "type": "integer"
+        },
+        "url": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "head": {
+          "type": "string"
+        }
       },
-      "required": ["number", "url", "state", "head"]
+      "required": [
+        "number",
+        "url",
+        "state",
+        "head"
+      ]
     }
   },
   "cardea": {
-    "version": 1,
+    "version": 2,
     "effect": "effect",
     "executor": {"kind": "confined", "profile": "vcs", "worker": "vcs-open-change"},
     "timeout_seconds": 60,
-    "idempotency_scope": ["/repository", "/head"],
+    "idempotency_scope": [
+      "/repository",
+      "/head"
+    ],
     "reconciler": "vcs.find_change",
-    "resource": {"grant": "repo", "argument": "/repository"}
+    "resource": {
+      "grant": "repo",
+      "argument": "/repository"
+    }
   }
 }

@@ -34,6 +34,29 @@ The tests in `apps/api/tests/service/test_worked_examples.py` cover more paths:
 - review rounds;
 - the broker's risk-limit refusal.
 
+## Dev team: the milestone 1 dress rehearsal (`dev-team/`, `dev_team.py`)
+
+The same kind of software team, run on the **real** operation packages with fake backends instead of the reference fakes:
+- `cardea-coding-ops`: `code.session` in its confined-worker shape, with a fake harness and fake gates on a local bare repository. The helper is replaced by a local process that runs the real worker command.
+- `cardea-vcs-ops`: `vcs.*` against the in-process fake GitHub, with the test-only token.
+- The kernel's content gate, with a stand-in scanner and a denylist.
+
+One group manifest (`dev-team/group.json`) holds a principal engineer, a product manager, a team leader and three developers. It also sets a group spend account and a developer pool account. Developer runs carry `expect: [{any_of: [vcs.open_change, mailbox.send to the team lead]}]`. Each run is built from the member's own trigger template, so its operations, context, bounds and expectations are the pool's.
+
+1. **Filing and assignment.** The product manager files two work items from a scripted test pass. The team leader assigns each to the developer pool and mails the pool.
+2. **One developer's whole run.** dev.0 claims an item with `start`, then calls `code.session`. It passes the session's `change.bundle` artifact straight to `vcs.push_branch`, then `vcs.open_change`, and `submit`s with that call's receipt as evidence (`requires_receipt`).
+3. **A refused double claim.** dev.1 tries to take the same item. The claim refuses it, so dev.1 mails the lead, which also meets its `any_of`.
+4. **Review.** The principal engineer reads the change and is refused an `APPROVE` review. It comments and approves the item. The owner's merge is simulated outside the team.
+5. **The content gate.** dev.2's change carries a planted secret, and the content gate refuses the push with nothing sent. dev.2 tells the lead it is blocked.
+6. **Overview and checks.** The script prints the group overview, including spend. It checks that no claim was ever taken while another was held, that every run has receipts and a reported cost, and that the gate refused exactly one change.
+7. **Restructure by configuration only.** `dev-team/group.restructured.json` has two developers and a `security` pool. Applying it drains dev.2, which releases its claim, so the blocked item goes back to `ready`. One new item then goes dev → security review → principal → done.
+
+Found by the rehearsal, recorded in ADR-037:
+- `requires_receipt` ties evidence to a record through the cited call's `record_id` argument, or through a `<record>.<epoch>` idempotency context that only claim follow-up runs have. The real `vcs.open_change` had no `record_id`, so a developer could never `submit`.
+  - `vcs.open_change` and `vcs.push_branch` now take an optional `record_id`, recorded in the receipt and never sent to the host. Their descriptors are at version 2.
+- `code.session` declares no `repo:<alias>` resource grant, unlike `vcs.*`. Any run granted `code.session` can work on every repository in the coding configuration.
+- The coding and vcs packages each keep their own repository aliases (`CARDEA_CODING_CONFIG`, `CARDEA_VCS_CONFIG`). Each alias's read-only source must be the same repository the vcs alias pushes to, or a thin bundle's base will not be found.
+
 ## The files
 
 | File | What it is | Applied with |

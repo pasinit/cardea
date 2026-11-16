@@ -18,7 +18,7 @@ from cardea.service.operations import OperationContext, OperationDescriptor, Rec
 from cardea_vcs_ops.config import load
 from cardea_vcs_ops.ops import Vcs
 
-__all__ = ["Vcs", "descriptors"]
+__all__ = ["Vcs", "descriptors", "in_process_descriptors"]
 
 
 def descriptors() -> tuple[OperationDescriptor, ...]:
@@ -28,6 +28,18 @@ def descriptors() -> tuple[OperationDescriptor, ...]:
         OperationDescriptor.model_validate_json(entry.read_text())
         for entry in sorted(folder.iterdir(), key=lambda e: e.name)
         if entry.name.endswith(".json")
+    )
+
+
+def in_process_descriptors() -> tuple[OperationDescriptor, ...]:
+    """The descriptors with in-process handlers instead of the `vcs` worker, for tests and
+    rehearsals against an in-process fake host only: installed, they would put the
+    repository credential in the service process."""
+    return tuple(
+        d.model_copy(
+            update={"cardea": d.cardea.model_copy(update={"executor": None, "handler": d.name})}
+        )
+        for d in descriptors()
     )
 
 

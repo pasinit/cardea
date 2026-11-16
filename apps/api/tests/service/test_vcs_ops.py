@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from cardea_vcs_ops import Vcs, descriptors
+from cardea_vcs_ops import Vcs, descriptors, in_process_descriptors
 from cardea_vcs_ops.config import FixedTokenConfig, VcsConfig
 from cardea_vcs_ops.fake import FakeGitHub
 from cardea_vcs_ops.git import push
@@ -116,12 +116,7 @@ def policy() -> Provisioning:
 def in_process() -> tuple[OperationDescriptor, ...]:
     """The package's descriptors run in the service process: the handler logic alone. The
     installed descriptors run in the `vcs` confined worker (test_vcs_confined.py)."""
-    return tuple(
-        d.model_copy(
-            update={"cardea": d.cardea.model_copy(update={"executor": None, "handler": d.name})}
-        )
-        for d in descriptors()
-    )
+    return in_process_descriptors()
 
 
 @pytest.fixture
