@@ -17,20 +17,27 @@ its previous run is unfinished is coalesced (recorded, not admitted).
 `?dry_run=true` runs the same transaction and rolls it back, so its plan and its refusals
 are exactly those of the real apply.
 
-Slice 4 converges synchronously inside the apply transaction (create, update, scale-up),
-so `observedGeneration` equals `generation` on commit. Scale-down, pool removal and group
-deletion drain members; that is slice 8 and is refused until then.
+Create, update and scale-up converge inside the apply transaction. Scale-down, pool
+removal (a rename is a removal plus an addition) and deletion drain members, highest
+ordinal first (slice 8): a draining member gets no new slots, claims or pool mail; its
+current run may finish until the pool's `drain_timeout_seconds`, after which it is
+cancelled through the normal path. Then its claims are released, its undelivered mail is
+re-addressed to its pool (or dead-lettered), its triggers are removed and its principal is
+disabled. The reconciler (`converge`) runs in the apply transaction and again on every
+minute tick until nothing drains; then `observedGeneration` equals `generation`.
 """
 
 import json
-from datetime import datetime
+import logging
+from datetime import datetime, timedelta
 from hashlib import sha256
-from typing import TYPE_CHECKING, Any, NoReturn
+from typing import TYPE_CHECKING, Any
 
 import rfc8785
 import sqlalchemy as sa
 from pydantic import JsonValue, ValidationError
 
+from cardea.kernel.store import KernelTransaction
 from cardea.service import mailbox
 from cardea.service.auth import Proof
 from cardea.service.database import Fault, borrow
@@ -46,13 +53,14 @@ from cardea.service.models import (
     now,
 )
 from cardea.service.policy import Policy
-from cardea.service.records import CollectionSpec, check_lease
+from cardea.service.records import CollectionSpec, check_lease, expire
 from cardea.service.schedule import slot_key
 from cardea.service.triggers import MemberBusy, remove, upsert
 
 if TYPE_CHECKING:
     from cardea.service.kernel import Kernel
 
+log = logging.getLogger(__name__)
 API_VERSION = "cardea/v1alpha1"
 UNFINISHED = "t.state NOT IN ('succeeded','failed','cancelled')"
 
@@ -220,7 +228,16 @@ def _ensure_member(
             raise Fault(
                 "principal_conflict", f"Principal {principal} belongs to another group", 409
             )
-        return False
+        if row["state"] == "active":
+            return False
+        # Scaling back up (or re-creating a deleted group) reuses the member principal.
+        conn.exec_driver_sql(
+            "UPDATE group_members SET state='active',drain_deadline=NULL,drain_generation=NULL "
+            "WHERE principal_id=?",
+            (principal,),
+        )
+        conn.exec_driver_sql("UPDATE principals SET disabled=0 WHERE principal_id=?", (principal,))
+        return True
     if conn.exec_driver_sql("SELECT 1 FROM principals WHERE principal_id=?", (principal,)).first():
         raise Fault(
             "principal_conflict",
@@ -233,7 +250,8 @@ def _ensure_member(
         (principal, runtime),
     )
     conn.exec_driver_sql(
-        "INSERT INTO group_members VALUES (?,?,?,?,?,'active',?)",
+        "INSERT INTO group_members(principal_id,namespace,group_name,pool,ordinal,state,"
+        "created_at) VALUES (?,?,?,?,?,'active',?)",
         (principal, namespace, group, pool, ordinal, at.isoformat()),
     )
     return True
@@ -261,7 +279,8 @@ def _apply(
     # a claim lease long enough for every pool that may claim its records (2.4).
     for collection in spec.collections:
         row = conn.exec_driver_sql(
-            "SELECT supervisor_id,spec_json FROM collections WHERE namespace=? AND name=?",
+            "SELECT supervisor_id,spec_json FROM collections WHERE namespace=? AND name=? "
+            "AND deleted_at IS NULL",
             (namespace, collection),
         ).first()
         if row is None or row[0] != principal:
@@ -282,29 +301,16 @@ def _apply(
     if old is not None:
         if old["supervisor_id"] != principal:
             raise Fault("group_immutable", "spec.supervisor of a group is immutable", 409)
-        previous = GroupSpec.model_validate_json(old["spec_json"])
-        wanted = {p.name: p.replicas for p in spec.pools}
-        for pool in previous.pools:
-            if pool.name not in wanted:
-                raise Fault(
-                    "group_drain_unsupported",
-                    f"Removing pool {pool.name} drains its members, which arrives with "
-                    "ADR-034 slice 8",
-                    409,
-                )
-            if wanted[pool.name] < pool.replicas:
-                raise Fault(
-                    "group_drain_unsupported",
-                    f"Scaling pool {pool.name} down drains members, which arrives with "
-                    "ADR-034 slice 8",
-                    409,
-                )
+        if old["state"] == "deleting":
+            raise Fault("group_deleting", "The group is still draining after its deletion", 409)
     checksum = spec_digest(spec)
-    changed = old is None or old["spec_sha256"] != checksum
+    changed = old is None or old["spec_sha256"] != checksum or old["state"] == "deleted"
     generation = (0 if old is None else int(old["generation"])) + int(changed)
     if old is None:
         conn.exec_driver_sql(
-            "INSERT INTO agent_groups VALUES (?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO agent_groups(namespace,name,supervisor_id,generation,"
+            "observed_generation,spec_json,spec_sha256,created_at,updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
             (
                 namespace,
                 name,
@@ -319,16 +325,34 @@ def _apply(
         )
     elif changed:
         conn.exec_driver_sql(
-            "UPDATE agent_groups SET generation=?,spec_json=?,spec_sha256=?,updated_at=? "
-            "WHERE namespace=? AND name=?",
+            "UPDATE agent_groups SET generation=?,spec_json=?,spec_sha256=?,updated_at=?,"
+            "state='active' WHERE namespace=? AND name=?",
             (generation, spec.model_dump_json(), checksum, at.isoformat(), namespace, name),
         )
     plan: dict[str, list[str]] = {
         "members_added": [],
+        "members_draining": [],
         "triggers_installed": [],
         "triggers_updated": [],
         "triggers_removed": [],
     }
+    # Scale-down and pool removal drain the members the spec no longer has, highest
+    # ordinal first; their current runs keep their bound requests (decision 1.5).
+    if old is not None and changed:
+        previous = {p.name: p for p in GroupSpec.model_validate_json(old["spec_json"]).pools}
+        wanted = {p.name: p.replicas for p in spec.pools}
+        for drained in sorted(
+            _members(conn, namespace, name), key=lambda m: (m["pool"], -int(m["ordinal"]))
+        ):
+            if drained["state"] != "active":
+                continue
+            if int(drained["ordinal"]) < wanted.get(str(drained["pool"]), 0):
+                continue
+            pool_spec = previous.get(str(drained["pool"]))
+            timeout = pool_spec.drain_timeout_seconds if pool_spec else 0
+            plan["triggers_removed"] += _remove_triggers(conn, str(drained["principal_id"]), at)
+            _start_drain(conn, drained, timeout, generation, at)
+            plan["members_draining"].append(str(drained["principal_id"]))
     for pool in spec.pools:
         _check_grants(policy, principal, namespace, pool)
         for ordinal in range(pool.replicas):
@@ -363,11 +387,9 @@ def _apply(
                 ).first():
                     remove(conn, stale, at)
                     plan["triggers_removed"].append(stale)
-    # Slice 4 converges inside this transaction, so the generation is observed on commit.
-    conn.exec_driver_sql(
-        "UPDATE agent_groups SET observed_generation=? WHERE namespace=? AND name=?",
-        (generation, namespace, name),
-    )
+    # Converge what can be converged now; draining members finish on later ticks.
+    outcome = converge(kernel, conn, namespace, name, at)
+    plan["members_removed"] = outcome["members_removed"]
     if changed:
         with borrow(conn) as tx:
             tx.append_event(
@@ -459,7 +481,11 @@ def _view(conn: sa.Connection, namespace: str, name: str) -> dict[str, Any]:
             "updated_at": row["updated_at"],
         },
         "spec": json.loads(row["spec_json"]),
-        "status": {"observedGeneration": row["observed_generation"], "members": members},
+        "status": {
+            "observedGeneration": row["observed_generation"],
+            "state": row["state"],
+            "members": members,
+        },
     }
 
 
@@ -479,17 +505,63 @@ def read(kernel: "Kernel", proof: Proof, namespace: str, name: str) -> dict[str,
         return _view(conn, namespace, name)
 
 
-def delete(kernel: "Kernel", proof: Proof, namespace: str, name: str, dry_run: bool) -> NoReturn:
-    """Deleting a group drains every member (ADR-034 decision 1.5), which is slice 8."""
-    with kernel.database.read() as conn:
-        principal = proof.resolve(conn)
-        _owned(conn, principal, namespace, name)
-        _authorize(conn, principal, namespace)
-    raise Fault(
-        "group_drain_unsupported",
-        "Deleting a group drains its members, which arrives with ADR-034 slice 8",
-        409,
-    )
+def delete(
+    kernel: "Kernel", proof: Proof, namespace: str, name: str, dry_run: bool
+) -> dict[str, Any]:
+    """Deleting a group drains every member (decision 1.5). The group is `deleting` until
+    the last member is removed, then `deleted`; `dry_run` returns the plan only."""
+    with kernel.database.engine.connect() as conn:
+        transaction = conn.begin()
+        try:
+            principal = proof.resolve(conn)
+            _owned(conn, principal, namespace, name)
+            _authorize(conn, principal, namespace)
+            at = now()
+            row = (
+                conn.exec_driver_sql(
+                    "SELECT * FROM agent_groups WHERE namespace=? AND name=?", (namespace, name)
+                )
+                .mappings()
+                .one()
+            )
+            spec = GroupSpec.model_validate_json(row["spec_json"])
+            timeouts = {p.name: p.drain_timeout_seconds for p in spec.pools}
+            draining: list[str] = []
+            if row["state"] == "active":
+                conn.exec_driver_sql(
+                    "UPDATE agent_groups SET state='deleting',updated_at=? "
+                    "WHERE namespace=? AND name=?",
+                    (at.isoformat(), namespace, name),
+                )
+                for member in sorted(
+                    _members(conn, namespace, name),
+                    key=lambda m: (m["pool"], -int(m["ordinal"])),
+                ):
+                    if member["state"] == "active":
+                        timeout = timeouts.get(str(member["pool"]), 0)
+                        _start_drain(conn, member, timeout, int(row["generation"]), at)
+                        draining.append(str(member["principal_id"]))
+            outcome = converge(kernel, conn, namespace, name, at)
+            state = conn.exec_driver_sql(
+                "SELECT state FROM agent_groups WHERE namespace=? AND name=?", (namespace, name)
+            ).scalar_one()
+        except BaseException:
+            transaction.rollback()
+            raise
+        if dry_run:
+            transaction.rollback()
+        else:
+            transaction.commit()
+    return {
+        "schema_version": "0.2",
+        "name": name,
+        "namespace": namespace,
+        "dry_run": dry_run,
+        "change": state,
+        "members_draining": draining,
+        "members_removed": outcome["members_removed"],
+        "waiting": outcome["waiting"],
+    }
 
 
 def check_member(conn: sa.Connection, supervisor: str, request: TaskRequest) -> None:
@@ -522,3 +594,170 @@ def check_member(conn: sa.Connection, supervisor: str, request: TaskRequest) -> 
     ).first()
     if busy is not None:
         raise MemberBusy(str(busy[0]))
+
+
+# Draining (ADR-034 decision 1.5, slice 8)
+
+
+def _start_drain(
+    conn: sa.Connection,
+    member: sa.RowMapping,
+    timeout_seconds: int,
+    generation: int,
+    at: datetime,
+) -> None:
+    """A draining member gets no new slots, claims or pool mail; its run may finish."""
+    deadline = at + timedelta(seconds=timeout_seconds)
+    conn.exec_driver_sql(
+        "UPDATE group_members SET state='draining',drain_deadline=?,drain_generation=? "
+        "WHERE principal_id=? AND state='active'",
+        (deadline.isoformat(), generation, member["principal_id"]),
+    )
+    _remove_triggers(conn, str(member["principal_id"]), at)
+
+
+def _remove_triggers(conn: sa.Connection, principal: str, at: datetime) -> list[str]:
+    removed = [
+        str(r[0])
+        for r in conn.exec_driver_sql(
+            "SELECT trigger_id FROM triggers WHERE managed_by='group' AND removed=0 "
+            "AND json_extract(definition_json,'$.template.agent_id')=? ORDER BY trigger_id",
+            (principal,),
+        )
+    ]
+    for trigger in removed:
+        remove(conn, trigger, at)
+    return removed
+
+
+def _unfinished(conn: sa.Connection, principal: str) -> str | None:
+    row = conn.exec_driver_sql(
+        "SELECT b.task_id FROM task_bindings b JOIN tasks t USING(task_id) "
+        f"WHERE b.agent_id=? AND {UNFINISHED} LIMIT 1",
+        (principal,),
+    ).first()
+    return str(row[0]) if row else None
+
+
+def _finish(
+    kernel: "Kernel",
+    conn: sa.Connection,
+    tx: KernelTransaction,
+    group: sa.RowMapping,
+    member: sa.RowMapping,
+    at: datetime,
+) -> None:
+    """A drained member with no unfinished run: release its claims, re-address its mail,
+    remove its triggers and disable its principal (decision 1.5)."""
+    principal = str(member["principal_id"])
+    namespace = str(member["namespace"])
+    runtime = kernel.runtime_id
+    for row in (
+        conn.exec_driver_sql(
+            "SELECT r.*, c.spec_json FROM records r JOIN collections c "
+            "ON c.namespace=r.namespace AND c.name=r.collection WHERE r.holder=?",
+            (principal,),
+        )
+        .mappings()
+        .all()
+    ):
+        spec = CollectionSpec.model_validate_json(row["spec_json"])
+        expire(conn, row, at, actor=runtime, reason="member_removed", spec=spec)
+    mailbox.sweep(conn, tx, runtime, at)
+    pool = f"{member['group_name']}.{member['pool']}"
+    open_pool = group["state"] == "active" and mailbox.member_pool_open(conn, namespace, pool)
+    mailbox.readdress(conn, tx, namespace, principal, pool if open_pool else None, runtime, at)
+    _remove_triggers(conn, principal, at)
+    conn.exec_driver_sql("UPDATE principals SET disabled=1 WHERE principal_id=?", (principal,))
+    conn.exec_driver_sql(
+        "UPDATE group_members SET state='removed',drain_deadline=NULL WHERE principal_id=?",
+        (principal,),
+    )
+    tx.append_event(
+        namespace="kernel.authority",
+        event_type="group.member_removed",
+        producer_id=runtime,
+        correlation_id=principal,
+        at=at,
+        payload={"namespace": namespace, "group": member["group_name"], "member": principal},
+    )
+
+
+def converge(
+    kernel: "Kernel", conn: sa.Connection, namespace: str, name: str, at: datetime
+) -> dict[str, list[str]]:
+    """One reconciler pass over a group, in the caller's transaction; restartable.
+
+    Draining members are taken highest ordinal first. A member whose run is unfinished
+    waits until its drain deadline, then the run is cancelled through the normal path
+    (uncertain effects stay `outcome_unknown`) and the member finishes on a later pass.
+    The generation is observed once nothing drains; a deleting group becomes deleted.
+    """
+    group = (
+        conn.exec_driver_sql(
+            "SELECT * FROM agent_groups WHERE namespace=? AND name=?", (namespace, name)
+        )
+        .mappings()
+        .one()
+    )
+    outcome: dict[str, list[str]] = {"members_removed": [], "runs_cancelled": [], "waiting": []}
+    draining = list(
+        conn.exec_driver_sql(
+            "SELECT * FROM group_members WHERE namespace=? AND group_name=? AND state='draining' "
+            "ORDER BY pool, ordinal DESC",
+            (namespace, name),
+        ).mappings()
+    )
+    with borrow(conn) as tx:
+        for member in draining:
+            principal = str(member["principal_id"])
+            task_id = _unfinished(conn, principal)
+            if task_id is not None:
+                if at < datetime.fromisoformat(str(member["drain_deadline"])):
+                    outcome["waiting"].append(principal)
+                    continue
+                kernel.signal(
+                    conn,
+                    tx,
+                    task_id,
+                    namespace,
+                    str(group["supervisor_id"]),
+                    f"drain.{principal}.{member['drain_generation']}",
+                    "cancel",
+                )
+                outcome["runs_cancelled"].append(task_id)
+                if _unfinished(conn, principal) is not None:
+                    outcome["waiting"].append(principal)
+                    continue
+            _finish(kernel, conn, tx, group, member, at)
+            outcome["members_removed"].append(principal)
+        if not outcome["waiting"]:
+            state = "deleted" if group["state"] in ("deleting", "deleted") else group["state"]
+            conn.exec_driver_sql(
+                "UPDATE agent_groups SET observed_generation=generation,state=?,updated_at=? "
+                "WHERE namespace=? AND name=?",
+                (state, at.isoformat(), namespace, name),
+            )
+    return outcome
+
+
+def reconcile_all(kernel: "Kernel", at: datetime | None = None) -> dict[str, dict[str, list[str]]]:
+    """The minute tick's pass over every group that has not converged (ADR-024's clock)."""
+    at = at or now()
+    with kernel.database.read() as conn:
+        pending = [
+            (str(r[0]), str(r[1]))
+            for r in conn.exec_driver_sql(
+                "SELECT namespace,name FROM agent_groups "
+                "WHERE observed_generation<generation OR state='deleting' ORDER BY namespace,name"
+            )
+        ]
+    results: dict[str, dict[str, list[str]]] = {}
+    for namespace, name in pending:
+        try:
+            with kernel.database.engine.begin() as conn:
+                results[f"{namespace}/{name}"] = converge(kernel, conn, namespace, name, at)
+        except Exception:
+            # A broken group must not stop the others; the next tick retries it.
+            log.exception("group reconciliation failed", extra={"code": f"{namespace}/{name}"})
+    return results

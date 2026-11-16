@@ -30,7 +30,7 @@ HOUR = timedelta(hours=1)
 WORK_ACTIONS = ("create", "read", "update", "triage", "start", "submit", "rework", "approve")
 WORK = tuple(f"record:work/{a}" for a in (*WORK_ACTIONS, "broken"))
 ORDERS = ("record:orders/create", "record:orders/read", "record:orders/approve")
-SUPERVISOR = (*RIGHTS, "groups.manage", "vcs.open_change", *WORK, *ORDERS)
+SUPERVISOR = (*RIGHTS, "groups.manage", "vcs.open_change", "ci.report", *WORK, *ORDERS)
 
 
 class Auth:
@@ -122,7 +122,18 @@ def document(supervisor: tuple[str, ...] = SUPERVISOR) -> Provisioning:
     )
 
 
-REGISTRY = Registry((VCS,), {"test.vcs": open_change})
+# A call that names its record only through its idempotency context `<record_id>.<epoch>`.
+CI = OperationDescriptor.model_validate(
+    {
+        "tool": {
+            "name": "ci.report",
+            "inputSchema": {"type": "object"},
+            "outputSchema": {"type": "object"},
+        },
+        "cardea": {"version": 1, "effect": "effect", "handler": "test.vcs"},
+    }
+)
+REGISTRY = Registry((VCS, CI), {"test.vcs": open_change})
 
 
 @pytest.fixture
@@ -628,6 +639,61 @@ def test_only_the_gated_transition_requires_approval(kernel: Kernel) -> None:
         )
     assert needed.required and [r.rule_id for r in needed.rules] == ["transition.approve"]
     assert not free.required
+
+
+def test_epoch_evidence_counts_only_for_the_current_claim(work: Kernel) -> None:
+    """Evidence named by `<record_id>.<epoch>` must match the record's current claim epoch,
+    so a holder that lost and reacquired the record cannot cite its earlier work."""
+    spec = {
+        **WORK_SPEC,
+        "transitions": [
+            *(t for t in WORK_SPEC["transitions"] if t["name"] != "submit"),
+            {
+                "name": "submit",
+                "from": ["doing"],
+                "to": "review",
+                "claim": "holder",
+                "requires_receipt": {
+                    "operation": "ci.report",
+                    "in": "same_caller",
+                    "window_seconds": 3600,
+                },
+            },
+        ],
+    }
+    assert apply(work, "work", spec).status_code == 200
+    record = ready(work)
+    rid = record["record_id"]
+
+    def report(epoch: int) -> str:
+        request = OperationTaskRequest.model_validate(
+            {
+                "request_id": f"ci-{epoch}",
+                "agent_id": "a1",
+                "namespace": "test",
+                "objective": "Report CI",
+                "operation": "ci.report",
+                "idempotency_context": f"{rid}.{epoch}",
+                "grants": ["objects.read", "objects.write", "ci.report"],
+            }
+        )
+        task_id = work.submit(work.auth.validate("supervisor"), request).task.task_id
+        assert OperationRuntime(work).execute(task_id) == "succeeded"
+        with work.database.read() as conn, borrow(conn) as tx:
+            return tx.get_operation(task_id, "execute").receipt_id
+
+    move(work, record, "start")
+    early = report(1)
+    from datetime import datetime
+
+    lease = datetime.fromisoformat(stored(work, rid)["lease_expires_at"])
+    Scheduler(work, lambda: lease + timedelta(seconds=60)).tick()
+    _, again, _ = move(work, record, "start")
+    assert again is not None and again["claim"]["claim_epoch"] == 3
+    stale = move(work, record, "submit", claim_epoch=3, receipt_id=early)
+    assert stale[2] == "receipt_invalid"
+    current = report(3)
+    assert move(work, record, "submit", claim_epoch=3, receipt_id=current)[0] == "succeeded"
 
 
 def test_summary_lists_what_the_callers_transitions_can_move(work: Kernel) -> None:

@@ -1442,6 +1442,54 @@
         "title": "CollectionApplied",
         "type": "object"
       },
+      "CollectionDeleted": {
+        "additionalProperties": false,
+        "description": "`DELETE /v0.2/collections/{name}`: a tombstone; records and history are kept.",
+        "properties": {
+          "change": {
+            "const": "deleted",
+            "title": "Change",
+            "type": "string"
+          },
+          "claims_released": {
+            "description": "Held claims released with the deletion.",
+            "title": "Claims Released",
+            "type": "integer"
+          },
+          "dry_run": {
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "records": {
+            "title": "Records",
+            "type": "integer"
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "namespace",
+          "dry_run",
+          "change",
+          "claims_released",
+          "records"
+        ],
+        "title": "CollectionDeleted",
+        "type": "object"
+      },
       "CollectionDocument": {
         "additionalProperties": false,
         "description": "`kind: Collection` (ADR-034 decisions 2 and 3).",
@@ -2429,12 +2477,35 @@
       },
       "GroupDeleted": {
         "additionalProperties": false,
-        "description": "`DELETE /v0.2/groups/{name}`: the drained group (ADR-034 slice 8; refused until then).",
+        "description": "`DELETE /v0.2/groups/{name}`: every member drains (ADR-034 decision 1.5).",
         "properties": {
           "change": {
-            "const": "removed",
+            "description": "`deleted` once every member is removed; until then `deleting`.",
+            "enum": [
+              "deleting",
+              "deleted"
+            ],
             "title": "Change",
             "type": "string"
+          },
+          "dry_run": {
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "members_draining": {
+            "description": "Members this deletion started draining.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Members Draining",
+            "type": "array"
+          },
+          "members_removed": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Members Removed",
+            "type": "array"
           },
           "name": {
             "title": "Name",
@@ -2449,12 +2520,24 @@
             "default": "0.2",
             "title": "Schema Version",
             "type": "string"
+          },
+          "waiting": {
+            "description": "Draining members whose run is unfinished; removed by a later tick.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Waiting",
+            "type": "array"
           }
         },
         "required": [
           "name",
           "namespace",
-          "change"
+          "dry_run",
+          "change",
+          "members_draining",
+          "members_removed",
+          "waiting"
         ],
         "title": "GroupDeleted",
         "type": "object"
@@ -2684,6 +2767,22 @@
             "title": "Members Added",
             "type": "array"
           },
+          "members_draining": {
+            "description": "Members this generation drains: scale-down or pool removal.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Members Draining",
+            "type": "array"
+          },
+          "members_removed": {
+            "description": "Drained members removed in this transaction (they had no run).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Members Removed",
+            "type": "array"
+          },
           "triggers_installed": {
             "items": {
               "type": "string"
@@ -2708,6 +2807,8 @@
         },
         "required": [
           "members_added",
+          "members_draining",
+          "members_removed",
           "triggers_installed",
           "triggers_updated",
           "triggers_removed"
@@ -3120,13 +3221,24 @@
             "type": "array"
           },
           "observedGeneration": {
-            "description": "The newest generation the reconciler converged.",
+            "description": "The newest generation the reconciler converged; below `generation` while members drain.",
             "title": "Observedgeneration",
             "type": "integer"
+          },
+          "state": {
+            "description": "`deleting` while a deleted group's members drain.",
+            "enum": [
+              "active",
+              "deleting",
+              "deleted"
+            ],
+            "title": "State",
+            "type": "string"
           }
         },
         "required": [
           "observedGeneration",
+          "state",
           "members"
         ],
         "title": "GroupStatus",
@@ -7716,6 +7828,190 @@
       }
     },
     "/v0.2/collections/{name}": {
+      "delete": {
+        "description": "Delete a collection no group uses (ADR-034 decision 2.1). Held claims are\nreleased; records and history are kept. `dry_run=true` changes nothing.",
+        "operationId": "delete_collection_v0_2_collections__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "namespace",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "Namespace",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dry_run",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Dry Run",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-cardea-auth",
+            "required": false,
+            "schema": {
+              "default": "spiffe",
+              "title": "X-Cardea-Auth",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionDeleted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Method Not Allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Collection"
+      },
       "get": {
         "operationId": "get_collection_v0_2_collections__name__get",
         "parameters": [
@@ -8643,7 +8939,7 @@
     },
     "/v0.2/groups/{name}": {
       "delete": {
-        "description": "Deleting drains every member (ADR-034 slice 8); until then it is refused with\n409 `group_drain_unsupported`.",
+        "description": "Deleting drains every member (ADR-034 decision 1.5): the group is `deleting`\nuntil the last member is removed, then `deleted`.",
         "operationId": "delete_group_v0_2_groups__name__delete",
         "parameters": [
           {
