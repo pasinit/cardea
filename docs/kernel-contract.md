@@ -2,7 +2,11 @@
 
 The [open-source-first review](standards-review-2026-09-22.md) governs implementation selection. Implemented version 0.1 semantics below remain accurate; proposed operations are requirements, not frozen wire contracts or authorization to build bespoke infrastructure. [ADR-001](decisions/001-m0-contracts.md) closes M0’s R01–R03 selection gate; [ADR-010](decisions/010-m1-authenticated-kernel.md) subsequently completed the authenticated endpoint and migrations.
 
-Status: version 0.1 records, lifecycle checks, and local SQLite persistence implemented on 2026-09-21. A trusted deterministic persistence demonstration runs across processes. The separate service implements bounded authenticated execution (ADR-010), confined `host.sha256`/`host.copy` operations with exact-version stored input (ADR-013–015), a bounded OpenRouter/MCP agent task (ADR-016), A2A delegation (ADR-017) and Debian packaging (ADR-018/019); general tool/application execution remains incomplete.
+Status: version 0.1 records, lifecycle checks, and local SQLite persistence implemented on 2026-09-21. A trusted deterministic persistence demonstration runs across processes. The separate service implements:
+- **Verified on Debian:** bounded authenticated execution (ADR-010), confined `host.sha256`/`host.copy` operations with exact-version stored input (ADR-013–015), A2A delegation (ADR-017) and Debian packaging and recovery (ADR-018/019). The ADR-016 agent task was removed by ADR-032.
+- **Implemented, portable tests only:** installed operations (ADR-023, with its 2026-11-16 amendment for long confined calls and artifacts), time triggers (ADR-024), the TLS listener (ADR-025), effect idempotency (ADR-026), agent runs and harnesses (ADR-027, 031, 033), worker profiles (ADR-028), expectations with `any_of` and `match` (ADR-029 and its amendment), event triggers (ADR-035), approval waits (ADR-036 slices 1–4), agent groups, shared records, state machines, mailboxes, journal triggers, spend and the group overview (ADR-034, all slices), and the content gate, redaction and `code.session` (ADR-037, only those parts).
+
+Nothing in the second list has run on Debian; the [Debian acceptance checklist](acceptance/debian-adr-034-037.md) lists what must. General tool/application execution remains incomplete.
 
 ## Implemented Contract Layer
 
@@ -86,7 +90,7 @@ Names are logical operations; transport and path spelling are not a promise that
 | Authority | `capabilities.inspect`, `capabilities.request` | Discover/request authority; grant/revoke are restricted supervisor operations. |
 | Results | `tasks.complete` | Submit artifact references for independent acceptance checks. |
 
-The proposed generic `tasks.spawn` and `messages.send/receive` names are not implemented endpoints. M4 exposes `POST /v0.2/delegation-tasks`, native A2A messages/tasks at the agent boundary, and authenticated `/tasks/{id}/children` inspection. Existing DBOS wakeups, immutable message/slot associations and conditional object publication supply the bounded profile without a new mailbox API.
+The proposed generic `tasks.spawn` and `messages.send/receive` names are not implemented endpoints. M4 exposes `POST /v0.2/delegation-tasks`, native A2A messages/tasks at the agent boundary, and authenticated `/tasks/{id}/children` inspection. Existing DBOS wakeups, immutable message/slot associations and conditional object publication supply that bounded delegation profile; the ADR-034 mailbox below is separate.
 
 Mailboxes (ADR-034 slice 5, implemented for portable execution) are store-and-forward mail between principals that may not be running, not a replacement for A2A delegation. An agent run sends with the built-in `mailbox.send` operation (grant `mail:<address>` checked against the live ceiling; ADR-026 scope on `/client_key`); the message commits in the transaction that settles its receipt. A supervisor sends with `POST /v0.2/mailbox` and reads with `GET /v0.2/mailbox` and `GET /v0.2/mailbox/{message_id}`. Recipients receive mail as the `mailbox.inbox` context block: deliveries are leased in the attempt-checkpoint transaction, consumed when the run succeeds, released when it fails or is cancelled, and dead-lettered after `max_deliveries` with a notice to the sender and the supervisor. Addresses are an instance, a pool of an agent group (any one active member) or a group (every active member).
 
@@ -116,11 +120,29 @@ Every operation declares one of: read-only/retryable, intrinsically idempotent, 
 
 If a worker completes an effect before its receipt commits, recovery must inspect observable state or ask a supported external deduplication mechanism. If neither proves the outcome, retain `outcome_unknown` and request intervention. Do not promise general exactly-once execution.
 
+A confined operation may run up to its profile's wall time, at most two hours ([ADR-023 amendment](decisions/023-installed-operation-registry.md#amendment-2026-11-16-long-confined-operations)). A call longer than five minutes holds a five-minute lease renewed by a heartbeat; only the current holder may renew, never past the task's deadline. A lost lease stops the worker and leaves the call `outcome_unknown`. Its artifacts are task-owned objects committed with the receipt.
+
+Before an operation sends content to a repository host, the kernel's content gate ([ADR-037](decisions/037-coding-and-vcs-operations.md) decision 4) checks it, failing closed. A refused call is a definite failure (`content_refused`), never `outcome_unknown`, and is never replayed. The refused content is redacted from its receipt, the task's bound request and any frozen approval intent; the request digest is kept, and a receipt may differ from its request only by that recorded redaction.
+
 ## Waiting and Event Delivery
 
 Commit the checkpoint and wait registration against a journal cursor transactionally. Check for matching events after that cursor as part of registration/recovery so publication around the wait boundary is not lost. Deliver at least once; consumers identify events and commit progress with durable cursors. Filter both subscriptions and payloads by current authority. Timers and cancellation are durable wakeup reasons.
 
 Installed input adapters publish events under their own scoped identities and stable source IDs. For the MVP directory source, rescan input versions on restart and reconcile them against the persisted ingestion cursor before resuming waits. An in-memory filesystem notification alone cannot preserve changes that arrive during downtime. General external sources require an explicit replay or reconciliation mechanism.
+
+## Shared Records and Groups
+
+[ADR-034](decisions/034-agent-groups-and-shared-records.md) adds generic primitives, implemented with portable tests only:
+- **Collections and records** (slice 1): versioned records under a JSON Schema, with conditional writes and an append-only history. Built-in `records.*` operations are authorized by `record:<collection>/<action>` grants.
+- **Claims** (slice 2): a lease per record and holder with a fencing epoch. While a record is held, writes need the holder's current epoch.
+- **State machines** (slice 3): `records.transition` along declared transitions, each with its own grant, a CEL guard, a claim effect and optionally an ADR-036 approval.
+- **Groups** (slices 4 and 8): members as above, reconciled from a manifest, and drained on scale-down or deletion.
+- **Context sources** (slice 6): blocks fetched in one read snapshot and fitted to byte budgets.
+- **Journal triggers** (slice 7): kernel journal events in the group's namespace wake members, with no signature because the kernel is the sender.
+- **Spend** (slice 9): a reservation at admission against the group's and pool's windowed accounts, settled to reported cost. Unknown cost keeps its reservation. A windowed expectation's miss is reported by kernel mail and fails no run.
+- **Overview**: one read snapshot of a group for its supervisor.
+
+[ADR-035](decisions/035-event-triggers.md) event triggers admit a run per signed inbound CloudEvent, deduplicated per (trigger, source, id), under the trigger's supervisor's live ceiling.
 
 ## Storage and Resource Boundaries
 
@@ -131,6 +153,12 @@ A task budget limits model invocation count/tokens, steps, wall time, tool time,
 ## Result Verification
 
 A trusted installed application verifier checks declared postconditions against actual artifacts or observed state. It runs with bounded authority/resources. The agent cannot select an always-successful verifier to validate itself. Model judgments may provide supplementary evidence but do not replace observable checks in the MVP.
+
+An agent run's `expect` entries ([ADR-029](decisions/029-supervisor-schedules-expectations-and-run-evidence.md)) count distinct applied effects. An entry may be `any_of` alternatives (met when one is met; exceeded only when all are exceeded), and any entry may `match` exact argument values by RFC 6901 pointer.
+
+## Error Codes
+
+Every code the API can answer with, and every failure code a receipt or task can record, is in [error codes](error-codes.md). It is generated from the source, and a test keeps it current.
 
 ## Conformance
 
