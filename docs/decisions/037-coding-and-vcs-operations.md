@@ -1,7 +1,7 @@
 # ADR-037: Coding and Version-Control Operations for an Agent Team
 
 - **Date / owner / milestones:** 2026-11-16; runtime, host-execution and API maintainers. Builds on [ADR-023](023-installed-operation-registry.md) (installed operations), [ADR-026](026-effect-idempotency-and-reconciliation.md) (effect scopes and reconciliation), [ADR-028](028-configurable-worker-profiles.md) (confined workers), [ADR-033](033-pluggable-agent-harnesses.md) (harnesses), [ADR-034](034-agent-groups-and-shared-records.md) (agent groups; its software-team example names `vcs.open_change`) and [ADR-036](036-approval-waits.md) (approval waits).
-- **Status:** proposed. Nothing here is selected, implemented or verified. No fit test below has run; every "fit" is from documentation and says so. The owner's open questions are at the end.
+- **Status:** proposed. Implementation slices 4 and 5 are implemented portably (2026-11-16) **except credential minting**, which waits on the owner's choice between a GitHub App and a personal access token (open question 7). See [Implementation status](#implementation-status). Nothing is verified against a real repository host, and no fit test below has run; every "fit" is from documentation and says so. Open questions 2–4 carry the lead's recommendations, pending the owner.
 - **Affected components:** [operation broker](../components/operation-broker.md), [installed host operations](../components/installed-host-operations.md), [Debian host](../components/debian-host.md), [identity and capabilities](../components/identity-capabilities.md), [agent runtime](../components/agent-runtime.md).
 
 ## Requirement
@@ -143,9 +143,57 @@ Compose existing pieces into one operations package, `vcs.*` and `code.*`, insta
 6. Content gate in both places.
 7. Debian acceptance with a real App on a test repository.
 
+## Implementation status
+
+### Slices 4 and 5 without credential minting (implemented 2026-11-16, portable tests only)
+
+- **Package.** `packages/cardea-vcs-ops` installs `vcs.push_branch`, `vcs.open_change`, `vcs.comment`, `vcs.review` and `vcs.read_change` as ADR-023 operations: descriptors, entry points and an in-process handler per operation over the pinned `httpx`. Host configuration is one private file, `CARDEA_VCS_CONFIG`, holding the repository aliases, the branch prefix, `allow_approve` and the credential provider.
+- **Credentials.** A `RepositoryCredentials` provider is asked for one repository and the call's permissions (`contents:write`, `pull_requests:write`, `issues:write` or `pull_requests:read`) at every call.
+  - The credential goes only to that call's HTTP client (the `Authorization` header) and to its push child process, through `GIT_ASKPASS` and one environment variable. It is never on a command line, in a URL, on disk, in arguments, outputs, receipts, logs or an agent's environment.
+  - The only provider is `FixedTestToken`, for tests and fakes. The GitHub App minter is not implemented; it waits on open question 7.
+- **Operations and reconcilers,** as in decision 1. The reconcilers read the host and never send again:
+  - the branch's head equals the named commit;
+  - the pull request for the head branch;
+  - a comment or review carrying the hidden marker `<!-- cardea:<effect key> -->`.
+
+  A duplicate pull request (422 from another effect scope) returns the existing pull request. Any other 4xx is a definite refusal, `host_refused`; a 5xx or a dropped connection leaves the effect `outcome_unknown` for the reconciler.
+- **Pushing.** `vcs.push_branch` takes the change as a kernel object (a git bundle) and the commit to push. It verifies the bundle in an empty bare repository, checks that the bundle holds that commit, and pushes one ref without force, with hooks and credential helpers disabled.
+  - A branch already at the commit is not pushed again.
+  - `expected_head` refuses a branch that moved.
+  - Its effect scope is `/repository`, `/branch`, `/head` rather than `/change`: two bundles of the same commit are the same effect.
+- **Rules in the operation, before any network call:**
+  - the alias must exist;
+  - the branch and a pull request's head must start with `agent/<group>/`;
+  - `APPROVE` is refused unless `allow_approve`;
+  - every text and the change pass the content gate.
+- **Content gate hook.** `cardea_vcs_ops.gate.content_gate()` is called by `vcs.push_branch` (`check_change` on the bundle) and by `vcs.open_change`, `vcs.comment` and `vcs.review` (`check_text` on each field) before they send. Until slice 6 it is `NoContentGate`, which allows everything; slice 6 installs its gate with `install_content_gate`. A `ContentRefused` becomes a definite `content_refused` failure, so nothing is sent.
+- **Kernel additions,** generic and additive, with descriptor digests unchanged when unset:
+  - descriptor `resource: {grant: "repo", argument: "/repository"}`: the invocation core checks `repo:<value>` in the caller's live ceiling before the intent exists;
+  - descriptor `inputs`: argument pointers that name object versions in the call's namespace. The core reads them under the `objects.read` ceiling, and the store verifies their digest. The handler gets the bytes in `OperationContext.inputs`, and they are never recorded.
+  - `OperationContext.group`: the caller's group from the member table, also recorded in the receipt's context for reconcilers;
+  - the grant form `repo:<alias>`, which provisioning accepts like `mail:` and `record:`.
+- **Not yet:**
+  - the `vcs` confined-worker profile: the handlers run in the service process for now, and moving them behind ADR-028 is a later slice;
+  - the App minter;
+  - the content gate itself (slice 6);
+  - `code.session`, which is slice 3 and would produce the change bundles;
+  - the repository-side ruleset readiness check.
+
+  No migration was needed.
+- **Tests** (`apps/api/tests/service/test_vcs_ops.py`, with an in-process fake GitHub in `cardea_vcs_ops.fake`: REST over `httpx.MockTransport`, backed by real bare repositories so pushes and ref reads agree):
+  - **Flow:** push, open, comment, review and read by a group member's agent run. A repeated push is deduplicated without a host call.
+  - **Branches:** outside the group prefix (including `main`, another group and `..`) they are refused before any network call, and a caller outside any group cannot push.
+  - **Reviews:** `APPROVE` is refused by default and allowed when enabled.
+  - **Repository grant:** a repository outside the run's `repo:` grants is refused by the kernel before the handler runs.
+  - **Inputs:** a change from another namespace is not staged.
+  - **Crash and reconcile,** for each effect: push, open, comment and review each apply on the host and then drop the connection. The run fails with `reconciliation_required`, and the reconcile endpoint settles each one from host state with exactly one effect on the host.
+  - **Duplicate:** a duplicate pull request returns the existing one.
+  - **Token containment:** the token reaches the host's `Authorization` header and appears in no database row, log record, session request or handler representation.
+  - **Digests:** descriptors without `resource` or `inputs` keep their digest.
+
 ## Verification
 
-None. This record is a proposal.
+Portable tests only (above). Nothing has run against a real repository host, a GitHub App or a ruleset.
 
 ## Limits
 
@@ -165,9 +213,9 @@ Revisit if:
 ## Open questions for the owner
 
 1. Which harness should `code.session` run first: Claude Code in `--bare` mode, or OpenCode with a configured provider? Both are already pinned for agent runs.
-2. May an agent submit an `APPROVE` review? The proposal refuses it by default, because an app's approval could satisfy the repository's review rule and amount to an unattended merge path.
-3. Branch naming: a fixed prefix (`agent/*`), or one per group (`agent/<group>/*`) so rulesets can separate teams?
-4. Repository authority: resource-qualified grants `repo:<alias>` with aliases in host configuration, or one installed package per repository?
+2. May an agent submit an `APPROVE` review? The proposal refuses it by default, because an app's approval could satisfy the repository's review rule and amount to an unattended merge path. **Lead recommendation (2026-11-16, pending the owner):** refuse by default; a host owner may enable it per host (`allow_approve`). Implemented that way.
+3. Branch naming: a fixed prefix (`agent/*`), or one per group (`agent/<group>/*`) so rulesets can separate teams? **Lead recommendation (2026-11-16, pending the owner):** one prefix per group, `agent/<group>/`, checked in the operation from the kernel's member table. Callers outside a group cannot push. Implemented that way.
+4. Repository authority: resource-qualified grants `repo:<alias>` with aliases in host configuration, or one installed package per repository? **Lead recommendation (2026-11-16, pending the owner):** `repo:<alias>` grants with aliases in host configuration. Implemented that way.
 5. Content gate scope: added lines only, or the whole tree of the pushed branch? And should a refusal notify the supervisor by mail (ADR-034 decision 4) as well as failing the call?
 6. Change transport: what size cap and retention for change bundles stored as objects?
 7. Credentials for small deployments: is a GitHub App required, or is a fine-grained personal access token an accepted fallback (no per-call minting, longer-lived secret)?

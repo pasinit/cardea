@@ -563,3 +563,19 @@ def test_the_token_never_leaves_the_host_call(
     for request in session.requests:
         assert TOKEN not in repr(request)
     assert TOKEN not in repr(kernel.operations.handlers) and TOKEN not in str(host.root)
+
+
+def test_descriptors_without_resource_or_inputs_keep_their_digest() -> None:
+    from cardea.service.operations import OperationDescriptor
+
+    (push,) = [d for d in descriptors() if d.name == "vcs.push_branch"]
+    document = push.model_dump(mode="json")
+    plain = {
+        **document,
+        "cardea": {k: v for k, v in document["cardea"].items() if k not in {"resource", "inputs"}},
+    }
+    without = OperationDescriptor.model_validate(plain)
+    explicit = OperationDescriptor.model_validate(
+        {**plain, "cardea": {**plain["cardea"], "resource": None, "inputs": None}}
+    )
+    assert without.digest == explicit.digest != push.digest
