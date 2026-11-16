@@ -260,7 +260,7 @@ def test_trigger_templates_carry_context_in_their_digest(kernel: Kernel, clock: 
     with kernel.database.read() as conn:
         request_json = conn.exec_driver_sql("SELECT request_json FROM task_bindings").scalar_one()
     request = AgentRunRequest.model_validate_json(request_json)
-    assert [c.model_dump() for c in request.context] == context
+    assert [c.model_dump(exclude_none=True) for c in request.context] == context
     effect = routine_spec(template=template(context=[{"operation": "mail.send"}]))
     refused = put(client, effect)
     assert refused.status_code == 422 and refused.json()["code"] == "context_not_read_only"

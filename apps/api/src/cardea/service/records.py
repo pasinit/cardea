@@ -38,7 +38,7 @@ from pydantic import (
 
 from cardea.kernel.models import Identifier, OperationReceipt, OperationState
 from cardea.service.approvals import execute_condition
-from cardea.service.database import Database, Fault, borrow
+from cardea.service.database import Database, Fault, borrow, shared
 from cardea.service.models import (
     COLLECTION_NAME,
     RECORD_ACTION,
@@ -1036,6 +1036,7 @@ class Records:
             "records.claim": self.claim,
             "records.release": self.release,
             "records.claimed": self.claimed,
+            "records.summary": self.summary,
             "records.transition": self.transition,
         }
 
@@ -1197,8 +1198,10 @@ class Records:
         limit = int(arguments.get("limit", 20))  # type: ignore[arg-type]
         with self.database.read() as conn:
             self._authorize(conn, context, collection, "read")
+            # Authority is read fresh; the data comes from the run's context snapshot.
+            data = shared(context.snapshot, conn)
             rows = (
-                conn.exec_driver_sql(
+                data.exec_driver_sql(
                     f"SELECT * FROM records WHERE {' AND '.join(clauses)} ORDER BY seq LIMIT ?",
                     (*values, limit + 1),
                 )
@@ -1367,8 +1370,9 @@ class Records:
         collection = str(arguments["collection"])
         with self.database.read() as conn:
             _, caller = self._authorize(conn, context, collection, "read")
+            data = shared(context.snapshot, conn)
             rows = (
-                conn.exec_driver_sql(
+                data.exec_driver_sql(
                     "SELECT * FROM records WHERE namespace=? AND collection=? AND holder=? "
                     "AND lease_expires_at>? ORDER BY seq LIMIT 64",
                     (context.namespace, collection, caller["id"], stamp(now())),
@@ -1385,6 +1389,74 @@ class Records:
                 break
             claims.append({**claim_view(view), "record": view})
         return {"claims": claims}
+
+    async def summary(
+        self, arguments: dict[str, JsonValue], context: OperationContext
+    ) -> dict[str, JsonValue]:
+        """Counts by state and label, and up to 50 unclaimed records, titles only.
+
+        Without a state machine every record counts under the state `null` and every
+        unclaimed record is available. With one, only records in a state some transition
+        the caller holds the live grant for may leave (ADR-034 decision 5.1).
+        """
+        collection = str(arguments["collection"])
+        with self.database.read() as conn:
+            spec, _ = self._authorize(conn, context, collection, "read")
+            data = shared(context.snapshot, conn)
+            scope = (context.namespace, collection)
+            free = "namespace=? AND collection=? AND (holder IS NULL OR lease_expires_at<=?)"
+            values: tuple[Any, ...] = (*scope, stamp(now()))
+            if spec.transitions:
+                policy = Policy(conn)
+                leaving: set[str] = set()
+                for transition in spec.transitions:
+                    try:
+                        policy.ceiling(context.task_id, record_grant(collection, transition.name))
+                    except Fault:
+                        continue
+                    leaving.update(transition.from_)
+                ordered = sorted(leaving)
+                free += f" AND state IN ({','.join('?' * len(ordered))})" if ordered else " AND 0"
+                values = (*values, *ordered)
+            by_state = {
+                str(state) if state is not None else "null": int(count)
+                for state, count in data.exec_driver_sql(
+                    "SELECT state,COUNT(*) FROM records WHERE namespace=? AND collection=? "
+                    "GROUP BY state ORDER BY state",
+                    scope,
+                )
+            }
+            by_label = {
+                str(label): int(count)
+                for label, count in data.exec_driver_sql(
+                    "SELECT j.value,COUNT(*) FROM records r, json_each(r.labels_json) j "
+                    "WHERE r.namespace=? AND r.collection=? GROUP BY j.value ORDER BY j.value",
+                    scope,
+                )
+            }
+            rows = data.exec_driver_sql(
+                "SELECT record_id,state,json_extract(data_json,'$.title') FROM records "
+                f"WHERE {free} ORDER BY seq LIMIT 50",
+                values,
+            ).fetchall()
+            count = f"SELECT COUNT(*) FROM records WHERE {free}"
+            waiting = int(data.exec_driver_sql(count, values).scalar_one())
+        available: list[JsonValue] = [
+            {
+                "record_id": record_id,
+                "state": state,
+                "title": title[:200] if isinstance(title, str) else None,
+            }
+            for record_id, state, title in rows
+        ]
+        return {
+            "collection": collection,
+            "total": sum(by_state.values()),
+            "by_state": dict(by_state),
+            "by_label": dict(by_label),
+            "available": available,
+            "truncated": waiting - len(rows),
+        }
 
     async def transition(
         self, arguments: dict[str, JsonValue], context: OperationContext
@@ -1763,6 +1835,26 @@ DESCRIPTORS: tuple[OperationDescriptor, ...] = (
                 }
             },
             "required": ["claims"],
+        },
+    ),
+    _descriptor(
+        "records.summary",
+        "Counts of a collection's records by state and label, and the unclaimed records "
+        "available to take, titles only (grant action: read)",
+        "read",
+        {},
+        [],
+        {
+            "type": "object",
+            "properties": {
+                "collection": {"type": "string"},
+                "total": {"type": "integer"},
+                "by_state": {"type": "object"},
+                "by_label": {"type": "object"},
+                "available": {"type": "array"},
+                "truncated": {"type": "integer"},
+            },
+            "required": ["collection", "total", "by_state", "by_label", "available"],
         },
     ),
 )
