@@ -1,0 +1,94 @@
+{
+  "apiVersion": "cardea/v1alpha1",
+  "kind": "AgentGroup",
+  "metadata": {"name": "dev-team", "namespace": "dev"},
+  "spec": {
+    "supervisor": "sup-dev",
+    "collections": ["work", "decisions"],
+    "spend": {"usd": 20, "window": "day", "timezone": "UTC"},
+    "pools": [
+      {
+        "name": "principal",
+        "replicas": 1,
+        "grants": [
+          "objects.read", "objects.write", "models.invoke",
+          "record:work/read", "record:work/approve", "record:work/request_changes",
+          "record:decisions/create", "record:decisions/read",
+          "vcs.read_change", "vcs.review", "vcs.comment", "repo:app"
+        ],
+        "run": {
+          "instructions": "Review work in review: read the change, review it, then approve the item or request changes. Record architecture decisions.",
+          "operations": [
+            "records.query", "records.transition", "records.create",
+            "vcs.read_change", "vcs.review", "vcs.comment"
+          ],
+          "context": [{"operation": "records.summary", "arguments": {"collection": "work"}}],
+          "bounds": {"timeout_seconds": 600, "attempts": 1, "max_cost_usd": 0.5}
+        },
+        "triggers": [{"event": {"types": ["cardea.record.transitioned"]}}]
+      },
+      {
+        "name": "product",
+        "replicas": 1,
+        "grants": [
+          "objects.read", "objects.write", "models.invoke",
+          "record:work/create", "record:work/read"
+        ],
+        "run": {
+          "instructions": "Exercise the product and file every problem you find as work.",
+          "operations": ["records.create", "records.query"],
+          "bounds": {"timeout_seconds": 600, "attempts": 1, "max_cost_usd": 0.5}
+        },
+        "triggers": [{"schedule": {"cron": "0 10 * * 1-5", "timezone": "UTC", "misfire": "skip"}}]
+      },
+      {
+        "name": "lead",
+        "replicas": 1,
+        "grants": [
+          "objects.read", "objects.write", "models.invoke",
+          "record:work/read", "record:work/update", "record:work/triage", "record:work/cancel",
+          "mail:dev-team.dev", "mailbox.send", "mailbox.inbox"
+        ],
+        "run": {
+          "instructions": "Prioritise open work, assign it to the developers and tell them.",
+          "operations": ["records.query", "records.update", "records.transition", "mailbox.send"],
+          "context": [{"operation": "mailbox.inbox"}],
+          "bounds": {"timeout_seconds": 600, "attempts": 1, "max_cost_usd": 0.5}
+        },
+        "triggers": [{"schedule": {"cron": "0 9 * * 1-5", "timezone": "UTC", "misfire": "skip"}}]
+      },
+      {
+        "name": "dev",
+        "replicas": 3,
+        "grants": [
+          "objects.read", "objects.write", "models.invoke",
+          "record:work/read", "record:work/start", "record:work/submit",
+          "code.session", "vcs.push_branch", "vcs.open_change", "repo:app",
+          "mail:dev-team.lead.0", "mailbox.send", "mailbox.inbox"
+        ],
+        "run": {
+          "instructions": "Take ready work assigned to the developers, implement it with a coding session, push it, open a change and submit the item for review. If you are blocked, tell the team lead.",
+          "operations": [
+            "records.query", "records.transition",
+            "code.session", "vcs.push_branch", "vcs.open_change", "mailbox.send"
+          ],
+          "context": [
+            {"operation": "mailbox.inbox"},
+            {"operation": "records.claimed", "arguments": {"collection": "work"}}
+          ],
+          "bounds": {"timeout_seconds": 900, "attempts": 1, "max_cost_usd": 0.5},
+          "expect": [
+            {
+              "any_of": [
+                {"operation": "vcs.open_change"},
+                {"operation": "mailbox.send", "match": {"/to/instance": "dev-team.lead.0"}}
+              ]
+            }
+          ]
+        },
+        "triggers": [{"event": {"types": ["cardea.mailbox.sent"], "subjects": ["$member", "$pool"]}}],
+        "spend": {"usd": 10, "window": "day", "timezone": "UTC"}
+      }
+    ]
+  }
+}

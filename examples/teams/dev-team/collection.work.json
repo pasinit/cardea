@@ -1,0 +1,106 @@
+{
+  "apiVersion": "cardea/v1alpha1",
+  "kind": "Collection",
+  "metadata": {
+    "name": "work",
+    "namespace": "dev"
+  },
+  "spec": {
+    "supervisor": "sup-dev",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "assignee_pool": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title"
+      ]
+    },
+    "claims": {
+      "lease_seconds": 14400,
+      "max_per_holder": 1,
+      "max_followups": 6
+    },
+    "states": [
+      "open",
+      "ready",
+      "in_progress",
+      "in_review",
+      "done",
+      "cancelled"
+    ],
+    "initial": "open",
+    "terminal": [
+      "done",
+      "cancelled"
+    ],
+    "transitions": [
+      {
+        "name": "triage",
+        "from": [
+          "open"
+        ],
+        "to": "ready",
+        "guard": "args.assignee_pool == 'dev-team.dev'"
+      },
+      {
+        "name": "start",
+        "from": [
+          "ready"
+        ],
+        "to": "in_progress",
+        "claim": "acquire",
+        "on_claim_expiry": "ready",
+        "guard": "caller.pool == record.data.assignee_pool"
+      },
+      {
+        "name": "submit",
+        "from": [
+          "in_progress"
+        ],
+        "to": "in_review",
+        "claim": "holder",
+        "requires_receipt": {
+          "operation": "vcs.open_change",
+          "in": "same_task"
+        }
+      },
+      {
+        "name": "request_changes",
+        "from": [
+          "in_review"
+        ],
+        "to": "in_progress",
+        "guard": "caller.id != record.holder"
+      },
+      {
+        "name": "approve",
+        "from": [
+          "in_review"
+        ],
+        "to": "done",
+        "claim": "release",
+        "guard": "caller.id != record.holder"
+      },
+      {
+        "name": "cancel",
+        "from": [
+          "open",
+          "ready",
+          "in_progress",
+          "in_review"
+        ],
+        "to": "cancelled",
+        "claim": "release"
+      }
+    ]
+  }
+}
