@@ -179,7 +179,8 @@
         "/opt/cardea-code"
       ],
       "env": {
-        "CARDEA_CODING_CONFIG": "/opt/cardea-code/coding.json"
+        "CARDEA_CODING_CONFIG": "/opt/cardea-code/coding.json",
+        "CARDEA_REPOSITORIES": "/opt/cardea-code/repositories.json"
       }
     },
     "vcs-push-branch": {
@@ -196,10 +197,12 @@
       ],
       "read_only": [
         "/opt/cardea",
-        "/opt/cardea-vcs"
+        "/opt/cardea-vcs",
+        "/opt/cardea-code/repositories.json"
       ],
       "env": {
-        "CARDEA_VCS_CONFIG": "/opt/cardea-vcs/vcs.json"
+        "CARDEA_VCS_CONFIG": "/opt/cardea-vcs/vcs.json",
+        "CARDEA_REPOSITORIES": "/opt/cardea-code/repositories.json"
       }
     },
     "vcs-open-change": {
@@ -216,10 +219,12 @@
       ],
       "read_only": [
         "/opt/cardea",
-        "/opt/cardea-vcs"
+        "/opt/cardea-vcs",
+        "/opt/cardea-code/repositories.json"
       ],
       "env": {
-        "CARDEA_VCS_CONFIG": "/opt/cardea-vcs/vcs.json"
+        "CARDEA_VCS_CONFIG": "/opt/cardea-vcs/vcs.json",
+        "CARDEA_REPOSITORIES": "/opt/cardea-code/repositories.json"
       }
     },
     "vcs-comment": {
@@ -236,10 +241,12 @@
       ],
       "read_only": [
         "/opt/cardea",
-        "/opt/cardea-vcs"
+        "/opt/cardea-vcs",
+        "/opt/cardea-code/repositories.json"
       ],
       "env": {
-        "CARDEA_VCS_CONFIG": "/opt/cardea-vcs/vcs.json"
+        "CARDEA_VCS_CONFIG": "/opt/cardea-vcs/vcs.json",
+        "CARDEA_REPOSITORIES": "/opt/cardea-code/repositories.json"
       }
     },
     "vcs-review": {
@@ -256,10 +263,12 @@
       ],
       "read_only": [
         "/opt/cardea",
-        "/opt/cardea-vcs"
+        "/opt/cardea-vcs",
+        "/opt/cardea-code/repositories.json"
       ],
       "env": {
-        "CARDEA_VCS_CONFIG": "/opt/cardea-vcs/vcs.json"
+        "CARDEA_VCS_CONFIG": "/opt/cardea-vcs/vcs.json",
+        "CARDEA_REPOSITORIES": "/opt/cardea-code/repositories.json"
       }
     },
     "vcs-read-change": {
@@ -275,10 +284,12 @@
       ],
       "read_only": [
         "/opt/cardea",
-        "/opt/cardea-vcs"
+        "/opt/cardea-vcs",
+        "/opt/cardea-code/repositories.json"
       ],
       "env": {
-        "CARDEA_VCS_CONFIG": "/opt/cardea-vcs/vcs.json"
+        "CARDEA_VCS_CONFIG": "/opt/cardea-vcs/vcs.json",
+        "CARDEA_REPOSITORIES": "/opt/cardea-code/repositories.json"
       }
     },
     "vcs-check-repository": {
@@ -294,10 +305,12 @@
       ],
       "read_only": [
         "/opt/cardea",
-        "/opt/cardea-vcs"
+        "/opt/cardea-vcs",
+        "/opt/cardea-code/repositories.json"
       ],
       "env": {
-        "CARDEA_VCS_CONFIG": "/opt/cardea-vcs/vcs.json"
+        "CARDEA_VCS_CONFIG": "/opt/cardea-vcs/vcs.json",
+        "CARDEA_REPOSITORIES": "/opt/cardea-code/repositories.json"
       }
     }
   }

@@ -1,8 +1,10 @@
 """Host-owner configuration of the vcs operations (ADR-037).
 
-One JSON file, named by `CARDEA_VCS_CONFIG`, lists the repository aliases callers may
-name, the branch prefix, whether `APPROVE` reviews are allowed, and the credential
-provider. Callers name an alias; they never send a URL, a token or a host.
+One private JSON file, named by `CARDEA_VCS_CONFIG`, holds whether `APPROVE` reviews are
+allowed and the credential provider. Repository aliases, their hosts and branch prefixes
+come from the host's repository registry (`CARDEA_REPOSITORIES`); for one release this
+file may still list `repositories` and a global `branch_prefix`, with a deprecation
+warning. Callers name an alias; they never send a URL, a token or a host.
 
 In the `vcs` confined worker (ADR-037) the file holds no secret: the provider is
 `profile_credential`, the worker profile's own credential, which systemd loads into
@@ -56,7 +58,10 @@ class ProfileCredentialConfig(Record):
 
 
 class VcsConfig(Record):
-    repositories: dict[Alias, Repository]
+    # Deprecated for one release: repositories come from the host's repository registry
+    # (`CARDEA_REPOSITORIES`, `cardea.service.repositories`). When both are set they must
+    # agree, or the kernel refuses to start and these operations refuse every call.
+    repositories: dict[Alias, Repository] = Field(default_factory=dict)
     # Pushed branches must start with this, after `{group}` is replaced by the caller's
     # group (ADR-037 open question 3; the lead recommends one prefix per group).
     branch_prefix: Annotated[str, Field(strict=True, min_length=1, max_length=64)] = (
@@ -64,7 +69,9 @@ class VcsConfig(Record):
     )
     # `APPROVE` reviews are refused unless the host owner enables them (open question 2).
     allow_approve: bool = False
-    credentials: Annotated[FixedTokenConfig | ProfileCredentialConfig, Field(discriminator="kind")]
+    credentials: Annotated[
+        FixedTokenConfig | ProfileCredentialConfig, Field(discriminator="kind")
+    ]
 
     @model_validator(mode="after")
     def prefix_names_the_group(self) -> Self:

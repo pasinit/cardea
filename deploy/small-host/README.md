@@ -165,14 +165,15 @@ python3 /opt/cardea/packaging/fetch_opencode.py /opt/cardea/opencode
    1. Lay out the read-only inputs under `/opt/cardea-code` (owned by root, readable by `cardea-worker`):
       - `/opt/cardea-code/repos/<alias>.git`: a bare mirror of each allowed repository. Keep it current from outside the sandbox, for example with `git fetch` from a timer.
       - `/opt/cardea-code/cache/`: the package caches the gates use offline (`uv`, wheels, `npm`).
-      - `/opt/cardea-code/coding.json`: `cardea/cardea-coding.json`, edited for your repositories, gates and cache paths.
+      - `/opt/cardea-code/repositories.json`: `cardea/repositories.json`, the host's one repository registry (ADR-037). Each alias holds its read-only mirror `source`, its gates, its branch prefix and, for `vcs.*`, the repository host (`owner`, `name`, `api_url`, `git_url`). Install `cardea/cardea-kernel.service.d/repositories.conf` so the kernel reads it too; it refuses to start if an older package file disagrees with it.
+      - `/opt/cardea-code/coding.json`: `cardea/cardea-coding.json`, edited for your harness and cache paths. Repositories no longer go here; for one release a coding file that still lists them works, with a deprecation warning.
    2. The `coding` profile and the `code-session` worker are in `cardea/cardea-host-workers.json`.
       - The profile allows up to an hour of wall time and 4 GiB each of memory and scratch.
       - Its `output_kb` is sized for a 10 MiB change bundle.
       - Its proxy port `127.0.10.5` allows only `api.anthropic.com`.
       - Its credential is a Claude subscription token from `claude setup-token`, stored as `/etc/cardea/credentials/claude-code` (`0600 root`).
       - The worker binds `/opt/cardea`, which holds the Claude Code CLI pinned by the Agent SDK, and `/opt/cardea-code`.
-   3. Install the operation: copy `packages/cardea-coding-ops/src/cardea_coding_ops/descriptors/code.session.json` into the kernel's `operations_dir`, and install `packages/cardea-coding-ops` into `/opt/cardea/apps/api/.venv`. Then provision `code.session` for the platform and the supervisors that may use it, and restart.
+   3. Install the operation: copy `packages/cardea-coding-ops/src/cardea_coding_ops/descriptors/code.session.json` into the kernel's `operations_dir`, and install `packages/cardea-coding-ops` into `/opt/cardea/apps/api/.venv`. Then provision `code.session` and each repository's `repo:<alias>` grant for the platform and the supervisors that may use them (`code.session` needs `repo:<alias>` for the repository it works on), and restart.
 
    Checks:
    - `curl -s -o /dev/null -w '%{http_connect}\n' -x http://127.0.10.5:3128 https://api.anthropic.com/` prints 200; any other host prints 403.
@@ -185,7 +186,7 @@ python3 /opt/cardea/packaging/fetch_opencode.py /opt/cardea/opencode
       - `input_kb` admits a 10 MiB change bundle as a staged, read-only input;
       - each worker runs `cardea.hosts.operation_worker` with the operation's handler, then its reconciler.
    2. The credential is a root-only file, `/etc/cardea/credentials/github` (`0600 root`), which systemd hands to each unit. The kernel never reads it.
-   3. Install `cardea/cardea-vcs.json`, edited for your repositories, as `/opt/cardea-vcs/vcs.json` (root, `0644`). It holds no secret.
+   3. Install `cardea/cardea-vcs.json` as `/opt/cardea-vcs/vcs.json` (root, `0644`). It holds no secret. Repositories, their hosts and branch prefixes come from the registry `/opt/cardea-code/repositories.json`: each vcs worker binds it read-only and names it in `CARDEA_REPOSITORIES`.
    4. Install `packages/cardea-vcs-ops` into `/opt/cardea/apps/api/.venv`, copy its `descriptors/` into the kernel's `operations_dir`, and configure the content gate. Provision `vcs.*` and `repo:<alias>` for the supervisors that may use them, and restart.
 
    Checks:

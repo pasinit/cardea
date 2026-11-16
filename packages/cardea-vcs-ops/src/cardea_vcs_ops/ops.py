@@ -23,12 +23,15 @@ Rules checked here, before any network call:
 """
 
 import asyncio
+import os
 import re
+from collections.abc import Mapping
 from typing import Any
 
 import httpx
 from pydantic import JsonValue
 
+from cardea.service import repositories
 from cardea.service.operations import OperationContext, OperationRejected, Reconciliation
 from cardea_vcs_ops.config import Repository, VcsConfig
 from cardea_vcs_ops.credentials import (
@@ -68,27 +71,60 @@ class Vcs:
         *,
         transport: httpx.AsyncBaseTransport | None = None,
         pusher: Pusher = push,
+        registry: repositories.Registry | None = None,
+        environ: Mapping[str, str] = os.environ,
     ) -> None:
+        """`registry` is the host's repository registry; by default it is read from
+        `CARDEA_REPOSITORIES`, and without one the config's deprecated `repositories` apply.
+        A config that still lists repositories and disagrees with the registry is refused."""
         self.config = config
         self.credentials = credentials or provider(config.credentials)
         self.transport = transport
         self.pusher = pusher
+        if registry is None:
+            legacy = {a: r.model_dump(mode="json") for a, r in config.repositories.items()}
+            registry = repositories.resolve(
+                "vcs",
+                legacy or None,
+                legacy_prefix=config.branch_prefix if legacy else None,
+                environ=environ,
+            )
+        self.registry = registry
 
     # Shared checks
 
     def repository(self, alias: object) -> Repository:
-        found = self.config.repositories.get(str(alias))
+        if self.registry is None:
+            found = self.config.repositories.get(str(alias))
+        else:
+            entry = self.registry.repositories.get(str(alias))
+            found = (
+                Repository(
+                    owner=str(entry.owner),
+                    name=str(entry.name),
+                    api_url=str(entry.api_url),
+                    git_url=str(entry.git_url),
+                )
+                if entry is not None and entry.hosted
+                else None
+            )
         if found is None:
             raise OperationRejected("No such repository alias on this host", "repository_unknown")
         return found
 
-    def check_branch(self, branch: str, context: OperationContext) -> None:
-        """Agent branches live under the caller's group prefix (ADR-037 open question 3)."""
+    def branch_prefix(self, alias: object) -> str:
+        if self.registry is None:
+            return self.config.branch_prefix
+        return self.registry.repositories[str(alias)].branch_prefix
+
+    def check_branch(self, branch: str, context: OperationContext, alias: object) -> None:
+        """Agent branches live under the caller's group prefix (ADR-037 open question 3),
+        which the registry sets per repository."""
         if context.group is None:
             raise OperationRejected(
                 "Only agent-group members push branches or open changes", "branch_not_allowed"
             )
-        prefix = self.config.branch_prefix.format(group=context.group)
+        prefix = self.branch_prefix(alias).format(group=context.group)
         if (
             not branch.startswith(prefix)
             or len(branch) <= len(prefix)
@@ -138,7 +174,7 @@ class Vcs:
     ) -> dict[str, JsonValue]:
         repository = self.repository(arguments["repository"])
         branch, head = str(arguments["branch"]), str(arguments["head"])
-        self.check_branch(branch, context)
+        self.check_branch(branch, context, arguments["repository"])
         bundle = context.inputs.get("/change")
         if bundle is None:
             raise OperationRejected("The change bundle was not staged", "change_invalid")
@@ -207,7 +243,7 @@ class Vcs:
     ) -> dict[str, JsonValue]:
         repository = self.repository(arguments["repository"])
         head, base = str(arguments["head"]), str(arguments["base"])
-        self.check_branch(head, context)
+        self.check_branch(head, context, arguments["repository"])
         title, body = str(arguments["title"]), str(arguments.get("body") or "")
         self.gate(context, "vcs.open_change", texts={"title": title, "body": body})
         async with await self.client(repository, "pull_requests:write") as host:
@@ -356,8 +392,9 @@ class Vcs:
         """Whether the host's rules hold what the team relies on (ADR-037): a human review
         on the default branch, and pushes only under the agent prefix. Reports only."""
         repository = self.repository(arguments["repository"])
-        root = self.config.branch_prefix.split("{group}", 1)[0] or "agent/"
-        inside = self.config.branch_prefix.format(group=context.group or "readiness") + PROBE
+        prefix = self.branch_prefix(arguments["repository"])
+        root = prefix.split("{group}", 1)[0] or "agent/"
+        inside = prefix.format(group=context.group or "readiness") + PROBE
         async with await self.client(repository, "metadata:read") as host:
             try:
                 default = str((await host.metadata()).get("default_branch") or "main")

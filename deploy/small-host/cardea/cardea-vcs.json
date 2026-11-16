@@ -1,13 +1,4 @@
 {
-  "repositories": {
-    "app": {
-      "owner": "example-org",
-      "name": "app",
-      "api_url": "https://api.github.com",
-      "git_url": "https://github.com/example-org/app.git"
-    }
-  },
-  "branch_prefix": "agent/{group}/",
   "allow_approve": false,
   "credentials": {
     "kind": "profile_credential"

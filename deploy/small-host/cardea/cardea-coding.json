@@ -1,35 +1,4 @@
 {
-  "repositories": {
-    "fixture": {
-      "source": "/opt/cardea-code/repos/fixture.git",
-      "gates": [
-        {
-          "name": "lint",
-          "argv": [
-            "/usr/bin/make",
-            "lint"
-          ],
-          "timeout_seconds": 600
-        },
-        {
-          "name": "typecheck",
-          "argv": [
-            "/usr/bin/make",
-            "typecheck"
-          ],
-          "timeout_seconds": 600
-        },
-        {
-          "name": "test",
-          "argv": [
-            "/usr/bin/make",
-            "test"
-          ],
-          "timeout_seconds": 900
-        }
-      ]
-    }
-  },
   "harness": {
     "kind": "claude-code",
     "model": "sonnet",

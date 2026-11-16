@@ -54,8 +54,8 @@ One group manifest (`dev-team/group.json`) holds a principal engineer, a product
 Found by the rehearsal, recorded in ADR-037:
 - `requires_receipt` ties evidence to a record through the cited call's `record_id` argument, or through a `<record>.<epoch>` idempotency context that only claim follow-up runs have. The real `vcs.open_change` had no `record_id`, so a developer could never `submit`.
   - `vcs.open_change` and `vcs.push_branch` now take an optional `record_id`, recorded in the receipt and never sent to the host. Their descriptors are at version 2.
-- `code.session` declares no `repo:<alias>` resource grant, unlike `vcs.*`. Any run granted `code.session` can work on every repository in the coding configuration.
-- The coding and vcs packages each keep their own repository aliases (`CARDEA_CODING_CONFIG`, `CARDEA_VCS_CONFIG`). Each alias's read-only source must be the same repository the vcs alias pushes to, or a thin bundle's base will not be found.
+- `code.session` declared no `repo:<alias>` resource grant, unlike `vcs.*`. *Resolved:* it now needs `repo:<alias>` (descriptor version 2).
+- The coding and vcs packages each kept their own repository aliases. *Resolved:* one host registry, `CARDEA_REPOSITORIES`, holds each alias's mirror source, host, gates and branch prefix, and both packages read it. The rehearsal writes one `repositories.json` for both.
 
 ## The files
 

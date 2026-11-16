@@ -269,6 +269,7 @@ def test_coding_profile_fits_code_session() -> None:
     from cardea_coding_ops.session import fixed_env
 
     from cardea.service.operations import OperationDescriptor
+    from cardea.service.repositories import Registry
 
     workers = json.loads((KIT / "cardea" / "cardea-host-workers.json").read_text())
     profile = workers["profiles"]["coding"]
@@ -287,14 +288,21 @@ def test_coding_profile_fits_code_session() -> None:
     assert profile["network"]["hosts"] == ["api.anthropic.com"] and "credential" in profile
     coding = json.loads((KIT / "cardea" / "cardea-coding.json").read_text())
     assert worker["env"]["CARDEA_CODING_CONFIG"] == "/opt/cardea-code/coding.json"
-    for repository in coding["repositories"].values():
-        assert repository["source"].startswith("/opt/cardea-code/")
+    # Repositories live in the host's one registry, which the kernel reads too (ADR-037).
+    assert "repositories" not in coding
+    registry = "/opt/cardea-code/repositories.json"
+    assert worker["env"]["CARDEA_REPOSITORIES"] == registry
+    drop_in = unit(KIT / "cardea" / "cardea-kernel.service.d" / "repositories.conf")
+    assert drop_in["Service"]["Environment"] == f"CARDEA_REPOSITORIES={registry}"
+    entries = Registry.model_validate_json((KIT / "cardea" / "repositories.json").read_text())
+    for repository in entries.repositories.values():
+        assert repository.source.startswith("/opt/cardea-code/")
     assert any(path == "/opt/cardea-code" for path in worker["read_only"])
     fixed_env(coding["gate_env"])
     harness = coding["harness"]
     assert harness["kind"] == "claude-code" and harness["credential_kind"] == "oauth_token"
     assert "--bare" not in claude_code.argv({**harness, "binary": "/opt/x/claude"})
-    gates = sum(g["timeout_seconds"] for r in coding["repositories"].values() for g in r["gates"])
+    gates = sum(g.timeout_seconds or 0 for r in entries.repositories.values() for g in r.gates)
     assert harness["timeout_seconds"] + gates <= descriptor.cardea.timeout_seconds
 
 
@@ -320,6 +328,10 @@ def test_vcs_profile_and_workers_fit_the_vcs_operations() -> None:
         assert entries[1:] == ([reconciler] if reconciler else [])
         assert descriptor.cardea.timeout_seconds <= profile["wall_seconds"]
         assert worker["env"]["CARDEA_VCS_CONFIG"].startswith("/opt/cardea-vcs/")
+        # The same repository registry as the kernel and code.session, bound read-only.
+        registry = worker["env"]["CARDEA_REPOSITORIES"]
+        assert registry == workers["workers"]["code-session"]["env"]["CARDEA_REPOSITORIES"]
+        assert registry in worker["read_only"]
     # The worker's configuration holds no secret: the token is the profile's credential.
     config = VcsConfig.model_validate_json((KIT / "cardea" / "cardea-vcs.json").read_text())
     assert isinstance(config.credentials, ProfileCredentialConfig)

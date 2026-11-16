@@ -132,11 +132,11 @@ def session() -> FakeSession:
 @pytest.fixture
 def vcs(host: FakeGitHub) -> Vcs:
     (host.root).mkdir()
-    config = VcsConfig(
-        repositories={"cardea": host.add("acme", "cardea"), "other": host.add("acme", "other")},
-        credentials=FixedTokenConfig(kind="test", token=SecretStr(TOKEN)),
-    )
-    return Vcs(config, transport=host.transport())
+    host.add("acme", "cardea")
+    host.add("acme", "other")
+    # Repositories come from the host's one registry (ADR-037); the vcs file keeps the rest.
+    config = VcsConfig(credentials=FixedTokenConfig(kind="test", token=SecretStr(TOKEN)))
+    return Vcs(config, transport=host.transport(), registry=host.registry())
 
 
 @pytest.fixture
@@ -752,3 +752,89 @@ def test_a_thin_bundle_artifact_from_code_session_pushes(
     tampered = {**push_thin, "branch": "agent/eng/t2", "change": {**artifact, "sha256": "0" * 64}}
     _, _, (refused,) = run_calls(kernel, session, [("vcs-push_branch", tampered)])
     assert refused.is_error and "input_digest_mismatch" in text(refused)
+
+
+# One repository registry (ADR-037 finding 3)
+
+
+def caller(group: str) -> Any:
+    from cardea.service.operations import OperationContext
+
+    return OperationContext(
+        task_id="t",
+        namespace="eng",
+        receipt_id="r",
+        deadline=now() + timedelta(minutes=1),
+        effect_key="e",
+        group=group,
+    )
+
+
+def test_hosts_and_branch_prefixes_come_from_the_registry(host: FakeGitHub, vcs: Vcs) -> None:
+    from cardea.service.operations import OperationRejected
+
+    registry = host.registry(cardea="bots/{group}/")
+    configured = Vcs(vcs.config, transport=host.transport(), registry=registry)
+    assert configured.repository("cardea").git_url == str(host.repositories["acme/cardea"].path)
+    configured.check_branch("bots/eng/fix", caller("eng"), "cardea")
+    with pytest.raises(OperationRejected) as refused:
+        configured.check_branch("agent/eng/fix", caller("eng"), "cardea")
+    assert refused.value.code == "branch_not_allowed"
+    configured.check_branch("agent/eng/fix", caller("eng"), "other")  # the default prefix
+
+
+def test_a_registry_alias_without_a_host_is_not_a_vcs_repository(tmp_path: Path) -> None:
+    from cardea.service.operations import OperationRejected
+    from cardea.service.repositories import Registry, Repository
+
+    registry = Registry(repositories={"mirror": Repository(source=str(tmp_path / "m.git"))})
+    config = VcsConfig(credentials=FixedTokenConfig(kind="test", token=SecretStr(TOKEN)))
+    with pytest.raises(OperationRejected) as refused:
+        Vcs(config, registry=registry).repository("mirror")
+    assert refused.value.code == "repository_unknown"
+
+
+def test_the_vcs_file_repositories_are_deprecated_and_must_agree(
+    tmp_path: Path, host: FakeGitHub, vcs: Vcs
+) -> None:
+    legacy = VcsConfig(
+        repositories={"cardea": vcs.repository("cardea"), "other": vcs.repository("other")},
+        credentials=FixedTokenConfig(kind="test", token=SecretStr(TOKEN)),
+    )
+    with pytest.warns(DeprecationWarning, match="CARDEA_VCS_CONFIG"):
+        alone = Vcs(legacy, environ={})
+    assert alone.registry is None and alone.repository("cardea").owner == "acme"
+    registry = tmp_path / "repositories.json"
+    registry.write_text(host.registry().model_dump_json())
+    registry.chmod(0o600)
+    with pytest.warns(DeprecationWarning):
+        agreeing = Vcs(legacy, environ={"CARDEA_REPOSITORIES": str(registry)})
+    assert agreeing.registry is not None
+    moved = host.registry(cardea="bots/{group}/").model_dump_json()
+    registry.write_text(moved)
+    with pytest.warns(DeprecationWarning), pytest.raises(Fault) as refused:
+        Vcs(legacy, environ={"CARDEA_REPOSITORIES": str(registry)})
+    assert refused.value.code == "repositories_disagree"
+
+
+def test_the_entry_points_refuse_a_disagreeing_host_definitely(
+    tmp_path: Path, host: FakeGitHub, vcs: Vcs, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A refusal, never an effect in doubt: nothing was sent."""
+    import cardea_vcs_ops
+
+    from cardea.service.operations import OperationRejected
+
+    legacy = VcsConfig(
+        repositories={"cardea": vcs.repository("cardea")},
+        credentials=FixedTokenConfig(kind="test", token=SecretStr(TOKEN)),
+    )
+    registry = tmp_path / "repositories.json"
+    registry.write_text(host.registry().model_dump_json())
+    registry.chmod(0o600)
+    monkeypatch.setenv("CARDEA_REPOSITORIES", str(registry))
+    monkeypatch.setattr(cardea_vcs_ops, "load", lambda: legacy)
+    monkeypatch.setattr(cardea_vcs_ops, "_DEFAULT", None)
+    with pytest.warns(DeprecationWarning), pytest.raises(OperationRejected) as refused:
+        cardea_vcs_ops._vcs()
+    assert refused.value.code == "repositories_disagree"

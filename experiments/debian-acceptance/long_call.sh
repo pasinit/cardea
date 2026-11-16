@@ -7,8 +7,9 @@
 #   sudo sh experiments/debian-acceptance/long_call.sh [WORK_DIR] [-- long_call.py options]
 #
 # It installs a fixture repository at /opt/cardea-code/repos/acceptance.git and, for the
-# run only, the test's code.session configuration; the previous /opt/cardea-code/coding.json
-# is restored on exit, also after an interrupted run. Running it again starts over.
+# run only, the test's code.session configuration and repository registry; the previous
+# /opt/cardea-code/coding.json and repositories.json are restored on exit, also after an
+# interrupted run. Running it again starts over.
 set -eu
 WORK="${1:-/var/tmp/cardea-acceptance/long-call}"
 [ "$#" -gt 0 ] && shift
@@ -19,6 +20,8 @@ CODE=/opt/cardea-code
 FIXTURE="$CODE/repos/acceptance.git"
 CONFIG="$CODE/coding.json"
 SAVED="$CODE/coding.json.before-acceptance"
+REGISTRY="$CODE/repositories.json"
+SAVED_REGISTRY="$CODE/repositories.json.before-acceptance"
 
 [ "$(id -u)" = 0 ] || { echo "run as root" >&2; exit 2; }
 for need in /usr/libexec/cardea-host /etc/cardea-host-workers.json "$PY"; do
@@ -26,15 +29,18 @@ for need in /usr/libexec/cardea-host /etc/cardea-host-workers.json "$PY"; do
 done
 grep -q '"coding"' /etc/cardea-host-workers.json || { echo "no coding profile" >&2; exit 2; }
 grep -q '"code-session"' /etc/cardea-host-workers.json || { echo "no code-session worker" >&2; exit 2; }
+grep -q 'CARDEA_REPOSITORIES' /etc/cardea-host-workers.json || { echo "the code-session worker has no CARDEA_REPOSITORIES; reinstall the kit's workers file" >&2; exit 2; }
 "$PY" -I -c 'import cardea_coding_ops' || { echo "cardea-coding-ops not installed" >&2; exit 2; }
 id cardea-kernel >/dev/null 2>&1 || { echo "no cardea-kernel user" >&2; exit 2; }
 
 # On exit: the owner's configuration back, or none if there was none before.
 restore_config() {
   if [ -e "$SAVED" ]; then mv "$SAVED" "$CONFIG"; else rm -f "$CONFIG"; fi
+  if [ -e "$SAVED_REGISTRY" ]; then mv "$SAVED_REGISTRY" "$REGISTRY"; else rm -f "$REGISTRY"; fi
 }
-# An interrupted earlier run left its backup: put the owner's configuration back first.
+# An interrupted earlier run left its backups: put the owner's configuration back first.
 if [ -e "$SAVED" ]; then mv "$SAVED" "$CONFIG"; fi
+if [ -e "$SAVED_REGISTRY" ]; then mv "$SAVED_REGISTRY" "$REGISTRY"; fi
 
 # The fixture: a bare repository with one commit on main, owned by this test alone.
 install -d -o root -g root -m 0755 "$CODE" "$CODE/repos"
@@ -49,9 +55,12 @@ rm -rf "$SCRATCH"
 chmod -R a+rX "$FIXTURE"
 
 if [ -e "$CONFIG" ]; then cp -a "$CONFIG" "$SAVED"; fi
+if [ -e "$REGISTRY" ]; then cp -a "$REGISTRY" "$SAVED_REGISTRY"; fi
 trap restore_config EXIT INT TERM
 "$PY" -I "$HERE/long_call.py" config "$FIXTURE" > "$CONFIG"
 chmod 0644 "$CONFIG"
+"$PY" -I "$HERE/long_call.py" repositories "$FIXTURE" > "$REGISTRY"
+chmod 0644 "$REGISTRY"
 
 # The kernel user runs its own copy of the scripts, in a directory it owns.
 PARENT="$(dirname "$WORK")"

@@ -143,15 +143,18 @@ def github(tmp_path: Path) -> Iterator[tuple[FakeGitHub, str]]:
 @pytest.fixture
 def helper(tmp_path: Path, github: tuple[FakeGitHub, str]) -> LocalVcsHost:
     fake, url = github
-    repositories = {}
-    for alias, name in (("cardea", "cardea"), ("other", "other")):
-        repository = fake.add("acme", name).model_copy(update={"api_url": url})
-        repositories[alias] = repository.model_dump()
+    fake.add("acme", "cardea")
+    fake.add("acme", "other")
+    # The host's repository registry, which the worker reads bound read-only.
+    registry = fake.registry().model_dump(mode="json", exclude_none=True)
+    for entry in registry["repositories"].values():
+        entry["api_url"] = url
+    repositories = tmp_path / "repositories.json"
+    repositories.write_text(json.dumps(registry))
+    repositories.chmod(0o644)
     # The host owner's file holds no secret: it may be shared and read-only.
     config = tmp_path / "vcs.json"
-    config.write_text(
-        json.dumps({"repositories": repositories, "credentials": {"kind": "profile_credential"}})
-    )
+    config.write_text(json.dumps({"credentials": {"kind": "profile_credential"}}))
     config.chmod(0o644)
     # The profile credential, which systemd would load into the unit.
     credential = tmp_path / "credential"
@@ -159,7 +162,11 @@ def helper(tmp_path: Path, github: tuple[FakeGitHub, str]) -> LocalVcsHost:
     credential.chmod(0o600)
     return LocalVcsHost(
         tmp_path / "spool",
-        {"CARDEA_VCS_CONFIG": str(config), "CARDEA_CREDENTIAL": str(credential)},
+        {
+            "CARDEA_VCS_CONFIG": str(config),
+            "CARDEA_REPOSITORIES": str(repositories),
+            "CARDEA_CREDENTIAL": str(credential),
+        },
     )
 
 

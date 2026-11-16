@@ -132,9 +132,10 @@ class ScriptedAgents:
 class LocalWorkerHost:
     """The confined-worker helper's interface, running the real worker command locally."""
 
-    def __init__(self, coding_config: Path) -> None:
+    def __init__(self, coding_config: Path, registry: Path) -> None:
         self.env = {
             "CARDEA_CODING_CONFIG": str(coding_config),
+            "CARDEA_REPOSITORIES": str(registry),
             "PYTHONPATH": str(Path(cardea.__file__).parents[1]),
         }
         self.outputs: dict[str, bytes] = {}
@@ -245,26 +246,28 @@ def gate(directory: Path) -> ContentGateConfig:
     )
 
 
-def coding(directory: Path, source: Path) -> Path:
-    """`code.session`'s host configuration: the repository, its gates and the fake harness."""
+def coding(directory: Path, host: FakeGitHub) -> tuple[Path, Path]:
+    """`code.session`'s own file (the fake harness) and the host's one repository registry
+    (ADR-037): the alias `app`, its read-only source, its host for `vcs.*` and its gates,
+    read by both packages."""
     scripts = directory / "coding"
     scripts.mkdir()
     (scripts / "harness.py").write_text(HARNESS)
     (scripts / "gate.py").write_text(GATE)
+    config = directory / "coding.json"
+    config.write_text(
+        json.dumps({"harness": {"argv": [sys.executable, str(scripts / "harness.py")]}})
+    )
     gates = [
         {"name": name, "argv": [sys.executable, str(scripts / "gate.py")]}
         for name in ("lint", "test")
     ]
-    config = directory / "coding.json"
-    config.write_text(
-        json.dumps(
-            {
-                "repositories": {"app": {"source": str(source), "gates": gates}},
-                "harness": {"argv": [sys.executable, str(scripts / "harness.py")]},
-            }
-        )
-    )
-    return config
+    document = host.registry().model_dump(mode="json", exclude_none=True)
+    document["repositories"]["app"]["gates"] = gates
+    registry = directory / "repositories.json"
+    registry.write_text(json.dumps(document))
+    registry.chmod(0o600)
+    return config, registry
 
 
 @contextmanager
@@ -272,7 +275,7 @@ def world(directory: Path) -> Iterator[World]:
     setattr(kernel_module, "DBOSClient", NoQueue)  # noqa: B010
     host = FakeGitHub(directory / "host")
     host.root.mkdir()
-    repository = host.add("acme", "app")
+    host.add("acme", "app")
     repo_path = host.repositories["acme/app"].path
     seed = directory / "seed"
     seed.mkdir()
@@ -281,12 +284,11 @@ def world(directory: Path) -> Iterator[World]:
     git(seed, "add", "README.md")
     git(seed, "commit", "-q", "-m", "Initial")
     git(seed, "push", "-q", str(repo_path), "main")
+    coding_config, registry_file = coding(directory, host)
     vcs = Vcs(
-        VcsConfig(
-            repositories={"app": repository},
-            credentials=FixedTokenConfig(kind="test", token=SecretStr(TOKEN)),
-        ),
+        VcsConfig(credentials=FixedTokenConfig(kind="test", token=SecretStr(TOKEN))),
         transport=host.transport(),
+        environ={"CARDEA_REPOSITORIES": str(registry_file)},
     )
     session = OperationDescriptor.model_validate_json(
         (
@@ -306,7 +308,7 @@ def world(directory: Path) -> Iterator[World]:
         cast(Authentication, Credentials()),
         operations=registry,
         harnesses=Harnesses({IMPLICIT_ID: agents}, catalog),
-        workers=Workers(LocalWorkerHost(coding(directory, repo_path))),
+        workers=Workers(LocalWorkerHost(coding_config, registry_file)),
     )
     kernel.content_gate = gate(directory)
     try:

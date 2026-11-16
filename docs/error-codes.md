@@ -103,6 +103,7 @@ errors answer 409. A request that fails schema validation answers
 | `invalid_platform_policy` | 403 | Platform policy must name platform | `cardea.service.kernel` |
 | `invalid_provenance` | 403 | Task provenance cannot be established; Invalid ancestor chain; Ancestor chain exceeds the supported bound | `cardea.service.approval_requests`, `cardea.service.delegation`, `cardea.service.kernel`, `cardea.service.policy` |
 | `invalid_recovery_epoch` | 500 | Invalid recovery epoch | `cardea.service.maintenance` |
+| `invalid_repositories` | 403 | The repository registry is invalid ({…}) | `cardea.service.repositories` |
 | `invalid_request` | — | Request does not match the versioned schema | `cardea.service.app` |
 | `invalid_retention` | 400 | Keep and age must be positive | `cardea.service.maintenance` |
 | `invalid_signature` | 401 | Event signature could not be verified | `cardea.service.events` |
@@ -150,6 +151,7 @@ errors answer 409. A request that fails schema validation answers
 | `record_not_found` | 404 | No such record | `cardea.service.records` |
 | `recovery_clock_regressed` | 409 | Restore requires a non-regressing clock | `cardea.service.admin` |
 | `recovery_lease_live` | 409 | Wait for copied worker leases to expire | `cardea.service.admin` |
+| `repositories_disagree` | 403 | {…} and {…} disagree about: {…} | `cardea.service.repositories` |
 | `request_conflict` | 409 | A kernel contract rule refused the change; Request ID already has different arguments; Control request ID was used for another action (and 1 more) | `cardea.kernel.lifecycle`, `cardea.service.kernel`, `cardea.service.mailbox` |
 | `request_scope_mismatch` | 409 | Request identity or deadline exceeds task. | `cardea.kernel.store` |
 | `request_too_large` | 413 | Request exceeds {…} bytes; Task request exceeds {…} bytes | `cardea.service.app`, `cardea.service.triggers` |
@@ -191,6 +193,7 @@ errors answer 409. A request that fails schema validation answers
 | `unsafe_directory` | 500 | Service directory must be private | `cardea.service.database` |
 | `unsafe_environment` | 500 | Remove inherited DBOS environment overrides | `cardea.service.server` |
 | `unsafe_file` | 500 | Credential/configuration file must be private; {…} must be a regular file owned by root and writable only by its owner; A vcs configuration with a token must be private (and 1 more) | `cardea.service.database`, `cardea.service.harnesses`, `cardea_vcs_ops.config` |
+| `unsafe_repositories` | 403 | The repository registry must be a private regular file | `cardea.service.repositories` |
 | `unsafe_socket` | 500 | Refusing to replace a non-owned socket | `cardea.service.server` |
 | `unsafe_store_path` | 409 | Store paths must be private and owned by this user. | `cardea.kernel.store` |
 | `unsupported_encoding` | — | Only identity content encoding is supported | `cardea.service.app` |

@@ -5,16 +5,23 @@
 against a GitHub-compatible REST API. Each is an ADR-023 installed operation: an MCP tool
 descriptor in `descriptors/` plus a handler under the `cardea.operations` entry-point group.
 
-The entry points use one process-wide `Vcs` built from the host-owner configuration file
-(`CARDEA_VCS_CONFIG`) on first use. Tests build their own `Vcs` and pass `handlers()` to the
-registry, as the reference package does.
+The entry points use one process-wide `Vcs`, built on first use from the host-owner
+configuration file (`CARDEA_VCS_CONFIG`) and the repository registry
+(`CARDEA_REPOSITORIES`). Tests build their own `Vcs` and pass `handlers()` to the
+operation registry, as the reference package does.
 """
 
 from importlib.resources import files
 
 from pydantic import JsonValue
 
-from cardea.service.operations import OperationContext, OperationDescriptor, Reconciliation
+from cardea.service.database import Fault
+from cardea.service.operations import (
+    OperationContext,
+    OperationDescriptor,
+    OperationRejected,
+    Reconciliation,
+)
 from cardea_vcs_ops.config import load
 from cardea_vcs_ops.ops import Vcs
 
@@ -49,7 +56,12 @@ _DEFAULT: Vcs | None = None
 def _vcs() -> Vcs:
     global _DEFAULT
     if _DEFAULT is None:
-        _DEFAULT = Vcs(load())
+        try:
+            _DEFAULT = Vcs(load())
+        except Fault as error:
+            # An unreadable or disagreeing configuration sends nothing: a definite refusal,
+            # never an effect in doubt.
+            raise OperationRejected(error.message, error.code) from None
     return _DEFAULT
 
 
