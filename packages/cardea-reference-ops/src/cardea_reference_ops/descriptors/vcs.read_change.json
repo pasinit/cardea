@@ -1,0 +1,32 @@
+{
+  "tool": {
+    "name": "vcs.read_change",
+    "description": "Read a code change's status. Fake: in-memory only, no network.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "change_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": []
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "cardea": {
+    "version": 1,
+    "effect": "read",
+    "handler": "reference.vcs.read_change",
+    "timeout_seconds": 10
+  }
+}

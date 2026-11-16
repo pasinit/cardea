@@ -9,8 +9,9 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from cardea_reference_ops import Fakes, descriptors
 from fastapi.testclient import TestClient
-from pydantic import JsonValue, ValidationError
+from pydantic import ValidationError
 from test_records import FakeClient, events, run
 
 from cardea.service import kernel as handlers
@@ -21,7 +22,7 @@ from cardea.service.database import Database, Fault, borrow
 from cardea.service.kernel import Kernel, provision
 from cardea.service.models import RIGHTS, OperationTaskRequest, Provisioning, now
 from cardea.service.operation_runtime import OperationRuntime
-from cardea.service.operations import OperationContext, OperationDescriptor, Registry
+from cardea.service.operations import Registry
 from cardea.service.records import CollectionDocument
 from cardea.service.triggers import Scheduler
 
@@ -41,26 +42,6 @@ class Auth:
         if token not in TOKENS:
             raise Fault("invalid_credential", "Unknown test credential", 401)
         return Proof("spiffe", "test", token, time.time() + 60)
-
-
-async def open_change(arguments: dict[str, JsonValue], context: OperationContext) -> Any:
-    return {"change_id": f"change-{context.receipt_id[-8:]}"}
-
-
-VCS = OperationDescriptor.model_validate(
-    {
-        "tool": {
-            "name": "vcs.open_change",
-            "inputSchema": {
-                "type": "object",
-                "properties": {"record_id": {"type": "string"}, "title": {"type": "string"}},
-                "required": ["record_id"],
-            },
-            "outputSchema": {"type": "object"},
-        },
-        "cardea": {"version": 1, "effect": "effect", "handler": "test.vcs"},
-    }
-)
 
 
 def document(supervisor: tuple[str, ...] = SUPERVISOR) -> Provisioning:
@@ -122,7 +103,8 @@ def document(supervisor: tuple[str, ...] = SUPERVISOR) -> Provisioning:
     )
 
 
-REGISTRY = Registry((VCS,), {"test.vcs": open_change})
+# The fake reference operations package provides `vcs.open_change` (no network).
+REGISTRY = Registry(descriptors(), Fakes().handlers())
 
 
 @pytest.fixture

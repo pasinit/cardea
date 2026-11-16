@@ -1,31 +1,35 @@
-"""ADR-034's two worked examples as executable tests (acceptance tests 1 and 2, in part).
+"""ADR-034's two worked examples as executable tests (acceptance test 2; test 1 in part).
 
 Both use only the kernel's generic primitives (collections, records, state machines, claims,
-agent groups, approvals) plus a fake operations package. Nothing in this module or the
-kernel changes between the software team and the trading desk; only configuration does.
+agent groups, approvals, mailboxes, event triggers), the configuration in `examples/teams`
+and the fake reference operations package `packages/cardea-reference-ops`. Nothing in this
+module or the kernel changes between the software team and the trading desk; only
+configuration does.
 
-Adapted from the ADR text where later slices are missing:
-- event triggers on group pools arrive with slice 7, so pools here use time triggers and the
-  tests start each member's run directly;
-- the desk's gated `approve` transition waits inside the risk agent's run for the human
-  approver (ADR-036 slice 4) and runs as `apr-01` in its continuation attempt.
+The tests start each member's run directly rather than through its manifest triggers, so
+each step is deterministic. The desk's gated `approve` transition waits inside the risk
+agent's run for the human approver (ADR-036 slice 4) and runs as `apr-01` in its
+continuation attempt; a broker fill arrives as a signed ADR-035 webhook.
 """
 
+import base64
 import json
 import time
 from collections.abc import Awaitable, Callable, Iterator
 from datetime import UTC, datetime, timedelta
+from math import floor
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
 import test_agent_runs as runs
+from cardea_reference_ops import Fakes, descriptors
 from fastapi.testclient import TestClient
 from mcp.client.session import ClientSession
-from pydantic import JsonValue
+from standardwebhooks.webhooks import Webhook
 
 from cardea.runtime.agent_session import SessionRequest, SessionResult
-from cardea.service import agent_run_runtime, operation_runtime
+from cardea.service import agent_run_runtime, approval_requests, events, operation_runtime
 from cardea.service import kernel as handlers
 from cardea.service.agent_run_runtime import AgentRunRuntime
 from cardea.service.app import create_app
@@ -39,17 +43,17 @@ from cardea.service.models import (
     AgentGroup,
     AgentRunRequest,
     Provisioning,
+    TriggerSpec,
+    now,
 )
 from cardea.service.operations import (
-    OperationContext,
-    OperationDescriptor,
-    OperationRejected,
-    Reconciliation,
     Registry,
 )
 from cardea.service.records import CollectionDocument, apply_collection
 
 TOKENS = {"runtime", "sup-eng", "sup-desk", "desk-approver"}
+# A Standard Webhooks test secret for the fake broker (not a real credential).
+SECRET = "whsec_" + base64.b64encode(b"broker-fills-example-key-32bytes").decode()
 RUN = ("objects.read", "objects.write", "models.invoke")
 
 
@@ -77,304 +81,41 @@ class Auth:
         return Proof("spiffe", "test", token, time.time() + 60)
 
 
-# The operations package: fake version control, CI, risk and broker operations.
+# The operations package (`packages/cardea-reference-ops`) and the configuration
+# (`examples/teams`): nothing below is specific to either example.
+
+EXAMPLES = Path(__file__).resolve().parents[4] / "examples" / "teams"
 
 
-class Package:
-    def __init__(self) -> None:
-        self.orders: dict[str, dict[str, JsonValue]] = {}
-        self.placements = 0
-
-    async def open_change(self, arguments: dict[str, JsonValue], ctx: OperationContext) -> Any:
-        return {"change_id": f"change-{ctx.receipt_id[-6:]}"}
-
-    async def read(self, arguments: dict[str, JsonValue], ctx: OperationContext) -> Any:
-        return {"ok": True}
-
-    async def place(self, arguments: dict[str, JsonValue], ctx: OperationContext) -> Any:
-        if float(cast(float, arguments["qty"])) > 1000:
-            raise OperationRejected("The order would breach the desk limit", "risk_limit")
-        self.placements += 1
-        order_id = f"B-{ctx.effect_key[:8]}"
-        self.orders[str(arguments["order_ref"])] = {"broker_order_id": order_id}
-        return {"broker_order_id": order_id}
-
-    async def find(self, arguments: dict[str, JsonValue], ctx: OperationContext) -> Any:
-        found = self.orders.get(str(arguments["order_ref"]))
-        return Reconciliation(applied=found is not None, output=found)
-
-    async def fills(self, arguments: dict[str, JsonValue], ctx: OperationContext) -> Any:
-        return {"filled_qty": 10}
+def example(name: str, document: str) -> dict[str, Any]:
+    return cast(dict[str, Any], json.loads((EXAMPLES / name / document).read_text()))
 
 
-def op(name: str, effect: str, handler: str, required: list[str], **binding: Any) -> Any:
-    return OperationDescriptor.model_validate(
-        {
-            "tool": {
-                "name": name,
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {k: {} for k in (*required, "record_id", "qty")},
-                    "required": required,
-                },
-                "outputSchema": {"type": "object"},
-            },
-            "cardea": {"version": 1, "effect": effect, "handler": handler, **binding},
-        }
-    )
+def registry(package: Fakes) -> Registry:
+    return Registry(descriptors(), package.handlers())
 
 
-def registry(package: Package) -> Registry:
-    return Registry(
-        (
-            op("vcs.open_change", "effect", "pkg.open_change", ["record_id"]),
-            op("vcs.read_change", "read", "pkg.read", []),
-            op("vcs.comment", "effect", "pkg.read", []),
-            op("ci.status", "read", "pkg.read", []),
-            op("risk.check", "read", "pkg.read", []),
-            op("market.quotes", "read", "pkg.read", []),
-            op(
-                "broker.place_order",
-                "effect",
-                "pkg.place",
-                ["order_ref", "record_id", "qty"],
-                idempotency_scope=["/order_ref"],
-                reconciler="pkg.find",
-            ),
-            op("broker.fills", "read", "pkg.fills", ["order_ref", "record_id"]),
-        ),
-        {
-            "pkg.open_change": package.open_change,
-            "pkg.read": package.read,
-            "pkg.place": package.place,
-            "pkg.find": package.find,
-            "pkg.fills": package.fills,
-        },
-    )
+def example_group(name: str) -> AgentGroup:
+    return AgentGroup.model_validate(example(name, "group.json"))
 
 
-# Configuration only: the two examples' documents, as in ADR-034.
-
-ENG_WORK: dict[str, Any] = {
-    "supervisor": "sup-eng",
-    "schema": {
-        "type": "object",
-        "properties": {
-            "title": {"type": "string"},
-            "body": {"type": "string"},
-            "assignee_pool": {"type": "string"},
-        },
-        "required": ["title"],
-    },
-    "claims": {"lease_seconds": 14400, "max_per_holder": 1, "max_followups": 6},
-    "states": ["open", "ready", "in_progress", "in_review", "done", "cancelled"],
-    "initial": "open",
-    "terminal": ["done", "cancelled"],
-    "transitions": [
-        {
-            "name": "triage",
-            "from": ["open"],
-            "to": "ready",
-            "guard": "args.assignee_pool == 'eng-team.dev'",
-        },
-        {
-            "name": "start",
-            "from": ["ready"],
-            "to": "in_progress",
-            "claim": "acquire",
-            "on_claim_expiry": "ready",
-            "guard": "caller.pool == record.data.assignee_pool",
-        },
-        {
-            "name": "submit",
-            "from": ["in_progress"],
-            "to": "in_review",
-            "claim": "holder",
-            "requires_receipt": {"operation": "vcs.open_change", "in": "same_task"},
-        },
-        {
-            "name": "request_changes",
-            "from": ["in_review"],
-            "to": "in_progress",
-            "guard": "caller.id != record.holder",
-        },
-        {
-            "name": "approve",
-            "from": ["in_review"],
-            "to": "done",
-            "claim": "release",
-            "guard": "caller.id != record.holder",
-        },
-        {
-            "name": "cancel",
-            "from": ["open", "ready", "in_progress", "in_review"],
-            "to": "cancelled",
-            "claim": "release",
-        },
-    ],
-}
-ENG_DECISIONS: dict[str, Any] = {
-    "supervisor": "sup-eng",
-    "schema": {
-        "type": "object",
-        "properties": {"title": {"type": "string"}, "summary": {"type": "string"}},
-        "required": ["title", "summary"],
-    },
-}
-ENG_POOLS: dict[str, tuple[int, tuple[str, ...]]] = {
-    "principal": (
-        1,
-        (
-            "record:work/read",
-            "record:work/approve",
-            "record:work/request_changes",
-            "record:decisions/create",
-            "record:decisions/read",
-            "vcs.read_change",
-            "vcs.comment",
-        ),
-    ),
-    "product": (1, ("record:work/create", "record:work/read", "ci.status")),
-    "lead": (
-        1,
-        ("record:work/read", "record:work/update", "record:work/triage", "record:work/cancel"),
-    ),
-    "dev": (
-        3,
-        (
-            "record:work/read",
-            "record:work/start",
-            "record:work/submit",
-            "vcs.open_change",
-            "ci.status",
-        ),
-    ),
-}
-
-DESK_ORDERS: dict[str, Any] = {
-    "supervisor": "sup-desk",
-    "schema": {
-        "type": "object",
-        "required": ["instrument", "side", "qty", "limit_price", "rationale"],
-        "properties": {
-            "instrument": {"type": "string"},
-            "side": {"enum": ["buy", "sell"]},
-            "qty": {"type": "number", "exclusiveMinimum": 0},
-            "limit_price": {"type": "number"},
-            "rationale": {"type": "string"},
-            "broker_order_id": {"type": "string"},
-            "filled_qty": {"type": "number"},
-        },
-    },
-    "claims": {"lease_seconds": 3600, "max_per_holder": 4, "max_followups": 3},
-    "states": [
-        "proposed",
-        "approved",
-        "placed",
-        "filled",
-        "reconciled",
-        "rejected",
-        "expired",
-        "cancelled",
-    ],
-    "initial": "proposed",
-    "terminal": ["reconciled", "rejected", "expired", "cancelled"],
-    "transitions": [
-        {
-            "name": "approve",
-            "from": ["proposed"],
-            "to": "approved",
-            "guard": "record.created_by != caller.id",
-            "approval": {
-                "level": "conditional",
-                "when": "true",
-                "reason": "Every order needs a desk approver",
-                "expires_after_seconds": 3600,
-                "on_expiry": "resume",
-                "distinct_from_supervisor": False,
-            },
-        },
-        {"name": "reject", "from": ["proposed"], "to": "rejected"},
-        {
-            "name": "place",
-            "from": ["approved"],
-            "to": "placed",
-            "claim": "acquire",
-            "on_claim_expiry": "approved",
-            "requires_receipt": {"operation": "broker.place_order", "in": "same_task"},
-        },
-        {"name": "fill", "from": ["placed"], "to": "filled", "claim": "holder"},
-        {
-            "name": "reconcile",
-            "from": ["filled"],
-            "to": "reconciled",
-            "claim": "release",
-            "requires_receipt": {"operation": "broker.fills", "in": "same_task"},
-        },
-        {"name": "expire", "from": ["proposed", "approved"], "to": "expired"},
-    ],
-}
-DESK_POOLS: dict[str, tuple[int, tuple[str, ...]]] = {
-    "analyst": (2, ("record:orders/create", "record:orders/read", "risk.check", "market.quotes")),
-    "risk": (
-        1,
-        ("record:orders/read", "record:orders/approve", "record:orders/reject", "risk.check"),
-    ),
-    "execution": (
-        1,
-        (
-            "record:orders/read",
-            "record:orders/place",
-            "record:orders/fill",
-            "record:orders/reconcile",
-            "broker.place_order",
-            "broker.fills",
-        ),
-    ),
-}
+def example_collections(name: str) -> dict[str, Any]:
+    return {
+        path.stem.removeprefix("collection."): json.loads(path.read_text())["spec"]
+        for path in sorted((EXAMPLES / name).glob("collection.*.json"))
+    }
 
 
-def manifest(
-    group: str,
-    namespace: str,
-    supervisor: str,
-    collections: list[str],
-    pools: dict[str, tuple[int, tuple[str, ...]]],
-) -> AgentGroup:
-    return AgentGroup.model_validate(
-        {
-            "apiVersion": "cardea/v1alpha1",
-            "kind": "AgentGroup",
-            "metadata": {"name": group, "namespace": namespace},
-            "spec": {
-                "supervisor": supervisor,
-                "collections": collections,
-                "pools": [
-                    {
-                        "name": name,
-                        "replicas": replicas,
-                        "grants": [*RUN, *grants],
-                        "run": {
-                            "instructions": f"Do the {name} work.",
-                            "operations": ["records.get"],
-                            "model": "model-a",
-                            "bounds": {"timeout_seconds": 60, "attempts": 2},
-                        },
-                        "triggers": [
-                            {
-                                "schedule": {
-                                    "cron": "0 9 29 2 *",
-                                    "timezone": "UTC",
-                                    "misfire": "skip",
-                                }
-                            }
-                        ],
-                    }
-                    for name, (replicas, grants) in pools.items()
-                ],
-            },
-        }
-    )
+def pools(name: str) -> dict[str, tuple[int, tuple[str, ...]]]:
+    """Each pool's replicas and its grants beyond the run basics, from the manifest."""
+    return {
+        pool.name: (pool.replicas, tuple(g for g in pool.grants if g not in RUN))
+        for pool in example_group(name).spec.pools
+    }
+
+
+ENG_POOLS = pools("software-team")
+DESK_POOLS = pools("trading-desk")
 
 
 def provisioning() -> Provisioning:
@@ -418,11 +159,11 @@ def provisioning() -> Provisioning:
 
 
 @pytest.fixture
-def setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[Kernel, Any, Package]]:
+def setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[Kernel, Any, Fakes]]:
     monkeypatch.setattr(handlers, "DBOSClient", FakeClient)
     monkeypatch.setattr(agent_run_runtime, "POLL_SECONDS", 0.05)
     monkeypatch.setattr(operation_runtime, "LEASE_MARGIN", 0.3)
-    package = Package()
+    package = Fakes()
     installed = registry(package)
     db = Database(tmp_path / "data")
     db.migrate()
@@ -517,11 +258,11 @@ def state_of(kernel: Kernel, record_id: str) -> tuple[str, str | None, int]:
 
 
 def test_held_transition_reexecution_keeps_the_resource_qualified_check(
-    setup: tuple[Kernel, Any, Package],
+    setup: tuple[Kernel, Any, Fakes],
 ) -> None:
     kernel, session, _ = setup
-    group = manifest("desk", "desk", "sup-desk", ["orders"], DESK_POOLS)
-    configure(kernel, "desk", "sup-desk", {"orders": DESK_ORDERS}, group)
+    group = example_group("trading-desk")
+    configure(kernel, "desk", "sup-desk", example_collections("trading-desk"), group)
 
     async def propose(client: ClientSession) -> Any:
         return await tool(
@@ -613,10 +354,10 @@ def test_held_transition_reexecution_keeps_the_resource_qualified_check(
 # A. Software team: a review gate built from transitions, grants and guards
 
 
-def test_software_team_review_gate(setup: tuple[Kernel, Any, Package]) -> None:
+def test_software_team_review_gate(setup: tuple[Kernel, Any, Fakes]) -> None:
     kernel, session, _ = setup
-    group = manifest("eng-team", "eng", "sup-eng", ["work", "decisions"], ENG_POOLS)
-    configure(kernel, "eng", "sup-eng", {"work": ENG_WORK, "decisions": ENG_DECISIONS}, group)
+    group = example_group("software-team")
+    configure(kernel, "eng", "sup-eng", example_collections("software-team"), group)
 
     def step(member: str, operations: list[str], script: Script) -> Any:
         pool = member.split(".")[1]
@@ -766,10 +507,42 @@ def test_software_team_review_gate(setup: tuple[Kernel, Any, Package]) -> None:
 # B. Trading desk: propose, approve (human), place, fill, reconcile
 
 
-def test_trading_desk_order_flow(setup: tuple[Kernel, Any, Package]) -> None:
+def fill_trigger(secret: Path) -> TriggerSpec:
+    """The broker's fill webhook (ADR-035), host-owned, waking the execution member."""
+    document = example("trading-desk", "trigger.fills.json")
+    document["event"]["secret_file"] = str(secret)
+    return TriggerSpec.model_validate(document)
+
+
+def deliver_fill(kernel: Kernel, secret: str, order: str) -> dict[str, Any]:
+    body = json.dumps(
+        {
+            "specversion": "1.0",
+            "id": f"fill-{order}",
+            "source": "broker",
+            "type": "fill",
+            "subject": order,
+            "datacontenttype": "application/json",
+            "data": {"order_ref": order, "filled_qty": 10},
+        }
+    ).encode()
+    stamp = floor(time.time())
+    signature = Webhook(secret).sign(
+        f"msg-{order}", datetime.fromtimestamp(stamp, tz=UTC), body.decode()
+    )
+    headers = {
+        "webhook-id": f"msg-{order}",
+        "webhook-timestamp": str(stamp),
+        "webhook-signature": signature,
+        "content-type": "application/cloudevents+json",
+    }
+    return events.deliver(kernel, "desk-fills", headers, body)
+
+
+def test_trading_desk_order_flow(setup: tuple[Kernel, Any, Fakes], tmp_path: Path) -> None:
     kernel, session, package = setup
-    group = manifest("desk", "desk", "sup-desk", ["orders"], DESK_POOLS)
-    configure(kernel, "desk", "sup-desk", {"orders": DESK_ORDERS}, group)
+    group = example_group("trading-desk")
+    configure(kernel, "desk", "sup-desk", example_collections("trading-desk"), group)
 
     def step(member: str, operations: list[str], script: Script, attempts: int = 1) -> Any:
         pool = member.split(".")[1]
@@ -885,13 +658,29 @@ def test_trading_desk_order_flow(setup: tuple[Kernel, Any, Package]) -> None:
     epoch = out["claim"]["claim_epoch"]
     assert state_of(kernel, order) == ("placed", "desk.execution.0", epoch)
 
-    # 4. A fill arrives (an ADR-035 webhook in the ADR); the holder records it.
-    filled = step(
-        "desk.execution.0",
-        ["records.transition"],
-        transition(order, "fill", claim_epoch=epoch),
+    # 4. A fill arrives as a signed ADR-035 webhook and wakes the execution member, which
+    # records it. A redelivered webhook starts nothing more.
+    secret_file = tmp_path / "broker.secret"
+    secret_file.write_text(SECRET + "\n")
+    secret_file.chmod(0o600)
+    provision(
+        kernel.database,
+        provisioning().model_copy(update={"triggers": (fill_trigger(secret_file),)}),
+        kernel.operations,
     )
-    assert filled["record"]["state"] == "filled"
+    woken = deliver_fill(kernel, SECRET, order)
+    assert woken["outcome"] == "admitted"
+    assert deliver_fill(kernel, SECRET, order)["outcome"] == "duplicate"
+    recorded: list[Any] = []
+
+    async def on_fill(client: ClientSession, request: SessionRequest) -> SessionResult:
+        assert '"type": "fill"' in request.prompt and order in request.prompt
+        recorded.append(await transition(order, "fill", claim_epoch=epoch)(client))
+        return SessionResult(text="Fill recorded.", is_error=False, turns=1)
+
+    session.scripts = [on_fill]
+    assert AgentRunRuntime(kernel).execute(str(woken["task_id"])) == "succeeded"
+    assert recorded[0]["record"]["state"] == "filled"
 
     # 5. Reconciliation needs the broker's fills read in the same run, and releases.
     async def reconcile(client: ClientSession) -> Any:
@@ -916,3 +705,138 @@ def test_trading_desk_order_flow(setup: tuple[Kernel, Any, Package]) -> None:
 
     refused = step("desk.execution.0", ["broker.place_order"], too_big)
     assert "risk_limit" in refused["error"]
+
+
+def test_trading_desk_gate_rejects_and_expires(setup: tuple[Kernel, Any, Fakes]) -> None:
+    """The gated `approve` transition: a human rejection and an expiry both leave the
+    order unapproved; after the expiry the risk agent moves it to `expired`."""
+    kernel, session, _ = setup
+    group = example_group("trading-desk")
+    configure(kernel, "desk", "sup-desk", example_collections("trading-desk"), group)
+
+    async def propose_script(client: ClientSession) -> Any:
+        return await tool(
+            client,
+            "records-create",
+            collection="orders",
+            client_key=f"o-{next(STEPS)}",
+            data={
+                "instrument": "XYZ",
+                "side": "sell",
+                "qty": 3,
+                "limit_price": 9.5,
+                "rationale": "Trim",
+            },
+        )
+
+    def propose() -> str:
+        state, made = act(
+            kernel,
+            session,
+            namespace="desk",
+            supervisor="sup-desk",
+            member="desk.analyst.0",
+            grants=DESK_POOLS["analyst"][1],
+            operations=["records.create"],
+            script=propose_script,
+        )
+        assert state == "succeeded", made
+        return str(made["record"]["record_id"])
+
+    def held(order: str) -> tuple[str, str, str]:
+        async def approve(client: ClientSession) -> Any:
+            return await tool(
+                client,
+                "records-transition",
+                collection="orders",
+                record_id=order,
+                transition="approve",
+            )
+
+        state, result = act(
+            kernel,
+            session,
+            namespace="desk",
+            supervisor="sup-desk",
+            member="desk.risk.0",
+            grants=DESK_POOLS["risk"][1],
+            operations=["records.transition"],
+            script=approve,
+        )
+        assert state == "waiting" and "approval_pending" in result["error"], result
+        with kernel.database.read() as conn:
+            row = conn.exec_driver_sql(
+                "SELECT request_id,intent_digest,task_id FROM approval_requests "
+                "ORDER BY created_at DESC LIMIT 1"
+            ).one()
+        return str(row[0]), str(row[1]), str(row[2])
+
+    def resume(task_id: str, decision: str, then: Script | None = None) -> Any:
+        results: list[Any] = []
+
+        async def resumed(client: ClientSession, request: SessionRequest) -> SessionResult:
+            assert f'decision="{decision}"' in request.prompt
+            if then is not None:
+                results.append(await then(client))
+            return SessionResult(text=f"The approval was {decision}.", is_error=False, turns=1)
+
+        session.scripts = [resumed]
+        assert AgentRunRuntime(kernel).execute(task_id) == "succeeded"
+        return results[0] if results else None
+
+    # A human approver rejects the held transition: it never runs.
+    rejected = propose()
+    request_id, digest, task_id = held(rejected)
+    decided = TestClient(create_app(kernel)).post(
+        f"/v0.2/approvals/{request_id}/decision",
+        json={"decision_id": "d-reject", "decision": "reject", "intent_digest": digest},
+        headers={"Authorization": "Bearer desk-approver", "X-Cardea-Auth": "spiffe"},
+    )
+    assert decided.status_code == 200, decided.json()
+    resume(task_id, "rejected")
+    assert state_of(kernel, rejected)[0] == "proposed"
+
+    # Nobody decides within an hour: the request expires and the run resumes (on_expiry:
+    # resume) without the transition; the risk agent then expires the order itself.
+    stale = propose()
+    request_id, _, task_id = held(stale)
+    # The hour passes: backdate the deadline and tick at real time, as the ADR-036 expiry
+    # tests do; a future clock would stamp the woken task ahead of later transitions.
+    with kernel.database.engine.begin() as conn:
+        conn.exec_driver_sql("DROP TRIGGER IF EXISTS approval_intent_immutable")
+        conn.exec_driver_sql(
+            "UPDATE approval_requests SET expires_at=? WHERE request_id=?",
+            ((now() - timedelta(seconds=1)).isoformat(), request_id),
+        )
+    assert approval_requests.expire_due(kernel) == {request_id: "expired"}
+
+    async def expire(client: ClientSession) -> Any:
+        return await tool(
+            client,
+            "records-transition",
+            collection="orders",
+            record_id=stale,
+            transition="expire",
+        )
+
+    expired = resume(task_id, "expired", expire)
+    assert expired["record"]["state"] == "expired", expired
+
+
+def test_the_reference_package_installs_like_any_operations_package(tmp_path: Path) -> None:
+    """Descriptors in a private `operations_dir`, handlers from installed entry points."""
+    directory = tmp_path / "operations"
+    directory.mkdir(mode=0o700)
+    for descriptor in descriptors():
+        path = directory / f"{descriptor.name}.json"
+        path.write_text(descriptor.model_dump_json(by_alias=True))
+        path.chmod(0o600)
+    installed = Registry.load(directory)
+    names = {d.name for d in descriptors()}
+    assert names <= set(installed.descriptors)
+    for name in names:
+        assert installed.handler(name) is not None
+        if installed.get(name).cardea.effect == "effect":
+            # Every fake effect is scoped and can be reconciled from the fake store.
+            assert installed.get(name).cardea.idempotency_scope
+            assert installed.reconciler(name) is not None

@@ -1,0 +1,45 @@
+{
+  "tool": {
+    "name": "vcs.open_change",
+    "description": "Open a code change for a work record. Fake: in-memory only, no network.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "record_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 200
+        }
+      },
+      "required": [
+        "record_id"
+      ]
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "change_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "change_id"
+      ]
+    }
+  },
+  "cardea": {
+    "version": 1,
+    "effect": "effect",
+    "handler": "reference.vcs.open_change",
+    "timeout_seconds": 10,
+    "idempotency_scope": [
+      "/record_id"
+    ],
+    "reconciler": "reference.vcs.find_change"
+  }
+}

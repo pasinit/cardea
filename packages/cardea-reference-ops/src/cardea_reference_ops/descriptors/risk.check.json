@@ -1,0 +1,37 @@
+{
+  "tool": {
+    "name": "risk.check",
+    "description": "The desk's exposure against its configured limit. Fake: in-memory only, no network.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "qty": {
+          "type": "number"
+        }
+      },
+      "required": []
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "exposure": {
+          "type": "number"
+        },
+        "limit": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "exposure",
+        "limit"
+      ]
+    }
+  },
+  "cardea": {
+    "version": 1,
+    "effect": "read",
+    "handler": "reference.risk.check",
+    "timeout_seconds": 10
+  }
+}

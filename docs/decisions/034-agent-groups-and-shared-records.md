@@ -1,7 +1,7 @@
 # ADR-034: Agent Groups, Shared Records, State Machines and Mailboxes
 
 - **Date / owner / milestones:** 2026-11-08; runtime and API maintainers. Builds on [ADR-023](023-installed-operation-registry.md) (installed operations), [ADR-024](024-time-triggers.md) (time triggers), [ADR-026](026-effect-idempotency-and-reconciliation.md) (effect scopes), [ADR-027](027-agent-runs.md) (agent runs), [ADR-029](029-supervisor-schedules-expectations-and-run-evidence.md) (supervisor-managed triggers, expectations), [ADR-031](031-agent-run-context-operations.md) (context operations), [ADR-033](033-pluggable-agent-harnesses.md) (harnesses), [ADR-035](035-event-triggers.md) (event triggers, selected, slice 1 implemented) and [ADR-036](036-approval-waits.md) (approval waits, selected, implementation pending). Relates to roadmap M8.
-- **Status:** selected (design); slices 1 (collections and records), 2 (claims), 3 (state machines), 4 (agent groups), 5 (mailboxes), 6 (context sources) and 7 (journal event triggers) implemented portably on 2026-11-09 to 2026-11-16, see [Implementation status](#implementation-status) and [Verification](#verification); slices 8–11 not implemented; nothing verified on Debian. The lead approved this design on 2026-11-09, and the owner may veto. It was reworked on 2026-11-08 at the lead's and owner's direction. The first version made "team" a kernel concept, with roles, role relations and a fixed work-item lifecycle; that baked one workflow into the kernel and is withdrawn. This version has only generic primitives. Review decisions are recorded under [Carried decisions](#carried-decisions) and [Decisions settled in review (2026-11-09)](#decisions-settled-in-review-2026-11-09). No fit test below has run.
+- **Status:** selected (design); slices 1 (collections and records), 2 (claims), 3 (state machines), 4 (agent groups), 5 (mailboxes), 6 (context sources), 7 (journal event triggers), 10 (approval-gated transitions) and 11 (reference operations package and examples) implemented portably on 2026-11-09 to 2026-11-16, see [Implementation status](#implementation-status) and [Verification](#verification); slices 8 and 9 not implemented; nothing verified on Debian. The lead approved this design on 2026-11-09, and the owner may veto. It was reworked on 2026-11-08 at the lead's and owner's direction. The first version made "team" a kernel concept, with roles, role relations and a fixed work-item lifecycle; that baked one workflow into the kernel and is withdrawn. This version has only generic primitives. Review decisions are recorded under [Carried decisions](#carried-decisions) and [Decisions settled in review (2026-11-09)](#decisions-settled-in-review-2026-11-09). No fit test below has run.
 - **Affected components:** [tasks and scheduler](../components/tasks-scheduler.md), [delegation and messaging](../components/delegation-messaging.md), [events and inputs](../components/events-inputs.md), [identity and capabilities](../components/identity-capabilities.md), [resource budgets](../components/resource-budgets.md), [agent runtime](../components/agent-runtime.md).
 
 ## Requirement
@@ -436,7 +436,7 @@ spec:
       triggers: [{schedule: {cron: "*/30 13-20 * * 1-5", timezone: UTC, misfire: skip}}]
     - name: risk                   # submits proposals for approval; may reject
       replicas: 1
-      grants: [objects.read, objects.write, models.invoke, "record:orders/read", "record:orders/approve", "record:orders/reject", risk.check]
+      grants: [objects.read, objects.write, models.invoke, "record:orders/read", "record:orders/approve", "record:orders/reject", "record:orders/expire", risk.check]
       triggers: [{event: {types: [cardea.record.transitioned]}}]
     - name: execution              # places approved orders and reconciles fills
       replicas: 1
@@ -620,6 +620,22 @@ Portable tests go in `apps/api/tests/service/`. Before the record is called veri
   2. An installed operation's output over budget is replaced by a size note, not cut in the middle. A cut would produce broken JSON and could split a structure the agent relies on.
 
   Acceptance test 9 is covered portably. Not run on Debian.
+
+### Slices 10 and 11: approval-gated transitions; reference package and examples (implemented 2026-11-16, portable tests only)
+
+- **Slice 10 audit.** Gated transitions compile to ADR-036 rules on `records.transition` (#41) and wait inside agent runs (ADR-036 slice 4, #40). Acceptance test 2 now runs end to end in `apps/api/tests/service/test_worked_examples.py`:
+  - **Approve:** the held `approve` waits in the risk agent's run, a desk approver holding `approve` on `record:orders/approve` decides, and the continuation runs it as `apr-01`.
+  - **Reject:** a human rejection leaves the order `proposed`, and the run resumes being told so.
+  - **Expire (the gap this slice filled):** an undecided request expires, the run resumes with `on_expiry: resume`, and the risk agent then moves the order to `expired`. The example's risk pool now holds `record:orders/expire` for this.
+  - **Placement across a crash:** an attempt dies after placing, and the retry's placement is deduplicated by the `/order_ref` effect scope, so the broker sees one order.
+  - **Fill as an event:** the broker's fill arrives as a signed ADR-035 webhook (`trigger.fills.json`, host-owned) that wakes the execution member, and a redelivery is a duplicate.
+
+  No kernel change was needed.
+- **Slice 11.**
+  - **Reference package.** The fake `vcs.*`, `ci.status`, `risk.check`, `market.quotes` and `broker.*` operations are the installable reference package `packages/cardea-reference-ops`. It has ADR-023 descriptors, `cardea.operations` entry points, and an idempotency scope and an in-memory reconciler on every effect. It has no network.
+  - **Examples as files.** Both worked examples are files in `examples/teams`: collections, group manifests and the fill trigger. `make teams` walks through them on a throwaway kernel, and `make teams-test` keeps the walkthrough working.
+  - **Tests.** `test_worked_examples.py` and `test_state_machines.py` load the package and the files. A test installs the package as a host would, with descriptors in a private `operations_dir` and handlers and reconcilers resolved from the installed entry points.
+- **Not done: acceptance test 1** (restructure by configuration only). It needs slice 8's drain and deletion, which are not on main.
 
 ## Verification
 

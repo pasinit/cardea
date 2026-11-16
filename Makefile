@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: help install try try-test try-check test api-test kernel-test standards-test m1-test m1-demo kernel-openapi spire-fit dbos-fit dbos-integration-fit temporal-fit absurd-fit hatchet-fit cel-fit kernel-schema kernel-demo lint lint-api fix-lint format typecheck typecheck-api check-uv
+.PHONY: help install try try-test try-check teams teams-test test api-test kernel-test standards-test m1-test m1-demo kernel-openapi spire-fit dbos-fit dbos-integration-fit temporal-fit absurd-fit hatchet-fit cel-fit kernel-schema kernel-demo lint lint-api fix-lint format typecheck typecheck-api check-uv
 
 API_DIR := apps/api
 UV ?= $(shell command -v uv 2>/dev/null || printf "%s/bin/uv" "$$(python3 -m site --user-base)")
@@ -9,6 +9,7 @@ help:
 	@printf "Cardea commands\n"
 	@printf "  make install      Install project dependencies\n"
 	@printf "  make try          Run the real daemon through crash/recovery, no SPIRE needed\n"
+	@printf "  make teams        Walk through ADR-034's software team and trading desk\n"
 	@printf "  make test         Run all available tests\n"
 	@printf "  make api-test     Run backend tests\n"
 	@printf "  make kernel-test  Run portable kernel contract tests\n"
@@ -45,7 +46,7 @@ api-dev: check-uv
 
 web-dev:
 
-test: api-test load-test m4-test try-test incident-demo-test
+test: api-test load-test m4-test try-test incident-demo-test teams-test
 
 TRY := PYTHONPATH=apps/api/src:experiments/try "$(UV)" run --locked --project $(API_DIR)
 
@@ -54,6 +55,14 @@ try: check-uv
 
 try-test: check-uv
 	$(TRY) pytest -q -p no:cacheprovider experiments/try
+
+TEAMS := PYTHONPATH=apps/api/src:examples/teams "$(UV)" run --locked --project $(API_DIR)
+
+teams: check-uv
+	$(TEAMS) python examples/teams/walkthrough.py
+
+teams-test: check-uv
+	$(TEAMS) pytest -q -p no:cacheprovider examples/teams
 
 try-check: check-uv
 	"$(UV)" run --locked --project $(API_DIR) ruff check --config apps/api/pyproject.toml experiments/try
@@ -111,18 +120,20 @@ kernel-demo: check-uv
 
 lint: lint-api
 
+REFERENCE_OPS := ../../packages/cardea-reference-ops/src ../../examples
+
 fix-lint: check-uv
-	cd $(API_DIR) && "$(UV)" run ruff check . --fix
-	cd $(API_DIR) && "$(UV)" run ruff format .
+	cd $(API_DIR) && "$(UV)" run ruff check . $(REFERENCE_OPS) --fix
+	cd $(API_DIR) && "$(UV)" run ruff format . $(REFERENCE_OPS)
 
 format: fix-lint
 
 lint-api: check-uv
-	cd $(API_DIR) && "$(UV)" run ruff check .
-	cd $(API_DIR) && "$(UV)" run ruff format --check .
+	cd $(API_DIR) && "$(UV)" run ruff check . $(REFERENCE_OPS)
+	cd $(API_DIR) && "$(UV)" run ruff format --check . $(REFERENCE_OPS)
 
 typecheck-api: check-uv
-	cd $(API_DIR) && "$(UV)" run mypy src tests
+	cd $(API_DIR) && "$(UV)" run mypy src tests ../../packages/cardea-reference-ops/src ../../examples/teams
 
 typecheck: typecheck-api
 
