@@ -374,6 +374,6 @@ and later, from version 1 of the record:
 **State machines** ([ADR-034](decisions/034-agent-groups-and-shared-records.md) slice 3). Add `states`, `initial`, `terminal` and `transitions` to the spec, for example `{"name": "submit", "from": ["in_progress"], "to": "in_review", "claim": "holder", "requires_receipt": {"operation": "vcs.open_change", "in": "same_task"}}`. Then:
 - `records.transition {"collection": "work", "record_id": …, "transition": "submit", "claim_epoch": 1}` needs the grant `record:work/submit`, a record in a `from` state, a passing `guard` (CEL over `record`, `args` and `caller`), the claim effect (`acquire`, `holder` or `release`) and, here, a `vcs.open_change` call for this record earlier in the same run.
 - Refusals: `transition_not_allowed`, `guard_refused`, `claim_lost`, `record_claimed`, `receipt_required`, `receipt_invalid`.
-- A transition with `approval` waits for an approver holding `approve` on `record:work/<transition>` (single-operation tasks; agent runs are refused with `approval_unsupported` until ADR-036 slice 4).
+- A transition with `approval` waits for an approver holding `approve` on `record:work/<transition>` (a single-operation task waits; in an agent run the call is held and the run waits, ADR-036 slice 4).
 - To remove a state that records occupy, add `"migrate": [{"from": "old", "to": "new"}]`.
 - The ADR's two worked examples run end to end in `apps/api/tests/service/test_worked_examples.py`.

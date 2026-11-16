@@ -616,9 +616,9 @@ def test_approve_on_one_collection_does_not_decide_another(kernel: Kernel) -> No
         assert not holds_approve(Policy(conn), "approver", cast(Any, forged))
 
 
-def test_agent_runs_cannot_take_a_gated_transition_yet(kernel: Kernel) -> None:
-    """ADR-036 slice 4 (approval waits in agent runs) is not on main: the call is refused
-    with approval_unsupported and nothing runs."""
+def test_only_the_gated_transition_requires_approval(kernel: Kernel) -> None:
+    """The transition's gate compiles to a rule on records.transition for that collection and
+    transition only; agent-run waits are in test_worked_examples (ADR-036 slice 4)."""
     from cardea.service.approval_requests import evaluate
 
     assert apply(kernel, "orders", ORDERS_SPEC).status_code == 200
