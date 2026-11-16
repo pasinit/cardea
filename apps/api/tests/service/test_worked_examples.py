@@ -7,9 +7,8 @@ kernel changes between the software team and the trading desk; only configuratio
 Adapted from the ADR text where later slices are missing:
 - event triggers on group pools arrive with slice 7, so pools here use time triggers and the
   tests start each member's run directly;
-- approval waits inside agent runs arrive with ADR-036 slice 4, so the desk's gated `approve`
-  transition is refused in an agent run (`approval_unsupported`) and is then requested by a
-  single-operation task, which waits for the human approver.
+- the desk's gated `approve` transition waits inside the risk agent's run for the human
+  approver (ADR-036 slice 4) and runs as `apr-01` in its continuation attempt.
 """
 
 import json
@@ -39,10 +38,8 @@ from cardea.service.models import (
     RIGHTS,
     AgentGroup,
     AgentRunRequest,
-    OperationTaskRequest,
     Provisioning,
 )
-from cardea.service.operation_runtime import OperationRuntime
 from cardea.service.operations import (
     OperationContext,
     OperationDescriptor,
@@ -515,6 +512,104 @@ def state_of(kernel: Kernel, record_id: str) -> tuple[str, str | None, int]:
     return str(row[0]), row[1], int(row[2])
 
 
+# ADR-036 slice 4: a gated transition held in an agent run keeps its resource-qualified
+# approval check when the continuation re-executes it
+
+
+def test_held_transition_reexecution_keeps_the_resource_qualified_check(
+    setup: tuple[Kernel, Any, Package],
+) -> None:
+    kernel, session, _ = setup
+    group = manifest("desk", "desk", "sup-desk", ["orders"], DESK_POOLS)
+    configure(kernel, "desk", "sup-desk", {"orders": DESK_ORDERS}, group)
+
+    async def propose(client: ClientSession) -> Any:
+        return await tool(
+            client,
+            "records-create",
+            collection="orders",
+            client_key="o-held",
+            data={
+                "instrument": "XYZ",
+                "side": "buy",
+                "qty": 1,
+                "limit_price": 10.5,
+                "rationale": "Test",
+            },
+        )
+
+    made = act(
+        kernel,
+        session,
+        namespace="desk",
+        supervisor="sup-desk",
+        member="desk.analyst.0",
+        grants=DESK_POOLS["analyst"][1],
+        operations=["records.create", "risk.check"],
+        script=propose,
+    )
+    order = str(made[1]["record"]["record_id"])
+
+    async def approve(client: ClientSession) -> Any:
+        return await tool(
+            client,
+            "records-transition",
+            collection="orders",
+            record_id=order,
+            transition="approve",
+        )
+
+    held_state, held = act(
+        kernel,
+        session,
+        namespace="desk",
+        supervisor="sup-desk",
+        member="desk.risk.0",
+        grants=DESK_POOLS["risk"][1],
+        operations=["records.transition"],
+        script=approve,
+    )
+    assert held_state == "waiting" and "approval_pending" in held["error"]
+    with kernel.database.read() as conn:
+        request_id, digest, task_id = conn.exec_driver_sql(
+            "SELECT request_id,intent_digest,task_id FROM approval_requests "
+            "WHERE approval_resource='record:orders/approve'"
+        ).one()
+    client = TestClient(create_app(kernel))
+    decided = client.post(
+        f"/v0.2/approvals/{request_id}/decision",
+        json={"decision_id": "d-held", "decision": "approve", "intent_digest": digest},
+        headers={"Authorization": "Bearer desk-approver", "X-Cardea-Auth": "spiffe"},
+    )
+    assert decided.status_code == 200, decided.json()
+    # Before the continuation runs, the approver keeps only an operation-level `approve`
+    # row on `records.transition`, which does not satisfy a resource-qualified request.
+    with kernel.database.engine.begin() as conn:
+        conn.exec_driver_sql(
+            "UPDATE policies SET operation='records.transition' "
+            "WHERE principal_id='desk-approver' AND operation='record:orders/approve'"
+        )
+    prompts: list[str] = []
+
+    async def resumed(client: ClientSession, request: SessionRequest) -> SessionResult:
+        prompts.append(request.prompt)
+        return SessionResult(text="The approval no longer holds.", is_error=False, turns=1)
+
+    session.scripts = [resumed]
+    assert AgentRunRuntime(kernel).execute(str(task_id)) == "succeeded"
+    assert state_of(kernel, order)[0] == "proposed"  # the transition never ran
+    with kernel.database.read() as conn:
+        state, reason = conn.exec_driver_sql(
+            "SELECT state,void_reason FROM approval_requests WHERE request_id=?", (request_id,)
+        ).one()
+        receipts = conn.exec_driver_sql(
+            "SELECT COUNT(*) FROM operations WHERE task_id=? AND operation_id='apr-01'",
+            (task_id,),
+        ).scalar_one()
+    assert (state, reason) == ("void", "approver_authority_lost") and receipts == 0
+    assert 'decision="void"' in prompts[0] and "approver_authority_lost" in prompts[0]
+
+
 # A. Software team: a review gate built from transitions, grants and guards
 
 
@@ -731,39 +826,41 @@ def test_trading_desk_order_flow(setup: tuple[Kernel, Any, Package]) -> None:
     assert out["record"]["state"] == "rejected"
     order = propose("o-1", 10)
 
-    # 2. Approval needs a human desk approver. Inside an agent run the gated call is
-    # refused until ADR-036 slice 4; nothing runs.
-    held = step("desk.risk.0", ["records.transition"], transition(order, "approve"))
-    assert "approval_unsupported" in held["error"]
-    assert state_of(kernel, order)[0] == "proposed"
-    # As a single-operation task it waits for the approver (the risk desk's own principal).
-    request = OperationTaskRequest.model_validate(
-        {
-            "request_id": "approve-o-1",
-            "agent_id": "risk-desk",
-            "namespace": "desk",
-            "objective": "Approve order o-1",
-            "operation": "records.transition",
-            "arguments": {"collection": "orders", "record_id": order, "transition": "approve"},
-            "grants": ["objects.read", "objects.write", "record:orders/approve"],
-        }
+    # 2. Approval needs a human desk approver. Inside the risk agent's run the gated call
+    # is held (ADR-036 slice 4): the run waits and nothing runs yet.
+    held_state, held = act(
+        kernel,
+        session,
+        namespace="desk",
+        supervisor="sup-desk",
+        member="desk.risk.0",
+        grants=DESK_POOLS["risk"][1],
+        operations=["records.transition"],
+        script=transition(order, "approve"),
     )
-    task_id = kernel.submit(kernel.auth.validate("sup-desk"), request).task.task_id
-    assert OperationRuntime(kernel).execute(task_id) == "waiting"
+    assert held_state == "waiting" and "approval_pending" in held["error"], held
+    assert state_of(kernel, order)[0] == "proposed"
     with kernel.database.read() as conn:
         pending = conn.exec_driver_sql(
-            "SELECT request_id,intent_digest,approval_resource FROM approval_requests "
-            "WHERE task_id=?",
-            (task_id,),
+            "SELECT request_id,intent_digest,approval_resource,task_id,operation_id "
+            "FROM approval_requests ORDER BY created_at DESC LIMIT 1"
         ).one()
-    assert pending[2] == "record:orders/approve"
+    assert pending[0] in held["error"]
+    assert pending[2] == "record:orders/approve" and pending[4] == "apr-01"
     decided = TestClient(create_app(kernel)).post(
         f"/v0.2/approvals/{pending[0]}/decision",
         json={"decision_id": "d-1", "decision": "approve", "intent_digest": pending[1]},
         headers={"Authorization": "Bearer desk-approver", "X-Cardea-Auth": "spiffe"},
     )
     assert decided.status_code == 200, decided.json()
-    assert OperationRuntime(kernel).execute(task_id, approval=pending[0]) == "succeeded"
+
+    # The continuation attempt runs the approved transition as apr-01, then resumes.
+    async def resumed(client: ClientSession, request: SessionRequest) -> SessionResult:
+        assert 'decision="approved"' in request.prompt
+        return SessionResult(text="Approved and recorded.", is_error=False, turns=1)
+
+    session.scripts = [resumed]
+    assert AgentRunRuntime(kernel).execute(str(pending[3])) == "succeeded"
     assert state_of(kernel, order)[0] == "approved"
 
     # 3. Execution places it. The first attempt crashes after placing; the retry's

@@ -13,7 +13,7 @@ from cardea.hosts.debian import Host
 from cardea.kernel.models import BudgetLimits, Task, TaskState
 from cardea.kernel.store import KernelTransaction
 from cardea.runtime.agent_session import AgentSession
-from cardea.service import host_budget
+from cardea.service import approval_requests, host_budget
 from cardea.service.approval_requests import waiting_for, withdraw
 from cardea.service.auth import IdentityProvider, Proof
 from cardea.service.confined import ConfinedAgentSession, Workers, confined_handler, job_id
@@ -22,6 +22,7 @@ from cardea.service.harnesses import Catalog, Harnesses, check_harness_grants
 from cardea.service.mailbox import BUILTIN
 from cardea.service.mailbox import is_group_address as mailbox_address
 from cardea.service.models import (
+    APPROVAL_OPERATIONS,
     DEFAULT_MAX_TASK_REQUEST_BYTES,
     RECORD_GRANT_PREFIX,
     RECORD_OPERATIONS,
@@ -493,11 +494,15 @@ class Kernel:
     def reconciler(self, name: str) -> Reconciler | None:
         if name in RECORD_OPERATIONS:
             return self.records.reconciler(name)
+        if name in APPROVAL_OPERATIONS:
+            return approval_requests.decide_reconciler(self)
         return self.operations.reconciler(name)
 
     def handler(self, name: str) -> Handler:
         if name in RECORD_OPERATIONS:
             return self.records.handler(name)
+        if name in APPROVAL_OPERATIONS:
+            return approval_requests.decide_handler(self)
         descriptor = self.operations.get(name)
         executor = descriptor.cardea.executor
         if executor is None:
@@ -657,6 +662,10 @@ class Kernel:
             raise Fault("capacity_exceeded", "M1 profile permits at most 100 active tasks", 429)
         task_id = "task-" + uuid4().hex
         at = now()
+        # An agent run that may wait for approval covers the wait in its deadline (ADR-036).
+        seconds = request.timeout_seconds
+        if isinstance(request, AgentRunRequest):
+            seconds += request.approval_wait_seconds or 0
         task = Task(
             task_id=task_id,
             agent_id=request.agent_id,
@@ -671,11 +680,11 @@ class Kernel:
                 | profile.limits(request)
                 | {
                     "deadline": min(
-                        at + timedelta(seconds=request.timeout_seconds),
+                        at + timedelta(seconds=seconds),
                         tx.get_task(request.parent_task_id).limits.deadline,
                     )
                     if request.parent_task_id
-                    else at + timedelta(seconds=request.timeout_seconds)
+                    else at + timedelta(seconds=seconds)
                 }
             ),
             created_at=at,
@@ -763,10 +772,14 @@ class Kernel:
                 raise Fault("task_terminal", "A terminal task cannot be resumed", 409)
             at = now()
             profile = for_runtime(task.runtime_id)
-            if (
-                kind == "cancel"
-                and not profile.runtime_cancels
-                and not (profile.runtime_cancels_running and task.state is TaskState.RUNNING)
+            # An agent run waiting for approval has no attempt to stop (ADR-036 slice 4).
+            parked = profile.workflow == AGENT_RUN_WORKFLOW and task.state is TaskState.WAITING
+            if kind == "cancel" and (
+                parked
+                or (
+                    not profile.runtime_cancels
+                    and not (profile.runtime_cancels_running and task.state is TaskState.RUNNING)
+                )
             ):
                 tx.change_task(
                     task_id,

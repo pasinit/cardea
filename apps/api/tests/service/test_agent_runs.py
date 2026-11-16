@@ -403,68 +403,6 @@ def test_tool_budget_is_enforced(kernel: Kernel, tools: Tools, session: FakeSess
     assert AgentRunRuntime(kernel).execute(submit(kernel, max_tool_calls=1)) == "succeeded"
 
 
-def test_calls_that_need_approval_are_refused_until_agent_runs_support_it(
-    kernel: Kernel, tools: Tools, session: FakeSession
-) -> None:
-    """ADR-036 slice 2 holds only single-operation tasks; a run's held call fails closed."""
-    principals = tuple(
-        Principal(
-            principal_id=p,
-            kind="service" if p == "runtime" else "human",
-            auth_kind="spiffe",
-            issuer="test",
-            subject=p,
-        )
-        for p in ("runtime", "supervisor", "outsider")
-    ) + (Principal(principal_id="agent", kind="agent", runtime_id="runtime"),)
-    granted = tuple(
-        Permission(
-            principal_id="supervisor",
-            namespace="test",
-            operation=right,
-            delegate=True,
-            expires_at=now() + timedelta(hours=1),
-        )
-        for right in GRANTS
-    )
-    provision(
-        kernel.database,
-        Provisioning.model_validate(
-            {
-                "principals": [p.model_dump(mode="json") for p in principals],
-                "permissions": [p.model_dump(mode="json") for p in granted],
-                "platform": [
-                    p.model_copy(update={"principal_id": "platform"}).model_dump(mode="json")
-                    for p in granted
-                ],
-                "approvals": {
-                    "entries": [
-                        {
-                            "namespace": "test",
-                            "operation": "mail.send",
-                            "rules": [
-                                {"rule_id": "mail", "level": "always", "reason": "Mail is held"}
-                            ],
-                        }
-                    ]
-                },
-            }
-        ),
-        kernel.operations,
-    )
-
-    async def held(client: ClientSession, request: SessionRequest) -> SessionResult:
-        refused = await call(client, "mail-send", to="user@example.invalid", body="x")
-        assert refused.is_error
-        assert "approval_unsupported" in cast(types.TextContent, refused.content[0]).text
-        return SessionResult(text="stopped", is_error=False)
-
-    session.scripts = [held]
-    task_id = submit(kernel)
-    AgentRunRuntime(kernel).execute(task_id)
-    assert tools.sent == [] and calls(kernel, task_id) == []
-
-
 def test_failed_attempt_retries_with_journal_and_does_not_resend(
     kernel: Kernel, tools: Tools, session: FakeSession
 ) -> None:
