@@ -184,7 +184,7 @@ def today(monkeypatch: pytest.MonkeyPatch) -> datetime:
     return start
 
 
-def supervisor_mail(kernel: Kernel) -> list[dict[str, Any]]:
+def supervisor_mail(kernel: Kernel) -> list[list[dict[str, Any]]]:
     found = rows(
         kernel,
         "SELECT m.parts_json FROM mailbox_messages m JOIN mailbox_deliveries d "
