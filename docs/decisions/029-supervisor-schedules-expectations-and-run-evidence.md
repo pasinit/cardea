@@ -1,7 +1,10 @@
 # ADR-029: Supervisor Schedules, Run Expectations and Run Evidence
 
 - **Date / owner / milestones:** 2026-10-15; runtime and API maintainers; ADR-022 gaps #7, #8 and #11 (C4, C5).
-- **Status:** selected and implemented; portable tests pass. Amended 2026-11-16 (expectation alternatives and argument match, see [Amendment](#amendment-2026-11-16-alternatives-and-argument-match)): decided by the lead, the owner may veto; implemented with portable tests.
+- **Status:** selected and implemented; nothing is verified on Debian.
+  - **Implemented:** supervisor-managed schedules, run expectations and bounded run evidence, and the [2026-11-16 amendment](#amendment-2026-11-16-alternatives-and-argument-match) (`any_of` alternatives and argument `match`, decided by the lead; the owner may veto).
+  - **Portable tests only:** all of it.
+  - **Verified on Debian:** nothing yet.
 - **Requirement:** a client application (Telos) manages its users' recurring work without host-owner access: create, update, disable and remove a schedule under the user's own live authority.
   - A scheduled run is a versioned definition: trigger, instructions, exposed operations, bounds and completion conditions. It is checked when installed and again at every slot.
   - A run is complete only when its declared effects actually happened.

@@ -1,0 +1,75 @@
+# Debian acceptance: ADR-034, ADR-035, ADR-036 and the ADR-023 amendment
+
+This is what an operator must run on the supported Debian host before these records can say **verified on Debian**. As of 2026-11-16 none of it has run: every item below passes portable tests only (macOS and CI), and their status lines say so.
+
+Each item names the script that exists, or says **gap** when no script exists yet. A record moves to verified only when every item for it has passed on the host, and its evidence (commands, versions, results) is committed beside the record, as for the [M2](../../experiments/m2/M2-REPORT.md) and [M5](../../experiments/m5/M5-REPORT.md) reports.
+
+## The host
+
+- [ ] **A disposable Debian 13 amd64 machine** with a Debian 13 6.12 LTS kernel, as ADR-028 requires. `python3 experiments/m2/vm.py start --state <dir>` starts the owned QEMU guest the M2 and M5 fixtures use ([experiments/m2/README.md](../../experiments/m2/README.md)). Never use a machine that holds real data.
+- [ ] **The package built from the commit under test.** `make m5-stage M5_STAGE=<new dir>`, then build and install it on the guest as in [packaging](../../packaging/README.md). Record the commit and the package version.
+- [ ] **Migrations on the host.** `cardea init` on a fresh store reaches `m17_content_redaction`. `cardea init` on an M5 store (`m5_001`) migrates it through every later revision, and `cardea verify` passes afterwards. Today only the `m4_001` to `m5_001` upgrade is verified there. **Gap:** no script upgrades an M5 store to the current head on Debian.
+- [ ] **Identities.** Real SPIRE 1.15.3 with disposable identities, as the M5 fixture sets up (`experiments/m5/installed_acceptance.py` with `experiments/m1/provider_lab.py` and `experiments/spire/binding.py`). ADR-036 also needs one OIDC human identity from a test issuer.
+
+## Regression first
+
+Run these first. They already exist, and nothing below means anything if they fail on the commit under test.
+
+- [ ] `make m1-test` and `make m2-host-fit M2_STATE=<dir>` (the M1 and M2 fixtures).
+- [ ] `python3 experiments/m5/complete_vm.py --state <dir>`: the M5 upgrade, reboot and restore sequence.
+- [ ] **ADR-028 probes:** `CARDEA_CONFINED_DEBIAN=1 pytest apps/api/tests/hosts/test_confined_debian.py` as root on the guest, with the helper installed. They cover a memory-cap kill, `none` denying all connections and DNS, the allow-list reaching only the proxy and only listed hosts, and no view of the store, the helper configuration or credentials. They have never run. Every confined item below depends on them.
+- [ ] `make try` on the guest: the real daemon, killed with `SIGKILL` and restarted from the same store.
+
+## ADR-023 amendment: long confined operations and artifacts
+
+The portable tests are in `apps/api/tests/service/test_code_session.py`. On the host they must run under the real helper and systemd.
+
+- [ ] **A long call survives.** A confined fake operation with a 20-minute timeout under a profile with `wall_seconds` ≥ 1200. Its lease is renewed every minute, and it settles `succeeded` with one receipt. **Gap:** no long-running fake worker or script.
+- [ ] **A lost lease stops the process tree.** Stop the daemon with `SIGKILL` 10 minutes into such a call. The worker sees the lost lease and its whole process tree is gone (check the transient unit and `ps`). After restart the call is `outcome_unknown` and is not retried. **Gap:** no script.
+- [ ] **Limits refused at admission.** A descriptor timeout above the installed profile's `wall_seconds`, or above 7200 s, is refused with `409 operation_timeout_exceeds_profile`. **Gap:** this is portable-only; it needs the installed helper's real profile file.
+- [ ] **Artifacts.** A worker returns a 10 MiB artifact. It is stored as task-owned objects of at most 1 MiB, read back by digest, and kept across `cardea backup`, `cardea restore` and `cardea verify`. An 11 MiB + 1 byte artifact stores nothing and reconciles as not applied. **Gap:** no script.
+- [ ] **`code.session` on the `coding` profile.** Not part of the amendment, but its first long confined user. Run `sudo sh experiments/code-session/debian.sh <token file> <out dir>` on a host with the small-host kit's `coding` profile ([experiments/code-session/README.md](../../experiments/code-session/README.md)). It passes when every check in `evidence.json` is true, and `proxy.txt` shows only the model API reachable. It spends real model usage (at most 1 USD). This script exists but has never run. It does not cover a call long enough to need a lease renewal.
+
+## ADR-034: groups, shared records and mailboxes
+
+ADR-034 requires acceptance tests 3–5 to run on Debian with a real daemon restart. The rest must run once through the installed daemon. Portable tests are listed in the ADR's [Verification](../decisions/034-agent-groups-and-shared-records.md#verification).
+
+- [ ] **Worked examples through the installed daemon** (acceptance tests 1 and 2). Apply `examples/teams/software-team` and `examples/teams/trading-desk` over the Unix socket with real SPIFFE identities. Run one work item through its flow, then restructure by changing only the manifest. `make teams` runs this walkthrough in process. **Gap:** no variant against the installed daemon.
+- [ ] **Test 3, no double claim.** Twenty concurrent claims from two members: exactly one wins. `SIGKILL` the daemon after the claim commits: after restart there is still one holder. Let the lease expire: a new epoch, and `claim_lost` for the old holder. **Gap:** no script; `test_claims.py` reopens the store in process.
+- [ ] **Test 4, idle and failed holders.** A weekly schedule and a 1 h lease, with a daemon restart in between: an idle holder keeps its epoch through follow-up wakes, a failing holder loses the claim within lease + 60 s, and follow-ups stop after `max_followups`. **Gap:** no script. It needs about an hour of wall time.
+- [ ] **Test 5, message once across restart.** Send a message, then `SIGKILL` the daemon before delivery. The next run receives it, fails, and the following run receives it again (`deliveries = 2`) and succeeds. Pool mail is consumed by one member, group mail by every member. A message is dead-lettered after `max_deliveries`, and the sender and supervisor are notified. **Gap:** no script.
+- [ ] **Test 6, ceiling.** Revoke one grant from the supervisor with `cardea provision`. The next run of each pool that uses it is refused, and a running one stops at its next call.
+- [ ] **Test 10, journal triggers across a restart.** A transition wakes the subscribed member exactly once, even when the daemon is killed around the tick, and a burst coalesces. **Gap:** no script.
+- [ ] **Draining.** Scale a pool down while a member's run is in progress, then reboot the host. The drain resumes and the member is disabled after `drain_timeout_seconds`.
+- [ ] **Spend.** Test 8 through real runs: an agent harness with a fake model server that reports cost, a group ceiling of two runs' `max_cost_usd`, and the third concurrent admission refused with `429 budget_exhausted`. A windowed expectation's miss is mailed after the window closes.
+- [ ] **Overview.** `GET /v0.2/groups/{name}/overview` over the TLS listener with a SPIFFE client certificate.
+
+Tests 7 (guards and evidence) and 9 (context bounds) involve no host behaviour; their portable tests are enough once the items above pass.
+
+## ADR-035: event triggers
+
+Portable tests: `apps/api/tests/service/test_event_triggers.py`. None of these has run.
+
+- [ ] **A signed delivery through the live TLS listener** of the installed daemon, from a sender off the host, with the trigger installed by `cardea provision` and its secret file at mode `0600`. **Gap:** no script.
+- [ ] **A third-party sender.** One real Standard Webhooks sender (a library or a hosted service's test delivery), not Cardea's own signer. **Gap:** no script; the portable tests check only the published example.
+- [ ] **Redelivery across a restart.** The same event, delivered again after `systemctl restart cardea-kernel`, returns the same task.
+- [ ] **A proxy in front of the listener.** When `client_ca_file` is set, the sender's TLS is terminated at a proxy, as [operations](../operations.md#event-triggers) recommends.
+- [ ] **Snapshot restore.** After `cardea restore`, deliveries are refused until the host owner provisions again.
+
+## ADR-036: approval waits (slices 1–4)
+
+ADR-036 slice 6 defines the host acceptance: a real OIDC human approver and a SPIFFE agent. Portable tests: `test_approval_waits.py`, `test_approval_expiry.py`, `test_agent_approvals.py` and `test_approvals.py`.
+
+- [ ] **A human approves.** An operation task waits. A person with an OIDC identity and the `approve` mode lists it with `GET /v0.2/approvals`, approves it with the right `intent_digest`, and the effect runs once as `apr-01`. **Gap:** no OIDC test issuer in the fixtures.
+- [ ] **A wait across a reboot.** Reboot the host while a task waits. It is still waiting afterwards, and a decision made after the reboot runs it.
+- [ ] **Expiry on the real schedule.** A request expires within about a minute of `expires_at`. A request that expired while the daemon was stopped expires on the first tick after it starts.
+- [ ] **An agent run waits and continues.** With a SPIFFE agent and a real harness against a fake model server, a held call returns `approval_pending`, the attempt parks, and after approval the continuation attempt runs `apr-01` and the run succeeds.
+- [ ] **Four eyes and refusals** over the real authentication: `self_approval` for the requesting agent, `four_eyes_required` for the supervisor under `distinct_from_supervisor`, and `approver_denied` after a revocation.
+- [ ] **Snapshot restore** voids open requests (`snapshot_restored`).
+
+Slice 5 (per-grant rules) is not implemented, so it has nothing to verify.
+
+## Recording the result
+
+- [ ] Commit the evidence (commands, package and dependency versions, kernel version, results) under `experiments/`, as the M2 and M5 reports do.
+- [ ] Change each record's **Verified on Debian** line and its row in the [ADR index](../decisions/README.md), only for the items that passed.
