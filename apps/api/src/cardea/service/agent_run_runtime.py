@@ -344,6 +344,24 @@ class AgentRunRuntime:
                 resumed = isinstance(parked, str) or open_request is not None
                 if not resumed and attempt - free > request.max_attempts:
                     raise Fault("attempts_exhausted", "Every allowed session attempt was used")
+                if attempt > 1 or resumed:
+                    # A retry or continuation spends beyond the one admission reservation;
+                    # it does not start once the run's account is spent (ADR-034 5.3).
+                    spent = spend.exhausted(conn, task_id)
+                    if spent is not None:
+                        spend.notify_exhausted(
+                            conn, tx, self.kernel.runtime_id, task_id, spent, now()
+                        )
+                        if open_request is not None:
+                            approval_requests.mark_void(
+                                tx,
+                                conn,
+                                open_request,
+                                "budget_exhausted",
+                                self.kernel.runtime_id,
+                                now(),
+                            )
+                        raise Fault("budget_exhausted", spent.message, 429)
             except Fault as error:
                 tx.change_task(
                     task_id,
