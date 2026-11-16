@@ -2767,6 +2767,14 @@
             "title": "Members Added",
             "type": "array"
           },
+          "members_disabled": {
+            "description": "Active members whose principal an operator disabled; it stays disabled and their runs are refused.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Members Disabled",
+            "type": "array"
+          },
           "members_draining": {
             "description": "Members this generation drains: scale-down or pool removal.",
             "items": {

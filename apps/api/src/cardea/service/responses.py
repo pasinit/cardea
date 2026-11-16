@@ -217,6 +217,11 @@ class GroupPlan(Record):
     members_removed: list[str] = Field(
         description="Drained members removed in this transaction (they had no run)."
     )
+    members_disabled: list[str] = Field(
+        default_factory=list,
+        description="Active members whose principal an operator disabled; it stays disabled "
+        "and their runs are refused.",
+    )
     triggers_installed: list[str]
     triggers_updated: list[str]
     triggers_removed: list[str]

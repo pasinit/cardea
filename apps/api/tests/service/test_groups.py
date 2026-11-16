@@ -262,6 +262,7 @@ def test_apply_creates_members_grants_and_triggers(kernel: Kernel) -> None:
         "members_added": [],
         "members_draining": [],
         "members_removed": [],
+        "members_disabled": [],
         "triggers_installed": [],
         "triggers_updated": [],
         "triggers_removed": [],
