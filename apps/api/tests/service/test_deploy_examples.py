@@ -304,3 +304,34 @@ def test_coding_profile_fits_code_session() -> None:
     assert "--bare" not in claude_code.argv({**harness, "binary": "/opt/x/claude"})
     gates = sum(g.timeout_seconds or 0 for r in entries.repositories.values() for g in r.gates)
     assert harness["timeout_seconds"] + gates <= descriptor.cardea.timeout_seconds
+
+
+def test_vcs_profile_and_workers_fit_the_vcs_operations() -> None:
+    """The `vcs` profile (ADR-037): the repository host only, the gate callback, a staged
+    change bundle, and one worker per operation that runs its handler, then reconciler."""
+    import cardea_vcs_ops
+    from cardea_vcs_ops.config import ProfileCredentialConfig, VcsConfig
+
+    workers = json.loads((KIT / "cardea" / "cardea-host-workers.json").read_text())
+    profile = workers["profiles"]["vcs"]
+    assert profile["network"]["policy"] == "allow_list" and profile["kernel_callback"] is True
+    assert profile["network"]["hosts"] == ["api.github.com", "github.com"]
+    assert profile["input_kb"] * 1024 >= 10 * 1048576 and "credential" in profile
+    for descriptor in cardea_vcs_ops.descriptors():
+        executor = descriptor.cardea.executor
+        assert executor is not None and executor.profile == "vcs"
+        worker = workers["workers"][executor.worker]
+        assert worker["profiles"] == ["vcs"]
+        entries = worker["argv"][worker["argv"].index("cardea.hosts.operation_worker") + 1 :]
+        assert entries[0] == descriptor.name
+        reconciler = descriptor.cardea.reconciler
+        assert entries[1:] == ([reconciler] if reconciler else [])
+        assert descriptor.cardea.timeout_seconds <= profile["wall_seconds"]
+        assert worker["env"]["CARDEA_VCS_CONFIG"].startswith("/opt/cardea-vcs/")
+        # The same repository registry as the kernel and code.session, bound read-only.
+        registry = worker["env"]["CARDEA_REPOSITORIES"]
+        assert registry == workers["workers"]["code-session"]["env"]["CARDEA_REPOSITORIES"]
+        assert registry in worker["read_only"]
+    # The worker's configuration holds no secret: the token is the profile's credential.
+    config = VcsConfig.model_validate_json((KIT / "cardea" / "cardea-vcs.json").read_text())
+    assert isinstance(config.credentials, ProfileCredentialConfig)

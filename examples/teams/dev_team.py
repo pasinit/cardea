@@ -5,7 +5,8 @@ the kernel's real primitives and the real operation packages:
 
 - `cardea-coding-ops`: `code.session`, in its confined-worker shape, with a fake harness
   and fake gates, against a local bare repository;
-- `cardea-vcs-ops`: `vcs.*` against the in-process fake GitHub, with the test-only token;
+- `cardea-vcs-ops`: `vcs.*` in process (not in their `vcs` worker) against the
+  in-process fake GitHub, with the test-only token;
 - the kernel's content gate, with a stand-in scanner and a denylist;
 - records with a state machine and claims, mailboxes, spend accounts and `expect` with
   `any_of`.
@@ -33,7 +34,7 @@ from typing import Any, cast
 
 import httpx2
 from cardea_vcs_ops import Vcs
-from cardea_vcs_ops import descriptors as vcs_descriptors
+from cardea_vcs_ops import in_process_descriptors as vcs_descriptors
 from cardea_vcs_ops.config import FixedTokenConfig, VcsConfig
 from cardea_vcs_ops.fake import FakeGitHub
 from fastapi.testclient import TestClient

@@ -21,6 +21,7 @@ dependencies = []
 "vcs.review" = "cardea_vcs_ops:review"
 "vcs.find_review" = "cardea_vcs_ops:find_review"
 "vcs.read_change" = "cardea_vcs_ops:read_change"
+"vcs.check_repository" = "cardea_vcs_ops:check_repository"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/cardea_vcs_ops"]

@@ -73,7 +73,7 @@
   "cardea": {
     "version": 2,
     "effect": "effect",
-    "handler": "vcs.open_change",
+    "executor": {"kind": "confined", "profile": "vcs", "worker": "vcs-open-change"},
     "timeout_seconds": 60,
     "idempotency_scope": [
       "/repository",

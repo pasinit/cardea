@@ -28,7 +28,7 @@
   "cardea": {
     "version": 1,
     "effect": "effect",
-    "handler": "vcs.review",
+    "executor": {"kind": "confined", "profile": "vcs", "worker": "vcs-review"},
     "timeout_seconds": 60,
     "idempotency_scope": ["/repository", "/number", "/client_key"],
     "reconciler": "vcs.find_review",

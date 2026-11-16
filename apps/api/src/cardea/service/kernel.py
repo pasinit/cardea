@@ -32,6 +32,7 @@ from cardea.service.confined import (
     WorkerFailed,
     Workers,
     confined_handler,
+    confined_reconciler,
     job_id,
 )
 from cardea.service.database import Database, Fault, borrow
@@ -526,6 +527,14 @@ class Kernel:
         if binding.reconciler is None and binding.max_artifact_bytes:
             # The output is stored with the artifacts: its presence settles the call.
             return artifacts.reconciler(self.database)
+        if binding.executor is not None and binding.reconciler is not None:
+            # A confined operation's reconciler runs in its worker, with the worker's
+            # credential: the service process holds none (ADR-037).
+            self.executor_record(name)
+            assert self.workers is not None
+            return confined_reconciler(
+                self.workers, binding.executor, binding.reconciler, binding.timeout_seconds
+            )
         return self.operations.reconciler(name)
 
     def handler(self, name: str) -> Handler:

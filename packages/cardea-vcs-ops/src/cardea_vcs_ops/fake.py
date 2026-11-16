@@ -4,14 +4,24 @@ REST requests go through `httpx.MockTransport`, so nothing touches a network. Ea
 repository is a real bare git repository on disk: `vcs.push_branch` pushes to it with git,
 and the REST ref endpoint reads it, so the two always agree.
 
+`serve()` puts the same fake behind a loopback HTTP server, for workers in another
+process (the `vcs` confined worker in tests). Rulesets are a list of
+`{"include": [...], "exclude": [...], "rules": [...]}` with `fnmatch` branch patterns, plus
+`~DEFAULT_BRANCH` and `~ALL`, which `rules/branches/<branch>` evaluates.
+
 `fail_after` makes the fake apply a request and then drop the connection, the case that
 leaves an effect in doubt: for example `{"create_pull"}` creates the pull request and then
 raises `httpx.ConnectError`, as a crash after the host acted would look to the kernel.
 """
 
+import fnmatch
 import json
 import subprocess
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +42,24 @@ class FakeRepository:
     pulls: list[dict[str, Any]] = field(default_factory=list)
     comments: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
     reviews: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
+    default_branch: str = "main"
+    rulesets: list[dict[str, Any]] = field(default_factory=list)
+
+    def rules_for(self, branch: str) -> list[dict[str, Any]]:
+        def matches(pattern: str) -> bool:
+            if pattern == "~ALL":
+                return True
+            if pattern == "~DEFAULT_BRANCH":
+                return branch == self.default_branch
+            return fnmatch.fnmatchcase(branch, pattern.removeprefix("refs/heads/"))
+
+        found: list[dict[str, Any]] = []
+        for number, ruleset in enumerate(self.rulesets, start=1):
+            if any(map(matches, ruleset.get("include", ()))) and not any(
+                map(matches, ruleset.get("exclude", ()))
+            ):
+                found += [{**rule, "ruleset_id": number} for rule in ruleset["rules"]]
+        return found
 
     def head(self, branch: str) -> str | None:
         found = subprocess.run(
@@ -91,12 +119,21 @@ class FakeGitHub:
     def handle(self, request: httpx.Request) -> httpx.Response:
         self.authorizations.append(request.headers.get("Authorization", ""))
         parts = request.url.path.strip("/").split("/")
-        if parts[0] != "repos" or len(parts) < 4:
+        if parts[0] != "repos" or len(parts) < 3:
             return httpx.Response(404, json={"message": "Not Found"})
         repo = self.repositories.get(f"{parts[1]}/{parts[2]}")
         if repo is None:
             return httpx.Response(404, json={"message": "Not Found"})
         rest, method = parts[3:], request.method
+        if not rest and method == "GET":
+            full = f"{repo.owner}/{repo.name}"
+            return httpx.Response(
+                200, json={"full_name": full, "default_branch": repo.default_branch}
+            )
+        if rest[:2] == ["rules", "branches"] and method == "GET":
+            page = int(request.url.params.get("page", "1"))
+            rules = repo.rules_for("/".join(rest[2:])) if page == 1 else []
+            return httpx.Response(200, json=rules)
         body = json.loads(request.content) if request.content else {}
         if rest[:3] == ["git", "ref", "heads"] and method == "GET":
             sha = repo.head("/".join(rest[3:]))
@@ -177,3 +214,45 @@ class FakeGitHub:
         }
         repo.pulls.append(pull)
         return self._done("create_pull", httpx.Response(201, json=pull))
+
+
+@contextmanager
+def serve(fake: FakeGitHub) -> Iterator[str]:
+    """The fake on a loopback HTTP server; yields its base URL. A `fail_after` request is
+    applied and then the connection is closed without an answer."""
+
+    class Handler(BaseHTTPRequestHandler):
+        def _answer(self) -> None:
+            length = int(self.headers.get("Content-Length") or 0)
+            body = self.rfile.read(length) if length else b""
+            request = httpx.Request(
+                self.command,
+                f"http://fake{self.path}",
+                headers=dict(self.headers.items()),
+                content=body,
+            )
+            try:
+                response = fake.handle(request)
+            except httpx.ConnectError:
+                self.close_connection = True
+                return
+            content = response.content
+            self.send_response(response.status_code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(content)))
+            self.end_headers()
+            self.wfile.write(content)
+
+        do_GET = do_POST = do_PATCH = do_PUT = _answer
+
+        def log_message(self, format: str, *args: Any) -> None:
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}"
+    finally:
+        server.shutdown()
+        server.server_close()

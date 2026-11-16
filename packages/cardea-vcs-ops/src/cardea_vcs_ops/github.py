@@ -116,6 +116,20 @@ class GitHub:
             return None
         return str(response.json()["object"]["sha"])
 
+    # Repository and rules (vcs.check_repository)
+
+    async def metadata(self) -> dict[str, Any]:
+        response = await self._client.request("GET", self._base)
+        if 400 <= response.status_code < 500:
+            raise HostRefused(response.status_code, _reason(response))
+        response.raise_for_status()
+        result: dict[str, Any] = response.json()
+        return result
+
+    async def branch_rules(self, branch: str) -> list[dict[str, Any]]:
+        """The ruleset rules that apply to a branch name, whether or not it exists."""
+        return await self._list(f"/rules/branches/{quote(branch, safe='/')}")
+
     # Pull requests
 
     async def create_pull(

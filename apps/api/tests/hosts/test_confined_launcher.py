@@ -1,6 +1,7 @@
 """Root helper side of confined worker profiles (ADR-028); portable, no host commands run."""
 
 import base64
+import hashlib
 import io
 import json
 import os
@@ -476,7 +477,10 @@ def test_operation_worker_speaks_json_on_stdin_and_stdout(
     async def refuse(arguments: dict[str, Any], context: OperationContext) -> dict[str, Any]:
         raise OperationRejected("blocked by robots.txt")
 
-    assert run_worker(monkeypatch, capsys, refuse) == {"rejected": "blocked by robots.txt"}
+    assert run_worker(monkeypatch, capsys, refuse) == {
+        "rejected": "blocked by robots.txt",
+        "code": "operation_rejected",
+    }
 
     class HTTPStatusError(Exception):
         def __init__(self) -> None:
@@ -587,3 +591,103 @@ def test_short_reads_are_read_to_the_end_and_a_size_mismatch_is_refused(
     monkeypatch.setattr(os, "fstat", shrunk)
     with pytest.raises(ValueError, match="invalid_output"):
         finish("d" * 32, content, monkeypatch)
+
+
+# Staged inputs and the kernel callback for allow-list profiles (ADR-037)
+
+VCS = {
+    **BROWSER,
+    "jit": False,
+    "input_kb": 64,
+    "kernel_callback": True,
+    "network": {
+        "policy": "allow_list",
+        "proxy": "127.0.10.6:3128",
+        "hosts": ["api.github.com", "github.com"],
+    },
+}
+
+
+@pytest.fixture
+def with_vcs(configured: list[list[str]], monkeypatch: pytest.MonkeyPatch) -> None:
+    config = {
+        "profiles": {**cast(dict[str, Any], CONFIG["profiles"]), "vcs": VCS},
+        "workers": {
+            **cast(dict[str, Any], CONFIG["workers"]),
+            "vcs": {"argv": ["/usr/bin/true"], "profiles": ["vcs"]},
+        },
+    }
+    monkeypatch.setattr(launcher, "worker_config", lambda: config)
+
+
+def staged(*contents: bytes) -> list[dict[str, str]]:
+    return [
+        {"sha256": hashlib.sha256(c).hexdigest(), "data": base64.b64encode(c).decode()}
+        for c in contents
+    ]
+
+
+def test_staged_inputs_are_read_only_files_bound_read_only(
+    with_vcs: None, configured: list[list[str]]
+) -> None:
+    job = "d" * 32
+    started = launcher.handle(start(job, "vcs", "vcs", inputs=staged(b"bundle", b"two")))
+    assert started == {"started": True}
+    files = launcher.ROOT / job / "inputs"
+    assert (files / "0").read_bytes() == b"bundle" and (files / "1").read_bytes() == b"two"
+    assert (files / "0").stat().st_mode & 0o777 == 0o444
+    command = configured[-1]
+    at = command.index(str(files))
+    assert command[at - 1 : at + 2] == ["--ro-bind", str(files), launcher.INPUTS]
+    assert environment(command)["CARDEA_INPUTS"] == launcher.INPUTS
+    # The gate callback is reachable; nothing else on loopback is named.
+    assert properties(command)["IPAddressAllow"] == "127.0.10.6/32 127.0.0.1/32"
+
+
+def test_a_job_without_inputs_binds_none(with_vcs: None, configured: list[list[str]]) -> None:
+    launcher.handle(start("e" * 32, "vcs", "vcs"))
+    assert "CARDEA_INPUTS" not in environment(configured[-1])
+    assert not (launcher.ROOT / ("e" * 32) / "inputs").exists()
+
+
+@pytest.mark.parametrize(
+    ("contents", "reason"),
+    [
+        (None, "input_digest_mismatch"),
+        ([b"x" * (64 * 1024 + 1)], "inputs_too_large"),
+        ([b"a" * 40000, b"b" * 40000], "inputs_too_large"),
+        ([], "invalid_request"),
+    ],
+)
+def test_staged_inputs_are_checked_before_the_fence(
+    with_vcs: None, contents: list[bytes] | None, reason: str
+) -> None:
+    job = "f" * 32
+    listed: Any = (
+        [{"sha256": "0" * 64, "data": base64.b64encode(b"x").decode()}]
+        if contents is None
+        else staged(*contents)
+    )
+    with pytest.raises(ValueError, match=reason):
+        launcher.handle(start(job, "vcs", "vcs", inputs=listed))
+    assert not (launcher.ROOT / job).exists()
+    with pytest.raises(ValueError, match="invalid_request"):
+        launcher.handle(start(job, "vcs", "vcs", inputs=[{"data": "eA=="}]))
+
+
+def test_a_profile_without_input_kb_takes_no_inputs(with_vcs: None) -> None:
+    with pytest.raises(ValueError, match="inputs_too_large"):
+        launcher.handle(start("a1" * 16, "browser", "fetch", inputs=staged(b"x")))
+
+
+def test_kernel_callback_is_only_for_allow_list_profiles() -> None:
+    launcher.validate_profile(VCS)
+    for bad in (
+        {**SESSION, "kernel_callback": True},
+        {**SMALL, "kernel_callback": True},
+        {**VCS, "kernel_callback": "yes"},
+        {**VCS, "input_kb": launcher.MAX_STAGED // 1024 + 1},
+    ):
+        with pytest.raises(ValueError, match="invalid_profile"):
+            launcher.validate_profile(bad)
+    assert launcher.MAX_REQUEST > 4 * launcher.MAX_STAGED // 3

@@ -1,0 +1,6 @@
+{
+  "allow_approve": false,
+  "credentials": {
+    "kind": "profile_credential"
+  }
+}

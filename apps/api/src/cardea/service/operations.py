@@ -338,7 +338,8 @@ class Registry:
                 continue
             if descriptor.cardea.handler:
                 names.add(descriptor.cardea.handler)
-            if descriptor.cardea.reconciler:
+            # A confined operation's reconciler runs in its worker (ADR-037), not here.
+            if descriptor.cardea.reconciler and descriptor.cardea.executor is None:
                 names.add(descriptor.cardea.reconciler)
         return names
 
