@@ -1,7 +1,10 @@
 # ADR-035: Event Triggers
 
 - **Date / owner / milestones:** 2026-11-08; runtime and API maintainers; extends ADR-024 (time triggers) and ADR-029 (supervisor schedules) with the "wait for events" part of the kernel contract.
-- **Status:** selected; slice 1 implemented. ADR-034 slice 7 (2026-11-09) adds the kernel journal as an internal, unsigned, namespace-local source (`journal` triggers) with the same matching, dedupe and admission. Open questions decided by the lead on 2026-11-08, subject to the owner's veto (see [Decided](#decided)). Portable tests pass (macOS, Python 3.13). Not run: a delivery through the live daemon's TLS listener, any test on Debian, and interoperability with a third-party sender.
+- **Status:** selected and implemented in part; nothing is verified on Debian. Open questions were decided by the lead on 2026-11-08, subject to the owner's veto (see [Decided](#decided)).
+  - **Implemented:** slice 1, host-owned event triggers for signed inbound CloudEvents (Standard Webhooks signatures, dedupe per trigger, source and id, admission under the supervisor's live ceiling). [ADR-034](034-agent-groups-and-shared-records.md) slice 7 adds the kernel journal as an internal, unsigned, namespace-local source (`journal` triggers) with the same matching, dedupe and admission. Supervisor-managed event triggers are deferred.
+  - **Portable tests only:** all of it (macOS, Python 3.13). Not run: a delivery through the live daemon's TLS listener, and interoperability with a third-party sender.
+  - **Verified on Debian:** nothing yet; see the [Debian acceptance checklist](../acceptance/debian-adr-034-037.md).
 - **Requirement:** a task can be started by an authenticated inbound event, not only by the clock.
   - **Authentication.** Only a sender holding the trigger's secret can start its task. A replayed request is either outside the replay window or a duplicate. An unauthenticated request does nothing and records nothing.
   - **Matching.** A trigger matches events by source and type, plus simple attribute filters. An event that does not match does nothing.

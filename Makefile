@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: help install try try-test try-check teams teams-test test api-test kernel-test standards-test m1-test m1-demo kernel-openapi spire-fit dbos-fit dbos-integration-fit temporal-fit absurd-fit hatchet-fit cel-fit kernel-schema kernel-demo lint lint-api fix-lint format typecheck typecheck-api check-uv
+.PHONY: help install error-codes try try-test try-check teams teams-test test api-test kernel-test standards-test m1-test m1-demo kernel-openapi spire-fit dbos-fit dbos-integration-fit temporal-fit absurd-fit hatchet-fit cel-fit kernel-schema kernel-demo lint lint-api fix-lint format typecheck typecheck-api check-uv
 
 API_DIR := apps/api
 UV ?= $(shell command -v uv 2>/dev/null || printf "%s/bin/uv" "$$(python3 -m site --user-base)")
@@ -17,6 +17,7 @@ help:
 	@printf "  make m1-test      Run authenticated daemon acceptance with real providers\n"
 	@printf "  make m1-demo      Run authenticated crash/restart demonstration\n"
 	@printf "  make kernel-openapi Export the separate v0.2 kernel API\n"
+	@printf "  make error-codes  Regenerate docs/error-codes.md from the source\n"
 	@printf "  make spire-fit    Run real SPIRE bootstrap and identity binding tests\n"
 	@printf "  make dbos-fit     Run isolated DBOS SQLite/PostgreSQL experiments\n"
 	@printf "  make dbos-integration-fit Run DBOS/Cardea commit and recovery tests\n"
@@ -142,6 +143,9 @@ m1-test: check-uv
 
 m1-demo: check-uv
 	PYTHONPATH=apps/api/src:experiments/m1:experiments/spire "$(UV)" run --locked --project $(API_DIR) python experiments/m1/demo.py
+
+error-codes: check-uv
+	PYTHONPATH=apps/api/src "$(UV)" run --locked --project $(API_DIR) python -m cardea.service.error_codes > docs/error-codes.md
 
 kernel-openapi: check-uv
 	PYTHONPATH=apps/api/src "$(UV)" run --locked --project $(API_DIR) python -m cardea.service.schema > packages/kernel-openapi.json
