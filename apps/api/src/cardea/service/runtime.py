@@ -26,7 +26,7 @@ from cardea.kernel.models import (
     VerificationRecord,
 )
 from cardea.kernel.store import KernelTransaction
-from cardea.service import approval_requests, journal
+from cardea.service import approval_requests, group_windows, journal
 from cardea.service.agent_run_runtime import AgentRunRuntime
 from cardea.service.database import Fault, borrow
 from cardea.service.delegation_runtime import DelegationRuntime
@@ -157,6 +157,10 @@ class Runtime:
         def approval_expiry() -> dict[str, str]:
             return approval_requests.expire_due(kernel)
 
+        @DBOS.step(name="cardea.m8.groups.windows", retries_allowed=False)
+        def window_checks() -> dict[str, str]:
+            return group_windows.tick(kernel)
+
         # DBOS owns the clock (ADR-024): one schedule, no second scheduler or queue.
         # Slot identity, misfire and timezone semantics live in `triggers`/`schedule`.
         # The same tick expires overdue approval requests (ADR-036), at most a minute late.
@@ -169,7 +173,11 @@ class Runtime:
                     # Kernel journal events admit their triggers on the same tick (ADR-034).
                     journal_tick()
                 finally:
-                    approval_expiry()
+                    try:
+                        approval_expiry()
+                    finally:
+                        # Windowed pool expectations are checked at window close (ADR-034).
+                        window_checks()
 
         self.tick_triggers = tick_triggers
 
