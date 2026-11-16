@@ -706,6 +706,9 @@ class AgentRunRuntime:
                 if receipt.failure
                 else receipt.state.value
             )
+            if receipt.failure is not None and receipt.failure.code == "content_refused":
+                # Rule and location only (ADR-037); the arguments above are redacted.
+                outcome = f"content_refused ({receipt.failure.details.get('summary', '')})"
             lines.append(
                 f"- {tool_name(receipt.request.name)} {_text(arguments)[:400]} -> "
                 f"{receipt.state.value}: {_text(outcome)[:800]}"
@@ -1139,6 +1142,9 @@ class AgentRunRuntime:
                 error=error or "",
                 elapsed_ms=elapsed,
             )
+        if failure is not None and failure.code == "content_refused":
+            # The redacted content must not survive in the write-ahead log either.
+            self.kernel.database.checkpoint()
         if failure is not None:
             # The operation's own refusal is meant for the agent; keep its full text.
             detail = _text(output) if failure.reason == "rejected" else failure.describe()
