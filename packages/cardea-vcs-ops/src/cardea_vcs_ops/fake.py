@@ -17,7 +17,7 @@ from typing import Any
 
 import httpx
 
-from cardea.service.repositories import Registry
+from cardea.service.repositories import DEFAULT_PREFIX, Registry
 from cardea.service.repositories import Repository as RegistryEntry
 from cardea_vcs_ops.config import Repository
 
@@ -70,11 +70,7 @@ class FakeGitHub:
                 name=repo.name,
                 api_url=API,
                 git_url=str(repo.path),
-                **(
-                    {"branch_prefix": branch_prefixes[repo.name]}
-                    if repo.name in branch_prefixes
-                    else {}
-                ),
+                branch_prefix=branch_prefixes.get(repo.name, DEFAULT_PREFIX),
             )
         return Registry(repositories=entries)
 
