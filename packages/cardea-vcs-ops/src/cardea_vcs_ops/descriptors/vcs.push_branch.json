@@ -115,6 +115,11 @@
             "null"
           ],
           "pattern": "^[0-9a-f]{40}$"
+        },
+        "record_id": {
+          "type": "string",
+          "pattern": "^rec-[0-9a-f]{32}$",
+          "description": "The work record this call is for (ADR-034 receipt evidence). Recorded in the receipt only; never sent to the host."
         }
       },
       "required": [
@@ -145,7 +150,7 @@
     }
   },
   "cardea": {
-    "version": 1,
+    "version": 2,
     "effect": "effect",
     "handler": "vcs.push_branch",
     "timeout_seconds": 120,

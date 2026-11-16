@@ -349,3 +349,326 @@ def run(world: World, member: str, script: Script) -> tuple[str, Any]:
     world.tasks.append(task_id)
     state = AgentRunRuntime(world.kernel).execute(task_id)
     return state, world.agents.results[-1] if world.agents.results else None
+
+
+# The team's steps, as scripts
+
+
+async def transition(client: ClientSession, item: str, name: str, **extra: Any) -> Any:
+    return await call(
+        client, "records-transition", collection="work", record_id=item, transition=name, **extra
+    )
+
+
+async def tell_lead(client: ClientSession, key: str, text: str) -> Any:
+    return await call(
+        client,
+        "mailbox-send",
+        client_key=key,
+        to={"instance": LEAD},
+        parts=[{"text": text}],
+    )
+
+
+def file_work(title: str, body: str) -> Script:
+    async def script(client: ClientSession, request: SessionRequest) -> Any:
+        # The product manager's scripted test pass found this; it files it as work.
+        return await call(
+            client,
+            "records-create",
+            collection="work",
+            client_key=title.lower().replace(" ", "-")[:64],
+            data={"title": title, "body": body},
+        )
+
+    return script
+
+
+def assign(item: str) -> Script:
+    async def script(client: ClientSession, request: SessionRequest) -> Any:
+        found = await call(client, "records-query", collection="work", state="open")
+        record = next(r for r in found["records"] if r["record_id"] == item)
+        await call(
+            client,
+            "records-update",
+            collection="work",
+            record_id=item,
+            expected_version=record["version"],
+            data={**record["data"], "assignee_pool": f"{GROUP}.dev"},
+        )
+        moved = await transition(client, item, "triage", args={"assignee_pool": f"{GROUP}.dev"})
+        await call(
+            client,
+            "mailbox-send",
+            client_key=f"assign-{item}",
+            to={"pool": f"{GROUP}.dev"},
+            parts=[{"text": f"{item} is ready for you."}],
+        )
+        return moved
+
+    return script
+
+
+def implement(item: str, files: dict[str, str], notes: dict[str, Any]) -> Script:
+    """A developer's run: claim the item, code it, push, open the change and submit; or,
+    when anything refuses, tell the team lead. Either satisfies the pool's `any_of`."""
+
+    async def script(client: ClientSession, request: SessionRequest) -> Any:
+        started = await transition(client, item, "start")
+        if "error" in started:
+            notes["start_refused"] = started["error"]
+            return await tell_lead(client, f"busy-{item}", f"Could not take {item}.")
+        epoch = started["claim"]["claim_epoch"]
+        task = json.dumps({"write": files})
+        session = await call(
+            client, "code-session", repository="app", base_ref="main", task=task, task_key=item
+        )
+        notes["session"] = session
+        (artifact,) = [a for a in session["artifacts"] if a["name"] == "change.bundle"]
+        branch = f"agent/{GROUP}/{item}"
+        pushed = await call(
+            client,
+            "vcs-push_branch",
+            repository="app",
+            branch=branch,
+            change=artifact,
+            head=session["head_sha"],
+            record_id=item,
+        )
+        if "error" in pushed:
+            notes["push_refused"] = pushed["error"]
+            return await tell_lead(client, f"blocked-{item}", f"{item} is blocked: push refused.")
+        opened = await call(
+            client,
+            "vcs-open_change",
+            repository="app",
+            head=branch,
+            base="main",
+            title=f"Fix {item}",
+            body="Implements the work item.",
+            # Names the record, so `submit` can cite this call as its evidence.
+            record_id=item,
+        )
+        notes["change"] = opened
+        return await transition(client, item, "submit", claim_epoch=epoch)
+
+    return script
+
+
+def review(item: str, number: int, notes: dict[str, Any], *, approve: bool = True) -> Script:
+    """The principal engineer reads the change, reviews it and moves the item."""
+
+    async def script(client: ClientSession, request: SessionRequest) -> Any:
+        notes["read"] = await call(client, "vcs-read_change", repository="app", number=number)
+        notes["approve_review"] = await call(
+            client,
+            "vcs-review",
+            repository="app",
+            number=number,
+            event="APPROVE",
+            body="Looks good.",
+            client_key=f"approve-{item}",
+        )
+        notes["review"] = await call(
+            client,
+            "vcs-review",
+            repository="app",
+            number=number,
+            event="COMMENT",
+            body="Reviewed: the change does what the item asks.",
+            client_key=f"review-{item}",
+        )
+        return await transition(client, item, "approve" if approve else "request_changes")
+
+    return script
+
+
+def security_review(item: str, number: int, notes: dict[str, Any]) -> Script:
+    async def script(client: ClientSession, request: SessionRequest) -> Any:
+        notes["security_read"] = await call(
+            client, "vcs-read_change", repository="app", number=number
+        )
+        return await call(
+            client,
+            "vcs-review",
+            repository="app",
+            number=number,
+            event="COMMENT",
+            body="Security review: no secrets, no new network access.",
+            client_key=f"security-{item}",
+        )
+
+    return script
+
+
+def owner_merges(world: World, number: int) -> None:
+    """Outside the team: the owner merges the pull request on the host (simulated)."""
+    repo = world.host.repositories["acme/app"]
+    pull = next(p for p in repo.pulls if p["number"] == number)
+    git(world.repo_path, "update-ref", "refs/heads/main", str(repo.head(pull["head"]["ref"])))
+    pull.update({"state": "closed", "merged": True})
+
+
+# Checks at the end
+
+
+def group_overview(world: World) -> dict[str, Any]:
+    response = TestClient(create_app(world.kernel)).get(
+        f"/v0.2/groups/{GROUP}/overview",
+        params={"namespace": NAMESPACE, "events": 5},
+        headers={"Authorization": f"Bearer {SUPERVISOR}", "X-Cardea-Auth": "spiffe"},
+    )
+    assert response.status_code == 200, response.json()
+    view = cast(dict[str, Any], response.json())
+    print(f"  Overview of {GROUP} (generation {view['generation']}):")
+    for pool in view["pools"]:
+        runs = " ".join(
+            f"{m['principal_id'].rsplit('.', 1)[1]}:{(m['last_run'] or {}).get('outcome', '-')}"
+            for m in pool["members"]
+        )
+        print(f"    pool {pool['name']:<9} last runs {runs}")
+    for collection in view["collections"]:
+        counts = ", ".join(f"{k} {v}" for k, v in collection["by_state"].items()) or "empty"
+        print(f"    collection {collection['name']}: {counts}; {len(collection['claimed'])} claimed")
+    print(f"    spend: {json.dumps(view.get('spend'), sort_keys=True)[:160]}")
+    return view
+
+
+def claim_holders(world: World) -> dict[str, list[str]]:
+    """Each record's claim holders in order, from its history. A claim is taken by a
+    `claimed` event or a transition with `claim: acquire`, and given up by `released`,
+    `claim_expired` or a transition with `claim: release`. Taking one while another is
+    held would be a double claim."""
+    holders: dict[str, list[str]] = {}
+    held: dict[str, str | None] = {}
+    with world.kernel.database.read() as conn:
+        rows = conn.exec_driver_sql(
+            "SELECT record_id, kind, actor, detail_json FROM record_events ORDER BY event_id"
+        ).all()
+    for record_id, kind, actor, detail in rows:
+        effect = (json.loads(detail) or {}).get("claim") if kind == "transitioned" else None
+        if kind == "claimed" or effect == "acquire":
+            assert held.get(record_id) is None, f"double claim of {record_id} by {actor}"
+            held[record_id] = actor
+            holders.setdefault(record_id, []).append(actor)
+        elif kind in {"released", "claim_expired"} or effect == "release":
+            held[record_id] = None
+    return holders
+
+
+def check(world: World) -> dict[str, int]:
+    """No double claim; every run has receipts and costs; the gate refused one change."""
+    claimed = claim_holders(world)
+    with world.kernel.database.read() as conn:
+        for task_id in world.tasks:
+            receipts = conn.exec_driver_sql(
+                "SELECT COUNT(*) FROM operations WHERE task_id=?", (task_id,)
+            ).scalar_one()
+            costs = conn.exec_driver_sql(
+                "SELECT COUNT(*) FROM run_attempt_costs WHERE task_id=? AND cost_usd IS NOT NULL",
+                (task_id,),
+            ).scalar_one()
+            assert receipts >= 1 and costs >= 1, (task_id, receipts, costs)
+        refused = conn.exec_driver_sql(
+            "SELECT COUNT(*) FROM operations WHERE json_extract(snapshot,'$.request.name')="
+            "'vcs.push_branch' AND json_extract(snapshot,'$.failure.code')='content_refused'"
+        ).scalar_one()
+    assert refused == 1, refused
+    return {"runs": len(world.tasks), "gate_refusals": refused, "claims": sum(map(len, claimed.values()))}
+
+
+# The rehearsal
+
+
+def rehearse(world: World) -> dict[str, Any]:
+    print("Dev team (examples/teams/dev-team): milestone 1 dress rehearsal")
+    configure(world)
+    _, made = run(world, f"{GROUP}.product.0", file_work("Login retry is flaky", "Fails 1 in 5."))
+    item = made["record"]["record_id"]
+    _, leaked = run(
+        world, f"{GROUP}.product.0", file_work("Add an API client", "For the billing service.")
+    )
+    second = leaked["record"]["record_id"]
+    print(f"  product's test pass filed {item} and {second}")
+    for work in (item, second):
+        _, out = run(world, LEAD, assign(work))
+        print(f"  the lead assigned {work} to the developers: {out['record']['state']}")
+
+    notes: dict[str, Any] = {}
+    state, out = run(world, f"{GROUP}.dev.0", implement(item, {"retry.py": "RETRIES = 2\n"}, notes))
+    assert state == "succeeded" and out["record"]["state"] == "in_review", (state, out, notes)
+    number = int(notes["change"]["number"])
+    print(f"  dev.0 claimed {item}, coded it, pushed and opened #{number}: in_review")
+    race: dict[str, Any] = {}
+    state, _ = run(world, f"{GROUP}.dev.1", implement(item, {"x.py": "x\n"}, race))
+    print(f"  dev.1 tried to take {item} too and was refused; it told the lead ({state})")
+    assert "start_refused" in race and state == "succeeded"
+    assert claim_holders(world)[item] == [f"{GROUP}.dev.0"]
+
+    reviewed: dict[str, Any] = {}
+    _, out = run(world, f"{GROUP}.principal.0", review(item, number, reviewed))
+    assert "approve_refused" in reviewed["approve_review"]["error"]
+    print(f"  the principal read #{number}, was refused APPROVE, commented and approved: {out['record']['state']}")
+    owner_merges(world, number)
+    print(f"  the owner merged #{number} on the host (outside the team)")
+
+    blocked: dict[str, Any] = {}
+    secret = {"client.py": f"API_TOKEN = '{PLANTED}'\n"}
+    state, _ = run(world, f"{GROUP}.dev.2", implement(second, secret, blocked))
+    assert state == "succeeded" and "content_refused" in blocked["push_refused"], blocked
+    print(f"  dev.2's change for {second} carried a secret: the gate refused the push; it told the lead")
+    overview = group_overview(world)
+    checked = check(world)
+    print(f"  checks: {checked['runs']} runs, all with receipts and costs; no double claim; "
+          f"{checked['gate_refusals']} gate refusal")
+
+    print("  restructure by configuration: 2 developers and a security pool")
+    result = apply(world, "group.restructured.json")
+    pools = [p["name"] for p in result["group"]["spec"]["pools"]]
+    print(f"  applied generation {result['generation']}: pools {', '.join(pools)}")
+    with world.kernel.database.read() as conn:
+        left = conn.exec_driver_sql(
+            "SELECT state FROM group_members WHERE principal_id=?", (f"{GROUP}.dev.2",)
+        ).scalar_one()
+        handed_back = conn.exec_driver_sql(
+            "SELECT state, holder FROM records WHERE record_id=?", (second,)
+        ).one()
+    assert left == "removed" and tuple(handed_back) == ("ready", None), (left, handed_back)
+    print(f"  dev.2 was drained ({left}); its claim on {second} was released: ready")
+    _, made = run(world, f"{GROUP}.product.0", file_work("Rate-limit logins", "Too many tries."))
+    third = made["record"]["record_id"]
+    run(world, LEAD, assign(third))
+    again: dict[str, Any] = {}
+    state, out = run(world, f"{GROUP}.dev.1", implement(third, {"limit.py": "LIMIT = 5\n"}, again))
+    assert out["record"]["state"] == "in_review", out
+    third_number = int(again["change"]["number"])
+    security: dict[str, Any] = {}
+    _, reviewed_by = run(world, f"{GROUP}.security.0", security_review(third, third_number, security))
+    assert "review_id" in reviewed_by, reviewed_by
+    final: dict[str, Any] = {}
+    _, out = run(world, f"{GROUP}.principal.0", review(third, third_number, final))
+    print(f"  {third} went dev.1 -> security.0 review -> principal: {out['record']['state']}")
+    owner_merges(world, third_number)
+    return {
+        "first": item,
+        "blocked": second,
+        "third": third,
+        "overview": overview,
+        "checks": check(world),
+        "final_state": out["record"]["state"],
+    }
+
+
+def main(directory: Path | None = None) -> dict[str, Any]:
+    logging.disable(logging.CRITICAL)
+    try:
+        with tempfile.TemporaryDirectory() as scratch, world(directory or Path(scratch)) as w:
+            outcome = rehearse(w)
+    finally:
+        logging.disable(logging.NOTSET)
+    print("The dev team ran on the real operation packages with no code of its own.")
+    return outcome
+
+
+if __name__ == "__main__":
+    sys.exit(0 if main()["final_state"] == "done" else 1)
