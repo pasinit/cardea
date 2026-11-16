@@ -24,7 +24,7 @@ import re
 import subprocess
 import tempfile
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import sqlalchemy as sa
@@ -32,7 +32,7 @@ from pydantic import JsonValue
 
 from cardea.service.database import Database, Fault, borrow, private_file
 from cardea.service.models import ContentGateConfig, now
-from cardea.service.operations import OperationContext, OperationRejected
+from cardea.service.operations import ContentRefused, OperationContext, OperationRejected
 
 log = logging.getLogger(__name__)
 
@@ -58,10 +58,11 @@ SCANNER_FLAGS = (
 
 @dataclass(frozen=True)
 class Finding:
-    """A rule that matched, and where. Deliberately without the matched text."""
+    """A rule that matched, and where. Its line stays in memory only, to redact copies."""
 
     rule: str
     location: str
+    line: str = field(default="", repr=False, compare=False)
 
     def describe(self) -> str:
         return f"{self.rule} at {self.location}"
@@ -109,10 +110,10 @@ def added_lines(diff: str) -> list[tuple[str, str]]:
 def text_lines(texts: Mapping[str, str]) -> list[tuple[str, str]]:
     """`(location, text)` for every line of every field; one-line fields are named alone."""
     found: list[tuple[str, str]] = []
-    for field, value in texts.items():
+    for name, value in texts.items():
         lines = value.splitlines() or [""]
         for number, text in enumerate(lines, start=1):
-            found.append((field if len(lines) == 1 else f"{field}:{number}", text))
+            found.append((name if len(lines) == 1 else f"{name}:{number}", text))
     return found
 
 
@@ -163,10 +164,10 @@ class Denylist:
             folded = text.casefold()
             for rule, term in self.terms:
                 if term in folded:
-                    findings.append(Finding(rule, location))
+                    findings.append(Finding(rule, location, text))
             for rule, pattern in self.patterns:
                 if pattern.search(text):
-                    findings.append(Finding(rule, location))
+                    findings.append(Finding(rule, location, text))
         return findings
 
 
@@ -191,6 +192,7 @@ class Scanner:
         if not units:
             return []
         locations = [location for location, _ in units]
+        lines = [text for _, text in units]
         content = "\n".join(text for _, text in units) + "\n"
         with tempfile.TemporaryDirectory(prefix="cardea-gate-") as scratch:
             command = [str(self.config.gitleaks_binary), *SCANNER_FLAGS, "-i", scratch]
@@ -214,7 +216,11 @@ class Scanner:
         try:
             report = json.loads(done.stdout or b"[]")
             findings = [
-                Finding(str(item["RuleID"]), locations[int(item["StartLine"]) - 1])
+                Finding(
+                    str(item["RuleID"]),
+                    locations[int(item["StartLine"]) - 1],
+                    lines[int(item["StartLine"]) - 1],
+                )
                 for item in report
             ]
         except (ValueError, KeyError, IndexError, TypeError):
@@ -317,4 +323,8 @@ def enforce(
     shown = "; ".join(f.describe() for f in found[:MAX_FINDINGS_SHOWN])
     hidden = len(found) - MAX_FINDINGS_SHOWN
     more = f" (and {hidden} more)" if hidden > 0 else ""
-    raise OperationRejected(f"Refused by the content gate: {shown}{more}", "content_refused")
+    # Everything this call offered to send, and each matched line, so that the kernel can
+    # redact them (and any copy) from the receipt.
+    offered = (diff,) if diff else ()
+    refused = (*offered, *(texts or {}).values(), *(f.line for f in found))
+    raise ContentRefused(f"Refused by the content gate: {shown}{more}", refused)

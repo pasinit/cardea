@@ -286,6 +286,10 @@ class Task(KernelModel):
         return self
 
 
+# Key of a redacted receipt's arguments that records what was redacted (ADR-037).
+REDACTION = "redaction"
+
+
 class OperationRequest(KernelModel):
     operation_id: Identifier
     task_id: Identifier
@@ -333,9 +337,25 @@ class OperationReceipt(KernelModel):
     failure: KernelFailure | None = None
     reconciliation_evidence: tuple[ResourceRef, ...] = ()
 
+    def redacted(self) -> bool:
+        """A call the content gate refused, its refused content replaced (ADR-037).
+
+        Only such a receipt may differ from its admitted request: it is failed with
+        `content_refused`, so it is definite and never replayed, and its arguments carry
+        the admitted request's digest so its identity still holds.
+        """
+        marker = self.request.arguments.get(REDACTION)
+        return (
+            self.state is OperationState.FAILED
+            and self.failure is not None
+            and self.failure.code == "content_refused"
+            and isinstance(marker, dict)
+            and marker.get("request_digest") == self.request_digest
+        )
+
     @model_validator(mode="after")
     def consistent_receipt(self) -> Self:
-        if self.request_digest != self.request.digest():
+        if self.request_digest != self.request.digest() and not self.redacted():
             raise ValueError("receipt digest does not match its admitted request")
         if self.updated_at < self.created_at or self.request.deadline <= self.created_at:
             raise ValueError("invalid operation timestamps or deadline")

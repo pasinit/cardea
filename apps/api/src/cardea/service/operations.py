@@ -77,6 +77,19 @@ class OperationRejected(Exception):
         self.code = code
 
 
+class ContentRefused(OperationRejected):
+    """The content gate refused a call (ADR-037 decision 4).
+
+    `refused` holds the refused inputs and the lines that matched. They stay in memory
+    only: the kernel uses them to redact the call's receipt and request, and never stores,
+    logs or shows them.
+    """
+
+    def __init__(self, message: str, refused: tuple[str, ...]) -> None:
+        super().__init__(message, "content_refused")
+        self.refused = refused
+
+
 def http_status(error: BaseException) -> int | None:
     """The HTTP status an exception carries (httpx, requests, urllib style), if any."""
     for candidate in (getattr(error, "response", None), error):
