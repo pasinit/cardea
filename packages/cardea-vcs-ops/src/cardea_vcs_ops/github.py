@@ -79,9 +79,15 @@ class GitHub:
     def _base(self) -> str:
         return f"/repos/{quote(self.repository.owner)}/{quote(self.repository.name)}"
 
-    async def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+    async def _request(
+        self, method: str, path: str, *, missing_ok: bool = False, **kwargs: Any
+    ) -> httpx.Response:
+        """`missing_ok` lets a read return a 404 as "not there"; on any other call a 404
+        is a refusal (nothing changed), never a malformed success."""
         response = await self._client.request(method, self._base + path, **kwargs)
-        if 400 <= response.status_code < 500 and response.status_code != 404:
+        if response.status_code == 404 and missing_ok:
+            return response
+        if 400 <= response.status_code < 500:
             reason = _reason(response)
             if response.status_code == 422 and "already exists" in reason.lower():
                 raise DuplicatePull(422, reason)
@@ -94,8 +100,6 @@ class GitHub:
         found: list[dict[str, Any]] = []
         for page in range(1, MAX_PAGES + 1):
             response = await self._request("GET", path, params={"per_page": PAGE, "page": page})
-            if response.status_code == 404:
-                raise HostRefused(404, "not found")
             items = response.json()
             found.extend(items)
             if len(items) < PAGE:
@@ -105,7 +109,9 @@ class GitHub:
     # Git refs
 
     async def branch_head(self, branch: str) -> str | None:
-        response = await self._request("GET", f"/git/ref/heads/{quote(branch, safe='/')}")
+        response = await self._request(
+            "GET", f"/git/ref/heads/{quote(branch, safe='/')}", missing_ok=True
+        )
         if response.status_code == 404:
             return None
         return str(response.json()["object"]["sha"])
@@ -135,8 +141,6 @@ class GitHub:
 
     async def pull(self, number: int) -> dict[str, Any]:
         response = await self._request("GET", f"/pulls/{number}")
-        if response.status_code == 404:
-            raise HostRefused(404, "no such pull request")
         result: dict[str, Any] = response.json()
         return result
 

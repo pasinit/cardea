@@ -13,6 +13,7 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
+            "schema_version": {"const": "0.1"},
             "namespace": {"type": "string"},
             "resource_id": {"type": "string"},
             "version": {"type": "integer", "minimum": 1},
