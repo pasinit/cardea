@@ -190,7 +190,7 @@ errors answer 409. A request that fails schema validation answers
 | `unsafe_backup` | 500 | File must be private, regular and owned | `cardea.service.maintenance` |
 | `unsafe_directory` | 500 | Service directory must be private | `cardea.service.database` |
 | `unsafe_environment` | 500 | Remove inherited DBOS environment overrides | `cardea.service.server` |
-| `unsafe_file` | 500 | Credential/configuration file must be private; {…} must be a regular file owned by root and writable only by its owner | `cardea.service.database`, `cardea.service.harnesses` |
+| `unsafe_file` | 500 | Credential/configuration file must be private; {…} must be a regular file owned by root and writable only by its owner; A vcs configuration with a token must be private (and 1 more) | `cardea.service.database`, `cardea.service.harnesses`, `cardea_vcs_ops.config` |
 | `unsafe_socket` | 500 | Refusing to replace a non-owned socket | `cardea.service.server` |
 | `unsafe_store_path` | 409 | Store paths must be private and owned by this user. | `cardea.kernel.store` |
 | `unsupported_encoding` | — | Only identity content encoding is supported | `cardea.service.app` |
@@ -231,6 +231,7 @@ used by the examples.
 | `content_refusal_ignored` | the worker continued after the content gate refused | `cardea.service.confined` |
 | `content_refused` | The content gate refused a call (ADR-037 decision 4). | `cardea.service.operations` |
 | `credential_in_change` | the change or a command's output contains the model credential; nothing is returned | `cardea_coding_ops.session` |
+| `credential_unavailable` | — | `cardea_vcs_ops.ops` |
 | `deadline_exceeded` | Task deadline elapsed. | `cardea.kernel.store` |
 | `effect_not_applied` | Destination shows no effect | `cardea.service.operation_runtime` |
 | `executor_busy` | — | `cardea.service.invocation` |
@@ -238,6 +239,9 @@ used by the examples.
 | `guard_refused` | {…} guard failed to evaluate: {…}; {…} guard refused this call | `cardea.service.records` |
 | `host_outcome_unknown` | Interrupted host intent; no replay | `cardea.service.host_runtime` |
 | `host_refused` | The host reports a duplicate it does not list | `cardea_vcs_ops.ops` |
+| `input_digest_mismatch` | Staged input {…} does not match its digest | `cardea.hosts.operation_worker` |
+| `input_too_large` | The call's inputs exceed what a worker may take | `cardea.service.confined` |
+| `input_unavailable` | The job's inputs were not staged; A staged input is missing | `cardea.hosts.operation_worker` |
 | `invalid_arguments` | Invalid decision | `cardea.service.approval_requests` |
 | `member_draining` | A draining group member takes no new claims | `cardea.service.records` |
 | `operation_failed` | no result within {…} s; {…} (HTTP {…}) | `cardea.service.invocation` |
@@ -262,6 +266,6 @@ used by the examples.
 | `worker_error` | {…} (HTTP {…}) | `cardea.service.confined` |
 | `worker_failed` | exit status {…}, systemd result {…} | `cardea.service.confined` |
 | `worker_lost` | Worker lease expired. | `cardea.kernel.store` |
-| `worker_output_invalid` | unexpected artifacts; output is not JSON | `cardea.service.confined` |
+| `worker_output_invalid` | unexpected artifacts; output is not JSON; not a reconciliation | `cardea.service.confined` |
 | `worker_start_unknown` | helper start failed | `cardea.service.confined` |
 | `worker_status_unknown` | worker status unavailable | `cardea.service.confined` |
