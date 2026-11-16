@@ -477,7 +477,10 @@ def test_operation_worker_speaks_json_on_stdin_and_stdout(
     async def refuse(arguments: dict[str, Any], context: OperationContext) -> dict[str, Any]:
         raise OperationRejected("blocked by robots.txt")
 
-    assert run_worker(monkeypatch, capsys, refuse) == {"rejected": "blocked by robots.txt"}
+    assert run_worker(monkeypatch, capsys, refuse) == {
+        "rejected": "blocked by robots.txt",
+        "code": "operation_rejected",
+    }
 
     class HTTPStatusError(Exception):
         def __init__(self) -> None:

@@ -24,8 +24,10 @@ import logging
 import re
 import threading
 import time
+import uuid
 from collections.abc import Callable
 from contextvars import ContextVar
+from functools import partial
 from typing import Any
 
 from pydantic import JsonValue
@@ -39,6 +41,8 @@ from cardea.service.operations import (
     Handler,
     OperationContext,
     OperationRejected,
+    Reconciler,
+    Reconciliation,
 )
 
 log = logging.getLogger(__name__)
@@ -124,7 +128,10 @@ def _document(status: dict[str, Any]) -> tuple[dict[str, Any], object | None]:
         raise WorkerFailed(
             "worker_output_invalid", "invalid_output", "output is not JSON"
         ) from None
-    if isinstance(document, dict) and set(document) == {"rejected"}:
+    if isinstance(document, dict) and set(document) in ({"rejected"}, {"rejected", "code"}):
+        given = document.get("code")
+        if isinstance(given, str) and re.fullmatch(r"[a-z][a-z0-9_]{0,63}", given):
+            raise OperationRejected(str(document["rejected"])[:256], given)
         raise OperationRejected(str(document["rejected"])[:256])
     if isinstance(document, dict) and set(document) == {"error"}:
         # The worker caught an exception and described it (operation_worker): no stderr.
@@ -267,6 +274,7 @@ class Workers:
         deadline: float,
         watch: Watch | None = None,
         timeout_seconds: float | None = None,
+        inputs: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         """Wait for a profile slot (bounded by the profile's queue timeout), then run.
 
@@ -281,7 +289,7 @@ class Workers:
         try:
             if timeout_seconds is not None:
                 deadline = min(deadline, time.time() + timeout_seconds)
-            return await self._run(job, payload, profile, worker, deadline, watch)
+            return await self._run(job, payload, profile, worker, deadline, watch, inputs)
         finally:
             if slot is not None:
                 slot.release()
@@ -294,11 +302,14 @@ class Workers:
         worker: str,
         deadline: float,
         watch: Watch | None,
+        inputs: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         content = json.dumps(payload, separators=(",", ":")).encode()
+        # Only hosts that stage inputs are asked to: other hosts keep their signature.
+        extra: dict[str, Any] = {"inputs": inputs} if inputs else {}
         try:
             await asyncio.to_thread(
-                self.host.start_confined, job, content, deadline, profile, worker
+                partial(self.host.start_confined, **extra), job, content, deadline, profile, worker
             )
         except Fault as error:
             if error.code == "host_rejected":
@@ -329,6 +340,80 @@ class Workers:
 
 
 StoreArtifacts = Callable[[OperationContext, dict[str, Any], object], dict[str, Any]]
+# Staged inputs a confined job may carry (ADR-037); the helper's profile cap applies too.
+MAX_STAGED_BYTES = 16 * 1048576
+MAX_STAGED_FILES = 8
+
+
+def stage_inputs(
+    context: OperationContext,
+) -> tuple[dict[str, dict[str, JsonValue]], list[dict[str, str]]]:
+    """A job's staged inputs: the manifest the worker checks (pointer to file index,
+    SHA-256 and size) and the files the helper writes. Never recorded anywhere."""
+    items = sorted(context.inputs.items())
+    if len(items) > MAX_STAGED_FILES or sum(len(d) for _, d in items) > MAX_STAGED_BYTES:
+        raise OperationRejected(
+            "The call's inputs exceed what a worker may take", "input_too_large"
+        )
+    manifest: dict[str, dict[str, JsonValue]] = {}
+    files: list[dict[str, str]] = []
+    for index, (pointer, data) in enumerate(items):
+        digest = hashlib.sha256(data).hexdigest()
+        manifest[pointer] = {"file": str(index), "sha256": digest, "bytes": len(data)}
+        files.append({"sha256": digest, "data": base64.b64encode(data).decode()})
+    return manifest, files
+
+
+def job_document(
+    arguments: dict[str, JsonValue], context: OperationContext, entry: str | None
+) -> dict[str, Any]:
+    """What a confined operation worker reads on stdin."""
+    return {
+        **({"entry": entry} if entry is not None else {}),
+        "arguments": arguments,
+        "context": {
+            "task_id": context.task_id,
+            "namespace": context.namespace,
+            "receipt_id": context.receipt_id,
+            "deadline": context.deadline.isoformat(),
+            "effect_key": context.effect_key,
+            "agent_id": context.agent_id,
+            "idempotency_context": context.idempotency_context,
+            "slot_time": context.slot_time,
+            "group": context.group,
+        },
+    }
+
+
+def confined_reconciler(
+    workers: "Workers", executor: ConfinedExecutor, entry: str, timeout_seconds: int
+) -> Reconciler:
+    """A reconciler whose code runs in the operation's confined worker (ADR-037).
+
+    It reads the destination with the worker's own credential, so the service process
+    never holds one. Each pass is a new job: reconciling may repeat, and only reads.
+    """
+
+    async def reconcile(
+        arguments: dict[str, JsonValue], context: OperationContext
+    ) -> Reconciliation:
+        # Reconciliation runs after the call's deadline; it gets its own.
+        deadline = time.time() + timeout_seconds
+        output = await workers.run(
+            job_id("reconcile", f"{context.receipt_id}:{uuid.uuid4().hex}"),
+            {**job_document(arguments, context, entry), "reconcile": True},
+            profile=executor.profile,
+            worker=executor.worker,
+            deadline=deadline,
+            timeout_seconds=timeout_seconds,
+        )
+        applied = output.get("applied")
+        observed = output.get("output")
+        if type(applied) is not bool or (observed is not None and not isinstance(observed, dict)):
+            raise WorkerFailed("worker_output_invalid", "invalid_output", "not a reconciliation")
+        return Reconciliation(applied=applied, output=observed if applied else None)
+
+    return reconcile
 
 
 def confined_handler(
@@ -338,6 +423,7 @@ def confined_handler(
     watch: Callable[[str, str], str | None],
     store_artifacts: StoreArtifacts | None = None,
     gate: Callable[[OperationContext], Any] | None = None,
+    entry: str | None = None,
 ) -> Handler:
     """A handler with the in-process signature whose code runs in a confined worker.
 
@@ -346,6 +432,9 @@ def confined_handler(
 
     `gate` opens the call's content-gate callback (ADR-037), a context manager with `url`,
     `token` and the `refusal` it recorded, handed to the worker as its `check_content`.
+
+    `entry` names the handler's entry point for a worker that serves several (ADR-037);
+    the context's group and staged inputs go to the worker too (`stage_inputs`).
     """
 
     async def run(arguments: dict[str, JsonValue], context: OperationContext) -> Any:
@@ -375,20 +464,12 @@ def confined_handler(
         context: OperationContext,
         callback: dict[str, str] | None,
     ) -> Any:
-        payload = {
-            "arguments": arguments,
-            "context": {
-                "task_id": context.task_id,
-                "namespace": context.namespace,
-                "receipt_id": context.receipt_id,
-                "deadline": context.deadline.isoformat(),
-                "effect_key": context.effect_key,
-                "agent_id": context.agent_id,
-                "idempotency_context": context.idempotency_context,
-                "slot_time": context.slot_time,
-                **({"content_gate": callback} if callback is not None else {}),
-            },
-        }
+        manifest, staged = stage_inputs(context)
+        payload = job_document(arguments, context, entry)
+        if callback is not None:
+            payload["context"]["content_gate"] = callback
+        if manifest:
+            payload["context"]["inputs"] = manifest
         status = await workers.status_of(
             job_id("operation", context.receipt_id),
             payload,
@@ -397,6 +478,7 @@ def confined_handler(
             deadline=context.deadline.timestamp(),
             timeout_seconds=timeout_seconds,
             watch=lambda: watch(context.task_id, context.lease_id),
+            inputs=staged,
         )
         if store_artifacts is None:
             return _result(status)
