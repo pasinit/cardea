@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: help install error-codes try try-test try-check teams teams-test test api-test kernel-test standards-test m1-test m1-demo kernel-openapi spire-fit dbos-fit dbos-integration-fit temporal-fit absurd-fit hatchet-fit cel-fit kernel-schema kernel-demo lint lint-api fix-lint format typecheck typecheck-api check-uv
+.PHONY: help install acceptance-check error-codes try try-test try-check teams teams-test test api-test kernel-test standards-test m1-test m1-demo kernel-openapi spire-fit dbos-fit dbos-integration-fit temporal-fit absurd-fit hatchet-fit cel-fit kernel-schema kernel-demo lint lint-api fix-lint format typecheck typecheck-api check-uv
 
 API_DIR := apps/api
 UV ?= $(shell command -v uv 2>/dev/null || printf "%s/bin/uv" "$$(python3 -m site --user-base)")
@@ -18,6 +18,7 @@ help:
 	@printf "  make m1-demo      Run authenticated crash/restart demonstration\n"
 	@printf "  make kernel-openapi Export the separate v0.2 kernel API\n"
 	@printf "  make error-codes  Regenerate docs/error-codes.md from the source\n"
+	@printf "  make acceptance-check Lint the Debian acceptance scripts\n"
 	@printf "  make spire-fit    Run real SPIRE bootstrap and identity binding tests\n"
 	@printf "  make dbos-fit     Run isolated DBOS SQLite/PostgreSQL experiments\n"
 	@printf "  make dbos-integration-fit Run DBOS/Cardea commit and recovery tests\n"
@@ -183,6 +184,14 @@ m4-test: check-uv
 m4-check: check-uv
 	"$(UV)" run --locked --project $(API_DIR) ruff check --config apps/api/pyproject.toml experiments/m4
 	"$(UV)" run --locked --project $(API_DIR) mypy --follow-imports=silent --ignore-missing-imports --check-untyped-defs experiments/m4
+
+.PHONY: acceptance-check
+# The Debian acceptance scripts (docs/acceptance/debian-adr-034-037.md): lint and types only;
+# they run on a Debian host, never here.
+acceptance-check: check-uv
+	"$(UV)" run --locked --project $(API_DIR) ruff check --config apps/api/pyproject.toml experiments/debian-acceptance
+	"$(UV)" run --locked --project $(API_DIR) ruff format --check --config apps/api/pyproject.toml experiments/debian-acceptance
+	"$(UV)" run --locked --project $(API_DIR) mypy --follow-imports=silent --ignore-missing-imports --check-untyped-defs experiments/debian-acceptance
 
 .PHONY: m5-stage m5-check
 m5-stage: check-uv
