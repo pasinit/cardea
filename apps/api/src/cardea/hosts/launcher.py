@@ -83,7 +83,9 @@ PROPERTIES = {
 
 
 # Confined worker profiles (ADR-028). The fixed M2 workers above are unchanged.
-MAX_OUTPUT = 262144
+# A worker's output document; artifacts such as a coding session's change bundle travel in it
+# (ADR-037), so it may reach 16 MiB. Each profile's `output_kb` sets its own, smaller limit.
+MAX_OUTPUT = 16 * 1048576
 MAX_REQUEST = 262144
 MAX_CONFINED_INPUT = 131072
 NAME = r"[a-z][a-z0-9-]{0,31}"
@@ -514,7 +516,8 @@ def status(job: str) -> dict[str, Any]:
         state = "running"
     output = b""
     path = ROOT / job / "output"
-    if path.exists():
+    # The output is read once the worker has finished, not on every poll while it runs.
+    if state == "finished" and path.exists():
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
         try:
             info = os.fstat(fd)
