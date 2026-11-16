@@ -16,18 +16,21 @@ from test_agent_runs import FakeSession, call
 from test_groups import manifest, pool, put, rows
 
 from cardea.runtime.agent_session import SessionRequest, SessionResult
-from cardea.service import group_windows, spend
+from cardea.service import approval_requests, group_windows, spend
 from cardea.service.agent_run_runtime import AgentRunRuntime
 from cardea.service.app import create_app
+from cardea.service.approval_requests import DecisionRequest
 from cardea.service.database import Fault
-from cardea.service.kernel import Kernel
-from cardea.service.models import AgentRunRequest
+from cardea.service.kernel import Kernel, provision
+from cardea.service.models import AgentRunRequest, Provisioning
 
 kernel, session = groups.kernel, groups.session
 REQUESTS = count()
 
 
-def spending(group: dict[str, Any] | None = None, **pool_changes: Any) -> dict[str, Any]:
+def spending(
+    group: dict[str, Any] | None = None, attempts: int = 1, **pool_changes: Any
+) -> dict[str, Any]:
     body = manifest(
         pool(
             replicas=3,
@@ -35,7 +38,7 @@ def spending(group: dict[str, Any] | None = None, **pool_changes: Any) -> dict[s
                 "instructions": "Search listings and email one recap.",
                 "operations": ["listings.search", "mail.send"],
                 "model": "model-a",
-                "bounds": {"timeout_seconds": 60, "attempts": 1, "max_cost_usd": 0.5},
+                "bounds": {"timeout_seconds": 60, "attempts": attempts, "max_cost_usd": 0.5},
             },
             **pool_changes,
         )
@@ -224,3 +227,101 @@ def test_window_close_mails_the_supervisor_once(
     with kernel.database.engine.begin() as conn:
         conn.exec_driver_sql("UPDATE agent_groups SET state='deleted'")
     assert group_windows.tick(kernel, closed + timedelta(days=1)) == {}
+
+
+# A run stops instead of overrunning: no retry or continuation once its account is spent
+
+
+def failing(cost: float) -> Any:
+    async def script(client: ClientSession, request: SessionRequest) -> SessionResult:
+        return SessionResult(text="", is_error=True, stop_reason="error", cost_usd=cost)
+
+    return script
+
+
+def stopped_mail(kernel: Kernel) -> list[dict[str, Any]]:
+    return [
+        parts[1]["data"]
+        for parts in supervisor_mail(kernel)
+        if parts[1].get("data", {}).get("code") == "budget_exhausted"
+    ]
+
+
+def test_a_retry_does_not_start_once_the_account_is_spent(
+    kernel: Kernel, session: FakeSession
+) -> None:
+    put(kernel, spending({"usd": 1.0, "window": "day"}, attempts=2))
+    task_id = admit(kernel, "desk.worker.0")
+    # The first attempt fails after spending the whole ceiling (more than its reservation).
+    session.scripts = [failing(1.0), costing(0.1)]
+    assert AgentRunRuntime(kernel).execute(task_id) == "failed"
+    assert len(session.requests) == 1  # the retry never started
+    ((code,),) = rows(
+        kernel, "SELECT json_extract(snapshot,'$.failure.code') FROM tasks WHERE task_id=?", task_id
+    )
+    assert code == "budget_exhausted"
+    (notice,) = stopped_mail(kernel)
+    assert notice["task_id"] == task_id and notice["account"] == "group"
+    assert notice["used_usd"] == 1.0 and notice["ceiling_usd"] == 1.0
+    # The run settles normally, at what it reported.
+    with kernel.database.engine.begin() as conn:
+        spend.settle(conn, "test", "desk", datetime.now(UTC))
+    assert rows(kernel, "SELECT state,cost_usd FROM spend_reservations") == [("settled", 1.0)]
+
+
+def test_a_retry_with_room_left_still_runs(kernel: Kernel, session: FakeSession) -> None:
+    put(kernel, spending({"usd": 1.0, "window": "day"}, attempts=2))
+    task_id = admit(kernel, "desk.worker.0")
+    session.scripts = [failing(0.2), costing(0.1)]
+    assert AgentRunRuntime(kernel).execute(task_id) == "succeeded"
+    assert len(session.requests) == 2 and stopped_mail(kernel) == []
+
+
+def approvals_document() -> Any:
+    """test_groups' policy, with a host rule holding mail.send for approval."""
+    document = groups.document().model_dump(mode="json")
+    for row in document["permissions"]:
+        if row["principal_id"] == "supervisor" and row["operation"] == "mail.send":
+            row["approve"] = True
+    for row in document["platform"]:
+        if row["operation"] == "mail.send":
+            row["approve"] = True
+    rule = {"rule_id": "mail", "level": "always", "reason": "Mail needs approval"}
+    document["approvals"] = {
+        "entries": [{"namespace": "test", "operation": "mail.send", "rules": [rule]}]
+    }
+    return Provisioning.model_validate(document)
+
+
+def test_an_approval_continuation_does_not_start_once_the_account_is_spent(
+    kernel: Kernel, session: FakeSession
+) -> None:
+    provision(kernel.database, approvals_document(), groups.REGISTRY)
+    put(kernel, spending({"usd": 1.0, "window": "day"}))
+
+    async def proposes(client: ClientSession, request: SessionRequest) -> SessionResult:
+        held = await call(client, "mail-send", to="user@example.invalid")
+        assert held.is_error and "approval_pending" in str(held.content)
+        return SessionResult(text="Asked for approval.", is_error=False, cost_usd=1.0)
+
+    session.scripts = [proposes, costing(0.1)]
+    task_id = admit(kernel, "desk.worker.0")
+    assert AgentRunRuntime(kernel).execute(task_id) == "waiting"
+    ((request_id, digest),) = rows(
+        kernel, "SELECT request_id,intent_digest FROM approval_requests WHERE task_id=?", task_id
+    )
+    approval_requests.decide(
+        kernel,
+        kernel.auth.validate("supervisor"),
+        request_id,
+        DecisionRequest(decision_id="d-1", decision="approve", intent_digest=digest),
+    )
+    # The continuation would run the approved call; the account is spent, so it does not.
+    assert AgentRunRuntime(kernel).execute(task_id) == "failed"
+    assert len(session.requests) == 1
+    assert rows(
+        kernel, "SELECT state,void_reason FROM approval_requests WHERE request_id=?", request_id
+    ) == [("void", "budget_exhausted")]
+    assert rows(kernel, "SELECT COUNT(*) FROM operations WHERE task_id=?", task_id) == [(0,)]
+    (notice,) = stopped_mail(kernel)
+    assert notice["task_id"] == task_id
