@@ -215,7 +215,9 @@ The owner may veto either.
   - a comment or review carrying the hidden marker `<!-- cardea:<effect key> -->`.
 
   A duplicate pull request (422 from another effect scope) returns the existing pull request. Any other 4xx is a definite refusal, `host_refused`; a 5xx or a dropped connection leaves the effect `outcome_unknown` for the reconciler.
-- **Pushing.** `vcs.push_branch` takes the change as a kernel object (a git bundle) and the commit to push. It verifies the bundle in an empty bare repository, checks that the bundle holds that commit, and pushes one ref without force, with hooks and credential helpers disabled.
+- **Pushing.** `vcs.push_branch` takes the change and the commit to push. The change is the `change.bundle` artifact entry that `code.session` returns (its object parts, joined and checked against its `sha256`), or one object version.
+  - In a private bare repository it first fetches the host's branch heads, so a thin bundle's base (`base..HEAD`) is present.
+  - It verifies the bundle, checks that the bundle holds that commit, and pushes one ref without force, with hooks and credential helpers disabled.
   - A branch already at the commit is not pushed again.
   - `expected_head` refuses a branch that moved.
   - Its effect scope is `/repository`, `/branch`, `/head` rather than `/change`: two bundles of the same commit are the same effect.
@@ -224,21 +226,19 @@ The owner may veto either.
   - the branch and a pull request's head must start with `agent/<group>/`;
   - `APPROVE` is refused unless `allow_approve`;
   - every text and the change pass the kernel's content gate.
-- **Content gate.** Every sending operation calls the kernel's gate (slice 6, `OperationContext.check_content`) before it asks for a credential or sends anything.
-  - `vcs.push_branch` passes every commit the bundle carries, as one unified diff of added lines, and each commit message as a text field (`commit_message:<sha>`).
+- **Content gate.** Every sending operation calls the kernel's gate (slice 6, `OperationContext.check_content`) before it sends anything.
+  - `vcs.push_branch` passes the commits the host does not have yet, as one unified diff of added lines, and each of their messages as a text field (`commit_message:<sha>`). Its only earlier network use is reading the host's heads.
   - `vcs.open_change` passes the title and body, `vcs.comment` the comment, and `vcs.review` the review body.
   - A finding is a definite `content_refused` that names the rule and place, never the text.
   - A call with no gate bound, or a gate that cannot run, is refused (`content_gate_unavailable`): the gate fails closed.
-  - Bundles must be self-contained for now (they are unpacked into an empty repository), so the whole history they carry is scanned.
 - **Kernel additions,** generic and additive, with descriptor digests unchanged when unset:
   - descriptor `resource: {grant: "repo", argument: "/repository"}`: the invocation core checks `repo:<value>` in the caller's live ceiling before the intent exists;
-  - descriptor `inputs`: argument pointers that name object versions in the call's namespace. The core reads them under the `objects.read` ceiling, and the store verifies their digest. The handler gets the bytes in `OperationContext.inputs`, and they are never recorded.
+  - descriptor `inputs`: argument pointers that name an object version, or an artifact listing (`{sha256, parts}`, the form confined operations return), in the call's namespace. The core reads them under the `objects.read` ceiling: the store verifies each part's digest and the core checks the joined bytes against `sha256` (`input_digest_mismatch`). The handler gets the bytes in `OperationContext.inputs`, and they are never recorded.
   - `OperationContext.group`: the caller's group from the member table, also recorded in the receipt's context for reconcilers;
   - the grant form `repo:<alias>`, which provisioning accepts like `mail:` and `record:`.
 - **Not yet:**
   - the `vcs` confined-worker profile: the handlers run in the service process for now, and moving them behind ADR-028 is a later slice;
   - the App minter;
-  - `code.session`, which is slice 3 and would produce the change bundles;
   - the repository-side ruleset readiness check.
 
   No migration was needed.
@@ -250,6 +250,7 @@ The owner may veto either.
   - **Inputs:** a change from another namespace is not staged.
   - **Crash and reconcile,** for each effect: push, open, comment and review each apply on the host and then drop the connection. The run fails with `reconciliation_required`, and the reconcile endpoint settles each one from host state with exactly one effect on the host.
   - **Duplicate:** a duplicate pull request returns the existing one.
+  - **Thin bundles:** a `base..HEAD` bundle passed as a two-part artifact listing, as `code.session` returns it, pushes. The base already on the host is not scanned again, and a listing whose parts do not match its `sha256` is refused before anything runs.
   - **Content gate:** a denylisted term in a pushed file, in a commit message or in a comment is refused with nothing sent and without echoing the term, and with no gate configured nothing is sent.
   - **Token containment:** the token reaches the host's `Authorization` header and appears in no database row, log record, session request or handler representation.
   - **Digests:** descriptors without `resource` or `inputs` keep their digest.
