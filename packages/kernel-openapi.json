@@ -2784,6 +2784,90 @@
         "title": "GroupMetadataView",
         "type": "object"
       },
+      "GroupOverview": {
+        "additionalProperties": false,
+        "description": "`GET /v0.2/groups/{name}/overview`: one read snapshot of a group's state.",
+        "properties": {
+          "approvals": {
+            "$ref": "#/components/schemas/OverviewApprovals"
+          },
+          "as_of": {
+            "title": "As Of",
+            "type": "string"
+          },
+          "collections": {
+            "items": {
+              "$ref": "#/components/schemas/OverviewCollection"
+            },
+            "title": "Collections",
+            "type": "array"
+          },
+          "cursor": {
+            "description": "The journal cursor of the snapshot.",
+            "title": "Cursor",
+            "type": "integer"
+          },
+          "generation": {
+            "title": "Generation",
+            "type": "integer"
+          },
+          "group": {
+            "title": "Group",
+            "type": "string"
+          },
+          "journal": {
+            "$ref": "#/components/schemas/OverviewJournal"
+          },
+          "mailbox": {
+            "$ref": "#/components/schemas/OverviewMailbox"
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "observed_generation": {
+            "title": "Observed Generation",
+            "type": "integer"
+          },
+          "pools": {
+            "items": {
+              "$ref": "#/components/schemas/OverviewPool"
+            },
+            "title": "Pools",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "spend": {
+            "$ref": "#/components/schemas/OverviewSpend"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "group",
+          "namespace",
+          "state",
+          "generation",
+          "observed_generation",
+          "as_of",
+          "cursor",
+          "pools",
+          "collections",
+          "mailbox",
+          "approvals",
+          "spend",
+          "journal"
+        ],
+        "title": "GroupOverview",
+        "type": "object"
+      },
       "GroupPlan": {
         "additionalProperties": false,
         "properties": {
@@ -4731,6 +4815,598 @@
           "receipt"
         ],
         "title": "OperationView",
+        "type": "object"
+      },
+      "OverviewAccount": {
+        "additionalProperties": false,
+        "properties": {
+          "account": {
+            "description": "`group` or `pool:<name>`.",
+            "title": "Account",
+            "type": "string"
+          },
+          "usd": {
+            "title": "Usd",
+            "type": "number"
+          },
+          "used_usd": {
+            "description": "Settled costs plus open and unknown reservations.",
+            "title": "Used Usd",
+            "type": "number"
+          },
+          "window": {
+            "title": "Window",
+            "type": "string"
+          },
+          "window_ends_at": {
+            "title": "Window Ends At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "account",
+          "usd",
+          "window",
+          "window_ends_at",
+          "used_usd"
+        ],
+        "title": "OverviewAccount",
+        "type": "object"
+      },
+      "OverviewAddress": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "title": "Address",
+            "type": "string"
+          },
+          "consumed": {
+            "title": "Consumed",
+            "type": "integer"
+          },
+          "dead": {
+            "title": "Dead",
+            "type": "integer"
+          },
+          "in_flight": {
+            "title": "In Flight",
+            "type": "integer"
+          },
+          "pending": {
+            "title": "Pending",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "address",
+          "pending",
+          "in_flight",
+          "dead",
+          "consumed"
+        ],
+        "title": "OverviewAddress",
+        "type": "object"
+      },
+      "OverviewApproval": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "operation": {
+            "title": "Operation",
+            "type": "string"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "resource": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "task_id",
+          "operation",
+          "resource",
+          "state",
+          "created_at",
+          "expires_at"
+        ],
+        "title": "OverviewApproval",
+        "type": "object"
+      },
+      "OverviewApprovals": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OverviewApproval"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "truncated"
+        ],
+        "title": "OverviewApprovals",
+        "type": "object"
+      },
+      "OverviewClaim": {
+        "additionalProperties": false,
+        "properties": {
+          "age_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Age Seconds"
+          },
+          "claim_epoch": {
+            "title": "Claim Epoch",
+            "type": "integer"
+          },
+          "claimed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claimed At"
+          },
+          "holder": {
+            "title": "Holder",
+            "type": "string"
+          },
+          "lease_expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lease Expires At"
+          },
+          "record_id": {
+            "title": "Record Id",
+            "type": "string"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "record_id",
+          "title",
+          "state",
+          "holder",
+          "claim_epoch",
+          "claimed_at",
+          "age_seconds",
+          "lease_expires_at"
+        ],
+        "title": "OverviewClaim",
+        "type": "object"
+      },
+      "OverviewCollection": {
+        "additionalProperties": false,
+        "properties": {
+          "by_state": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Record counts by state; `null` without states.",
+            "title": "By State",
+            "type": "object"
+          },
+          "claimed": {
+            "items": {
+              "$ref": "#/components/schemas/OverviewClaim"
+            },
+            "title": "Claimed",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "status",
+          "by_state",
+          "total",
+          "claimed",
+          "truncated"
+        ],
+        "title": "OverviewCollection",
+        "type": "object"
+      },
+      "OverviewEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "cursor": {
+            "title": "Cursor",
+            "type": "integer"
+          },
+          "producer_id": {
+            "title": "Producer Id",
+            "type": "string"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cursor",
+          "type",
+          "producer_id",
+          "task_id",
+          "subject",
+          "at"
+        ],
+        "title": "OverviewEvent",
+        "type": "object"
+      },
+      "OverviewExpectation": {
+        "additionalProperties": false,
+        "properties": {
+          "observed": {
+            "title": "Observed",
+            "type": "integer"
+          },
+          "outcome": {
+            "title": "Outcome",
+            "type": "string"
+          },
+          "pool": {
+            "title": "Pool",
+            "type": "string"
+          },
+          "reported_at": {
+            "title": "Reported At",
+            "type": "string"
+          },
+          "window_key": {
+            "title": "Window Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pool",
+          "window_key",
+          "outcome",
+          "observed",
+          "reported_at"
+        ],
+        "title": "OverviewExpectation",
+        "type": "object"
+      },
+      "OverviewJournal": {
+        "additionalProperties": false,
+        "properties": {
+          "events": {
+            "description": "Newest first.",
+            "items": {
+              "$ref": "#/components/schemas/OverviewEvent"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "events",
+          "truncated"
+        ],
+        "title": "OverviewJournal",
+        "type": "object"
+      },
+      "OverviewMailbox": {
+        "additionalProperties": false,
+        "properties": {
+          "addresses": {
+            "items": {
+              "$ref": "#/components/schemas/OverviewAddress"
+            },
+            "title": "Addresses",
+            "type": "array"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "addresses",
+          "truncated"
+        ],
+        "title": "OverviewMailbox",
+        "type": "object"
+      },
+      "OverviewMember": {
+        "additionalProperties": false,
+        "properties": {
+          "active_task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The member's unfinished run, if any.",
+            "title": "Active Task Id"
+          },
+          "claims": {
+            "description": "Live claims held, as `<collection>/<record_id>`.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Claims",
+            "type": "array"
+          },
+          "claims_truncated": {
+            "title": "Claims Truncated",
+            "type": "integer"
+          },
+          "disabled": {
+            "title": "Disabled",
+            "type": "boolean"
+          },
+          "last_run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OverviewRun"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its most recently finished run."
+          },
+          "ordinal": {
+            "title": "Ordinal",
+            "type": "integer"
+          },
+          "pool": {
+            "title": "Pool",
+            "type": "string"
+          },
+          "principal_id": {
+            "title": "Principal Id",
+            "type": "string"
+          },
+          "state": {
+            "description": "active, draining or removed.",
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "principal_id",
+          "pool",
+          "ordinal",
+          "state",
+          "disabled",
+          "active_task_id",
+          "last_run",
+          "claims",
+          "claims_truncated"
+        ],
+        "title": "OverviewMember",
+        "type": "object"
+      },
+      "OverviewPool": {
+        "additionalProperties": false,
+        "properties": {
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/OverviewMember"
+            },
+            "title": "Members",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "replicas": {
+            "description": "Replicas in the spec; 0 for a removed pool.",
+            "title": "Replicas",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "replicas",
+          "members"
+        ],
+        "title": "OverviewPool",
+        "type": "object"
+      },
+      "OverviewRun": {
+        "additionalProperties": false,
+        "properties": {
+          "failure_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Code"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "outcome": {
+            "title": "Outcome",
+            "type": "string"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "outcome",
+          "failure_code",
+          "finished_at"
+        ],
+        "title": "OverviewRun",
+        "type": "object"
+      },
+      "OverviewSpend": {
+        "additionalProperties": false,
+        "properties": {
+          "accounts": {
+            "items": {
+              "$ref": "#/components/schemas/OverviewAccount"
+            },
+            "title": "Accounts",
+            "type": "array"
+          },
+          "expectations": {
+            "description": "Latest closed windows first.",
+            "items": {
+              "$ref": "#/components/schemas/OverviewExpectation"
+            },
+            "title": "Expectations",
+            "type": "array"
+          },
+          "expectations_truncated": {
+            "title": "Expectations Truncated",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "accounts",
+          "expectations",
+          "expectations_truncated"
+        ],
+        "title": "OverviewSpend",
         "type": "object"
       },
       "ReceiptRequirement": {
@@ -9628,6 +10304,194 @@
           }
         ],
         "summary": "Apply Group"
+      }
+    },
+    "/v0.2/groups/{name}/overview": {
+      "get": {
+        "description": "A supervisor's overview of a group (ADR-034 amendment 2026-11-16), read in one\nsnapshot: members and their runs and claims, each listed collection's counts and\nclaimed records, mailbox counts, open approvals, spend and the latest journal\nevents. The rights are those of `GET /v0.2/groups/{name}`.",
+        "operationId": "group_overview_v0_2_groups__name__overview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z][a-z0-9-]{0,39}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "namespace",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "Namespace",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "events",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 0,
+              "title": "Events",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-cardea-auth",
+            "required": false,
+            "schema": {
+              "default": "spiffe",
+              "title": "X-Cardea-Auth",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupOverview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Method Not Allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Group Overview"
       }
     },
     "/v0.2/host-budget": {
