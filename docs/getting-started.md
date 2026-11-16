@@ -306,6 +306,16 @@ A pool's `grants` are its runs' complete grants, and nothing is added. An agent 
 
 To restructure the group, change the manifest and apply it again. For example, set `replicas` to 3 or pick another `model`; no code change is needed. Scaling down, removing a pool (or renaming one) and `DELETE /v0.2/groups/desk?namespace=team` drain members: a draining member takes no new slots, claims or pool mail, its current run may finish until the pool's `drain_timeout_seconds` (then it is cancelled), and then its claims are released, its mail goes to its pool and its principal is disabled. `status.observedGeneration` catches up when nothing drains. Until slice 9 lands, `spend` and `expect_window` are refused with 422. A pool's `event` triggers read the group's own kernel journal (slice 7).
 
+To see the group at a glance, `GET /v0.2/groups/desk/overview?namespace=team` returns one read snapshot (ADR-034's team overview amendment). It lists:
+- each pool's members, with their active and last runs and the claims they hold;
+- each listed collection's counts by state and its claimed records;
+- mailbox counts per address;
+- open approvals;
+- spend for the current window, and the last windowed expectations;
+- the latest journal events.
+
+Every list is bounded, with `truncated`. Its rights are those of `GET /v0.2/groups/{name}`.
+
 ## 7b. Two whole teams from configuration
 
 [`examples/teams`](../examples/teams/README.md) holds ADR-034's two worked examples as files: a software team with a review gate, and a trading desk whose orders need a human approver, survive a crash without a second placement and are filled by a signed broker webhook. Their operations come from the fake reference package [`cardea-reference-ops`](../packages/cardea-reference-ops/README.md). Run `make teams` to watch both on a throwaway kernel.

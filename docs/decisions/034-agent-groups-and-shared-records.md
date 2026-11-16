@@ -498,7 +498,7 @@ Portable tests go in `apps/api/tests/service/`. Before the record is called veri
     - mailbox counts by address and delivery state (pending, in flight, dead);
     - open approval requests of the group's runs;
     - each spend account's current window (used against ceiling), and the last closed `expect_window` results;
-    - the latest journal events produced by members or their runs.
+    - the latest journal events produced by members or their runs, limited to the domain events that journal triggers see (mail, record and approval events).
   - **Bounds.** Every list is bounded and says how many entries it left out (`truncated`).
   - **No new storage.** It needs no migration, no index and no new state.
 - **No page.** The kernel serves no static pages, and adding a web UI is out of scope. The walkthrough (`make teams`) prints the software team's overview at the end of its run.

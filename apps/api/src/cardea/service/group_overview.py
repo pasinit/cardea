@@ -14,6 +14,7 @@ import sqlalchemy as sa
 
 from cardea.service import spend
 from cardea.service.auth import Proof
+from cardea.service.journal import APPROVALS
 from cardea.service.models import GroupSpec, now
 from cardea.service.policy import Policy
 
@@ -270,8 +271,14 @@ def _spend(
 def _journal(
     conn: sa.Connection, namespace: str, group: str, members: list[str], limit: int
 ) -> dict[str, Any]:
-    where = f"namespace=? AND (producer_id IN {_in(members)} OR task_id IN ({MEMBER_TASKS}))"
-    values = (namespace, *members, namespace, group)
+    # The domain events journal triggers see (ADR-034 decision 6), not the bookkeeping
+    # of objects and task transitions behind every run.
+    exposed = sorted({*APPROVALS, "record.claim_expired"})
+    where = (
+        f"namespace=? AND (event_type LIKE 'cardea.%' OR event_type IN {_in(exposed)}) "
+        f"AND (producer_id IN {_in(members)} OR task_id IN ({MEMBER_TASKS}))"
+    )
+    values = (namespace, *exposed, *members, namespace, group)
     rows = conn.exec_driver_sql(
         "SELECT cursor,event_type,producer_id,task_id,occurred_at,payload FROM events "
         f"WHERE {where} ORDER BY cursor DESC LIMIT ?",

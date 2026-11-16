@@ -317,7 +317,33 @@ def software_team(kernel: Kernel, agents: ScriptedAgents) -> str:
         move("work", item, "approve"),
     )
     print(f"  the principal approved it: {out['record']['state']}")
+    show_overview(kernel, "eng-team", "eng", "sup-eng")
     return str(out["record"]["state"])
+
+
+def show_overview(kernel: Kernel, group: str, namespace: str, supervisor: str) -> None:
+    """`GET /v0.2/groups/{name}/overview`, as the supervisor sees it."""
+    response = TestClient(create_app(kernel)).get(
+        f"/v0.2/groups/{group}/overview",
+        params={"namespace": namespace, "events": 5},
+        headers={"Authorization": f"Bearer {supervisor}", "X-Cardea-Auth": "spiffe"},
+    )
+    assert response.status_code == 200, response.json()
+    view = response.json()
+    print(f"  Overview of {group} (generation {view['generation']}, as of {view['as_of']}):")
+    for pool in view["pools"]:
+        runs = [
+            f"{m['principal_id'].rsplit('.', 1)[1]}:{(m['last_run'] or {}).get('outcome', '-')}"
+            for m in pool["members"]
+        ]
+        print(f"    pool {pool['name']:<9} last runs {' '.join(runs)}")
+    for collection in view["collections"]:
+        counts = ", ".join(f"{k} {v}" for k, v in collection["by_state"].items()) or "empty"
+        print(f"    collection {collection['name']}: {counts}; {len(collection['claimed'])} claimed")
+    mail = sum(a["consumed"] for a in view["mailbox"]["addresses"])
+    print(f"    mail consumed {mail}; open approvals {len(view['approvals']['items'])}")
+    for event in view["journal"]["events"]:
+        print(f"    journal #{event['cursor']} {event['type']} by {event['producer_id']}")
 
 
 def fill_event(order: str) -> tuple[dict[str, str], bytes]:

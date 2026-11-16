@@ -19,6 +19,7 @@ make teams
 2. The lead assigns it to the `dev` pool and triages it to `ready`. The transition guards allow only that pool to start it.
 3. A developer claims it with `start`: the claim gives it a lease and a fencing epoch. The developer opens a change and submits the item. `submit` needs the receipt of `vcs.open_change` from the same run.
 4. The principal approves it to `done`. A guard stops anyone from approving work they hold.
+5. The supervisor reads the group's overview, `GET /v0.2/groups/eng-team/overview?namespace=eng`, from one read snapshot. It shows each pool's members and their last runs, each collection's counts and claims, mail and approvals, spend, and the latest journal events.
 
 **Trading desk** (`trading-desk/`):
 1. An analyst checks risk and proposes an order.
