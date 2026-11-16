@@ -370,6 +370,40 @@ class KernelTransaction:
             return self.wake_task(task_id, expected_revision=updated.revision, at=at)
         return updated
 
+    @_mutation
+    def renew_lease(
+        self,
+        task_id: str,
+        *,
+        expected_revision: int,
+        lease_id: str,
+        expires_at: datetime,
+        at: datetime,
+    ) -> Task:
+        """A heartbeat: the current worker extends its own unexpired lease.
+
+        Only the lease holder may renew, only before the lease expires, never beyond the
+        task's deadline, and never shortening it. A lost or expired lease cannot be renewed,
+        so recovery's fence stays final.
+        """
+        task = self.get_task(task_id)
+        _expect_revision(task.revision, expected_revision)
+        self._require_lease(task, lease_id, at)
+        assert task.lease is not None
+        until = min(_timestamp.validate_python(expires_at), task.limits.deadline)
+        if until <= task.lease.expires_at:
+            return task
+        now = _timestamp.validate_python(at)
+        updated = Task.model_validate(
+            {
+                **task.model_dump(),
+                "lease": task.lease.model_copy(update={"expires_at": until}).model_dump(),
+                "revision": task.revision + 1,
+                "updated_at": now,
+            }
+        )
+        return self._save_task(task, updated, "task.lease_renewed")
+
     def _wait_ready(self, task: Task, at: datetime) -> bool:
         wait = task.wait
         if isinstance(wait, TimerWait):
