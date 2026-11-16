@@ -57,6 +57,7 @@ from cardea.service.responses import (
     ApprovalView,
     ChildrenView,
     CollectionApplied,
+    CollectionDeleted,
     CollectionView,
     ContentChunk,
     EventDelivered,
@@ -481,6 +482,26 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
             principal = proof.resolve(conn)
             return records.apply_collection(conn, principal, document, dry_run=dry_run)
 
+    @app.delete("/v0.2/collections/{name}", response_model=CollectionDeleted)
+    def delete_collection(
+        name: CollectionPath, namespace: Namespace, proof: Credential, dry_run: bool = False
+    ) -> dict[str, Any]:
+        """Delete a collection no group uses (ADR-034 decision 2.1). Held claims are
+        released; records and history are kept. `dry_run=true` changes nothing."""
+        with kernel.database.engine.connect() as conn:
+            transaction = conn.begin()
+            try:
+                principal = proof.resolve(conn)
+                result = records.delete_collection(conn, principal, namespace, name)
+            except BaseException:
+                transaction.rollback()
+                raise
+            if dry_run:
+                transaction.rollback()
+            else:
+                transaction.commit()
+        return {"schema_version": "0.2", "dry_run": dry_run, **result}
+
     @app.get("/v0.2/collections/{name}", response_model=CollectionView)
     def get_collection(name: CollectionPath, proof: Credential, namespace: Namespace) -> Any:
         with kernel.database.read() as conn:
@@ -604,8 +625,8 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
     def delete_group(
         name: GroupPath, namespace: Namespace, proof: Credential, dry_run: bool = False
     ) -> dict[str, Any]:
-        """Deleting drains every member (ADR-034 slice 8); until then it is refused with
-        409 `group_drain_unsupported`."""
+        """Deleting drains every member (ADR-034 decision 1.5): the group is `deleting`
+        until the last member is removed, then `deleted`."""
         return groups.delete(kernel, proof, namespace, name, dry_run)
 
     @app.get("/v0.2/tasks/{task_id}/run", response_model=RunView)

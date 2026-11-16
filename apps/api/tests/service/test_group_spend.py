@@ -220,3 +220,7 @@ def test_window_close_mails_the_supervisor_once(
     assert len(supervisor_mail(kernel)) == 2
     # Expectations never fail a run after the fact.
     assert rows(kernel, "SELECT state FROM tasks WHERE task_id=?", task_id) == [("succeeded",)]
+    # A deleted group checks nothing more.
+    with kernel.database.engine.begin() as conn:
+        conn.exec_driver_sql("UPDATE agent_groups SET state='deleted'")
+    assert group_windows.tick(kernel, closed + timedelta(days=1)) == {}

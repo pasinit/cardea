@@ -2,8 +2,8 @@
 
 from alembic import op
 
-revision = "m14_spend"
-down_revision = "m13_state_machines"
+revision = "m15_spend"
+down_revision = "m14_group_drain"
 branch_labels = None
 depends_on = None
 

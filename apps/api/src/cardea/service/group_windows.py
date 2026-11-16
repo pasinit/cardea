@@ -157,7 +157,9 @@ def tick(kernel: "Kernel", at: datetime | None = None) -> dict[str, str]:
     with kernel.database.read() as conn:
         groups = list(
             conn.exec_driver_sql(
-                "SELECT namespace,name,supervisor_id,spec_json,created_at FROM agent_groups"
+                # A deleted group (slice 8) checks nothing more.
+                "SELECT namespace,name,supervisor_id,spec_json,created_at FROM agent_groups "
+                "WHERE state != 'deleted'"
             ).mappings()
         )
     outcomes: dict[str, str] = {}

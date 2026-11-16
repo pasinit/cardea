@@ -760,69 +760,86 @@ class Kernel:
         with self.database.engine.begin() as conn, borrow(conn) as tx:
             principal = proof.resolve(conn)
             binding = Policy(conn).access(principal, task_id, operation)
-            task = tx.get_task(task_id)
-            previous = conn.exec_driver_sql(
-                "SELECT kind FROM control_requests WHERE task_id=? AND request_id=?",
-                (task_id, signal.request_id),
-            ).first()
-            if previous:
-                if previous[0] != kind:
-                    raise Fault(
-                        "request_conflict", "Control request ID was used for another action", 409
-                    )
-                return view(conn, task_id)
-            if task.state in TERMINAL:
-                if kind == "cancel":
-                    return view(conn, task_id)
-                raise Fault("task_terminal", "A terminal task cannot be resumed", 409)
-            at = now()
-            profile = for_runtime(task.runtime_id)
-            # An agent run waiting for approval has no attempt to stop (ADR-036 slice 4).
-            parked = profile.workflow == AGENT_RUN_WORKFLOW and task.state is TaskState.WAITING
-            if kind == "cancel" and (
-                parked
-                or (
-                    not profile.runtime_cancels
-                    and not (profile.runtime_cancels_running and task.state is TaskState.RUNNING)
-                )
-            ):
-                tx.change_task(
-                    task_id,
-                    TaskState.CANCELLED,
-                    expected_revision=task.revision,
-                    lease_id=task.lease.lease_id if task.lease else None,
-                    at=at,
-                )
-            event = tx.append_event(
-                namespace=binding["namespace"],
-                event_type=f"{kind}.{task_id}",
-                producer_id=principal,
-                correlation_id=signal.request_id,
-                task_id=task_id,
-                at=at,
+            self.signal(
+                conn, tx, task_id, str(binding["namespace"]), principal, signal.request_id, kind
             )
-            conn.exec_driver_sql(
-                "INSERT INTO control_requests VALUES (?,?,?,?)",
-                (task_id, signal.request_id, kind, event.cursor),
-            )
-            self.client.send_in_transaction(
-                conn,
-                workflow_id(task_id),
-                kind,
-                topic="control",
-                idempotency_key=f"control:{task_id}:{signal.request_id}",
-            )
-            if kind == "cancel":
-                # ADR-036: a cancelled task's pending approval request is withdrawn.
-                withdraw(conn, tx, task_id, principal, at)
-            if kind == "cancel" and profile.owns_children:
-                from cardea.service.delegation import cancel_children
-
-                cancel_children(self, conn, task_id)
             self.fault("control.before_commit")
             result = view(conn, task_id)
         self.fault("control.after_commit")
         return result
+
+    def signal(
+        self,
+        conn: sa.Connection,
+        tx: KernelTransaction,
+        task_id: str,
+        namespace: str,
+        principal: str,
+        request_id: str,
+        kind: str,
+    ) -> None:
+        """Record a cancel or resume in the caller's transaction, exactly as
+        `tasks.cancel`/`tasks.resume` do. Authority is the caller's to check; the kernel
+        also uses it to cancel a draining group member's run (ADR-034 decision 1.5)."""
+        task = tx.get_task(task_id)
+        previous = conn.exec_driver_sql(
+            "SELECT kind FROM control_requests WHERE task_id=? AND request_id=?",
+            (task_id, request_id),
+        ).first()
+        if previous:
+            if previous[0] != kind:
+                raise Fault(
+                    "request_conflict", "Control request ID was used for another action", 409
+                )
+            return
+        if task.state in TERMINAL:
+            if kind == "cancel":
+                return
+            raise Fault("task_terminal", "A terminal task cannot be resumed", 409)
+        at = now()
+        profile = for_runtime(task.runtime_id)
+        # An agent run waiting for approval has no attempt to stop (ADR-036 slice 4).
+        parked = profile.workflow == AGENT_RUN_WORKFLOW and task.state is TaskState.WAITING
+        if kind == "cancel" and (
+            parked
+            or (
+                not profile.runtime_cancels
+                and not (profile.runtime_cancels_running and task.state is TaskState.RUNNING)
+            )
+        ):
+            tx.change_task(
+                task_id,
+                TaskState.CANCELLED,
+                expected_revision=task.revision,
+                lease_id=task.lease.lease_id if task.lease else None,
+                at=at,
+            )
+        event = tx.append_event(
+            namespace=namespace,
+            event_type=f"{kind}.{task_id}",
+            producer_id=principal,
+            correlation_id=request_id,
+            task_id=task_id,
+            at=at,
+        )
+        conn.exec_driver_sql(
+            "INSERT INTO control_requests VALUES (?,?,?,?)",
+            (task_id, request_id, kind, event.cursor),
+        )
+        self.client.send_in_transaction(
+            conn,
+            workflow_id(task_id),
+            kind,
+            topic="control",
+            idempotency_key=f"control:{task_id}:{request_id}",
+        )
+        if kind == "cancel":
+            # ADR-036: a cancelled task's pending approval request is withdrawn.
+            withdraw(conn, tx, task_id, principal, at)
+        if kind == "cancel" and profile.owns_children:
+            from cardea.service.delegation import cancel_children
+
+            cancel_children(self, conn, task_id)
 
     def close(self) -> None:
         self.client.destroy()
