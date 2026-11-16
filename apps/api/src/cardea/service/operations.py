@@ -106,6 +106,10 @@ class OperationContext:
     slot_time: str | None = None
     # The run's context read snapshot, for built-in context sources only (ADR-034 5.1).
     snapshot: Snapshot | None = None
+    # The kernel's content gate (ADR-037 decision 4), bound for in-process installed
+    # operations: call `check_content(operation=..., diff=..., texts=...)` before
+    # sending anything off the host; it raises `OperationRejected` on a finding.
+    check_content: Callable[..., None] | None = None
 
 
 @dataclass(frozen=True)

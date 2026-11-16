@@ -589,6 +589,29 @@ class EventTriggers(Record):
     timestamp_tolerance_seconds: Annotated[int, Field(strict=True, ge=1, le=300)] = 300
 
 
+class ContentGateConfig(Record):
+    """Host-owner configuration of the gate. Every file is private (0600, the service's)."""
+
+    # The pinned Gitleaks binary (packaging/fetch_gitleaks.py) and its SHA-256.
+    gitleaks_binary: Path
+    gitleaks_sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+    # A Gitleaks TOML configuration; Gitleaks's built-in rules when omitted.
+    gitleaks_config: Path | None = None
+    # One term per line, case-insensitive; `re:<pattern>` for a regular expression;
+    # blank lines and `#` comments are ignored.
+    denylist_file: Path | None = None
+    # A refusal also mails the run's supervisor (ADR-037 open question 5).
+    notify_supervisor: bool = True
+    timeout_seconds: Annotated[int, Field(strict=True, ge=1, le=300)] = 30
+
+    @model_validator(mode="after")
+    def absolute(self) -> Self:
+        for path in (self.gitleaks_binary, self.gitleaks_config, self.denylist_file):
+            if path is not None and not path.is_absolute():
+                raise ValueError("Content gate paths must be absolute")
+        return self
+
+
 class ServiceConfig(Record):
     data_dir: Path
     spiffe_socket: str
@@ -619,6 +642,9 @@ class ServiceConfig(Record):
     attempt_logging: AttemptLogging = AttemptLogging()
     agent_tools: AgentTools = AgentTools()
     event_triggers: EventTriggers = EventTriggers()
+    # What may leave the host (ADR-037 decision 4); operations that send to a repository
+    # host refuse every call while it is not configured.
+    content_gate: ContentGateConfig | None = None
 
     @model_validator(mode="after")
     def one_harness_source(self) -> Self:
