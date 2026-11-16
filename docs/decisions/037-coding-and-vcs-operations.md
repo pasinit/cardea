@@ -1,7 +1,7 @@
 # ADR-037: Coding and Version-Control Operations for an Agent Team
 
 - **Date / owner / milestones:** 2026-11-16; runtime, host-execution and API maintainers. Builds on [ADR-023](023-installed-operation-registry.md) (installed operations), [ADR-026](026-effect-idempotency-and-reconciliation.md) (effect scopes and reconciliation), [ADR-028](028-configurable-worker-profiles.md) (confined workers), [ADR-033](033-pluggable-agent-harnesses.md) (harnesses), [ADR-034](034-agent-groups-and-shared-records.md) (agent groups; its software-team example names `vcs.open_change`) and [ADR-036](036-approval-waits.md) (approval waits).
-- **Status:** proposed. Nothing here is selected, implemented or verified. No fit test below has run; every "fit" is from documentation and says so. The owner's open questions are at the end.
+- **Status:** proposed. Two questions are decided by the lead, subject to the owner's veto (see [Decisions](#decisions-lead-2026-11-16)). Implementation-plan slices 2 and 3 are implemented and pass portable tests (2026-11-16): the ADR-023 amendment and `code.session` with a fake harness and fake gates. Nothing else is implemented, nothing is verified on Debian, and no fit test with a real harness has run. The owner's remaining questions are at the end.
 - **Affected components:** [operation broker](../components/operation-broker.md), [installed host operations](../components/installed-host-operations.md), [Debian host](../components/debian-host.md), [identity and capabilities](../components/identity-capabilities.md), [agent runtime](../components/agent-runtime.md).
 
 ## Requirement
@@ -143,6 +143,24 @@ Compose existing pieces into one operations package, `vcs.*` and `code.*`, insta
 6. Content gate in both places.
 7. Debian acceptance with a real App on a test repository.
 
+## Decisions (lead, 2026-11-16)
+
+The owner may veto either.
+
+1. **Question 9, long calls.** ADR-023's 600 s cap is raised for confined operations only, to the profile's declared wall time, with a hard maximum of two hours. `code.session` stays one call. See [ADR-023, Amendment (2026-11-16)](023-installed-operation-registry.md#amendment-2026-11-16-long-confined-operations).
+2. **Question 1, first harness.** Claude Code in `--bare` mode is the first harness for `code.session`, consistent with the subscription-token decision for agent runs.
+
+## Implementation status
+
+### Slices 2 and 3 (implemented 2026-11-16, portable tests only)
+
+- **ADR-023 amendment** as recorded there: timeouts up to the profile's wall time (two hours at most), a heartbeat lease for long confined calls, and artifacts stored as task-owned objects.
+- **`code.session`** is the package `packages/cardea-coding-ops` (entry point `coding.code.session`, descriptor `code.session.json`: confined profile `coding`, worker `code-session`, a one-hour timeout, an ADR-026 scope on `/repository`, `/base_ref` and `/task_key`, artifacts up to 10 MiB). The host owner configures it with a read-only JSON file named by `CARDEA_CODING_CONFIG`: repositories by alias, each with a read-only `source` and its `gates`, and the `harness` command and the variable names it may receive. A call names an alias, never a path or a command.
+- **In the worker:** a clone of `base_ref` with git hooks and global configuration off; the harness run in the checkout with the task; a commit of everything it changed; a diff summary; the gates; and the `change.bundle` artifact (`git bundle` of the commits on top of `base_ref`). The receipt holds the base and head commits, file and line counts, a diff excerpt of at most 16 KiB, each gate's exit status, duration and output tail, the harness's exit status and output tail, and the bundle's object references. The kernel stores the bundle in parts of at most 1 MiB.
+- **No repository-host credential.** Every command runs with an environment built from nothing (fixed `PATH`, scratch `HOME`, no global git configuration), plus the variables the harness entry names; names that could carry a repository-host credential (`GH_*`, `GITHUB_*`, `GIT_*`, `*ASKPASS*`, `*CREDENTIAL*`, `SSH_AUTH_SOCK`) cannot be passed through. A test plants such credentials in the worker's own environment and checks that neither the harness nor the gates see them, and that no receipt holds them.
+- **Tests** (`apps/api/tests/service/test_code_session.py`, 11 tests): a session against a local bare-repository fixture with a fake harness that applies a scripted change and fake gates with configurable exit status, producing a bounded receipt and a bundle that verifies and applies to a fresh clone; failing gates reported; no host credential reaching the harness, the gates or the receipt; a refused credential passthrough and an unknown repository; an oversized change refused and reconciled as not applied; a timeout beyond the profile's wall time refused; the hard timeout limits; and the heartbeat tests listed in the ADR-023 amendment.
+- **Not yet:** a real harness (Claude Code `--bare`) and its fit test, the `coding` profile's real network policy and read-only source, and everything in slices 4–7.
+
 ## Verification
 
 None. This record is a proposal.
@@ -164,7 +182,7 @@ Revisit if:
 
 ## Open questions for the owner
 
-1. Which harness should `code.session` run first: Claude Code in `--bare` mode, or OpenCode with a configured provider? Both are already pinned for agent runs.
+1. *Decided by the lead (2026-11-16): Claude Code in `--bare` mode.* Which harness should `code.session` run first: Claude Code in `--bare` mode, or OpenCode with a configured provider? Both are already pinned for agent runs.
 2. May an agent submit an `APPROVE` review? The proposal refuses it by default, because an app's approval could satisfy the repository's review rule and amount to an unattended merge path.
 3. Branch naming: a fixed prefix (`agent/*`), or one per group (`agent/<group>/*`) so rulesets can separate teams?
 4. Repository authority: resource-qualified grants `repo:<alias>` with aliases in host configuration, or one installed package per repository?
@@ -172,4 +190,4 @@ Revisit if:
 6. Change transport: what size cap and retention for change bundles stored as objects?
 7. Credentials for small deployments: is a GitHub App required, or is a fine-grained personal access token an accepted fallback (no per-call minting, longer-lived secret)?
 8. Network for gates: `make test` often installs packages. Allow-list the package registries in the `coding` profile, or require pre-provisioned caches and no network beyond the model API?
-9. Long calls: raise ADR-023's 600 s cap for confined operations to the profile's wall time, or split a session into code and gate calls?
+9. *Decided by the lead (2026-11-16): raise the cap for confined operations to the profile's wall time, at most two hours.* Long calls: raise ADR-023's 600 s cap for confined operations to the profile's wall time, or split a session into code and gate calls?
