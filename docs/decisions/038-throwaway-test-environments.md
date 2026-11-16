@@ -1,6 +1,6 @@
 # ADR-038: Throwaway Test Environments for Agent Teams
 
-- **Date / owner / milestones:** 2026-11-16; kernel/host execution and runtime maintainers. Roadmap gap T9. Builds on ADR-012 and ADR-028 (host confinement and worker profiles), ADR-023 (installed operations), ADR-026 (receipts, scopes and reconciliation), ADR-029 (run evidence), ADR-031 (context operations), ADR-034 (records, state machines and receipt evidence) and ADR-030 (the small-host profile).
+- **Date / owner / milestones:** 2026-11-16; kernel/host execution and runtime maintainers. Roadmap gap T9. Builds on ADR-012 and ADR-028 (host confinement and worker profiles), ADR-023 (installed operations), ADR-026 (receipts, scopes and reconciliation), ADR-029 (run evidence), ADR-031 (context operations), ADR-034 (records, state machines and receipt evidence), ADR-030 (the small-host profile) and [ADR-037](037-coding-and-vcs-operations.md) (coding and version-control operations, proposed in parallel), whose repository aliases this record reuses.
 - **Status:** proposed, 2026-11-16. Nothing is selected, implemented or verified. No fit test below has run. The open questions at the end are for the project owner.
 - **Requirement:** an agent team, typically a developer, a reviewer and a product-manager agent, needs evidence that a given commit actually works before it is accepted. Evidence from reading the diff is not enough. One installed operation, `env.try`:
   1. builds or installs a given commit of a given repository into a throwaway, confined instance;
@@ -61,14 +61,14 @@ A tier is host-owner configuration, never a caller's choice. A scenario that nee
 {"repo": "cardea", "commit": "<40 hex>", "scenarios": ["try", "teams", "getting-started"], "rerun": false}
 ```
 
-- **`repo`** is a host-owner repository ID, mapped to a source URL in host configuration. A caller never sends a URL.
+- **`repo`** is a repository alias from host configuration, the same aliases ADR-037 proposes for `code.session` and `vcs.*`. A caller never sends a URL.
 - **`commit`** is a full object ID. Branches, tags and abbreviations are refused, because a name can move and the receipt must name exactly what ran.
 - **`scenarios`** are names from the host-owner catalog, 1 to 8 of them.
   - Each catalog entry fixes: the argv run inside the instance (for example `["make", "try"]`), the tier it needs, a per-scenario time limit, and the artifact paths to keep.
   - The commands come from the catalog, while what `make try` does comes from the commit. That is why the commit is treated as untrusted.
 - **`rerun: true`** skips the result window (item 4) and records a new receipt that links to the earlier one. It is for flaky scenarios, and it is bounded by the cap and per-host concurrency.
 
-Grants: the operation name, as any installed operation, plus `objects.write` for its artifacts. Optionally, `requires: ["env.repo:<id>"]` lets a host owner grant repositories one by one; see the open questions.
+Grants: the operation name, as any installed operation, plus `objects.write` for its artifacts, and the repository's `repo:<alias>` grant if ADR-037's resource-qualified repository grants are adopted (its open question 4).
 
 ### 2. Lifecycle
 
@@ -142,6 +142,15 @@ Grants: the operation name, as any installed operation, plus `objects.write` for
   - Whether a receipt *passed* is a guard over the cited receipt's result (for example every scenario's `outcome == "pass"`). This is proposed as a small extension of slice 3's receipt evidence, because today it checks only that a receipt exists; see the open questions.
 - **To later runs (ADR-031).** A read-only context operation, `env.result {repo, commit}`, returns the latest receipt's summary for that commit within the window. A product-manager agent's run template can then start every attempt with the current evidence, under the same byte budgets as other context blocks.
 
+### 7. Relation to ADR-037
+
+ADR-037's `code.session` already runs a repository's own gates (lint, typecheck, test) inside the confined session that writes the change, and returns their results to the developer. `env.try` is separate, and is for whoever checks the change:
+- it starts from a pushed commit, not a live workspace, so a reviewer or product-manager agent can run it without the developer's session;
+- it runs product scenarios (`make try`, getting-started use cases, end-to-end checks, `make teams`), not only the unit gates;
+- its evidence is deduplicated per commit and scenario set and cited by receipt.
+
+Both are confined workers under ADR-028 with the same repository aliases; they share the staging and teardown design and differ in profile and catalog.
+
 ## Integration
 
 - **Authority:** an installed operation under the live ceiling. A repository, a tier and a scenario are host-owner configuration, so a supervisor can only choose among what the host offers. Approval rules (ADR-036) apply as to any operation, though one is rarely needed because nothing outside the box changes.
@@ -187,7 +196,7 @@ None. This record is proposed; no fit test or acceptance test has run, and nothi
 ## Open questions for the owner
 
 1. **Default tier.** Is the process tier acceptable as the default for agent-written commits, given the shared kernel? Or should `env.try` stay unavailable on hosts without an init or microVM tier?
-2. **Repository grants.** Should each repository be its own grant (`env.repo:<id>`, like `record:` and `mail:`), or is the operation grant plus the host catalog enough?
+2. **Repository grants.** Should `env.try` follow ADR-037's answer on `repo:<alias>` grants, or is the operation grant plus the host catalog enough for an operation that changes nothing outside its box?
 3. **Pass/fail guards on records.** Should ADR-034's receipt evidence grow a guard over the cited receipt's result, so "accept only after a passing run" is enforced by the kernel rather than by the reviewer agent?
 4. **Window and reruns.** Is a 24-hour default window right, and should `rerun` be limited per commit, to bound flaky-test churn?
 5. **Run table or ADR-026 amendment.** Is a small run table (item 4) acceptable, or should ADR-026 scopes be amended to allow reads with an expiry window?
