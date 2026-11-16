@@ -1,0 +1,136 @@
+{
+  "apiVersion": "cardea/v1alpha1",
+  "kind": "Collection",
+  "metadata": {
+    "name": "orders",
+    "namespace": "desk"
+  },
+  "spec": {
+    "supervisor": "sup-desk",
+    "schema": {
+      "type": "object",
+      "required": [
+        "instrument",
+        "side",
+        "qty",
+        "limit_price",
+        "rationale"
+      ],
+      "properties": {
+        "instrument": {
+          "type": "string"
+        },
+        "side": {
+          "enum": [
+            "buy",
+            "sell"
+          ]
+        },
+        "qty": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "limit_price": {
+          "type": "number"
+        },
+        "rationale": {
+          "type": "string"
+        },
+        "broker_order_id": {
+          "type": "string"
+        },
+        "filled_qty": {
+          "type": "number"
+        }
+      }
+    },
+    "claims": {
+      "lease_seconds": 3600,
+      "max_per_holder": 4,
+      "max_followups": 3
+    },
+    "states": [
+      "proposed",
+      "approved",
+      "placed",
+      "filled",
+      "reconciled",
+      "rejected",
+      "expired",
+      "cancelled"
+    ],
+    "initial": "proposed",
+    "terminal": [
+      "reconciled",
+      "rejected",
+      "expired",
+      "cancelled"
+    ],
+    "transitions": [
+      {
+        "name": "approve",
+        "from": [
+          "proposed"
+        ],
+        "to": "approved",
+        "guard": "record.created_by != caller.id",
+        "approval": {
+          "level": "conditional",
+          "when": "true",
+          "reason": "Every order needs a desk approver",
+          "expires_after_seconds": 3600,
+          "on_expiry": "resume",
+          "distinct_from_supervisor": false
+        }
+      },
+      {
+        "name": "reject",
+        "from": [
+          "proposed"
+        ],
+        "to": "rejected"
+      },
+      {
+        "name": "place",
+        "from": [
+          "approved"
+        ],
+        "to": "placed",
+        "claim": "acquire",
+        "on_claim_expiry": "approved",
+        "requires_receipt": {
+          "operation": "broker.place_order",
+          "in": "same_task"
+        }
+      },
+      {
+        "name": "fill",
+        "from": [
+          "placed"
+        ],
+        "to": "filled",
+        "claim": "holder"
+      },
+      {
+        "name": "reconcile",
+        "from": [
+          "filled"
+        ],
+        "to": "reconciled",
+        "claim": "release",
+        "requires_receipt": {
+          "operation": "broker.fills",
+          "in": "same_task"
+        }
+      },
+      {
+        "name": "expire",
+        "from": [
+          "proposed",
+          "approved"
+        ],
+        "to": "expired"
+      }
+    ]
+  }
+}

@@ -1,0 +1,147 @@
+{
+  "apiVersion": "cardea/v1alpha1",
+  "kind": "AgentGroup",
+  "metadata": {
+    "name": "desk",
+    "namespace": "desk"
+  },
+  "spec": {
+    "supervisor": "sup-desk",
+    "collections": [
+      "orders"
+    ],
+    "pools": [
+      {
+        "name": "analyst",
+        "replicas": 2,
+        "grants": [
+          "objects.read",
+          "objects.write",
+          "models.invoke",
+          "record:orders/create",
+          "record:orders/read",
+          "risk.check",
+          "market.quotes"
+        ],
+        "run": {
+          "instructions": "Propose orders with a rationale, within the desk's risk limits.",
+          "operations": [
+            "records.create",
+            "risk.check",
+            "market.quotes"
+          ],
+          "context": [
+            {
+              "operation": "records.summary",
+              "arguments": {
+                "collection": "orders"
+              }
+            }
+          ],
+          "bounds": {
+            "timeout_seconds": 600,
+            "attempts": 2
+          }
+        },
+        "triggers": [
+          {
+            "schedule": {
+              "cron": "*/30 13-20 * * 1-5",
+              "timezone": "UTC",
+              "misfire": "skip"
+            }
+          }
+        ]
+      },
+      {
+        "name": "risk",
+        "replicas": 1,
+        "grants": [
+          "objects.read",
+          "objects.write",
+          "models.invoke",
+          "record:orders/read",
+          "record:orders/approve",
+          "record:orders/reject",
+          "record:orders/expire",
+          "risk.check"
+        ],
+        "run": {
+          "instructions": "Check proposed orders; submit sound ones for approval, reject the rest.",
+          "operations": [
+            "records.query",
+            "records.transition",
+            "risk.check"
+          ],
+          "context": [
+            {
+              "operation": "records.summary",
+              "arguments": {
+                "collection": "orders"
+              }
+            }
+          ],
+          "bounds": {
+            "timeout_seconds": 600,
+            "attempts": 2
+          }
+        },
+        "triggers": [
+          {
+            "event": {
+              "types": [
+                "cardea.record.created",
+                "cardea.record.transitioned"
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "name": "execution",
+        "replicas": 1,
+        "grants": [
+          "objects.read",
+          "objects.write",
+          "models.invoke",
+          "record:orders/read",
+          "record:orders/place",
+          "record:orders/fill",
+          "record:orders/reconcile",
+          "broker.place_order",
+          "broker.fills"
+        ],
+        "run": {
+          "instructions": "Place approved orders, record fills and reconcile them.",
+          "operations": [
+            "records.query",
+            "records.transition",
+            "broker.place_order",
+            "broker.fills"
+          ],
+          "context": [
+            {
+              "operation": "records.claimed",
+              "arguments": {
+                "collection": "orders"
+              }
+            }
+          ],
+          "bounds": {
+            "timeout_seconds": 600,
+            "attempts": 2
+          }
+        },
+        "triggers": [
+          {
+            "event": {
+              "types": [
+                "cardea.record.transitioned"
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

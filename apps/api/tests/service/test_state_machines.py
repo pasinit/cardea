@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from cardea_reference_ops import Fakes, descriptors
 from fastapi.testclient import TestClient
 from pydantic import JsonValue, ValidationError
 from test_records import FakeClient, events, run
@@ -41,26 +42,6 @@ class Auth:
         if token not in TOKENS:
             raise Fault("invalid_credential", "Unknown test credential", 401)
         return Proof("spiffe", "test", token, time.time() + 60)
-
-
-async def open_change(arguments: dict[str, JsonValue], context: OperationContext) -> Any:
-    return {"change_id": f"change-{context.receipt_id[-8:]}"}
-
-
-VCS = OperationDescriptor.model_validate(
-    {
-        "tool": {
-            "name": "vcs.open_change",
-            "inputSchema": {
-                "type": "object",
-                "properties": {"record_id": {"type": "string"}, "title": {"type": "string"}},
-                "required": ["record_id"],
-            },
-            "outputSchema": {"type": "object"},
-        },
-        "cardea": {"version": 1, "effect": "effect", "handler": "test.vcs"},
-    }
-)
 
 
 def document(supervisor: tuple[str, ...] = SUPERVISOR) -> Provisioning:
@@ -122,6 +103,13 @@ def document(supervisor: tuple[str, ...] = SUPERVISOR) -> Provisioning:
     )
 
 
+# The fake reference operations package provides `vcs.open_change` (no network).
+
+
+async def report(arguments: dict[str, JsonValue], context: OperationContext) -> Any:
+    return {"reported": True}
+
+
 # A call that names its record only through its idempotency context `<record_id>.<epoch>`.
 CI = OperationDescriptor.model_validate(
     {
@@ -130,10 +118,10 @@ CI = OperationDescriptor.model_validate(
             "inputSchema": {"type": "object"},
             "outputSchema": {"type": "object"},
         },
-        "cardea": {"version": 1, "effect": "effect", "handler": "test.vcs"},
+        "cardea": {"version": 1, "effect": "effect", "handler": "test.ci"},
     }
 )
-REGISTRY = Registry((VCS, CI), {"test.vcs": open_change})
+REGISTRY = Registry((*descriptors(), CI), {**Fakes().handlers(), "test.ci": report})
 
 
 @pytest.fixture
