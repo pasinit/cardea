@@ -69,9 +69,7 @@ class VcsConfig(Record):
     )
     # `APPROVE` reviews are refused unless the host owner enables them (open question 2).
     allow_approve: bool = False
-    credentials: Annotated[
-        FixedTokenConfig | ProfileCredentialConfig, Field(discriminator="kind")
-    ]
+    credentials: Annotated[FixedTokenConfig | ProfileCredentialConfig, Field(discriminator="kind")]
 
     @model_validator(mode="after")
     def prefix_names_the_group(self) -> Self:
