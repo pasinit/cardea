@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from test_m2_completion import helper as helper
@@ -507,3 +507,83 @@ def test_debian_probe_configuration_is_a_valid_host_owner_file() -> None:
         launcher.validate_profile(entry)
     for entry in probes["workers"].values():
         launcher.validate_worker(entry, probes["profiles"])
+
+
+# Output limits per job (ADR-023 amendment, 2026-11-16)
+
+CODING = {**SMALL, "wall_seconds": 3600, "scratch_mb": 64, "output_kb": 16384}
+
+
+def finish(job: str, content: bytes, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """The status of a finished job whose worker wrote `content` as its output."""
+    (launcher.ROOT / job / "output").write_bytes(content)
+
+    def run(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args, 0, "SubState=exited\nResult=success\nExecMainStatus=0\n", ""
+        )
+
+    monkeypatch.setattr(launcher, "run", run)
+    return launcher.status(job)
+
+
+@pytest.fixture
+def with_coding(configured: list[list[str]], monkeypatch: pytest.MonkeyPatch) -> None:
+    config = {
+        "profiles": {**cast(dict[str, Any], CONFIG["profiles"]), "coding": CODING},
+        "workers": {
+            **cast(dict[str, Any], CONFIG["workers"]),
+            "code": {"argv": ["/usr/bin/true"], "profiles": ["coding"]},
+        },
+    }
+    monkeypatch.setattr(launcher, "worker_config", lambda: config)
+
+
+def test_a_profile_output_limit_holds_under_the_global_ceiling(
+    with_coding: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert launcher.handle(start("a" * 32, "small", "hash")) == {"started": True}
+    assert (launcher.ROOT / ("a" * 32) / "output_limit").read_text() == str(64 * 1024)
+    with pytest.raises(ValueError, match="invalid_output"):
+        finish("a" * 32, b"x" * (64 * 1024 + 1), monkeypatch)
+    exact = finish("a" * 32, b"y" * (64 * 1024), monkeypatch)
+    assert len(base64.b64decode(exact["output"])) == 64 * 1024
+
+
+def test_the_coding_profile_accepts_a_bundle_near_ten_mib(
+    with_coding: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert launcher.handle(start("b" * 32, "coding", "code")) == {"started": True}
+    content = os.urandom(10 * 1048576 - 4096)
+    result = finish("b" * 32, content, monkeypatch)
+    assert base64.b64decode(result["output"]) == content
+
+
+def test_a_job_without_a_recorded_limit_keeps_the_legacy_limit(
+    helper: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    job = "c" * 32
+    (launcher.ROOT / job).mkdir()
+    with pytest.raises(ValueError, match="invalid_output"):
+        finish(job, b"z" * (launcher.LEGACY_OUTPUT + 1), monkeypatch)
+
+
+def test_short_reads_are_read_to_the_end_and_a_size_mismatch_is_refused(
+    with_coding: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert launcher.handle(start("d" * 32, "coding", "code")) == {"started": True}
+    content = os.urandom(300000)
+    real_read = os.read
+    monkeypatch.setattr(os, "read", lambda fd, n: real_read(fd, min(n, 1000)))
+    assert base64.b64decode(finish("d" * 32, content, monkeypatch)["output"]) == content
+    real_fstat = os.fstat
+
+    def shrunk(fd: int) -> os.stat_result:
+        info = real_fstat(fd)
+        fields = list(info)
+        fields[6] = info.st_size - 1  # st_size: the file grew after fstat
+        return os.stat_result(fields)
+
+    monkeypatch.setattr(os, "fstat", shrunk)
+    with pytest.raises(ValueError, match="invalid_output"):
+        finish("d" * 32, content, monkeypatch)

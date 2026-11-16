@@ -265,6 +265,7 @@ def test_in_process_digest_is_unchanged_by_executors() -> None:
     dumped = described.model_dump(mode="json")
     assert "executor" in dumped["cardea"]
     del dumped["cardea"]["executor"], dumped["cardea"]["approval"]
+    del dumped["cardea"]["max_artifact_bytes"]
     assert described.digest == hashlib.sha256(rfc8785.dumps(dumped)).hexdigest()
     assert Registry((described,), None).entry_points() == {"test.handler"}
     assert Registry((descriptor("pages.fetch", "read", "fetch"),), {}).entry_points() == set()

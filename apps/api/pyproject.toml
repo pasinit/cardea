@@ -28,6 +28,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "authlib==1.8.0",
+    "cardea-coding-ops",
     "cardea-reference-ops",
     "cryptography==50.0.1",
     "httpx>=0.27.0",
@@ -59,4 +60,5 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 
 [tool.uv.sources]
+cardea-coding-ops = { path = "../../packages/cardea-coding-ops", editable = true }
 cardea-reference-ops = { path = "../../packages/cardea-reference-ops", editable = true }
