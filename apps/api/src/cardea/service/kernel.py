@@ -3,6 +3,7 @@
 import json
 from collections.abc import Callable
 from datetime import timedelta
+from typing import Any
 from uuid import uuid4
 
 import sqlalchemy as sa
@@ -13,10 +14,17 @@ from cardea.hosts.debian import Host
 from cardea.kernel.models import BudgetLimits, Task, TaskState
 from cardea.kernel.store import KernelTransaction
 from cardea.runtime.agent_session import AgentSession
-from cardea.service import approval_requests, context_sources, host_budget, spend
+from cardea.service import approval_requests, artifacts, context_sources, host_budget, spend
 from cardea.service.approval_requests import waiting_for, withdraw
 from cardea.service.auth import IdentityProvider, Proof
-from cardea.service.confined import ConfinedAgentSession, Workers, confined_handler, job_id
+from cardea.service.confined import (
+    ConfinedAgentSession,
+    StoreArtifacts,
+    WorkerFailed,
+    Workers,
+    confined_handler,
+    job_id,
+)
 from cardea.service.database import Database, Fault, borrow
 from cardea.service.harnesses import Catalog, Harnesses, check_harness_grants
 from cardea.service.mailbox import BUILTIN
@@ -46,6 +54,7 @@ from cardea.service.models import (
 from cardea.service.operations import (
     KERNEL_RIGHTS,
     Handler,
+    OperationContext,
     Reconciler,
     Registry,
     check_context,
@@ -498,6 +507,10 @@ class Kernel:
             return self.records.reconciler(name)
         if name in APPROVAL_OPERATIONS:
             return approval_requests.decide_reconciler(self)
+        binding = self.operations.get(name).cardea
+        if binding.reconciler is None and binding.max_artifact_bytes:
+            # The output is stored with the artifacts: its presence settles the call.
+            return artifacts.reconciler(self.database)
         return self.operations.reconciler(name)
 
     def handler(self, name: str) -> Handler:
@@ -514,8 +527,27 @@ class Kernel:
         self.executor_record(name)
         assert self.workers is not None
         return confined_handler(
-            self.workers, executor, descriptor.cardea.timeout_seconds, self.worker_watch
+            self.workers,
+            executor,
+            descriptor.cardea.timeout_seconds,
+            self.worker_watch,
+            self._artifact_store(descriptor.cardea.max_artifact_bytes),
         )
+
+    def _artifact_store(self, limit: int) -> StoreArtifacts | None:
+        """Where a confined operation's artifacts go: task-owned objects (ADR-037)."""
+        if not limit:
+            return None
+
+        def keep(context: OperationContext, output: dict[str, Any], raw: object) -> dict[str, Any]:
+            try:
+                decoded = artifacts.decode(raw, limit)
+                return artifacts.store(self.database, context, output, decoded, self.runtime_id)
+            except artifacts.ArtifactRefused as refused:
+                # Nothing was stored; the call reconciles as not applied.
+                raise WorkerFailed("artifact_refused", "invalid_output", refused.summary) from None
+
+        return keep
 
     def worker_watch(self, task_id: str, lease_id: str) -> str | None:
         """Why a running confined worker must stop now, if it must."""

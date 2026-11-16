@@ -709,7 +709,7 @@ class OperationRuntime:
         for task_id, operation_id, name in rows:
             if settled >= limit or name not in self.kernel.operations:
                 continue
-            if self.kernel.operations.get(str(name)).cardea.reconciler is None:
+            if self.kernel.reconciler(str(name)) is None:
                 continue
             try:
                 self.reconcile(str(task_id), str(operation_id))

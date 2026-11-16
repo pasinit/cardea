@@ -95,6 +95,15 @@ def _word(value: object) -> str:
 
 
 def _result(status: dict[str, Any]) -> dict[str, Any]:
+    """The worker's output; a worker may not return artifacts unless its call keeps them."""
+    output, artifacts = _document(status)
+    if artifacts is not None:
+        raise WorkerFailed("worker_output_invalid", "invalid_output", "unexpected artifacts")
+    return output
+
+
+def _document(status: dict[str, Any]) -> tuple[dict[str, Any], object | None]:
+    """The worker's output and, if it returned any, its raw artifacts (ADR-037)."""
     result = status.get("result")
     if result in LIMIT_RESULTS:
         code = LIMIT_RESULTS[str(result)]
@@ -128,10 +137,10 @@ def _result(status: dict[str, Any]) -> dict[str, Any]:
         raise WorkerFailed("worker_error", "error", kind or "handler error")
     if (
         isinstance(document, dict)
-        and set(document) == {"output"}
+        and set(document) in ({"output"}, {"output", "artifacts"})
         and isinstance(document["output"], dict)
     ):
-        return document["output"]
+        return document["output"], document.get("artifacts")
     raise WorkerFailed("worker_output_invalid")
 
 
@@ -236,6 +245,29 @@ class Workers:
         watch: Watch | None = None,
         timeout_seconds: float | None = None,
     ) -> dict[str, Any]:
+        """Wait for a profile slot, run, and return the worker's output."""
+        status = await self.status_of(
+            job,
+            payload,
+            profile=profile,
+            worker=worker,
+            deadline=deadline,
+            watch=watch,
+            timeout_seconds=timeout_seconds,
+        )
+        return _result(status)
+
+    async def status_of(
+        self,
+        job: str,
+        payload: dict[str, Any],
+        *,
+        profile: str,
+        worker: str,
+        deadline: float,
+        watch: Watch | None = None,
+        timeout_seconds: float | None = None,
+    ) -> dict[str, Any]:
         """Wait for a profile slot (bounded by the profile's queue timeout), then run.
 
         ``deadline`` is the absolute limit; ``timeout_seconds`` bounds execution only and
@@ -293,7 +325,10 @@ class Workers:
             await asyncio.to_thread(self.reap, job)
             raise
         await asyncio.to_thread(self.reap, job)
-        return _result(status)
+        return status
+
+
+StoreArtifacts = Callable[[OperationContext, dict[str, Any], object], dict[str, Any]]
 
 
 def confined_handler(
@@ -301,8 +336,13 @@ def confined_handler(
     executor: ConfinedExecutor,
     timeout_seconds: int,
     watch: Callable[[str, str], str | None],
+    store_artifacts: StoreArtifacts | None = None,
 ) -> Handler:
-    """A handler with the in-process signature whose code runs in a confined worker."""
+    """A handler with the in-process signature whose code runs in a confined worker.
+
+    With `store_artifacts`, the worker may return artifacts beside its output; they are
+    stored as kernel objects and the output carries their references (ADR-037).
+    """
 
     async def run(arguments: dict[str, JsonValue], context: OperationContext) -> Any:
         payload = {
@@ -318,7 +358,7 @@ def confined_handler(
                 "slot_time": context.slot_time,
             },
         }
-        return await workers.run(
+        status = await workers.status_of(
             job_id("operation", context.receipt_id),
             payload,
             profile=executor.profile,
@@ -327,6 +367,12 @@ def confined_handler(
             timeout_seconds=timeout_seconds,
             watch=lambda: watch(context.task_id, context.lease_id),
         )
+        if store_artifacts is None:
+            return _result(status)
+        output, artifacts = _document(status)
+        if artifacts is None:
+            return output
+        return await asyncio.to_thread(store_artifacts, context, output, artifacts)
 
     return run
 
