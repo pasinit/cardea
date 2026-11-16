@@ -1,7 +1,10 @@
 # ADR-023: Installed Operation Registry
 
 - **Date / owner / milestones:** 2026-10-15; runtime and broker maintainers; ADR-022 gap #1 (G3).
-- **Status:** selected and implemented for a bounded first increment: in-process operations declared by host-owner configuration. Portable tests pass; no live provider operation is installed yet. The existing host, incident and delegation profiles are unchanged. Confined-worker operations from configuration are deferred to the worker-profile decision (ADR-022 gap #6). They are added by [ADR-028](028-configurable-worker-profiles.md).
+- **Status:** selected and implemented; nothing is verified on Debian.
+  - **Implemented:** in-process operations declared by host-owner configuration (the first increment), confined operations from configuration (added by [ADR-028](028-configurable-worker-profiles.md)), and the [2026-11-16 amendment](#amendment-2026-11-16-long-confined-operations): confined timeouts up to the profile's wall time (two hours at most), heartbeat leases and artifacts.
+  - **Portable tests only:** all of it. No live provider operation is installed yet. The existing host, incident and delegation profiles are unchanged.
+  - **Verified on Debian:** nothing yet. The amendment's heartbeat and process-tree stop must run under the real helper; see the [Debian acceptance checklist](../acceptance/debian-adr-034-037.md).
 - **Requirement:** a host owner can install, version and remove operations without kernel code changes. Each operation declares its schemas and effect class. A task can invoke only installed operations that its live authority ceiling grants. Every invocation keeps the existing intent → receipt → verification contract, and an interrupted effect is never replayed.
 
 ## Problem

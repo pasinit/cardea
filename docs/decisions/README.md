@@ -25,21 +25,23 @@ Each record states the requirement, the open-source candidates considered, fit e
 | [019](019-m5-operational-recovery.md) | M5 operational recovery and maintenance |
 | [020](020-company-product-direction.md) | Company Product Direction and Reuse Shortlist |
 | [021](021-company-process-data-integration.md) | Cross-Team Process and Data Integration |
-| [023](023-installed-operation-registry.md) | Installed Operation Registry |
-| [024](024-time-triggers.md) | Time Triggers |
-| [025](025-remote-kernel-api.md) | Remote Kernel API over TLS |
-| [026](026-effect-idempotency-and-reconciliation.md) | Effect Idempotency Scopes and Reconciliation |
-| [027](027-agent-runs.md) | Agent Runs with Cardea-Owned Tools |
-| [028](028-configurable-worker-profiles.md) | Configurable Worker Profiles |
-| [029](029-supervisor-schedules-expectations-and-run-evidence.md) | Supervisor Schedules, Run Expectations and Run Evidence |
-| [030](030-small-host-profile.md) | Small-Host Profile |
-| [031](031-agent-run-context-operations.md) | Agent-Run Context Operations |
+| [023](023-installed-operation-registry.md) | Installed Operation Registry (implemented, with the 2026-11-16 amendment for long confined calls and artifacts; portable tests only) |
+| [024](024-time-triggers.md) | Time Triggers (implemented; portable tests only) |
+| [025](025-remote-kernel-api.md) | Remote Kernel API over TLS (implemented; portable tests only) |
+| [026](026-effect-idempotency-and-reconciliation.md) | Effect Idempotency Scopes and Reconciliation (implemented; portable tests only) |
+| [027](027-agent-runs.md) | Agent Runs with Cardea-Owned Tools (implemented; portable tests only) |
+| [028](028-configurable-worker-profiles.md) | Configurable Worker Profiles (implemented; portable tests only, Debian probes written but not run) |
+| [029](029-supervisor-schedules-expectations-and-run-evidence.md) | Supervisor Schedules, Run Expectations and Run Evidence (implemented, with the 2026-11-16 `any_of` and `match` amendment; portable tests only) |
+| [030](030-small-host-profile.md) | Small-Host Profile (selected; kit validated by tests, not installed on a real host) |
+| [031](031-agent-run-context-operations.md) | Agent-Run Context Operations (implemented; portable tests only) |
 | [032](032-remove-incident-agent-tasks.md) | Remove the Incident Agent-Task Path |
-| [033](033-pluggable-agent-harnesses.md) | Pluggable Agent Harnesses |
-| [034](034-agent-groups-and-shared-records.md) | Agent Groups, Shared Records, State Machines and Mailboxes (selected; slices 1, collections and records, 2, claims, 3, state machines, 4, agent groups, 5, mailboxes, 6, context sources, 7, journal triggers, and 8, draining and deletion, implemented) |
-| [035](035-event-triggers.md) | Event Triggers |
-| [036](036-approval-waits.md) | Approval Waits and Per-Operation Autonomy (selected; slice 1 implemented: CEL fit test, rule evaluator) |
-| [037](037-coding-and-vcs-operations.md) | Coding and Version-Control Operations for an Agent Team (proposed; slices 2 and 3 implemented: long confined operations, `code.session` with fakes; slices 4 and 5 implemented without credential minting) |
+| [033](033-pluggable-agent-harnesses.md) | Pluggable Agent Harnesses (implemented; portable tests only) |
+| [034](034-agent-groups-and-shared-records.md) | Agent Groups, Shared Records, State Machines and Mailboxes (implemented: all eleven slices and the team overview; portable tests only) |
+| [035](035-event-triggers.md) | Event Triggers (slice 1 implemented, plus journal triggers from ADR-034; portable tests only) |
+| [036](036-approval-waits.md) | Approval Waits and Per-Operation Autonomy (slices 1–4 implemented, slices 5–6 pending; portable tests only) |
+| [037](037-coding-and-vcs-operations.md) | Coding and Version-Control Operations for an Agent Team (proposed; implemented: the content gate with redaction, long confined calls, `code.session` with the Claude Code harness entry and `coding` profile, the `vcs.*` operations without credential minting; portable tests only, Debian fit test written but not run) |
 | [038](038-throwaway-test-environments.md) | Throwaway Test Environments for Agent Teams (proposed) |
+
+**Verified on Debian** means a run on the supported Debian host, recorded as evidence in the ADR. The milestone ADRs up to ADR-019 record their own Debian evidence. From ADR-023 on, nothing is verified on Debian yet: "portable tests only" above means the tests pass on the development platforms and in CI, and nothing more. The [Debian acceptance checklist](../acceptance/debian-adr-034-037.md) lists what must run to verify ADR-034, ADR-035, ADR-036 and the ADR-023 amendment.
 
 ADR-022, a gap analysis for a first client application, is not published. ADRs 023–030 cite its gap numbers (for example "gap #3"); each of those records restates its own requirement in full.

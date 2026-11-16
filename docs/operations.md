@@ -18,7 +18,7 @@ Use `systemctl restart cardea-kernel` or reboot the host. DBOS recovers the **cu
 
 ## Upgrade
 
-The verified compatibility path is package `0.1.0-1` / schema `m4_001` to `0.1.0-2` / schema `m5_001`, keeping DBOS `3.0.0` and workflow version `cardea-m1-v1`. Older service schema migrations have portable regression coverage. Arbitrary future dependencies, runtime versions and host versions require another fit test.
+The verified compatibility path is package `0.1.0-1` / schema `m4_001` to `0.1.0-2` / schema `m5_001`, keeping DBOS `3.0.0` and workflow version `cardea-m1-v1`. Later service schemas, up to the current head `m17_content_redaction`, have portable migration tests only; no package upgrade across them has run on Debian (see the [Debian acceptance checklist](acceptance/debian-adr-034-037.md)). Arbitrary future dependencies, runtime versions and host versions require another fit test.
 
 1. Arrange a maintenance window, stop admissions and reconcile outstanding work. Stop with `systemctl stop cardea-kernel`.
 2. As `cardea-kernel`, run `cardea backup /private/path/pre-upgrade.sqlite3 --config /etc/cardea/config.json`. The destination must not already exist.
@@ -138,6 +138,21 @@ Single-operation tasks and agent runs can wait for an approver before an effect 
 - **Agent approvers.** An agent run may decide requests through the built-in tool `approvals.decide` (list it in `operations`). Each call is checked live: the run's agent needs the `approve` row on the operation, the run must be granted `approve:<operation>`, and its supervisor (and every ancestor's) must hold `approve` and `delegate` on it, as the platform allows; the requester exclusion applies. Admission checks the same `approve:<operation>` grant against the supervisor.
 - **Not yet.** Per-grant rules in agent-run requests and triggers (ADR-036 slice 5). A snapshot restore voids open requests (`snapshot_restored`).
 
+## Mailboxes, context and journal triggers
+
+These are the rest of [ADR-034](decisions/034-agent-groups-and-shared-records.md) (slices 5–7; worked example in [getting started](getting-started.md#9-a-pool-that-wakes-on-mail-reads-its-context-and-stays-within-budget)). Migrations `m11_mailboxes` and `m12_journal_triggers` add their tables.
+
+- **Mail.** Addresses are an instance, a pool `<group>.<pool>` or a group. A sender needs `mail:<address>`, and the platform must allow it there. A message is leased to a run when its attempt checkpoints. It is consumed when the run succeeds and released when it fails or is cancelled. After `max_deliveries` (1–10, default 3) it is dead-lettered, and the sender and the supervisor get a notice. The kernel's own notices (dead letters, spend, windowed expectations, content refusals) come from the kernel runtime.
+- **Context.** A run's context blocks are read in one snapshot. Each block is cut to its `max_bytes`, and all of them together to `context_max_bytes` (default 24 KiB, at most 64 KiB). The inbox (default 6 KiB) and the caller's claims are never dropped entirely.
+- **Journal triggers.** A pool's `event` triggers read the group's own kernel journal (`cardea://<namespace>`): `cardea.mailbox.*`, `cardea.record.*` and `cardea.approval.*` events. The minute schedule (`cardea-triggers`, step `cardea.m6.journal_triggers.tick`) admits each matching event once, through the same admission and live ceiling as any trigger. A member is not woken by its own actions unless `include_own` is set. While its run is unfinished, further events coalesce into one follow-up admission.
+- **Overview.** `GET /v0.2/groups/{name}/overview?namespace=` gives the supervisor one read snapshot of the group: pools and members, collections, mail, open approvals, spend and recent journal events.
+
+## Long confined operations and `code.session`
+
+[ADR-023's amendment](decisions/023-installed-operation-registry.md#amendment-2026-11-16-long-confined-operations) lets a confined operation run up to its profile's `wall_seconds`, at most two hours. A call longer than five minutes holds a five-minute lease that a heartbeat renews every minute. If a renewal is refused, the worker stops and the call becomes `outcome_unknown`. A descriptor whose timeout exceeds the installed profile's wall time is refused with `409 operation_timeout_exceeds_profile`. Artifacts (`max_artifact_bytes`, at most 11 MiB) are stored as task-owned objects of at most 1 MiB each.
+
+`code.session` ([ADR-037](decisions/037-coding-and-vcs-operations.md) slice 3, package `packages/cardea-coding-ops`) is the first such operation. The host owner names a read-only JSON file in `CARDEA_CODING_CONFIG`. It lists repositories by alias, each with a read-only `source` and its `gates`, and the harness: `"kind": "claude-code"` runs the pinned Claude Code CLI headless with repository settings, hooks and MCP servers turned off. The operation needs the confined profile `coding`; on a host without the ADR-028 helper it is refused. The small-host kit has the profile and an example configuration (`deploy/small-host/cardea/cardea-host-workers.json` and `cardea-coding.json`): model API egress only, with gates using a read-only package cache offline. Commands run with an environment built from nothing. Only the harness receives the profile's model credential, and a change or output that contains it is refused with `credential_in_change`. The harness is tested against a fake `claude` only. The Debian fit test in [`experiments/code-session`](../experiments/code-session/README.md) is written but has not run. The repository-host operations are below.
+
 ## Repository-host operations
 
 The `cardea-vcs-ops` package installs `vcs.push_branch`, `vcs.open_change`, `vcs.comment`, `vcs.review`, `vcs.read_change` and `vcs.check_repository` ([ADR-037](decisions/037-coding-and-vcs-operations.md), slices 4 and 5, without credential minting).
@@ -151,6 +166,21 @@ The `cardea-vcs-ops` package installs `vcs.push_branch`, `vcs.open_change`, `vcs
 - **Credentials.** `profile_credential` reads the `vcs` profile's credential, a root-only file systemd loads into the unit. Until the minter exists that file is a token; the test provider (`{"kind": "test", "token": ...}`) is for fakes and tests. A production minter (a GitHub App or a personal access token, ADR-037 open question 7) is not available yet, so do not point these operations at a real host.
 - **Readiness.** `vcs.check_repository` reports whether the repository's rules require a human review on the default branch and allow pushes only under the agent prefix. It lists what is missing and changes nothing; check it before pointing a team at a repository.
 - **Recovery.** An interrupted push, pull request, comment or review is `outcome_unknown`. `POST /v0.2/tasks/<id>/operations/<operation_id>/reconcile` reads the host (the branch head, the pull request for the head, or the comment or review marker) and settles it without sending again.
+
+## Content gate
+
+The content gate ([ADR-037](decisions/037-coding-and-vcs-operations.md) decision 4) checks what an operation sends to a repository host before it sends it. Configure it under `content_gate` in the service configuration:
+
+- `gitleaks_binary` and `gitleaks_sha256`: the pinned Gitleaks binary and its digest. `python3 packaging/fetch_gitleaks.py <dir>` downloads it, checks the release archive and prints both. The Debian package does not ship it.
+- `gitleaks_config` (optional): a Gitleaks TOML file. Gitleaks's built-in rules apply without one.
+- `denylist_file` (optional): one case-insensitive term per line, or `re:<pattern>`, with blank lines and `#` comments ignored. Keep it private (mode `0600`, owned by the kernel account). Terms are never logged or echoed: a finding names only `denylist:<line>`.
+- `notify_supervisor` (default true) mails the run's supervisor on a refusal. `timeout_seconds` (1–300, default 30) bounds one scan.
+
+The gate fails closed. A finding fails the call with `content_refused`. A missing or misconfigured gate, or a scanner that fails, fails it with `content_gate_unavailable`. A refused call's matching argument strings are replaced in its receipt, in the task's bound request and in a held approval's frozen intent, with `{"redacted": "content_refused", "sha256", "bytes"}`; digests are kept. Service connections use `secure_delete`, and a refusal truncates the write-ahead log. Confined workers reach the gate through a per-call loopback callback, so its configuration and denylist never enter the sandbox; a profile that cannot reach the loopback endpoint is refused with `content_gate_unavailable`.
+
+## Error codes
+
+[Error codes](error-codes.md) lists every code an API request can answer with, and every failure code a receipt or task can record, with its HTTP status and meaning. It is generated from the source (`make error-codes`), and a test keeps it current.
 
 ## Retention and deletion
 

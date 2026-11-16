@@ -1,7 +1,7 @@
 # ADR-031: Agent-Run Context Operations
 
 - **Date / owner / milestones:** 2026-10-20; runtime maintainers; extends ADR-027 and ADR-029.
-- **Status:** selected and implemented for portable execution. A live Claude session has not run with context blocks. Amended by [ADR-034](034-agent-groups-and-shared-records.md) slice 5 (2026-11-09): the built-in `mailbox.inbox` is the one context source that writes, and only kernel bookkeeping. Its delivery leases are taken in the attempt-checkpoint transaction and settled by the run's terminal transition. Amended again by ADR-034 slice 6 (2026-11-16):
+- **Status:** selected and implemented for portable execution; nothing is verified on Debian. A live Claude session has not run with context blocks. Amended by [ADR-034](034-agent-groups-and-shared-records.md) slice 5 (2026-11-09): the built-in `mailbox.inbox` is the one context source that writes, and only kernel bookkeeping. Its delivery leases are taken in the attempt-checkpoint transaction and settled by the run's terminal transition. Amended again by ADR-034 slice 6 (2026-11-16):
   - up to 8 entries;
   - a per-entry `max_bytes`, and a run total `context_max_bytes` (24 KiB by default, 64 KiB at most);
   - built-in sources read through one snapshot, and their blocks carry `as_of` and `cursor`;
