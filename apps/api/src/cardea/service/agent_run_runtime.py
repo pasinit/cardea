@@ -10,7 +10,7 @@ import json
 import logging
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Set
 from contextlib import ExitStack, contextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -189,8 +189,6 @@ class AgentRunRuntime:
         self.kernel = kernel
         # The attempt in progress; tool calls arrive on the endpoint's thread and report here.
         self.activity: AttemptActivity | None = None
-        # Approval requests whose outcome this attempt's prompt reported (ADR-036).
-        self.reported: set[str] = set()
 
     # Authority
 
@@ -241,9 +239,12 @@ class AgentRunRuntime:
             request, lease, attempt = started
             with self._observe(task_id, request, lease, attempt) as activity:
                 self.kernel.fault("agent_run.attempt_started")
-                result = self._attempt(task_id, request, lease, attempt)
+                # Requests whose outcome this attempt's prompt reports (ADR-036); one set
+                # per attempt, never shared between runs on this runtime.
+                reported: set[str] = set()
+                result = self._attempt(task_id, request, lease, attempt, reported)
                 self.kernel.fault("agent_run.before_finish")
-                outcome = self._finish(task_id, request, lease, attempt, result)
+                outcome = self._finish(task_id, request, lease, attempt, result, reported)
                 activity.event(
                     "attempt finished",
                     logging.INFO
@@ -627,15 +628,21 @@ class AgentRunRuntime:
         return prompt
 
     def _attempt(
-        self, task_id: str, request: AgentRunRequest, lease: DispatchLease, attempt: int
+        self,
+        task_id: str,
+        request: AgentRunRequest,
+        lease: DispatchLease,
+        attempt: int,
+        reported: set[str] | None = None,
     ) -> HarnessResult:
+        reported = set() if reported is None else reported
         if self.kernel.harnesses is None:
             return HarnessResult.failed("agent_disabled")
         harness_id, model = self.kernel.selection(request)
         harness = self.kernel.harnesses.get(harness_id)
         # An approved request runs first, as `apr-NN` under this attempt's lease (ADR-036).
         asyncio.run(self._run_approved(task_id, lease.lease_id, request))
-        approvals = self._approval_blocks(task_id)
+        approvals = self._approval_blocks(task_id, reported)
         with self.kernel.database.engine.begin() as conn, borrow(conn) as tx:
             journal = self._journal(tx, task_id)
             checkpoint = tx.get_task(task_id).checkpoint
@@ -1200,6 +1207,7 @@ class AgentRunRuntime:
         lease_id: str,
         row: sa.RowMapping,
         state: dict[str, Any],
+        session_succeeded: bool = False,
     ) -> str:
         """RUNNING -> WAITING on `approval.<id>`; already-committed closure wakes it at once.
 
@@ -1231,11 +1239,26 @@ class AgentRunRuntime:
                 after_cursor=int(cursor),
             ),
         )
+        # Mail is not held through a wait that may last days (ADR-034 mailboxes): leased
+        # deliveries settle as at the end of an attempt, consumed if the session succeeded,
+        # otherwise released for redelivery.
+        mailbox.settle(
+            conn,
+            tx,
+            task.task_id,
+            "succeeded" if session_succeeded else "failed",
+            self.kernel.runtime_id,
+            at,
+        )
         log.info("run parked for approval", extra={"task_id": task.task_id, "code": request_id})
         return "waiting"
 
     def _parked_on(
-        self, conn: sa.Connection, task_id: str, lease: DispatchLease
+        self,
+        conn: sa.Connection,
+        task_id: str,
+        lease: DispatchLease,
+        reported: Set[str] = frozenset(),
     ) -> sa.RowMapping | None:
         """The request this attempt must wait on: an open one, or one that closed during the
         attempt after its prompt was built (the agent has not been told yet)."""
@@ -1244,7 +1267,7 @@ class AgentRunRuntime:
             return row
         for closed in reversed(approval_requests.closed_for(conn, task_id)):
             if (
-                closed["request_id"] not in self.reported
+                closed["request_id"] not in reported
                 and datetime.fromisoformat(closed["updated_at"]) >= lease.acquired_at
             ):
                 return closed
@@ -1361,9 +1384,8 @@ class AgentRunRuntime:
             )
             return admitted, self.kernel.handler(name), timeout
 
-    def _approval_blocks(self, task_id: str) -> tuple[str, ...]:
+    def _approval_blocks(self, task_id: str, reported: set[str]) -> tuple[str, ...]:
         """One `<approval>` block per closed request, with the `apr-NN` result when it ran."""
-        self.reported = set()
         with self.kernel.database.read() as conn, borrow(conn) as tx:
             receipts = {r.request.operation_id: r for r in tx.list_operations(task_id)}
             blocks = []
@@ -1379,7 +1401,7 @@ class AgentRunRuntime:
                         else {"state": receipt.state.value}
                     )
                 blocks.append(approval_requests.prompt_block(conn, row, result))
-                self.reported.add(str(row["request_id"]))
+                reported.add(str(row["request_id"]))
         return tuple(blocks)
 
     # Completion
@@ -1391,6 +1413,7 @@ class AgentRunRuntime:
         lease: DispatchLease,
         attempt: int,
         result: HarnessResult,
+        reported: Set[str] = frozenset(),
     ) -> str:
         with self.kernel.database.engine.begin() as conn, borrow(conn) as tx:
             task = tx.get_task(task_id)
@@ -1420,7 +1443,7 @@ class AgentRunRuntime:
             state = task.checkpoint.state if task.checkpoint else {}
             free = state.get("free", 0)
             free = free if isinstance(free, int) else 0
-            waiting_on = self._parked_on(conn, task_id, lease)
+            waiting_on = self._parked_on(conn, task_id, lease, reported)
             if waiting_on is not None:
                 # A request is open, or closed unseen by the agent: wait instead of finishing
                 # (ADR-036 item 4). A failed session still uses a retry; a successful one not.
@@ -1432,6 +1455,7 @@ class AgentRunRuntime:
                     lease.lease_id,
                     waiting_on,
                     {"attempt": attempt, "free": free + 1 if succeeded else free},
+                    session_succeeded=succeeded,
                 )
             # Expectations hold only once no request is open (ADR-036 item 7).
             unmet = self._unmet(request, calls)
