@@ -1,7 +1,11 @@
 # ADR-037: Coding and Version-Control Operations for an Agent Team
 
 - **Date / owner / milestones:** 2026-11-16; runtime, host-execution and API maintainers. Builds on [ADR-023](023-installed-operation-registry.md) (installed operations), [ADR-026](026-effect-idempotency-and-reconciliation.md) (effect scopes and reconciliation), [ADR-028](028-configurable-worker-profiles.md) (confined workers), [ADR-033](033-pluggable-agent-harnesses.md) (harnesses), [ADR-034](034-agent-groups-and-shared-records.md) (agent groups; its software-team example names `vcs.open_change`) and [ADR-036](036-approval-waits.md) (approval waits).
-- **Status:** proposed. Implementation slices 4 and 5 are implemented portably (2026-11-16) **except credential minting**, which waits on the owner's choice between a GitHub App and a personal access token (open question 7). See [Implementation status](#implementation-status). Nothing is verified against a real repository host, and no fit test below has run; every "fit" is from documentation and says so. Open questions 2–4 carry the lead's recommendations, pending the owner.
+- **Status:** proposed, except two parts implemented portably on 2026-11-16 at the lead's direction:
+  - the content gate (decision 4, implementation slice 6), selected and implemented; see [Content gate: implementation](#content-gate-implementation-2026-11-16);
+  - implementation slices 4 and 5, except credential minting, which waits on the owner's choice between a GitHub App and a personal access token (open question 7); see [Implementation status](#implementation-status).
+
+  Nothing is verified against a real repository host. Apart from the Gitleaks fit test recorded there, no fit test below has run; every other "fit" is from documentation and says so. Open questions 2–4 carry the lead's recommendations, pending the owner; the owner's open questions are at the end.
 - **Affected components:** [operation broker](../components/operation-broker.md), [installed host operations](../components/installed-host-operations.md), [Debian host](../components/debian-host.md), [identity and capabilities](../components/identity-capabilities.md), [agent runtime](../components/agent-runtime.md).
 
 ## Requirement
@@ -126,6 +130,43 @@ Compose existing pieces into one operations package, `vcs.*` and `code.*`, insta
 - Operations that leave the host can carry ADR-036 rules, for example "always" for `vcs.open_change` on a protected repository.
 - Branch names come from the operation, not the agent: `agent/<group>/<record or task>` by default, inside the configured prefix (open question 3).
 
+### Content gate: implementation (2026-11-16)
+
+**Gitleaks as a pinned binary, or a port of its rules?** Both were fit-tested on Gitleaks v8.30.1, and the binary was chosen. The evidence is in [`gitleaks-fit-evidence-2026-11-16.json`](gitleaks-fit-evidence-2026-11-16.json).
+
+- **A rule port loses fidelity.** The default configuration has 222 rules.
+  - Of the 221 with a regex, 25 do not compile with Python's `re`: Go RE2 allows `(?i)` in the middle of a pattern and `\z`, and Python does not.
+  - 130 rules also depend on an entropy threshold, 221 on keyword prefilters, and 9 on allowlists, plus a global allowlist and stopwords.
+  - A port would need a regex translator and a re-implementation of each of those, and it would drift from upstream with every release.
+- **The binary fits.**
+  - `gitleaks stdin` scans the text it is given in about 0.3 s, and `--redact` keeps secrets out of its report.
+  - It reads only what the kernel passes: an explicit `--config` (or its built-in rules), an empty ignore directory (`-i`), a cleaned environment (so `GITLEAKS_CONFIG` has no effect) and a scratch working directory.
+  - It honours an inline `gitleaks:allow` comment unless `--ignore-gitleaks-allow` is passed. The fit test confirmed the bypass, so the gate always passes the flag: content must never be able to exempt itself.
+- **Pinned like OpenCode.** `packaging/fetch_gitleaks.py` downloads the release archive and checks the archive's SHA-256 against the release's checksums. The host configuration pins the binary's own SHA-256, which the gate checks before every use.
+
+**What is built** (`cardea.service.content_gate`):
+- **Configuration.** A `content_gate` section in the host configuration: the binary and its SHA-256, an optional Gitleaks TOML, a denylist file, `notify_supervisor` (default `true`) and a timeout. Every file is private and read like the other secret files.
+- **Denylist.** One case-insensitive term per line, or `re:<pattern>` for a regular expression. Blank lines and `#` comments are ignored. The rule ID is `denylist:<line>`, so the term itself is never shown. An invalid pattern, a pattern that matches the empty string, an over-long line, a file that is not UTF-8 and a file that is not private all fail closed with `content_gate_unavailable`, and the message names the line at most.
+- **Inputs.**
+  - The added lines of a unified diff, located as `<file>:<line>` in the new file. An added line outside a hunk refuses the diff.
+  - Free-text fields, located as `<field>` or `<field>:<line>`.
+- **The check.**
+  - The kernel hands every in-process installed operation `OperationContext.check_content(operation=…, diff=…, texts=…)`. The future `vcs.*` operations call it before any network request.
+  - A finding raises `OperationRejected` with code `content_refused`. The refusal names each rule and location (at most ten, then a count), never the matched text. Nothing is sent and the failure is definite.
+  - When the gate is not configured, the scanner is missing or tampered with, or the scan fails, the call is refused with `content_gate_unavailable`.
+- **Supervisor mail.** A refusal also sends kernel mail to the run's supervisor (ADR-034 decision 4), listing the rules and locations. This is the lead's recommendation on open question 5 and can be turned off with `notify_supervisor: false`.
+- **Scope.** Added lines only, as recommended on open question 5. Whole-tree scanning is not built.
+- **Tests** (`apps/api/tests/service/test_content_gate.py`; the Gitleaks tests run in CI with the pinned binary):
+  - diff and text locations;
+  - the denylist's terms and patterns, case-insensitive;
+  - five ways a denylist fails closed;
+  - the binary's digest pin;
+  - a fake secret, assembled at runtime, found in an added line despite an inline `gitleaks:allow`, and in a text field;
+  - a clean change sent;
+  - a denylisted term and a secret each refusing a call through an installed operation, with nothing sent, and neither the receipt's refusal nor the supervisor's mail containing the matched text;
+  - the notice switched off;
+  - no gate, or a malformed one, refusing the call.
+
 ## Integration
 
 - **State.** No new kernel tables are expected: receipts, effect scopes, objects and the existing confined-worker bookkeeping hold everything. The package's configuration (repositories, App ids, gate files, profiles) is host-owner configuration.
@@ -165,8 +206,13 @@ Compose existing pieces into one operations package, `vcs.*` and `code.*`, insta
   - the alias must exist;
   - the branch and a pull request's head must start with `agent/<group>/`;
   - `APPROVE` is refused unless `allow_approve`;
-  - every text and the change pass the content gate.
-- **Content gate hook.** `cardea_vcs_ops.gate.content_gate()` is called by `vcs.push_branch` (`check_change` on the bundle) and by `vcs.open_change`, `vcs.comment` and `vcs.review` (`check_text` on each field) before they send. Until slice 6 it is `NoContentGate`, which allows everything; slice 6 installs its gate with `install_content_gate`. A `ContentRefused` becomes a definite `content_refused` failure, so nothing is sent.
+  - every text and the change pass the kernel's content gate.
+- **Content gate.** Every sending operation calls the kernel's gate (slice 6, `OperationContext.check_content`) before it asks for a credential or sends anything.
+  - `vcs.push_branch` passes every commit the bundle carries, as one unified diff of added lines, and each commit message as a text field (`commit_message:<sha>`).
+  - `vcs.open_change` passes the title and body, `vcs.comment` the comment, and `vcs.review` the review body.
+  - A finding is a definite `content_refused` that names the rule and place, never the text.
+  - A call with no gate bound, or a gate that cannot run, is refused (`content_gate_unavailable`): the gate fails closed.
+  - Bundles must be self-contained for now (they are unpacked into an empty repository), so the whole history they carry is scanned.
 - **Kernel additions,** generic and additive, with descriptor digests unchanged when unset:
   - descriptor `resource: {grant: "repo", argument: "/repository"}`: the invocation core checks `repo:<value>` in the caller's live ceiling before the intent exists;
   - descriptor `inputs`: argument pointers that name object versions in the call's namespace. The core reads them under the `objects.read` ceiling, and the store verifies their digest. The handler gets the bytes in `OperationContext.inputs`, and they are never recorded.
@@ -175,7 +221,6 @@ Compose existing pieces into one operations package, `vcs.*` and `code.*`, insta
 - **Not yet:**
   - the `vcs` confined-worker profile: the handlers run in the service process for now, and moving them behind ADR-028 is a later slice;
   - the App minter;
-  - the content gate itself (slice 6);
   - `code.session`, which is slice 3 and would produce the change bundles;
   - the repository-side ruleset readiness check.
 
@@ -188,6 +233,7 @@ Compose existing pieces into one operations package, `vcs.*` and `code.*`, insta
   - **Inputs:** a change from another namespace is not staged.
   - **Crash and reconcile,** for each effect: push, open, comment and review each apply on the host and then drop the connection. The run fails with `reconciliation_required`, and the reconcile endpoint settles each one from host state with exactly one effect on the host.
   - **Duplicate:** a duplicate pull request returns the existing one.
+  - **Content gate:** a denylisted term in a pushed file, in a commit message or in a comment is refused with nothing sent and without echoing the term, and with no gate configured nothing is sent.
   - **Token containment:** the token reaches the host's `Authorization` header and appears in no database row, log record, session request or handler representation.
   - **Digests:** descriptors without `resource` or `inputs` keep their digest.
 

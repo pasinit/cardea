@@ -111,6 +111,10 @@ class OperationContext:
     # Declared object inputs, staged by the kernel under the caller's ceiling: argument
     # pointer -> the object's verified bytes (ADR-037). Never recorded in the receipt.
     inputs: Mapping[str, bytes] = field(default_factory=dict)
+    # The kernel's content gate (ADR-037 decision 4), bound for in-process installed
+    # operations: call `check_content(operation=..., diff=..., texts=...)` before
+    # sending anything off the host; it raises `OperationRejected` on a finding.
+    check_content: Callable[..., None] | None = None
 
 
 @dataclass(frozen=True)

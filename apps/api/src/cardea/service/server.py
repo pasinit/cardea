@@ -262,6 +262,7 @@ def serve(
             kernel.attempt_logging = config.attempt_logging
             kernel.agent_tools = config.agent_tools
             kernel.event_triggers = config.event_triggers
+            kernel.content_gate = config.content_gate
             if config.agent_session:
                 kernel.session_limit = config.agent_session.concurrent_sessions
             elif harnesses is not None:

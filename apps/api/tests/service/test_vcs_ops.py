@@ -4,6 +4,7 @@ Group members' agent runs call the `vcs.*` tools over the real per-attempt MCP e
 the fake host is `httpx.MockTransport` over real bare git repositories.
 """
 
+import hashlib
 import json
 import subprocess
 import time
@@ -32,7 +33,14 @@ from cardea.service.database import Database, Fault, borrow
 from cardea.service.groups import apply
 from cardea.service.harnesses import IMPLICIT_ID, Catalog, Harnesses, ModelEntry, implicit_entry
 from cardea.service.kernel import Kernel, provision
-from cardea.service.models import RIGHTS, AgentGroup, AgentRunRequest, Provisioning, now
+from cardea.service.models import (
+    RIGHTS,
+    AgentGroup,
+    AgentRunRequest,
+    ContentGateConfig,
+    Provisioning,
+    now,
+)
 from cardea.service.operations import Registry
 
 TOKEN = "ghs_TEST" + "x7Q2" * 8  # recognisable, never expected outside the host
@@ -132,6 +140,7 @@ def kernel(
         {IMPLICIT_ID: session}, Catalog({IMPLICIT_ID: entry}, IMPLICIT_ID, implicit=IMPLICIT_ID)
     )
     instance = Kernel(db, cast(Authentication, Auth()), operations=registry, harnesses=harnesses)
+    instance.content_gate = gate_config(tmp_path)
     group = {
         "apiVersion": "cardea/v1alpha1",
         "kind": "AgentGroup",
@@ -169,6 +178,25 @@ def kernel(
         db.close()
 
 
+DENIED = "project-nightjar"
+
+
+def gate_config(directory: Path) -> ContentGateConfig:
+    """The kernel's content gate with a stand-in scanner and a one-term denylist."""
+    scanner = directory / "no-findings"
+    scanner.write_text("#!/bin/sh\ncat >/dev/null\necho '[]'\n")
+    scanner.chmod(0o700)
+    denylist = directory / "denylist"
+    denylist.write_text(DENIED + "\n")
+    denylist.chmod(0o600)
+    return ContentGateConfig(
+        gitleaks_binary=scanner,
+        gitleaks_sha256=hashlib.sha256(scanner.read_bytes()).hexdigest(),
+        denylist_file=denylist,
+        notify_supervisor=False,
+    )
+
+
 def member_run(kernel: Kernel, member: str = "eng.dev.0", **changes: Any) -> str:
     with kernel.database.read() as conn:
         definition = conn.exec_driver_sql(
@@ -203,13 +231,13 @@ def text(result: Any) -> str:
 
 
 def make_change(
-    kernel: Kernel, tmp_path: Path, message: str = "Fix the login retry"
+    kernel: Kernel, tmp_path: Path, message: str = "Fix the login retry", content: str = ""
 ) -> dict[str, Any]:
     """A commit on a fixture repository, bundled and stored as an object in `eng`."""
     work = tmp_path / f"work-{next(STEPS)}"
     git = ["git", "-c", "user.name=agent", "-c", "user.email=agent@example.invalid"]
     subprocess.run(["git", "init", "-q", "-b", "main", str(work)], check=True)
-    (work / "README.md").write_text(f"{message}\n")
+    (work / "README.md").write_text(f"{message}\n{content}")
     subprocess.run([*git, "-C", str(work), "add", "README.md"], check=True)
     subprocess.run([*git, "-C", str(work), "commit", "-q", "-m", message], check=True)
     head = subprocess.run(
@@ -579,3 +607,59 @@ def test_descriptors_without_resource_or_inputs_keep_their_digest() -> None:
         {**plain, "cardea": {**plain["cardea"], "resource": None, "inputs": None}}
     )
     assert without.digest == explicit.digest != push.digest
+
+
+# The kernel's content gate runs before anything is sent
+
+
+def test_the_content_gate_refuses_before_sending(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path
+) -> None:
+    number = open_pull(kernel, session, tmp_path)
+    in_file = make_change(kernel, tmp_path, message="Docs", content=f"Mentions {DENIED}.\n")
+    in_message = make_change(kernel, tmp_path, message=f"Ship {DENIED}")
+    before = len(host.authorizations)
+    _, _, results = run_calls(
+        kernel,
+        session,
+        [
+            ("vcs-push_branch", {"repository": "cardea", "branch": "agent/eng/a", **in_file}),
+            ("vcs-push_branch", {"repository": "cardea", "branch": "agent/eng/b", **in_message}),
+            (
+                "vcs-comment",
+                {
+                    "repository": "cardea",
+                    "number": number,
+                    "body": f"see {DENIED}",
+                    "client_key": "g",
+                },
+            ),
+        ],
+    )
+    assert all(r.is_error and "content_refused" in text(r) for r in results), [
+        text(r) for r in results
+    ]
+    # The refusal names the rule and place, never the matched text.
+    assert all(DENIED not in text(r) for r in results)
+    assert "README.md:2" in text(results[0]) and "commit_message" in text(results[1])
+    assert untouched(host, before)
+
+
+def test_without_a_configured_gate_nothing_is_sent(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path
+) -> None:
+    number = open_pull(kernel, session, tmp_path)
+    kernel.content_gate = None
+    before = len(host.authorizations)
+    _, _, (refused,) = run_calls(
+        kernel,
+        session,
+        [
+            (
+                "vcs-comment",
+                {"repository": "cardea", "number": number, "body": "ok", "client_key": "n"},
+            )
+        ],
+    )
+    assert refused.is_error and "content_gate_unavailable" in text(refused)
+    assert untouched(host, before)

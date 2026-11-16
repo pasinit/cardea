@@ -15,7 +15,8 @@ Rules checked here, before any network call:
   by the kernel, from the descriptor's `resource`);
 - a pushed branch, and a pull request's head, start with the caller's group prefix;
 - `APPROVE` reviews are refused unless the host owner allows them;
-- every text that leaves the host passes the content gate first.
+- the change and every text that leaves the host pass the kernel's content gate first
+  (`OperationContext.check_content`, ADR-037 slice 6), which fails closed.
 """
 
 import re
@@ -27,8 +28,7 @@ from pydantic import JsonValue
 from cardea.service.operations import OperationContext, OperationRejected, Reconciliation
 from cardea_vcs_ops.config import Repository, VcsConfig
 from cardea_vcs_ops.credentials import Permission, RepositoryCredentials, provider
-from cardea_vcs_ops.gate import ContentRefused, TextField, content_gate
-from cardea_vcs_ops.git import BundleInvalid, Pusher, PushRejected, push_bundle
+from cardea_vcs_ops.git import BundleInvalid, Pusher, PushRejected, change_content, push_bundle
 from cardea_vcs_ops.github import DuplicatePull, GitHub, HostRefused
 
 BRANCH = re.compile(r"^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$")
@@ -86,13 +86,24 @@ class Vcs:
             raise OperationRejected(f"Branches must be named {prefix}<name>", "branch_not_allowed")
 
     @staticmethod
-    def gate_text(field: TextField, text: str) -> None:
-        try:
-            content_gate().check_text(field, text)
-        except ContentRefused as refused:
+    def gate(
+        context: OperationContext,
+        operation: str,
+        *,
+        diff: str | None = None,
+        texts: dict[str, str] | None = None,
+    ) -> None:
+        """The kernel's content gate (ADR-037 slice 6), before anything is sent.
+
+        It raises `OperationRejected` (`content_refused`, or the gate's own code when it is
+        unavailable) on a finding. A call the kernel did not bind a gate to is refused too:
+        the gate fails closed.
+        """
+        if context.check_content is None:
             raise OperationRejected(
-                f"Content refused: {refused.rule} in {refused.where}", "content_refused"
-            ) from None
+                "The content gate is not available to this call", "content_gate_unavailable"
+            )
+        context.check_content(operation=operation, diff=diff, texts=texts)
 
     async def client(self, repository: Repository, *permissions: Permission) -> GitHub:
         credential = await self.credentials.credential(repository, permissions)
@@ -110,11 +121,11 @@ class Vcs:
         if bundle is None:
             raise OperationRejected("The change bundle was not staged", "change_invalid")
         try:
-            content_gate().check_change(bundle)
-        except ContentRefused as refused:
-            raise OperationRejected(
-                f"Content refused: {refused.rule} in {refused.where}", "content_refused"
-            ) from None
+            diff, messages = await change_content(bundle, head)
+        except BundleInvalid as invalid:
+            raise OperationRejected(str(invalid), "change_invalid") from None
+        # The added lines and every commit message, before the credential is even asked for.
+        self.gate(context, "vcs.push_branch", diff=diff, texts=messages)
         credential = await self.credentials.credential(repository, ("contents:write",))
         try:
             async with GitHub(repository, credential, self.transport) as host:
@@ -168,8 +179,7 @@ class Vcs:
         head, base = str(arguments["head"]), str(arguments["base"])
         self.check_branch(head, context)
         title, body = str(arguments["title"]), str(arguments.get("body") or "")
-        self.gate_text("title", title)
-        self.gate_text("body", body)
+        self.gate(context, "vcs.open_change", texts={"title": title, "body": body})
         async with await self.client(repository, "pull_requests:write") as host:
             try:
                 pull = await host.create_pull(head, base, title, body, bool(arguments.get("draft")))
@@ -202,7 +212,7 @@ class Vcs:
     ) -> dict[str, JsonValue]:
         repository = self.repository(arguments["repository"])
         body = str(arguments["body"])
-        self.gate_text("comment", body)
+        self.gate(context, "vcs.comment", texts={"comment": body})
         async with await self.client(repository, "issues:write") as host:
             try:
                 made = await host.create_comment(
@@ -240,7 +250,7 @@ class Vcs:
             raise OperationRejected(
                 "APPROVE reviews are not allowed on this host", "approve_refused"
             )
-        self.gate_text("review", body)
+        self.gate(context, "vcs.review", texts={"review": body})
         async with await self.client(repository, "pull_requests:write") as host:
             try:
                 made = await host.create_review(

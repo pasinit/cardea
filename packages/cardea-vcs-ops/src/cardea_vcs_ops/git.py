@@ -65,27 +65,58 @@ def _environment(work: Path, credential: Credential) -> dict[str, str]:
     }
 
 
+def _unpack(work: Path, bundle: bytes, head: str) -> Path:
+    """Verify the bundle and fetch its ref at `head` into an empty bare repository.
+
+    The bundle must be self-contained: an empty repository has no prerequisite commits.
+    """
+    (work / "change.bundle").write_bytes(bundle)
+    repo = work / "repo.git"
+    if _git("init", "--bare", "-q", str(repo), cwd=work).returncode != 0:
+        raise RuntimeError("git init failed")
+    if _git("bundle", "verify", "-q", str(work / "change.bundle"), cwd=repo).returncode:
+        raise BundleInvalid("the change bundle does not verify")
+    listed = _git("bundle", "list-heads", str(work / "change.bundle"), cwd=repo)
+    refs = [line.split(maxsplit=1) for line in listed.stdout.splitlines() if line.strip()]
+    source = next((ref for sha, ref in refs if sha == head), None)
+    if source is None:
+        raise BundleInvalid("the change bundle has no ref at the named commit")
+    fetched = _git(
+        "fetch", "-q", str(work / "change.bundle"), f"{source}:refs/cardea/change", cwd=repo
+    )
+    if fetched.returncode != 0:
+        raise BundleInvalid("the change bundle could not be read")
+    if _git("rev-parse", "refs/cardea/change", cwd=repo).stdout.strip() != head:
+        raise BundleInvalid("the change bundle's head is not the named commit")
+    return repo
+
+
+def _content(bundle: bytes, head: str) -> tuple[str, dict[str, str]]:
+    with tempfile.TemporaryDirectory(prefix="cardea-vcs-") as directory:
+        repo = _unpack(Path(directory), bundle, head)
+        # Every commit the bundle carries, as one unified diff of added lines.
+        diff = _git("log", "-p", "--no-color", "--format=", "--reverse", head, cwd=repo)
+        logged = _git("log", "--format=%H%x00%B%x00", head, cwd=repo)
+        if diff.returncode or logged.returncode:
+            raise BundleInvalid("the change bundle's history could not be read")
+        parts = logged.stdout.split("\x00")
+        messages = {
+            f"commit_message:{sha.strip()[:12]}": body.strip()
+            for sha, body in zip(parts[0::2], parts[1::2], strict=False)
+            if sha.strip()
+        }
+        return diff.stdout, messages
+
+
+async def change_content(bundle: bytes, head: str) -> tuple[str, dict[str, str]]:
+    """What a push sends, for the content gate: the bundle's diff and commit messages."""
+    return await asyncio.to_thread(_content, bundle, head)
+
+
 def _push(bundle: bytes, head: str, git_url: str, branch: str, credential: Credential) -> None:
     with tempfile.TemporaryDirectory(prefix="cardea-vcs-") as directory:
         work = Path(directory)
-        (work / "change.bundle").write_bytes(bundle)
-        repo = work / "repo.git"
-        if _git("init", "--bare", "-q", str(repo), cwd=work).returncode != 0:
-            raise RuntimeError("git init failed")
-        if _git("bundle", "verify", "-q", str(work / "change.bundle"), cwd=repo).returncode:
-            raise BundleInvalid("the change bundle does not verify")
-        listed = _git("bundle", "list-heads", str(work / "change.bundle"), cwd=repo)
-        refs = [line.split(maxsplit=1) for line in listed.stdout.splitlines() if line.strip()]
-        source = next((ref for sha, ref in refs if sha == head), None)
-        if source is None:
-            raise BundleInvalid("the change bundle has no ref at the named commit")
-        fetched = _git(
-            "fetch", "-q", str(work / "change.bundle"), f"{source}:refs/cardea/change", cwd=repo
-        )
-        if fetched.returncode != 0:
-            raise BundleInvalid("the change bundle could not be read")
-        if _git("rev-parse", "refs/cardea/change", cwd=repo).stdout.strip() != head:
-            raise BundleInvalid("the change bundle's head is not the named commit")
+        repo = _unpack(work, bundle, head)
         pushed = _git(
             "push",
             "--porcelain",

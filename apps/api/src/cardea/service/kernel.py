@@ -2,7 +2,9 @@
 
 import json
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import timedelta
+from functools import partial
 from uuid import uuid4
 
 import sqlalchemy as sa
@@ -13,7 +15,13 @@ from cardea.hosts.debian import Host
 from cardea.kernel.models import BudgetLimits, Task, TaskState
 from cardea.kernel.store import KernelTransaction
 from cardea.runtime.agent_session import AgentSession
-from cardea.service import approval_requests, context_sources, host_budget, spend
+from cardea.service import (
+    approval_requests,
+    content_gate,
+    context_sources,
+    host_budget,
+    spend,
+)
 from cardea.service.approval_requests import waiting_for, withdraw
 from cardea.service.auth import IdentityProvider, Proof
 from cardea.service.confined import ConfinedAgentSession, Workers, confined_handler, job_id
@@ -30,6 +38,7 @@ from cardea.service.models import (
     AgentTools,
     AttemptLogging,
     BaseHostTaskRequest,
+    ContentGateConfig,
     DelegationTaskRequest,
     EventTriggers,
     HostObjectTaskRequest,
@@ -46,6 +55,7 @@ from cardea.service.models import (
 from cardea.service.operations import (
     KERNEL_RIGHTS,
     Handler,
+    OperationContext,
     Reconciler,
     Registry,
     check_context,
@@ -327,6 +337,8 @@ class Kernel:
         self.agent_tools = AgentTools()
         # Inbound event intake bounds for event triggers (ADR-035).
         self.event_triggers = EventTriggers()
+        # What may leave the host (ADR-037 decision 4); unset refuses every check.
+        self.content_gate: ContentGateConfig | None = None
         # Unfinished tasks of a profile whose adapters are missing could never recover.
         missing: tuple[tuple[str, str, Callable[[Profile], bool]], ...] = (
             (
@@ -512,12 +524,23 @@ class Kernel:
         descriptor = self.operations.get(name)
         executor = descriptor.cardea.executor
         if executor is None:
-            return self.operations.handler(name)
+            return self._gated(self.operations.handler(name))
         self.executor_record(name)
         assert self.workers is not None
         return confined_handler(
             self.workers, executor, descriptor.cardea.timeout_seconds, self.worker_watch
         )
+
+    def _gated(self, handler: Handler) -> Handler:
+        """Hand an in-process installed operation the kernel's content gate."""
+
+        async def gated(
+            arguments: dict[str, JsonValue], context: OperationContext
+        ) -> dict[str, JsonValue]:
+            check = partial(content_gate.enforce, self.database, self.content_gate, context)
+            return await handler(arguments, replace(context, check_content=check))
+
+        return gated
 
     def worker_watch(self, task_id: str, lease_id: str) -> str | None:
         """Why a running confined worker must stop now, if it must."""
