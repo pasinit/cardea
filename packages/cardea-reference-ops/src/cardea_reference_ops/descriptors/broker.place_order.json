@@ -1,0 +1,61 @@
+{
+  "tool": {
+    "name": "broker.place_order",
+    "description": "Place an order at the broker; refused with risk_limit over the desk limit. Fake: in-memory only, no network.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "order_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "record_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "qty": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "side": {
+          "enum": [
+            "buy",
+            "sell"
+          ]
+        },
+        "limit_price": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "order_ref",
+        "record_id",
+        "qty"
+      ]
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "broker_order_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "broker_order_id"
+      ]
+    }
+  },
+  "cardea": {
+    "version": 1,
+    "effect": "effect",
+    "handler": "reference.broker.place_order",
+    "timeout_seconds": 10,
+    "idempotency_scope": [
+      "/order_ref"
+    ],
+    "reconciler": "reference.broker.find_order"
+  }
+}

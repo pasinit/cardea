@@ -1,0 +1,42 @@
+{
+  "tool": {
+    "name": "broker.fills",
+    "description": "The broker's fills for an order. Fake: in-memory only, no network.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "order_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "record_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "order_ref"
+      ]
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "filled_qty": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "filled_qty"
+      ]
+    }
+  },
+  "cardea": {
+    "version": 1,
+    "effect": "read",
+    "handler": "reference.broker.fills",
+    "timeout_seconds": 10
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "tool": {
+    "name": "vcs.comment",
+    "description": "Comment on a code change. Fake: in-memory only, no network.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "change_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "body": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        }
+      },
+      "required": [
+        "change_id",
+        "body"
+      ]
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "comment_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "comment_id"
+      ]
+    }
+  },
+  "cardea": {
+    "version": 1,
+    "effect": "effect",
+    "handler": "reference.vcs.comment",
+    "timeout_seconds": 10,
+    "idempotency_scope": [
+      "/change_id",
+      "/body"
+    ],
+    "reconciler": "reference.vcs.find_comment"
+  }
+}

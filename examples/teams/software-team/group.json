@@ -1,0 +1,212 @@
+{
+  "apiVersion": "cardea/v1alpha1",
+  "kind": "AgentGroup",
+  "metadata": {
+    "name": "eng-team",
+    "namespace": "eng"
+  },
+  "spec": {
+    "supervisor": "sup-eng",
+    "collections": [
+      "work",
+      "decisions"
+    ],
+    "pools": [
+      {
+        "name": "principal",
+        "replicas": 1,
+        "grants": [
+          "objects.read",
+          "objects.write",
+          "models.invoke",
+          "record:work/read",
+          "record:work/approve",
+          "record:work/request_changes",
+          "record:decisions/create",
+          "record:decisions/read",
+          "vcs.read_change",
+          "vcs.comment"
+        ],
+        "run": {
+          "instructions": "Review work in review: approve it or request changes, and record architecture decisions.",
+          "operations": [
+            "records.query",
+            "records.transition",
+            "records.create",
+            "vcs.read_change"
+          ],
+          "context": [
+            {
+              "operation": "records.summary",
+              "arguments": {
+                "collection": "work"
+              }
+            }
+          ],
+          "bounds": {
+            "timeout_seconds": 600,
+            "attempts": 2
+          }
+        },
+        "triggers": [
+          {
+            "event": {
+              "types": [
+                "cardea.record.transitioned"
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "name": "product",
+        "replicas": 1,
+        "grants": [
+          "objects.read",
+          "objects.write",
+          "models.invoke",
+          "record:work/create",
+          "record:work/read",
+          "ci.status"
+        ],
+        "run": {
+          "instructions": "Exercise the product and file the work you find.",
+          "operations": [
+            "records.create",
+            "ci.status"
+          ],
+          "context": [
+            {
+              "operation": "records.summary",
+              "arguments": {
+                "collection": "work"
+              }
+            }
+          ],
+          "bounds": {
+            "timeout_seconds": 600,
+            "attempts": 2
+          }
+        },
+        "triggers": [
+          {
+            "schedule": {
+              "cron": "0 10 * * 1-5",
+              "timezone": "UTC",
+              "misfire": "skip"
+            }
+          }
+        ]
+      },
+      {
+        "name": "lead",
+        "replicas": 1,
+        "grants": [
+          "objects.read",
+          "objects.write",
+          "models.invoke",
+          "record:work/read",
+          "record:work/update",
+          "record:work/triage",
+          "record:work/cancel",
+          "mail:eng-team.dev",
+          "mailbox.send"
+        ],
+        "run": {
+          "instructions": "Prioritise open work and assign it to the developers.",
+          "operations": [
+            "records.query",
+            "records.transition",
+            "mailbox.send"
+          ],
+          "context": [
+            {
+              "operation": "records.summary",
+              "arguments": {
+                "collection": "work"
+              }
+            }
+          ],
+          "bounds": {
+            "timeout_seconds": 600,
+            "attempts": 2
+          }
+        },
+        "triggers": [
+          {
+            "schedule": {
+              "cron": "0 9 * * 1-5",
+              "timezone": "UTC",
+              "misfire": "skip"
+            }
+          }
+        ]
+      },
+      {
+        "name": "dev",
+        "replicas": 3,
+        "grants": [
+          "objects.read",
+          "objects.write",
+          "models.invoke",
+          "record:work/read",
+          "record:work/start",
+          "record:work/submit",
+          "vcs.open_change",
+          "ci.status",
+          "mailbox.inbox"
+        ],
+        "run": {
+          "instructions": "Take ready work, implement it, open a change and submit it for review.",
+          "operations": [
+            "records.query",
+            "records.transition",
+            "vcs.open_change",
+            "ci.status"
+          ],
+          "context": [
+            {
+              "operation": "records.claimed",
+              "arguments": {
+                "collection": "work"
+              }
+            },
+            {
+              "operation": "mailbox.inbox"
+            },
+            {
+              "operation": "records.summary",
+              "arguments": {
+                "collection": "work"
+              }
+            }
+          ],
+          "bounds": {
+            "timeout_seconds": 600,
+            "attempts": 2
+          }
+        },
+        "triggers": [
+          {
+            "schedule": {
+              "cron": "0 */2 * * 1-5",
+              "timezone": "UTC",
+              "misfire": "skip"
+            }
+          },
+          {
+            "event": {
+              "types": [
+                "cardea.mailbox.sent"
+              ],
+              "subjects": [
+                "$member",
+                "$pool"
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
