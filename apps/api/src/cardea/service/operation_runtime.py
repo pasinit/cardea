@@ -10,14 +10,17 @@ import hashlib
 import json
 import logging
 import time
-from datetime import timedelta
-from typing import Any
+from collections.abc import Awaitable
+from contextlib import suppress
+from datetime import datetime, timedelta
+from typing import Any, TypeVar
 from uuid import uuid4
 
 import rfc8785
 import sqlalchemy as sa
 from pydantic import JsonValue
 
+from cardea.kernel.lifecycle import ContractError
 from cardea.kernel.models import (
     Checkpoint,
     DispatchLease,
@@ -29,7 +32,7 @@ from cardea.kernel.models import (
     TaskState,
     VerificationRecord,
 )
-from cardea.kernel.store import KernelTransaction
+from cardea.kernel.store import KernelTransaction, StoreError
 from cardea.service import approval_requests, invocation, mailbox
 from cardea.service.approvals import ApprovalRequirement
 from cardea.service.confined import WorkerFailed
@@ -47,6 +50,11 @@ from cardea.service.policy import Policy
 log = logging.getLogger(__name__)
 # Lease time beyond the handler timeout for settlement; settlement after expiry is fenced.
 LEASE_MARGIN = 5.0
+# A confined call longer than this lease holds a short lease renewed every HEARTBEAT_SECONDS,
+# so a crashed service is recovered within one lease, not one call.
+HEARTBEAT_LEASE_SECONDS = 300.0
+HEARTBEAT_SECONDS = 60.0
+T = TypeVar("T")
 SETTLE_MARGIN = 1.0
 EXECUTE = "execute"
 # A single-operation task has at most one approval request, so its effect is `apr-01`.
@@ -305,12 +313,20 @@ class OperationRuntime:
                         else None
                     )
                     at = now()
-                    expires = min(
+                    # The whole call's limit; a long confined call holds a short lease that
+                    # a heartbeat renews up to it (ADR-023 amendment, 2026-11-16).
+                    limit = min(
                         task.limits.deadline,
                         at
                         + timedelta(
                             seconds=descriptor.cardea.timeout_seconds + queue + LEASE_MARGIN
                         ),
+                    )
+                    heartbeat = descriptor.cardea.executor is not None and limit - at > timedelta(
+                        seconds=HEARTBEAT_LEASE_SECONDS
+                    )
+                    expires = (
+                        at + timedelta(seconds=HEARTBEAT_LEASE_SECONDS) if heartbeat else limit
                     )
                     task = tx.change_task(
                         task_id,
@@ -356,8 +372,9 @@ class OperationRuntime:
                         raise _Void(void_reason_for(error)) from None
                     raise _Refused(error) from None
                 timeout = invocation.timeout_for(
-                    self.kernel.operations, request.operation, expires, SETTLE_MARGIN, queue
+                    self.kernel.operations, request.operation, limit, SETTLE_MARGIN, queue
                 )
+                lease_id = task.lease.lease_id
         self.kernel.fault("operation.intent_committed")
         if recovering:
             # A confined worker may outlive the service: stop its whole process tree.
@@ -372,8 +389,9 @@ class OperationRuntime:
         try:
             if timeout <= 0:
                 raise OperationRejected("no time left to dispatch")
+            call = asyncio.wait_for(handler(dict(request.arguments), admitted.context), timeout)
             output = asyncio.run(
-                asyncio.wait_for(handler(dict(request.arguments), admitted.context), timeout)
+                self._with_heartbeat(call, task_id, lease_id, limit) if heartbeat else call
             )
         except OperationRejected as rejected:
             # Nothing happened: the handler refused, the helper refused or no slot freed up.
@@ -397,6 +415,46 @@ class OperationRuntime:
             )
         self.kernel.fault("operation.before_settle")
         return self.settle(task_id, output, "", started, operation_id)
+
+    async def _with_heartbeat(
+        self, call: Awaitable[T], task_id: str, lease_id: str, limit: datetime
+    ) -> T:
+        """Run a long call while renewing its lease; a lost lease stops the renewals.
+
+        The confined worker's own watch sees the lost lease and stops the worker, so a call
+        whose lease was fenced by recovery never settles as if it still held it.
+        """
+        beat = asyncio.ensure_future(self._heartbeat(task_id, lease_id, limit))
+        try:
+            return await call
+        finally:
+            beat.cancel()
+            with suppress(asyncio.CancelledError):
+                await beat
+
+    async def _heartbeat(self, task_id: str, lease_id: str, limit: datetime) -> None:
+        while True:
+            await asyncio.sleep(HEARTBEAT_SECONDS)
+            if not await asyncio.to_thread(self.renew, task_id, lease_id, limit):
+                log.warning("lease renewal refused; the call is fenced", extra={"task_id": task_id})
+                return
+
+    def renew(self, task_id: str, lease_id: str, limit: datetime) -> bool:
+        """Extend this call's lease by one heartbeat period, up to the call's limit."""
+        try:
+            with self.kernel.database.engine.begin() as conn, borrow(conn) as tx:
+                task = tx.get_task(task_id)
+                at = now()
+                tx.renew_lease(
+                    task_id,
+                    expected_revision=task.revision,
+                    lease_id=lease_id,
+                    expires_at=min(limit, at + timedelta(seconds=HEARTBEAT_LEASE_SECONDS)),
+                    at=at,
+                )
+            return True
+        except (StoreError, ContractError):
+            return False
 
     def uncertain(self, task_id: str, operation_id: str = EXECUTE) -> str:
         # Never infer a result: fence the lease, then let recovery require reconciliation.
@@ -651,7 +709,9 @@ class OperationRuntime:
         for task_id, operation_id, name in rows:
             if settled >= limit or name not in self.kernel.operations:
                 continue
-            if self.kernel.operations.get(str(name)).cardea.reconciler is None:
+            binding = self.kernel.operations.get(str(name)).cardea
+            # A confined operation with artifacts is reconciled from the store (ADR-023).
+            if binding.reconciler is None and not binding.max_artifact_bytes:
                 continue
             try:
                 self.reconcile(str(task_id), str(operation_id))

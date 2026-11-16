@@ -63,6 +63,12 @@ BUILTIN_PREFIXES = ("mailbox.", "runs.")
 # Room in a receipt's 64 KiB result document for the output and its wrapper keys.
 MAX_RECORDED_OUTPUT_BYTES = MAX_DOCUMENT_BYTES - 64
 _NAME = TypeAdapter(OperationName)
+MAX_IN_PROCESS_TIMEOUT_SECONDS = 600
+# The hard maximum for a confined operation (ADR-023 amendment, lead decision 2026-11-16).
+MAX_CONFINED_TIMEOUT_SECONDS = 7200
+# Artifacts travel in the worker's output document, which the helper caps (launcher).
+MAX_ARTIFACT_BYTES = 11 * 1024 * 1024
+DEFAULT_ARTIFACT_BYTES = 10 * 1024 * 1024
 
 
 class OperationRejected(Exception):
@@ -113,6 +119,18 @@ class OperationContext:
 
 
 @dataclass(frozen=True)
+class WithArtifacts:
+    """A confined handler's output plus named artifacts (ADR-037).
+
+    Only a worker (`operation_worker`) can return it; the kernel stores the artifacts as
+    task-owned objects when the operation declares `max_artifact_bytes`.
+    """
+
+    output: dict[str, JsonValue]
+    artifacts: dict[str, bytes]
+
+
+@dataclass(frozen=True)
 class Reconciliation:
     """A reconciler's observation of destination state for an uncertain effect."""
 
@@ -149,7 +167,10 @@ class Binding(Record):
     handler: HandlerName | None = None
     # None runs the handler in the service process (ADR-023).
     executor: ConfinedExecutor | None = None
-    timeout_seconds: Annotated[int, Field(strict=True, ge=1, le=600)] = 30
+    # In-process operations: at most 600 s. Confined operations: at most their profile's
+    # `wall_seconds`, checked against the installed profile at load and admission, and never
+    # more than two hours (ADR-023 amendment, 2026-11-16).
+    timeout_seconds: Annotated[int, Field(strict=True, ge=1, le=MAX_CONFINED_TIMEOUT_SECONDS)] = 30
     # At most what a receipt can record (MAX_DOCUMENT_BYTES); checked below with a clear error.
     max_output_bytes: Annotated[int, Field(strict=True, ge=1)] = 65536
     requires: tuple[Right, ...] = ()
@@ -161,6 +182,10 @@ class Binding(Record):
     # Default approval rules (ADR-036); a host rule for a namespace replaces them. None, like
     # an empty rule list, is autonomous: authority alone decides.
     approval: OperationApproval | None = None
+    # Confined operations only: bytes of named artifacts the worker may return beside its
+    # output, stored as task-owned kernel objects in parts of at most 1 MiB (ADR-037). 0
+    # means none. The output then carries the objects' references, not the bytes.
+    max_artifact_bytes: Annotated[int, Field(strict=True, ge=0, le=MAX_ARTIFACT_BYTES)] = 0
 
     @model_validator(mode="after")
     def effect_only(self) -> Self:
@@ -168,6 +193,13 @@ class Binding(Record):
             raise ValueError("Read operations have no effect scope or reconciler")
         if (self.handler is None) == (self.executor is None):
             raise ValueError("Declare an in-process handler or a confined executor, not both")
+        if self.executor is None and self.timeout_seconds > MAX_IN_PROCESS_TIMEOUT_SECONDS:
+            raise ValueError(
+                f"timeout_seconds {self.timeout_seconds} exceeds "
+                f"{MAX_IN_PROCESS_TIMEOUT_SECONDS}; only confined operations may run longer"
+            )
+        if self.executor is None and self.max_artifact_bytes:
+            raise ValueError("Only confined operations return artifacts")
         if self.max_output_bytes > MAX_DOCUMENT_BYTES:
             # A larger output could never be recorded in its receipt (ADR-023, ADR-029).
             raise ValueError(
@@ -228,6 +260,8 @@ class OperationDescriptor(Record):
             )
             if value is None
         }
+        if not self.cardea.max_artifact_bytes:
+            unset.add("max_artifact_bytes")
         exclude = {"cardea": unset} if unset else None
         return sha256(rfc8785.dumps(self.model_dump(mode="json", exclude=exclude))).hexdigest()
 
