@@ -706,6 +706,9 @@ class AgentRunRuntime:
                 if receipt.failure
                 else receipt.state.value
             )
+            if receipt.failure is not None and receipt.failure.code == "content_refused":
+                # Rule and location only (ADR-037); the arguments above are redacted.
+                outcome = f"content_refused ({receipt.failure.details.get('summary', '')})"
             lines.append(
                 f"- {tool_name(receipt.request.name)} {_text(arguments)[:400]} -> "
                 f"{receipt.state.value}: {_text(outcome)[:800]}"

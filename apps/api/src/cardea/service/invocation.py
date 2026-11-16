@@ -380,6 +380,18 @@ def redact(
                 "UPDATE task_bindings SET request_json=? WHERE task_id=?",
                 (json.dumps(request), task_id),
             )
+    # A call held for approval and run as `apr-NN` (ADR-036) froze its arguments there.
+    held = conn.exec_driver_sql(
+        "SELECT arguments_json FROM approval_requests WHERE task_id=? AND operation_id=?",
+        (task_id, operation_id),
+    ).first()
+    if held is not None:
+        frozen, hit = scrub(json.loads(held[0]), needles)
+        if hit:
+            conn.exec_driver_sql(
+                "UPDATE approval_requests SET arguments_json=? WHERE task_id=? AND operation_id=?",
+                (json.dumps(frozen), task_id, operation_id),
+            )
 
 
 def uncertain(
