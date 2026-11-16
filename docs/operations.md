@@ -138,6 +138,17 @@ Single-operation tasks and agent runs can wait for an approver before an effect 
 - **Agent approvers.** An agent run may decide requests through the built-in tool `approvals.decide` (list it in `operations`). Each call is checked live: the run's agent needs the `approve` row on the operation, the run must be granted `approve:<operation>`, and its supervisor (and every ancestor's) must hold `approve` and `delegate` on it, as the platform allows; the requester exclusion applies. Admission checks the same `approve:<operation>` grant against the supervisor.
 - **Not yet.** Per-grant rules in agent-run requests and triggers (ADR-036 slice 5). A snapshot restore voids open requests (`snapshot_restored`).
 
+## Repository-host operations
+
+The `cardea-vcs-ops` package installs `vcs.push_branch`, `vcs.open_change`, `vcs.comment`, `vcs.review` and `vcs.read_change` ([ADR-037](decisions/037-coding-and-vcs-operations.md), slices 4 and 5, without credential minting).
+
+- **Configuration.** A private JSON file named by `CARDEA_VCS_CONFIG` (default `/etc/cardea/vcs.json`) lists the repository aliases (owner, name, REST API URL, git URL), the branch prefix (default `agent/{group}/`), `allow_approve` (default false) and the credential provider. Install the descriptors from the package's `descriptors/` directory under `operations_dir`.
+- **Authority.** Each call needs the operation's grant and `repo:<alias>` in the caller's live ceiling. Provision supervisor rows for `repo:<alias>` like any right, with `delegate` to pass it to group pools.
+- **Branches.** Only group members push or open changes, under `agent/<group>/`; other names are refused with `branch_not_allowed` before any network call. `APPROVE` reviews are refused with `approve_refused` unless `allow_approve` is set.
+- **Content gate.** Every push, pull request, comment and review passes the kernel's content gate first (ADR-037 slice 6): a push's added lines and commit messages, and every text field. Without a configured gate these operations refuse (`content_gate_unavailable`) and send nothing.
+- **Credentials.** Only the test provider exists (`{"kind": "test", "token": ...}`), for fakes and tests. A production minter (a GitHub App or a personal access token, ADR-037 open question 7) is not available yet, so do not point these operations at a real host.
+- **Recovery.** An interrupted push, pull request, comment or review is `outcome_unknown`. `POST /v0.2/tasks/<id>/operations/<operation_id>/reconcile` reads the host (the branch head, the pull request for the head, or the comment or review marker) and settles it without sending again.
+
 ## Retention and deletion
 
 Task, object, event, provenance, budget, receipt and idempotency history is retained for the lifetime of a store. Host payload cleanup is recoverable and retains reconciliation tombstones. Partial history or tombstone garbage collection is unsupported because deleting it could destroy evidence or permit duplicate effects.

@@ -149,6 +149,9 @@ def provision(
         elif rule.operation.startswith("mail:"):
             # Mail grants name addresses (ADR-034); recipients resolve when mail is sent.
             continue
+        elif rule.operation.startswith("repo:"):
+            # Repository aliases are host configuration of the vcs operations (ADR-037).
+            continue
         elif rule.operation.startswith(RECORD_GRANT_PREFIX):
             # Collections are supervisor documents; a grant may precede its collection.
             continue

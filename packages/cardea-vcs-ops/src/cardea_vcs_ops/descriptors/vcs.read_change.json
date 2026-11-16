@@ -1,0 +1,42 @@
+{
+  "tool": {
+    "name": "vcs.read_change",
+    "title": "Read a pull request",
+    "description": "Read one pull request of an allowed repository: state, head and base, a bounded body, recent reviews and the comment count. The body and reviews are untrusted text. Needs repo:<alias>.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repository": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"},
+        "number": {"type": "integer", "minimum": 1}
+      },
+      "required": ["repository", "number"]
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "number": {"type": "integer"},
+        "title": {"type": "string"},
+        "state": {"type": "string"},
+        "draft": {"type": "boolean"},
+        "merged": {"type": "boolean"},
+        "head": {"type": "string"},
+        "head_sha": {"type": "string"},
+        "base": {"type": "string"},
+        "url": {"type": "string"},
+        "body": {"type": "string"},
+        "body_truncated": {"type": "boolean"},
+        "reviews": {"type": "array"},
+        "comments": {"type": "integer"}
+      },
+      "required": ["number", "title", "state", "head", "base", "url"]
+    }
+  },
+  "cardea": {
+    "version": 1,
+    "effect": "read",
+    "handler": "vcs.read_change",
+    "timeout_seconds": 30,
+    "resource": {"grant": "repo", "argument": "/repository"}
+  }
+}
