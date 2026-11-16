@@ -62,6 +62,7 @@ TEAMS := PYTHONPATH=apps/api/src:examples/teams "$(UV)" run --locked --project $
 
 teams: check-uv
 	$(TEAMS) python examples/teams/walkthrough.py
+	$(TEAMS) python examples/teams/dev_team.py
 
 teams-test: check-uv
 	$(TEAMS) pytest -q -p no:cacheprovider examples/teams
