@@ -5,7 +5,9 @@ import json
 import subprocess
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
+import pytest
 from cardea_coding_ops import claude_code
 from cardea_coding_ops.session import fixed_env
 
@@ -55,3 +57,51 @@ def test_debian_script_is_valid_shell_and_never_prints_the_token() -> None:
     subprocess.run(["sh", "-n", str(script)], check=True)
     text = script.read_text()
     assert "0600" in text and 'cat "$TOKEN_FILE"' not in text and "--no-verify" not in text
+
+
+# The helper's `profiles` answer, in the shape `cardea.service.confined.Workers` reads.
+INSTALLED: dict[str, Any] = {
+    "profiles": {
+        "coding": {"wall_seconds": 3600, "network": {"policy": "model_api_only"}, "sha256": "p"},
+        "session": {"wall_seconds": 1800, "network": {"policy": "model_api_only"}},
+    },
+    "workers": {"code-session": ["coding"], "agent": ["session"]},
+}
+
+
+class FakeHost:
+    """The helper's interface, answering `profiles` with the real nested shape."""
+
+    def __init__(self, installed: dict[str, Any]) -> None:
+        self.installed = installed
+
+    def profiles(self) -> dict[str, Any]:
+        return self.installed
+
+
+def test_the_fit_reads_the_coding_profile_from_the_nested_answer() -> None:
+    from cardea.service.confined import Workers
+
+    host = FakeHost(INSTALLED)
+    profile = fit().installed_profile(host.profiles())
+    assert profile["network"]["policy"] == "model_api_only" and profile["wall_seconds"] == 3600
+    # The answer the kernel itself reads, so the fit test checks what the kernel will run.
+    assert Workers(host).installed()["profiles"]["coding"] == profile  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "installed",
+    [
+        # The old reading: profiles at the top level are not the helper's answer.
+        INSTALLED["profiles"],
+        {"profiles": {"session": INSTALLED["profiles"]["session"]}, "workers": {}},
+        {"profiles": INSTALLED["profiles"], "workers": {"code-session": []}},
+        {
+            "profiles": {"coding": {"network": {"policy": "model_api_only"}}},
+            "workers": {"code-session": ["coding"]},
+        },
+    ],
+)
+def test_a_missing_or_incomplete_profile_stops_the_fit_loudly(installed: dict[str, Any]) -> None:
+    with pytest.raises(SystemExit):
+        fit().installed_profile(installed)
