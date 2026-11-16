@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, cast
@@ -15,7 +16,6 @@ import pytest
 from test_operations import Auth, FakeClient
 
 import cardea
-
 from cardea.kernel.models import OperationState, TaskState
 from cardea.service import artifacts, confined, operation_runtime
 from cardea.service import kernel as handlers
@@ -23,7 +23,14 @@ from cardea.service.auth import Authentication
 from cardea.service.confined import Workers
 from cardea.service.database import Database, Fault, borrow
 from cardea.service.kernel import Kernel, provision
-from cardea.service.models import RIGHTS, OperationTaskRequest, Permission, Principal, Provisioning, now
+from cardea.service.models import (
+    RIGHTS,
+    OperationTaskRequest,
+    Permission,
+    Principal,
+    Provisioning,
+    now,
+)
 from cardea.service.operation_runtime import OperationRuntime
 from cardea.service.operations import OperationDescriptor, Registry
 
@@ -145,9 +152,7 @@ def kernel_for(
         ),
         registry,
     )
-    return Kernel(
-        db, cast(Authentication, Auth()), operations=registry, workers=Workers(host)
-    )
+    return Kernel(db, cast(Authentication, Auth()), operations=registry, workers=Workers(host))
 
 
 def submit(kernel: Kernel, operation: str, arguments: dict[str, Any], key: str = "one") -> str:
@@ -178,7 +183,7 @@ def task(kernel: Kernel, task_id: str) -> Any:
 
 # code.session: fixtures
 
-HARNESS = '''
+HARNESS = """
 import json, os, pathlib
 script = json.loads(os.environ["CARDEA_TASK"])
 for path, content in script.get("write", {}).items():
@@ -188,13 +193,13 @@ for path, content in script.get("write", {}).items():
 # What the harness could see, kept in the change so the test can inspect it.
 pathlib.Path("env-seen.json").write_text(json.dumps(dict(os.environ), sort_keys=True))
 print("applied", len(script.get("write", {})), "files")
-'''
+"""
 
-GATE = '''
+GATE = """
 import json, os, sys
 print(json.dumps(dict(os.environ), sort_keys=True))
 sys.exit(int(sys.argv[1]))
-'''
+"""
 
 
 def git(cwd: Path, *args: str) -> str:
@@ -365,9 +370,12 @@ def test_an_oversized_change_is_refused_and_reconciles_as_not_applied(
     OperationRuntime(kernel).execute(task_id)
     assert receipt(kernel, task_id).state is OperationState.OUTCOME_UNKNOWN
     with kernel.database.read() as conn:
-        assert conn.exec_driver_sql(
-            "SELECT COUNT(*) FROM objects WHERE resource_id LIKE 'receipt-%'"
-        ).scalar_one() == 0
+        assert (
+            conn.exec_driver_sql(
+                "SELECT COUNT(*) FROM objects WHERE resource_id LIKE 'receipt-%'"
+            ).scalar_one()
+            == 0
+        )
     assert OperationRuntime(kernel).reconcile(task_id, "execute") == "failed"
 
 
@@ -394,3 +402,105 @@ def test_descriptor_timeouts_have_hard_limits(timeout: int) -> None:
         document["cardea"]["timeout_seconds"] = timeout
         with pytest.raises(ValidationError, match="only confined"):
             OperationDescriptor.model_validate(document)
+
+
+# Long confined calls: heartbeat lease and fencing
+
+
+class SlowHost(LocalHost):
+    """A worker that runs for `seconds` and then finishes with an empty output."""
+
+    def __init__(self, seconds: float) -> None:
+        super().__init__(profiles(7200))
+        self.seconds = seconds
+        self.started: dict[str, float] = {}
+
+    def start_confined(
+        self, job: str, content: bytes, deadline: float, profile: str, worker: str
+    ) -> None:
+        self.started[job] = time.monotonic()
+
+    def status(self, job: str) -> dict[str, Any]:
+        if time.monotonic() - self.started[job] < self.seconds:
+            return {"state": "running"}
+        return {
+            "state": "finished",
+            "result": "success",
+            "exit_status": "0",
+            "output": base64.b64encode(b'{"output": {}}').decode(),
+        }
+
+
+SLOW = OperationDescriptor.model_validate(
+    {
+        "tool": {
+            "name": "slow.job",
+            "inputSchema": {"type": "object"},
+            "outputSchema": {"type": "object"},
+        },
+        "cardea": {
+            "version": 1,
+            "effect": "effect",
+            "executor": {"kind": "confined", "profile": "coding", "worker": "code-session"},
+            "timeout_seconds": 5400,
+        },
+    }
+)
+
+
+def renewals(kernel: Kernel, task_id: str) -> int:
+    with kernel.database.read() as conn:
+        return int(
+            conn.exec_driver_sql(
+                "SELECT COUNT(*) FROM events WHERE event_type='task.lease_renewed' "
+                "AND correlation_id=?",
+                (task_id,),
+            ).scalar_one()
+        )
+
+
+def test_a_long_call_keeps_a_short_lease_alive_with_a_heartbeat(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    kernel = kernel_for(tmp_path, SlowHost(2.0), monkeypatch, Registry((SLOW,), {}), "slow.job")
+    task_id = submit(kernel, "slow.job", {})
+    assert OperationRuntime(kernel).execute(task_id) == "succeeded"
+    # The 1 s lease outlived itself only because the heartbeat renewed it.
+    assert renewals(kernel, task_id) >= 5
+    assert receipt(kernel, task_id).state is OperationState.SUCCEEDED
+
+
+def test_a_long_call_whose_lease_is_lost_is_stopped_and_fenced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    host = SlowHost(30.0)
+    kernel = kernel_for(tmp_path, host, monkeypatch, Registry((SLOW,), {}), "slow.job")
+    # Renewal fails, as it does once recovery has replaced or expired the lease.
+    monkeypatch.setattr(OperationRuntime, "renew", lambda self, *args: False)
+    task_id = submit(kernel, "slow.job", {})
+    started = time.monotonic()
+    OperationRuntime(kernel).execute(task_id)
+    assert time.monotonic() - started < 10
+    assert host.stopped  # the worker's process tree was stopped
+    assert receipt(kernel, task_id).state is OperationState.OUTCOME_UNKNOWN
+    assert task(kernel, task_id).state is TaskState.FAILED
+
+
+def test_a_lease_can_be_renewed_only_by_its_live_holder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from cardea.kernel.store import StoreError
+
+    kernel = kernel_for(tmp_path, SlowHost(0.0), monkeypatch, Registry((SLOW,), {}), "slow.job")
+    task_id = submit(kernel, "slow.job", {})
+    assert OperationRuntime(kernel).execute(task_id) == "succeeded"
+    # The task finished, so it holds no lease any more: nobody can renew one.
+    with pytest.raises(StoreError), kernel.database.engine.begin() as conn, borrow(conn) as tx:
+        current = tx.get_task(task_id)
+        tx.renew_lease(
+            task_id,
+            expected_revision=current.revision,
+            lease_id="lease-gone",
+            expires_at=now() + timedelta(hours=1),
+            at=now(),
+        )
