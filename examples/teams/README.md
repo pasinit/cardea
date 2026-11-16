@@ -46,10 +46,10 @@ One group manifest (`dev-team/group.json`) holds a principal engineer, a product
 1. **Filing and assignment.** The product manager files two work items from a scripted test pass. The team leader assigns each to the developer pool and mails the pool.
 2. **One developer's whole run.** dev.0 claims an item with `start`, then calls `code.session`. It passes the session's `change.bundle` artifact straight to `vcs.push_branch`, then `vcs.open_change`, and `submit`s with that call's receipt as evidence (`requires_receipt`).
 3. **A refused double claim.** dev.1 tries to take the same item. The claim refuses it, so dev.1 mails the lead, which also meets its `any_of`.
-4. **Review.** The principal engineer reads the change and is refused an `APPROVE` review. It comments and approves the item. The owner's merge is simulated outside the team.
+4. **Review.** The principal engineer reads the change, submits an `APPROVE` review on the host and approves the item. The rehearsal's vcs configuration allows `APPROVE` for the `dev-team.principal` pool only (`allow_approve`, ADR-037 question 2). No agent can merge: the owner's merge is simulated outside the team.
 5. **The content gate.** dev.2's change carries a planted secret, and the content gate refuses the push with nothing sent. dev.2 tells the lead it is blocked.
 6. **Overview and checks.** The script prints the group overview, including spend. It checks that no claim was ever taken while another was held, that every run has receipts and a reported cost, and that the gate refused exactly one change.
-7. **Restructure by configuration only.** `dev-team/group.restructured.json` has two developers and a `security` pool. Applying it drains dev.2, which releases its claim, so the blocked item goes back to `ready`. One new item then goes dev → security review → principal → done.
+7. **Restructure by configuration only.** `dev-team/group.restructured.json` has two developers and a `security` pool. Applying it drains dev.2, which releases its claim, so the blocked item goes back to `ready`. One new item then goes dev → security review → principal → done. The security pool holds `vcs.review` too, but its `APPROVE` is refused: only the principal pool may approve.
 
 Found by the rehearsal, recorded in ADR-037:
 - `requires_receipt` ties evidence to a record through the cited call's `record_id` argument, or through a `<record>.<epoch>` idempotency context that only claim follow-up runs have. The real `vcs.open_change` had no `record_id`, so a developer could never `submit`.
