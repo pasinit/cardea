@@ -119,12 +119,15 @@ def approve_grant(operation: str) -> str:
 # Right to send mail to one address, written `mail:<address>` (ADR-034 decision 4.2): an
 # instance (a principal ID), a pool (`<group>.<pool>`) or a group (`<group>`).
 MailGrant = Annotated[str, Field(strict=True, pattern=r"^mail:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")]
+# Authority over one repository alias from host configuration, written `repo:<alias>`
+# (ADR-037). Operations that declare a `repo` resource need it in the live ceiling.
+RepoGrant = Annotated[str, Field(strict=True, pattern=r"^repo:[a-z][a-z0-9-]{0,63}$")]
 
 # A kernel right, the name of an installed operation (ADR-023), a harness grant, a record
 # grant, a mail grant or an approve grant. Installed names are checked against the live
 # registry at provisioning, admission and dispatch; harness grants against the installed
 # harnesses.
-Grant = Right | OperationName | HarnessGrant | RecordGrant | MailGrant | ApproveGrant
+Grant = Right | OperationName | HarnessGrant | RecordGrant | MailGrant | ApproveGrant | RepoGrant
 
 RIGHTS: tuple[Right, ...] = (
     "objects.read",

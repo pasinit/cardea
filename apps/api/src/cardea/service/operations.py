@@ -6,7 +6,7 @@ recorded as descriptive hints only; authority, effect class and limits come from
 
 import json
 from collections.abc import Awaitable, Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from hashlib import sha256
 from importlib.metadata import entry_points
@@ -106,6 +106,11 @@ class OperationContext:
     slot_time: str | None = None
     # The run's context read snapshot, for built-in context sources only (ADR-034 5.1).
     snapshot: Snapshot | None = None
+    # The calling agent's group, from the kernel's member table (ADR-034); None outside one.
+    group: str | None = None
+    # Declared object inputs, staged by the kernel under the caller's ceiling: argument
+    # pointer -> the object's verified bytes (ADR-037). Never recorded in the receipt.
+    inputs: Mapping[str, bytes] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -138,6 +143,13 @@ class ConfinedExecutor(Record):
     worker: WorkerName
 
 
+class ResourceGrant(Record):
+    """The kind of a resource-qualified grant and the argument that names the resource."""
+
+    grant: Literal["repo"]
+    argument: Pointer
+
+
 class Binding(Record):
     version: Annotated[int, Field(strict=True, ge=1)]
     effect: Literal["read", "effect"]
@@ -157,6 +169,12 @@ class Binding(Record):
     # Default approval rules (ADR-036); a host rule for a namespace replaces them. None, like
     # an empty rule list, is autonomous: authority alone decides.
     approval: OperationApproval | None = None
+    # A resource-qualified grant every call needs in the caller's live ceiling, named by an
+    # argument (ADR-037): `{"grant": "repo", "argument": "/repository"}` needs `repo:<value>`.
+    resource: ResourceGrant | None = None
+    # Arguments that name kernel objects (`{namespace, resource_id, version, content_digest}`)
+    # the handler receives as verified bytes in `OperationContext.inputs` (ADR-037).
+    inputs: Annotated[tuple[Pointer, ...], Field(min_length=1, max_length=4)] | None = None
 
     @model_validator(mode="after")
     def effect_only(self) -> Self:
@@ -221,6 +239,8 @@ class OperationDescriptor(Record):
             for name, value in (
                 ("executor", self.cardea.executor),
                 ("approval", self.cardea.approval),
+                ("resource", self.cardea.resource),
+                ("inputs", self.cardea.inputs),
             )
             if value is None
         }
@@ -355,7 +375,7 @@ class Registry:
                 if not resource.startswith(RECORD_GRANT_PREFIX):
                     self.get(resource)
             elif grant not in KERNEL_RIGHTS and not grant.startswith(
-                ("harness:", "mail:", RECORD_GRANT_PREFIX)
+                ("harness:", "mail:", "repo:", RECORD_GRANT_PREFIX)
             ):
                 self.get(grant)
 

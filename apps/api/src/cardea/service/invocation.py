@@ -9,12 +9,14 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+import jsonpointer  # type: ignore[import-untyped]  # ships no type information
 import sqlalchemy as sa
 from pydantic import JsonValue
 
 from cardea.kernel.models import (
     MAX_DOCUMENT_BYTES,
     KernelFailure,
+    ObjectVersion,
     OperationRequest,
     OperationState,
     ResourceRef,
@@ -23,16 +25,18 @@ from cardea.kernel.models import (
     Task,
     canonical_json,
 )
-from cardea.kernel.store import KernelTransaction
+from cardea.kernel.store import KernelTransaction, StoreError
 from cardea.service.confined import CallAbandoned, ExecutorBusy, WorkerFailed, WorkerNotStarted
 from cardea.service.database import Fault
 from cardea.service.models import now
 from cardea.service.operations import (
     OperationContext,
+    OperationDescriptor,
     OperationRejected,
     Registry,
     http_status,
 )
+from cardea.service.policy import Policy
 
 # Why a call failed, recorded in the receipt's failure details and told to the agent.
 REASONS = frozenset(
@@ -100,6 +104,53 @@ def classify(error: BaseException, timeout: float) -> Failure:
     return Failure("operation_failed", "error", type(error).__name__)
 
 
+# Total bytes of declared object inputs one call may stage (ADR-037 change bundles).
+MAX_INPUT_BYTES = 16 * 1024 * 1024
+
+
+def _argument(arguments: dict[str, JsonValue], pointer: str) -> JsonValue:
+    try:
+        value: JsonValue = jsonpointer.resolve_pointer(arguments, pointer)
+    except jsonpointer.JsonPointerException:
+        return None
+    return value
+
+
+def _stage_inputs(
+    conn: sa.Connection,
+    tx: KernelTransaction,
+    policy: Policy,
+    task: Task,
+    namespace: str,
+    descriptor: OperationDescriptor,
+    arguments: dict[str, JsonValue],
+) -> dict[str, bytes]:
+    """Read the objects a call's declared inputs name, under the caller's live ceiling.
+
+    Only objects of the call's own namespace, at an exact version whose digest the call
+    names, are staged; the store verifies the digest when it reads them.
+    """
+    staged: dict[str, bytes] = {}
+    for pointer in descriptor.cardea.inputs or ():
+        try:
+            reference = ObjectVersion.model_validate(_argument(arguments, pointer))
+        except ValueError:
+            raise Fault(
+                "invalid_arguments", f"Input {pointer} must name an object version", 422
+            ) from None
+        if reference.namespace != namespace:
+            raise Fault("input_namespace", "Inputs must be objects of the call's namespace", 403)
+        policy.ceiling(task.task_id, "objects.read")
+        try:
+            content = tx.read_object(reference)
+        except StoreError as error:
+            raise Fault("input_unavailable", f"Input {pointer}: {error.code}", 409) from None
+        staged[pointer] = content
+        if sum(len(v) for v in staged.values()) > MAX_INPUT_BYTES:
+            raise Fault("input_too_large", "Inputs exceed 16 MiB", 413)
+    return staged
+
+
 @dataclass(frozen=True)
 class Admitted:
     context: OperationContext
@@ -136,6 +187,20 @@ def admit(
     """
     descriptor = registry.get(name)
     registry.validate_arguments(name, arguments)
+    policy = Policy(conn)
+    if descriptor.cardea.resource is not None:
+        # A resource-qualified grant, e.g. `repo:<alias>`, must be in the live ceiling.
+        resource = descriptor.cardea.resource
+        value = _argument(arguments, resource.argument)
+        if not isinstance(value, str) or not value:
+            raise Fault("invalid_arguments", "The resource argument must name a resource", 422)
+        policy.ceiling(task.task_id, f"{resource.grant}:{value}")
+    inputs = _stage_inputs(conn, tx, policy, task, namespace, descriptor, arguments)
+    member = conn.exec_driver_sql(
+        "SELECT group_name FROM group_members WHERE principal_id=? AND namespace=?",
+        (agent_id, namespace),
+    ).first()
+    group = str(member[0]) if agent_id is not None and member is not None else None
     key = registry.scope_key(name, namespace, idempotency_context or task.task_id, arguments)
     provenance: dict[str, JsonValue] = {
         k: v
@@ -143,6 +208,7 @@ def admit(
             ("agent_id", agent_id),
             ("idempotency_context", idempotency_context),
             ("slot_time", slot_time),
+            ("group", group),
         )
         if v is not None
     }
@@ -217,6 +283,8 @@ def admit(
         agent_id=agent_id,
         idempotency_context=idempotency_context,
         slot_time=slot_time,
+        group=group,
+        inputs=inputs,
     )
     if prior is not None:
         tx.change_operation(
