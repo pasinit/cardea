@@ -288,3 +288,278 @@ def test_push_open_comment_review_and_read(
     _, state, again = run_calls(kernel, session, steps[:1])
     assert state == "succeeded" and not again[0].is_error
     assert len(host.calls) == pushes
+
+
+# Refusals before any network call
+
+
+def untouched(host: FakeGitHub, before: int) -> bool:
+    return len(host.authorizations) == before
+
+
+@pytest.mark.parametrize("branch", ["main", "agent/other/x", "agent/eng/", "agent/eng/../main"])
+def test_branches_outside_the_group_prefix_are_refused(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path, branch: str
+) -> None:
+    change = make_change(kernel, tmp_path)
+    before = len(host.authorizations)
+    _, _, (pushed,) = run_calls(
+        kernel,
+        session,
+        [("vcs-push_branch", {"repository": "cardea", "branch": branch, **change})],
+    )
+    assert pushed.is_error and "branch_not_allowed" in text(pushed)
+    assert untouched(host, before) and host.repositories["acme/cardea"].head(branch) is None
+
+
+def test_a_caller_outside_any_group_cannot_push(
+    kernel: Kernel, host: FakeGitHub, tmp_path: Path
+) -> None:
+    """An operation task by an agent outside a group has no branch prefix to push under."""
+    from cardea.service.models import OperationTaskRequest
+    from cardea.service.operation_runtime import OperationRuntime
+
+    change = make_change(kernel, tmp_path)
+    request = OperationTaskRequest.model_validate(
+        {
+            "request_id": "loner-push",
+            "agent_id": "loner",
+            "namespace": "eng",
+            "objective": "Push",
+            "operation": "vcs.push_branch",
+            "arguments": {"repository": "cardea", "branch": "agent/eng/x", **change},
+            "grants": ["objects.read", "objects.write", "vcs.push_branch", "repo:cardea"],
+        }
+    )
+    task_id = kernel.submit(kernel.auth.validate("supervisor"), request).task.task_id
+    before = len(host.authorizations)
+    assert OperationRuntime(kernel).execute(task_id) == "failed"
+    (receipt,) = calls(kernel, task_id)
+    assert cast(Any, receipt.failure).code == "branch_not_allowed"
+    assert untouched(host, before)
+
+
+def test_approve_reviews_are_refused_unless_allowed(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, vcs: Vcs, tmp_path: Path
+) -> None:
+    opened = open_pull(kernel, session, tmp_path)
+    approve = {
+        "repository": "cardea",
+        "number": opened,
+        "event": "APPROVE",
+        "body": "LGTM",
+        "client_key": "a1",
+    }
+    before = len(host.authorizations)
+    _, _, (refused,) = run_calls(kernel, session, [("vcs-review", approve)])
+    assert refused.is_error and "approve_refused" in text(refused)
+    assert untouched(host, before)
+    vcs.config = vcs.config.model_copy(update={"allow_approve": True})
+    _, _, (allowed,) = run_calls(kernel, session, [("vcs-review", {**approve, "client_key": "a2"})])
+    assert not allowed.is_error and allowed.structured_content["state"] == "APPROVED"
+
+
+def test_repository_authority_is_the_repo_grant(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path
+) -> None:
+    """The pool holds `repo:cardea` only: `other` is refused by the kernel, before the
+    handler runs; an unknown alias is refused by the operation."""
+    change = make_change(kernel, tmp_path)
+    before = len(host.authorizations)
+    _, _, results = run_calls(
+        kernel,
+        session,
+        [
+            ("vcs-push_branch", {"repository": "other", "branch": "agent/eng/x", **change}),
+            ("vcs-read_change", {"repository": "other", "number": 1}),
+        ],
+    )
+    assert all(r.is_error and "task_grant_denied" in text(r) for r in results)
+    assert untouched(host, before)
+
+
+def test_a_change_from_another_namespace_is_not_staged(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path
+) -> None:
+    change = make_change(kernel, tmp_path)
+    change["change"]["namespace"] = "elsewhere"
+    _, _, (pushed,) = run_calls(
+        kernel,
+        session,
+        [("vcs-push_branch", {"repository": "cardea", "branch": "agent/eng/x", **change})],
+    )
+    assert pushed.is_error and "input_namespace" in text(pushed)
+
+
+# Crash and reconcile: the host acted, the kernel did not hear back
+
+
+@pytest.fixture
+def short_leases(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(agent_run_runtime, "attempt_lease_seconds", lambda request: 4.0)
+    monkeypatch.setattr(agent_run_runtime, "LEASE_MARGIN", 1.0)
+
+
+def open_pull(kernel: Kernel, session: FakeSession, tmp_path: Path, name: str = "work") -> int:
+    change = make_change(kernel, tmp_path, message=f"Change {name}")
+    branch = f"agent/eng/{name}"
+    _, state, results = run_calls(
+        kernel,
+        session,
+        [
+            ("vcs-push_branch", {"repository": "cardea", "branch": branch, **change}),
+            (
+                "vcs-open_change",
+                {"repository": "cardea", "head": branch, "base": "main", "title": name},
+            ),
+        ],
+    )
+    assert state == "succeeded", [text(r) for r in results]
+    return int(results[1].structured_content["number"])
+
+
+def crashed_then_reconciled(kernel: Kernel, task_id: str, state: str) -> Any:
+    from cardea.kernel.models import OperationState
+    from cardea.service.operation_runtime import OperationRuntime
+
+    assert state == "failed"
+    (receipt,) = calls(kernel, task_id)
+    assert receipt.state is OperationState.OUTCOME_UNKNOWN
+    assert OperationRuntime(kernel).reconcile(task_id, receipt.request.operation_id) == "succeeded"
+    (settled,) = calls(kernel, task_id)
+    assert settled.state is OperationState.SUCCEEDED
+    return cast(Any, settled.result)["output"]
+
+
+def test_push_crash_is_reconciled_from_the_branch_head(
+    kernel: Kernel,
+    session: FakeSession,
+    host: FakeGitHub,
+    vcs: Vcs,
+    tmp_path: Path,
+    short_leases: None,
+) -> None:
+    change = make_change(kernel, tmp_path)
+    branch = "agent/eng/crash"
+
+    async def pushes_then_drops(*args: Any) -> None:
+        await push_bundle(*args)
+        raise ConnectionError("connection dropped after the push")
+
+    vcs.pusher = pushes_then_drops
+    task_id, state, _ = run_calls(
+        kernel, session, [("vcs-push_branch", {"repository": "cardea", "branch": branch, **change})]
+    )
+    output = crashed_then_reconciled(kernel, task_id, state)
+    assert output["head"] == change["head"] == host.repositories["acme/cardea"].head(branch)
+
+
+def test_open_crash_is_reconciled_from_the_pull_for_the_head(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path, short_leases: None
+) -> None:
+    change = make_change(kernel, tmp_path)
+    branch = "agent/eng/pr-crash"
+    run_calls(
+        kernel, session, [("vcs-push_branch", {"repository": "cardea", "branch": branch, **change})]
+    )
+    host.fail_after.add("create_pull")
+    task_id, state, _ = run_calls(
+        kernel,
+        session,
+        [
+            (
+                "vcs-open_change",
+                {"repository": "cardea", "head": branch, "base": "main", "title": "t"},
+            )
+        ],
+    )
+    output = crashed_then_reconciled(kernel, task_id, state)
+    (pull,) = host.repositories["acme/cardea"].pulls
+    assert output["number"] == pull["number"]
+
+
+@pytest.mark.parametrize("tool", ["vcs-comment", "vcs-review"])
+def test_comment_and_review_crashes_are_reconciled_from_the_marker(
+    kernel: Kernel,
+    session: FakeSession,
+    host: FakeGitHub,
+    tmp_path: Path,
+    short_leases: None,
+    tool: str,
+) -> None:
+    number = open_pull(kernel, session, tmp_path)
+    arguments: dict[str, Any] = {
+        "repository": "cardea",
+        "number": number,
+        "body": "Looks close.",
+        "client_key": "k1",
+    }
+    if tool == "vcs-review":
+        arguments["event"] = "COMMENT"
+    host.fail_after.add("create_comment" if tool == "vcs-comment" else "create_review")
+    task_id, state, _ = run_calls(kernel, session, [(tool, arguments)])
+    output = crashed_then_reconciled(kernel, task_id, state)
+    repo = host.repositories["acme/cardea"]
+    store = repo.comments if tool == "vcs-comment" else repo.reviews
+    (made,) = store[number]
+    assert output["url"] == made["html_url"]
+
+
+def test_a_duplicate_pull_request_returns_the_existing_one(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path
+) -> None:
+    """Another task (another effect scope) opens the same head: the host answers 422 and the
+    operation returns the pull request that already exists."""
+    number = open_pull(kernel, session, tmp_path, name="dup")
+    _, state, (again,) = run_calls(
+        kernel,
+        session,
+        [
+            (
+                "vcs-open_change",
+                {"repository": "cardea", "head": "agent/eng/dup", "base": "main", "title": "x"},
+            )
+        ],
+    )
+    assert state == "succeeded" and not again.is_error
+    assert again.structured_content["number"] == number
+    assert len(host.repositories["acme/cardea"].pulls) == 1
+
+
+# The credential stays with the host call
+
+
+def test_the_token_never_leaves_the_host_call(
+    kernel: Kernel,
+    session: FakeSession,
+    host: FakeGitHub,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    short_leases: None,
+) -> None:
+    caplog.set_level("DEBUG")
+    number = open_pull(kernel, session, tmp_path)
+    host.fail_after.add("create_comment")
+    run_calls(
+        kernel,
+        session,
+        [
+            (
+                "vcs-comment",
+                {"repository": "cardea", "number": number, "body": "b", "client_key": "z"},
+            )
+        ],
+    )
+    # It reached the host, as a bearer token, and nowhere else.
+    assert f"Bearer {TOKEN}" in host.authorizations
+    with kernel.database.read() as conn:
+        tables = [
+            r[0] for r in conn.exec_driver_sql("SELECT name FROM sqlite_master WHERE type='table'")
+        ]
+        for table in tables:
+            for row in conn.exec_driver_sql(f'SELECT * FROM "{table}"'):
+                assert TOKEN not in repr(tuple(row)), table
+    assert TOKEN not in caplog.text
+    for request in session.requests:
+        assert TOKEN not in repr(request)
+    assert TOKEN not in repr(kernel.operations.handlers) and TOKEN not in str(host.root)
