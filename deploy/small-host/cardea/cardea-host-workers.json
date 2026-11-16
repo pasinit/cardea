@@ -84,6 +84,26 @@
       "jit": true,
       "concurrency": 1,
       "credential": "/etc/cardea/credentials/claude-code"
+    },
+    "vcs": {
+      "memory_mb": 512,
+      "cpu_percent": 100,
+      "tasks": 128,
+      "wall_seconds": 300,
+      "scratch_mb": 1024,
+      "output_kb": 256,
+      "input_kb": 12288,
+      "network": {
+        "policy": "allow_list",
+        "proxy": "127.0.10.6:3128",
+        "hosts": [
+          "api.github.com",
+          "github.com"
+        ]
+      },
+      "kernel_callback": true,
+      "concurrency": 2,
+      "credential": "/etc/cardea/credentials/github"
     }
   },
   "workers": {
@@ -160,6 +180,124 @@
       ],
       "env": {
         "CARDEA_CODING_CONFIG": "/opt/cardea-code/coding.json"
+      }
+    },
+    "vcs-push-branch": {
+      "argv": [
+        "/opt/cardea/apps/api/.venv/bin/python",
+        "-I",
+        "-m",
+        "cardea.hosts.operation_worker",
+        "vcs.push_branch",
+        "vcs.find_branch"
+      ],
+      "profiles": [
+        "vcs"
+      ],
+      "read_only": [
+        "/opt/cardea",
+        "/opt/cardea-vcs"
+      ],
+      "env": {
+        "CARDEA_VCS_CONFIG": "/opt/cardea-vcs/vcs.json"
+      }
+    },
+    "vcs-open-change": {
+      "argv": [
+        "/opt/cardea/apps/api/.venv/bin/python",
+        "-I",
+        "-m",
+        "cardea.hosts.operation_worker",
+        "vcs.open_change",
+        "vcs.find_change"
+      ],
+      "profiles": [
+        "vcs"
+      ],
+      "read_only": [
+        "/opt/cardea",
+        "/opt/cardea-vcs"
+      ],
+      "env": {
+        "CARDEA_VCS_CONFIG": "/opt/cardea-vcs/vcs.json"
+      }
+    },
+    "vcs-comment": {
+      "argv": [
+        "/opt/cardea/apps/api/.venv/bin/python",
+        "-I",
+        "-m",
+        "cardea.hosts.operation_worker",
+        "vcs.comment",
+        "vcs.find_comment"
+      ],
+      "profiles": [
+        "vcs"
+      ],
+      "read_only": [
+        "/opt/cardea",
+        "/opt/cardea-vcs"
+      ],
+      "env": {
+        "CARDEA_VCS_CONFIG": "/opt/cardea-vcs/vcs.json"
+      }
+    },
+    "vcs-review": {
+      "argv": [
+        "/opt/cardea/apps/api/.venv/bin/python",
+        "-I",
+        "-m",
+        "cardea.hosts.operation_worker",
+        "vcs.review",
+        "vcs.find_review"
+      ],
+      "profiles": [
+        "vcs"
+      ],
+      "read_only": [
+        "/opt/cardea",
+        "/opt/cardea-vcs"
+      ],
+      "env": {
+        "CARDEA_VCS_CONFIG": "/opt/cardea-vcs/vcs.json"
+      }
+    },
+    "vcs-read-change": {
+      "argv": [
+        "/opt/cardea/apps/api/.venv/bin/python",
+        "-I",
+        "-m",
+        "cardea.hosts.operation_worker",
+        "vcs.read_change"
+      ],
+      "profiles": [
+        "vcs"
+      ],
+      "read_only": [
+        "/opt/cardea",
+        "/opt/cardea-vcs"
+      ],
+      "env": {
+        "CARDEA_VCS_CONFIG": "/opt/cardea-vcs/vcs.json"
+      }
+    },
+    "vcs-check-repository": {
+      "argv": [
+        "/opt/cardea/apps/api/.venv/bin/python",
+        "-I",
+        "-m",
+        "cardea.hosts.operation_worker",
+        "vcs.check_repository"
+      ],
+      "profiles": [
+        "vcs"
+      ],
+      "read_only": [
+        "/opt/cardea",
+        "/opt/cardea-vcs"
+      ],
+      "env": {
+        "CARDEA_VCS_CONFIG": "/opt/cardea-vcs/vcs.json"
       }
     }
   }
