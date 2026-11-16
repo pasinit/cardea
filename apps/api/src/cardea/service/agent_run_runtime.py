@@ -52,7 +52,15 @@ from cardea.service.confined import ConfinedAgentSession, WorkerFailed
 from cardea.service.database import Fault, Snapshot, borrow
 from cardea.service.kernel import TERMINAL, Kernel
 from cardea.service.logs import ATTEMPT_LOGS, attempt_log_file
-from cardea.service.models import BUILTIN_OPERATIONS, AgentRunRequest, InboundEvent, now
+from cardea.service.models import (
+    BUILTIN_OPERATIONS,
+    AgentRunRequest,
+    AnyOfExpectation,
+    Expectation,
+    InboundEvent,
+    matches,
+    now,
+)
 from cardea.service.operation_runtime import void_reason_for
 from cardea.service.operations import Handler, OperationContext, OperationRejected
 from cardea.service.policy import Policy
@@ -168,6 +176,29 @@ def event_block(event: InboundEvent) -> str:
 def _reason(result: HarnessResult) -> str:
     """Why an attempt did not complete: its failure reason, else the harness's stop detail."""
     return result.failure_reason or result.stop_reason
+
+
+def _expectation_state(expectation: Expectation, calls: list[OperationReceipt]) -> str:
+    """`met`, `unmet` or `exceeded` over a run's calls.
+
+    Count distinct applied effects, not calls: a deduplicated receipt replays an earlier
+    call in the same effect scope and shares its scope key, so it adds nothing. Calls
+    without a declared scope each count once.
+    """
+    count = len(
+        {
+            _effect_identity(c)
+            for c in calls
+            if c.request.name == expectation.operation
+            and c.state is OperationState.SUCCEEDED
+            and matches(expectation.match, c.request.arguments.get("arguments"))
+        }
+    )
+    if count < expectation.min_calls:
+        return "unmet"
+    if expectation.max_calls is not None and count > expectation.max_calls:
+        return "exceeded"
+    return "met"
 
 
 def _effect_identity(receipt: OperationReceipt) -> str:
@@ -344,6 +375,24 @@ class AgentRunRuntime:
                 resumed = isinstance(parked, str) or open_request is not None
                 if not resumed and attempt - free > request.max_attempts:
                     raise Fault("attempts_exhausted", "Every allowed session attempt was used")
+                if attempt > 1 or resumed:
+                    # A retry or continuation spends beyond the one admission reservation;
+                    # it does not start once the run's account is spent (ADR-034 5.3).
+                    spent = spend.exhausted(conn, task_id)
+                    if spent is not None:
+                        spend.notify_exhausted(
+                            conn, tx, self.kernel.runtime_id, task_id, spent, now()
+                        )
+                        if open_request is not None:
+                            approval_requests.mark_void(
+                                tx,
+                                conn,
+                                open_request,
+                                "budget_exhausted",
+                                self.kernel.runtime_id,
+                                now(),
+                            )
+                        raise Fault("budget_exhausted", spent.message, 429)
             except Fault as error:
                 tx.change_task(
                     task_id,
@@ -1585,20 +1634,25 @@ class AgentRunRuntime:
     def _unmet(request: AgentRunRequest, calls: list[OperationReceipt]) -> list[tuple[str, str]]:
         problems = []
         for expectation in request.expect:
-            # Count distinct applied effects, not calls: a deduplicated receipt replays an
-            # earlier call in the same effect scope and shares its scope key, so it adds
-            # nothing. Calls without a declared scope each count once.
-            count = len(
-                {
-                    _effect_identity(c)
-                    for c in calls
-                    if c.request.name == expectation.operation
-                    and c.state is OperationState.SUCCEEDED
-                }
-            )
-            if count < expectation.min_calls:
+            if isinstance(expectation, AnyOfExpectation):
+                # Met when one alternative is met; exceeded only when every one is.
+                states = [_expectation_state(e, calls) for e in expectation.any_of]
+                if "met" in states:
+                    continue
+                if all(state == "exceeded" for state in states):
+                    problems.append(
+                        (
+                            "expectation_exceeded",
+                            f"Exceeds every option of {expectation.describe()}",
+                        )
+                    )
+                else:
+                    problems.append(("expectation_unmet", f"Needs {expectation.describe()}"))
+                continue
+            state = _expectation_state(expectation, calls)
+            if state == "unmet":
                 problems.append(("expectation_unmet", f"Needs {expectation.describe()}"))
-            elif expectation.max_calls is not None and count > expectation.max_calls:
+            elif state == "exceeded":
                 problems.append(("expectation_exceeded", f"Exceeds {expectation.describe()}"))
         return problems
 

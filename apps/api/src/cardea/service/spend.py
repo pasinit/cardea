@@ -114,7 +114,17 @@ def settle(conn: sa.Connection, namespace: str, group: str, at: datetime) -> Non
         )
 
 
-CHARGE = "COALESCE(SUM(CASE state WHEN 'settled' THEN cost_usd ELSE reserved_usd END),0)"
+# A settled run is charged what it reported. An open or unknown run is charged its
+# reservation, or what its finished attempts already reported when that is more: retries
+# and approval continuations can spend beyond the one admission reservation.
+REPORTED = (
+    "COALESCE((SELECT SUM(c.cost_usd) FROM run_attempt_costs c "
+    "WHERE c.task_id=spend_reservations.task_id),0)"
+)
+CHARGE = (
+    "COALESCE(SUM(CASE state WHEN 'settled' THEN cost_usd "
+    f"ELSE MAX(reserved_usd, {REPORTED}) END),0)"
+)
 
 
 def used(
@@ -213,6 +223,105 @@ def reserve(conn: sa.Connection, request: TaskRequest, task_id: str, at: datetim
             amount,
             at.isoformat(),
         ),
+    )
+
+
+@dataclass(frozen=True)
+class Exhausted:
+    """A run's account at or over its ceiling in the window the run was charged to."""
+
+    account: str
+    window: str
+    used: float
+    ceiling: float
+    group: str
+    pool: str
+    namespace: str
+
+    @property
+    def message(self) -> str:
+        return (
+            f"The {self.account} spend ceiling ({self.ceiling} USD) is spent for {self.window} "
+            f"({self.used:.4f} USD used or reserved); no further attempt starts"
+        )
+
+
+def exhausted(conn: sa.Connection, task_id: str) -> Exhausted | None:
+    """Whether a group member run's group or pool account is at or over its ceiling.
+
+    Checked before a retry or an approval continuation starts, in the windows the run was
+    charged to at admission (decision 2), counting runs still open at their reservation or
+    their reported cost, whichever is more.
+    """
+    row = (
+        conn.exec_driver_sql(
+            "SELECT r.*,g.spec_json FROM spend_reservations r JOIN agent_groups g "
+            "ON g.namespace=r.namespace AND g.name=r.group_name WHERE r.task_id=?",
+            (task_id,),
+        )
+        .mappings()
+        .first()
+    )
+    if row is None:
+        return None
+    spec = GroupSpec.model_validate_json(row["spec_json"])
+    namespace, group, pool_name = str(row["namespace"]), str(row["group_name"]), str(row["pool"])
+    pool = next((p for p in spec.pools if p.name == pool_name), None)
+    checks: list[tuple[str, GroupSpend | None, str | None, str | None]] = [
+        ("group", spec.spend, row["group_window"], None),
+        (f"pool {pool_name}", pool.spend if pool else None, row["pool_window"], pool_name),
+    ]
+    for account, ceiling, key, pool_filter in checks:
+        if ceiling is None or key is None:
+            continue
+        spent = used(conn, namespace, group, key=str(key), pool=pool_filter)
+        if spent >= ceiling.usd - 1e-9:
+            return Exhausted(account, str(key), spent, ceiling.usd, group, pool_name, namespace)
+    return None
+
+
+def notify_exhausted(
+    conn: sa.Connection,
+    tx: Any,
+    runtime_id: str,
+    task_id: str,
+    spent: Exhausted,
+    at: datetime,
+) -> None:
+    """Kernel mail to the group's supervisor that a run stopped on its spend ceiling."""
+    from cardea.service import mailbox
+
+    supervisor = conn.exec_driver_sql(
+        "SELECT supervisor_id FROM task_bindings WHERE task_id=?", (task_id,)
+    ).scalar_one()
+    mailbox.send(
+        conn,
+        tx,
+        namespace=spent.namespace,
+        sender_id=runtime_id,
+        supervisor_id=str(supervisor),
+        to=mailbox.Address(instance=str(supervisor)),
+        parts=[
+            {
+                "text": f"budget_exhausted: run {task_id} of pool {spent.pool} stopped. "
+                f"{spent.message}."
+            },
+            {
+                "data": {
+                    "code": "budget_exhausted",
+                    "task_id": task_id,
+                    "group": spent.group,
+                    "pool": spent.pool,
+                    "account": spent.account,
+                    "window": spent.window,
+                    "used_usd": round(spent.used, 6),
+                    "ceiling_usd": spent.ceiling,
+                }
+            },
+        ],
+        runtime_id=runtime_id,
+        at=at,
+        from_kernel=True,
     )
 
 

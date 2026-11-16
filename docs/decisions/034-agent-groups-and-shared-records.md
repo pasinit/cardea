@@ -642,12 +642,15 @@ Portable tests go in `apps/api/tests/service/`. Before the record is called veri
 - **Per-run cost.** `GET /v0.2/tasks/{id}/run` gains `spend`: each attempt's reported cost, the run's total (null when any is unknown), and the reservation with its windows, state and charged amount.
 - **Windows.** `day` is the local calendar day and `week` the ISO week starting Monday, on the wall clock of the account's `timezone` (default UTC). Local midnights map to UTC with ADR-024's rules, so DST days are 23 or 25 hours long.
 - **Windowed expectations.** `expect_window` entries gain `timezone` (default UTC). An entry needs `min`, `max` or both; `transition` is only for `records.transition`; and the operation must be one the pool's runs expose. The minute tick (step `cardea.m8.groups.windows`) checks each entry's most recently closed window once. It counts the pool members' successful, not deduplicated receipts of the operation settled in the window. A count below `min` or above `max` sends `expectation_unmet` or `expectation_exceeded` mail from the kernel runtime to the supervisor, with the counts and window as data. A run is never failed after the fact.
-- **Per-run expectations** in the pool run template are ADR-029's `expect`, unchanged and already passed into every member run since slice 4. They count calls of one operation. An alternative such as "a pull request or a blocker message" cannot be expressed; see decision 4 below.
-- **Lead decisions** (2026-11-16; the owner may veto each):
+- **Per-run expectations** in the pool run template are ADR-029's `expect`, unchanged and already passed into every member run since slice 4. Since the review change to decision 4 below they also take `any_of` alternatives and `match`.
+- **Lead decisions** (2026-11-16; the owner may veto each). After review on 2026-11-16 the lead accepted decisions 2 and 3, and computing balances without an accounts table; decisions 1 and 4 were changed as recorded after the list.
   1. **Reservation size.** A run reserves its `max_cost_usd` once, as decision 5.3 and acceptance test 8 say, not once per allowed attempt. A run with retries or approval continuations can therefore settle above its reservation; settlement charges what was reported. This is a metered bound, not a hard cap.
   2. **Charging window.** A run is charged to the window in which it was admitted, even if it settles in the next one.
   3. **Missed windows.** Only the most recently closed window is checked, so after downtime longer than one window the earlier windows are skipped, as with an ADR-024 `skip` misfire. Windows that began before the group was created are not checked. `expect_window` gains `timezone`, defaulting to UTC.
   4. **No alternatives in `expect`.** An "A or B" per-run expectation would change ADR-029's `expect` contract, which decision 5.4 keeps unchanged. It is a revisit item, not part of this slice.
+- **Review changes (2026-11-16, lead; the owner may veto).**
+  - **Decision 1 changed: overruns are stopped.** The single reservation at admission stays. But before a retry or an approval-continuation attempt starts, the run's group and pool accounts are checked in the windows it was charged to. Open runs count at their reservation or at what their finished attempts reported, whichever is more. If either account is at or over its ceiling, the attempt does not start: the run fails with `budget_exhausted`, an approved request it held becomes `void (budget_exhausted)`, the kernel mails the supervisor, and the reservation settles normally. Tests: a retry refused after the first attempt spends the ceiling, a retry with room left still runs, and an approval continuation refused once the account is spent.
+  - **Decision 4 changed: alternatives are supported** through the [ADR-029 amendment](029-supervisor-schedules-expectations-and-run-evidence.md#amendment-2026-11-16-alternatives-and-argument-match): `any_of` and `match` in per-run `expect` and in `expect_window`. A windowed `any_of` is met when one alternative's count is within its bounds; its mail lists every alternative's count.
 - **Tests** (`apps/api/tests/service/test_group_spend.py`):
   - with a group ceiling of twice a run's `max_cost_usd`, the third concurrent admission is refused and leaves nothing;
   - a settled run releases its unused reservation, so a refused admission later succeeds, and an unknown cost keeps the full reservation;
@@ -719,7 +722,6 @@ Revisit if:
 - an external tracker gains conditional writes and a deployment wants it authoritative;
 - DBOS or A2A gains durable store-and-forward to a logical recipient;
 - groups must span hosts, which breaks the single-writer claim argument;
-- pools need per-run expectations with alternatives (for example "a pull request or a blocker message"), which ADR-029's `expect` cannot express (slice 9, decision 4);
 - runs need more than 64 KiB of context, or retrieval instead of recency;
 - approver sets need relationships that grants cannot express, in which case evaluate OpenFGA (as ADR-036 says);
 - human recipients need to acknowledge mailbox notices (slice 5 decision 4);

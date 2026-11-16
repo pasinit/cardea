@@ -151,13 +151,14 @@ def _unsupported(spec: GroupSpec, namespace: str) -> None:
     journal_source = f"cardea://{namespace}"
     for pool in spec.pools:
         for entry in pool.expect_window:
-            if entry.operation not in pool.run.operations:
-                raise Fault(
-                    "invalid_template",
-                    f"Pool {pool.name}: a windowed expectation names {entry.operation}, "
-                    "which its runs do not expose",
-                    422,
-                )
+            for operation in entry.operations():
+                if operation not in pool.run.operations:
+                    raise Fault(
+                        "invalid_template",
+                        f"Pool {pool.name}: a windowed expectation names {operation}, "
+                        "which its runs do not expose",
+                        422,
+                    )
         for trigger in pool.triggers:
             # Group event triggers read the group's own journal; inbound HTTP sources need
             # a host-owner secret, so they stay host-owned (ADR-035).

@@ -1,11 +1,14 @@
 """Explicit v0.2 wire/config records; existing v0.1 task and receipt bytes are preserved."""
 
+import json
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
 from typing import Annotated, Any, Literal, Self
 from zoneinfo import ZoneInfo
 
+import jsonpointer  # type: ignore[import-untyped]  # ships no type information
 import rfc8785
 from pydantic import (
     AwareDatetime,
@@ -273,18 +276,69 @@ class OperationTaskRequest(TaskRequest):
         return self
 
 
+# RFC 6901 pointer into a call's arguments, as in ADR-026 scopes.
+ArgumentPointer = Annotated[
+    str, Field(strict=True, max_length=256, pattern=r"^(/([^~/]|~[01])*)+$")
+]
+# Exact argument values a counted call must have: pointer -> value (ADR-029 amendment).
+ArgumentMatch = Annotated[dict[ArgumentPointer, JsonValue], Field(min_length=1, max_length=8)]
+
+
+def omit_unset(document: Any, *keys: str) -> Any:
+    """Leave amendment fields out of a dump when unset, so older digests do not change."""
+    if isinstance(document, dict):
+        for key in keys:
+            if key in document and document[key] is None:
+                del document[key]
+    return document
+
+
+def matches(match: Mapping[str, Any] | None, arguments: object) -> bool:
+    """Whether a call's arguments have the exact values an expectation names (RFC 6901)."""
+    if not match:
+        return True
+    if not isinstance(arguments, dict):
+        return False
+    for pointer, expected in match.items():
+        try:
+            if jsonpointer.resolve_pointer(arguments, pointer) != expected:
+                return False
+        except jsonpointer.JsonPointerException:
+            return False
+    return True
+
+
+def describe_match(match: dict[str, JsonValue] | None) -> str:
+    if not match:
+        return ""
+    pairs = ", ".join(f"{k} = {json.dumps(v, sort_keys=True)}" for k, v in sorted(match.items()))
+    return f" with {pairs}"
+
+
 class Expectation(Record):
-    """A completion condition on a run's successful calls of one operation (ADR-029)."""
+    """A completion condition on a run's successful calls of one operation (ADR-029).
+
+    `match` (ADR-029 amendment, 2026-11-16) counts only calls whose arguments have these
+    exact values, for example `{"/to/instance": "team.lead.0"}`.
+    """
 
     operation: OperationName
     min_calls: Annotated[int, Field(strict=True, ge=0, le=100)] = 1
     max_calls: Annotated[int, Field(strict=True, ge=0, le=100)] | None = None
+    match: ArgumentMatch | None = None
 
     @model_validator(mode="after")
     def ordered(self) -> Self:
         if self.max_calls is not None and self.max_calls < self.min_calls:
             raise ValueError("max_calls must not be below min_calls")
         return self
+
+    @model_serializer(mode="wrap")
+    def _dump(self, handler: SerializerFunctionWrapHandler) -> Any:
+        return omit_unset(handler(self), "match")
+
+    def operations(self) -> tuple[str, ...]:
+        return (self.operation,)
 
     def describe(self) -> str:
         bound = (
@@ -293,7 +347,25 @@ class Expectation(Record):
             else f"at least {self.min_calls}"
             + (f" and at most {self.max_calls}" if self.max_calls is not None else "")
         )
-        return f"{bound} successful call(s) of {self.operation.replace('.', '-')}"
+        return f"{bound} successful call(s) of {self.operation.replace('.', '-')}" + (
+            describe_match(self.match)
+        )
+
+
+class AnyOfExpectation(Record):
+    """Alternatives (ADR-029 amendment, 2026-11-16): met when at least one is met, for
+    example a pull request opened, or a message sent to the team lead."""
+
+    any_of: Annotated[tuple[Expectation, ...], Field(min_length=2, max_length=8)]
+
+    def operations(self) -> tuple[str, ...]:
+        return tuple(e.operation for e in self.any_of)
+
+    def describe(self) -> str:
+        return "one of: " + "; or ".join(e.describe() for e in self.any_of)
+
+
+ExpectEntry = Expectation | AnyOfExpectation
 
 
 # Context budgets (ADR-031 as amended by ADR-034 decision 5.2).
@@ -345,7 +417,7 @@ class AgentRunRequest(TaskRequest):
     max_tool_calls: Annotated[int, Field(strict=True, ge=1, le=500)] = 100
     max_cost_usd: Annotated[float, Field(strict=True, gt=0, le=50)] = 2.0
     # The run succeeds only when every expectation holds over its successful calls.
-    expect: Annotated[tuple[Expectation, ...], Field(max_length=16)] = ()
+    expect: Annotated[tuple[ExpectEntry, ...], Field(max_length=16)] = ()
     # Read-only operations invoked before each attempt's session; outputs go into the prompt.
     context: Annotated[tuple[ContextCall, ...], Field(max_length=MAX_CONTEXT_ENTRIES)] = ()
     # All context blocks together; blocks beyond it are trimmed (ADR-034 decision 5.2).
@@ -382,7 +454,7 @@ class AgentRunRequest(TaskRequest):
     def run_grants(self) -> Self:
         if len(set(self.operations)) != len(self.operations):
             raise ValueError("Operations must be distinct")
-        if any(e.operation not in self.operations for e in self.expect):
+        if any(o not in self.operations for e in self.expect for o in e.operations()):
             raise ValueError("Expectations must name exposed operations")
         # Built-in record operations are authorized per call by record grants (ADR-034),
         # `approvals.decide` by approve grants (ADR-036).
@@ -902,7 +974,7 @@ class RunTemplate(Record):
     harness: HarnessID | None = None
     model: ModelID | None = None
     bounds: RunBounds = RunBounds()
-    expect: Annotated[tuple[Expectation, ...], Field(max_length=16)] = ()
+    expect: Annotated[tuple[ExpectEntry, ...], Field(max_length=16)] = ()
 
 
 class GroupSpend(Record):
@@ -919,21 +991,22 @@ class GroupSpend(Record):
         return self
 
 
-class WindowExpectation(Record):
-    """A windowed pool expectation (ADR-034 decision 5.4): successful receipted calls of
-    `operation` (for `records.transition`, optionally of one named transition) across the
-    pool's members in each day or ISO week. Checked at window close; never fails a run."""
+WindowCount = Annotated[int, Field(strict=True, ge=0, le=100000)]
+
+
+class WindowAlternative(Record):
+    """What one windowed count covers: successful calls of `operation` (for
+    `records.transition`, optionally of one named `transition`; optionally only calls whose
+    arguments `match`), bounded by `min` and/or `max`."""
 
     operation: OperationName
     transition: Identifier | None = None
-    min: Annotated[int, Field(strict=True, ge=0, le=100000)] | None = None
-    max: Annotated[int, Field(strict=True, ge=0, le=100000)] | None = None
-    window: Literal["day", "week"]
-    timezone: Annotated[str, Field(strict=True, min_length=1, max_length=64)] = "UTC"
+    match: ArgumentMatch | None = None
+    min: WindowCount | None = None
+    max: WindowCount | None = None
 
     @model_validator(mode="after")
     def bounded(self) -> Self:
-        zone(self.timezone)
         if self.min is None and self.max is None:
             raise ValueError("A windowed expectation needs min, max or both")
         if self.min is not None and self.max is not None and self.max < self.min:
@@ -941,6 +1014,77 @@ class WindowExpectation(Record):
         if self.transition is not None and self.operation != "records.transition":
             raise ValueError("transition applies only to records.transition")
         return self
+
+    @model_serializer(mode="wrap")
+    def _dump(self, handler: SerializerFunctionWrapHandler) -> Any:
+        return omit_unset(handler(self), "match")
+
+    def describe(self) -> str:
+        what = self.operation + (f" ({self.transition})" if self.transition else "")
+        bounds = []
+        if self.min is not None:
+            bounds.append(f"at least {self.min}")
+        if self.max is not None:
+            bounds.append(f"at most {self.max}")
+        return f"{' and '.join(bounds)} successful call(s) of {what}" + describe_match(self.match)
+
+
+class WindowExpectation(Record):
+    """A windowed pool expectation (ADR-034 decision 5.4): counts of the pool members'
+    successful receipted calls in each day or ISO week, checked at window close; it never
+    fails a run. Either one count (`operation`, `transition`, `match`, `min`, `max`) or
+    `any_of` alternatives, met when at least one is (ADR-029 amendment, 2026-11-16)."""
+
+    operation: OperationName | None = None
+    transition: Identifier | None = None
+    match: ArgumentMatch | None = None
+    min: WindowCount | None = None
+    max: WindowCount | None = None
+    any_of: Annotated[tuple[WindowAlternative, ...], Field(min_length=2, max_length=8)] | None = (
+        None
+    )
+    window: Literal["day", "week"]
+    timezone: Annotated[str, Field(strict=True, min_length=1, max_length=64)] = "UTC"
+
+    @model_validator(mode="after")
+    def bounded(self) -> Self:
+        zone(self.timezone)
+        if self.any_of is not None:
+            if any(
+                v is not None
+                for v in (self.operation, self.transition, self.match, self.min, self.max)
+            ):
+                raise ValueError("any_of replaces operation, transition, match, min and max")
+            return self
+        if self.operation is None:
+            raise ValueError("A windowed expectation needs operation or any_of")
+        self.alternatives()  # the single count's own checks
+        return self
+
+    @model_serializer(mode="wrap")
+    def _dump(self, handler: SerializerFunctionWrapHandler) -> Any:
+        return omit_unset(handler(self), "match", "any_of")
+
+    def alternatives(self) -> tuple[WindowAlternative, ...]:
+        if self.any_of is not None:
+            return self.any_of
+        assert self.operation is not None
+        return (
+            WindowAlternative(
+                operation=self.operation,
+                transition=self.transition,
+                match=self.match,
+                min=self.min,
+                max=self.max,
+            ),
+        )
+
+    def operations(self) -> tuple[str, ...]:
+        return tuple(a.operation for a in self.alternatives())
+
+    def describe(self) -> str:
+        described = [a.describe() for a in self.alternatives()]
+        return described[0] if len(described) == 1 else "one of: " + "; or ".join(described)
 
 
 class GroupPool(Record):
