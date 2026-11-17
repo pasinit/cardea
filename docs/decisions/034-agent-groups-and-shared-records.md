@@ -2,7 +2,7 @@
 
 - **Date / owner / milestones:** 2026-11-08; runtime and API maintainers. Builds on [ADR-023](023-installed-operation-registry.md) (installed operations), [ADR-024](024-time-triggers.md) (time triggers), [ADR-026](026-effect-idempotency-and-reconciliation.md) (effect scopes), [ADR-027](027-agent-runs.md) (agent runs), [ADR-029](029-supervisor-schedules-expectations-and-run-evidence.md) (supervisor-managed triggers, expectations), [ADR-031](031-agent-run-context-operations.md) (context operations), [ADR-033](033-pluggable-agent-harnesses.md) (harnesses), [ADR-035](035-event-triggers.md) (event triggers, selected, slice 1 implemented) and [ADR-036](036-approval-waits.md) (approval waits, selected, implementation pending). Relates to roadmap M8.
 - **Status:** selected and implemented; nothing is verified on Debian. The lead approved this design on 2026-11-09, and the owner may veto.
-  - **Implemented:** all eleven slices (2026-11-09 to 2026-11-16): collections and records, claims, state machines, agent groups, mailboxes, context sources, journal triggers, draining and deletion, spend and windowed expectations, approval-gated transitions, and the reference package with examples; and the [team overview amendment](#amendment-2026-11-16-team-overview). See [Implementation status](#implementation-status).
+  - **Implemented:** all eleven slices (2026-11-09 to 2026-11-16): collections and records, claims, state machines, agent groups, mailboxes, context sources, journal triggers, draining and deletion, spend and windowed expectations, approval-gated transitions, and the reference package with examples; the [team overview amendment](#amendment-2026-11-16-team-overview); and the [2026-11-17 amendment](#amendment-2026-11-17-only-progress-renews-a-claim), under which only progress renews a claim. See [Implementation status](#implementation-status).
   - **Portable tests only:** all of it. Acceptance tests 1–10 have portable tests (see [Verification](#verification)). No fit test below has run.
   - **Verified on Debian:** nothing yet. Acceptance tests 3–5 must also run there with a real daemon restart; see the [Debian acceptance checklist](../acceptance/debian-adr-034-037.md).
   - **History.** It was reworked on 2026-11-08 at the lead's and owner's direction. The first version made "team" a kernel concept, with roles, role relations and a fixed work-item lifecycle; that baked one workflow into the kernel and is withdrawn. This version has only generic primitives. Review decisions are recorded under [Carried decisions](#carried-decisions) and [Decisions settled in review (2026-11-09)](#decisions-settled-in-review-2026-11-09).
@@ -211,7 +211,7 @@ spec:
 4. **Claims.** A claim sets `holder` to the calling principal.
    - It is atomic. One `BEGIN IMMEDIATE` transaction re-reads the record, checks it is unclaimed, the guard and the holder's limit, then sets the holder, increments `claim_epoch`, sets the lease and appends the event. SQLite's single writer means exactly one of several concurrent claims succeeds. The others get `record_claimed` (409).
    - **It belongs to a principal, not to a run,** so it survives across runs.
-   - **Renewal requires evidence the holder is alive.** At each attempt start of a holder's run, the lease becomes at least the attempt deadline plus 120 s. When a holder's run succeeds, the lease becomes now plus the full lease. An idempotent re-claim also renews. Failed or crashed runs renew nothing.
+   - **Renewal requires evidence the holder is alive.** At each attempt start of a holder's run, the lease becomes at least the attempt deadline plus 120 s. *Amended 2026-11-17:* only if the holder's previous attempt on the claim did not fail; see [Amendment (2026-11-17): only progress renews a claim](#amendment-2026-11-17-only-progress-renews-a-claim). When a holder's run succeeds, the lease becomes now plus the full lease. An idempotent re-claim also renews. Failed or crashed runs renew nothing.
    - **Fencing.** A holder's runs see `(record_id, claim_epoch)` in `records.claimed`. Holder-only operations check the epoch, and a stale holder is refused with `claim_lost`. Effects taken for a record should use `idempotency_context = <record_id>.<epoch>` (ADR-026; record IDs are unique across collections, and the lead chose this form on 2026-11-09 so the context is always a valid identifier). `records.claim` and `records.claimed` return it. Fencing stops at Cardea's invocation boundary.
    - **Follow-up wake for idle holders.** A holder only runs on its triggers. The ADR-024 tick therefore admits one coalesced follow-up run when two conditions hold: less than half the lease is left, and the holder has no queued or running run.
      - The follow-up uses the holder's first trigger template, with request ID `<holder>.claim.<record_id>.<epoch>.<n>`, and pays from its budgets.
@@ -471,7 +471,7 @@ A crash between placing and transitioning leaves the order `approved`. The effec
 3. **No double claim.** Twenty concurrent claims from two members: exactly one wins. Kill the daemon after the claim commits: one holder after restart. Let the lease expire: a new epoch, `claim_lost` for the old holder, and the new holder proceeds.
 4. **Idle holder keeps its claim; a failed holder loses it.** Use a weekly schedule and a 1 h lease.
    - An idle, healthy holder keeps its claim, with the same epoch, through follow-up wakes.
-   - A holder whose runs all fail loses the claim within lease + 60 s.
+   - A holder whose runs all fail loses the claim within lease + 60 s. *Amended 2026-11-17:* within the bound stated in the [amendment](#amendment-2026-11-17-only-progress-renews-a-claim), and never extended by an attempt that follows a failed one.
    - A holder that never touches the record stops getting follow-ups after `max_followups` follow-ups, and the claim lapses.
    - A lease below the apply-time bound is refused.
 5. **Message once, across restart.** Send a message, then kill the daemon before delivery. The next run receives it. That run fails, and the following run receives it again (`deliveries = 2`) and succeeds. No later run sees it. A pool message is consumed by exactly one member, a group message by every member. After the third failed delivery the message is dead-lettered and the sender is notified.
@@ -539,6 +539,34 @@ These came from deploying a dev team on a real host (`deploy/team-kit`, [runbook
   - `test_group_spend.py`: run ceilings for the group and for pools, `usd` and `runs` together, the validation, and one notice per window from refused schedule slots.
   - `test_journal_triggers.py`: the attributes, and a filter on them.
   - `test_team_kit.py`: the kit end to end on a kernel. An assignment wakes both developers and only one claims the item; the kill switch refuses new runs; the PM stops at its role's run ceiling; the status summary.
+
+## Amendment (2026-11-17): only progress renews a claim
+
+Decided by the lead after a Debian acceptance finding (`experiments/debian-acceptance/groups.py`, test 4); the owner may veto.
+
+- **Finding.** On a 300 s lease, a holder whose runs all failed kept its claim for 410–436 s. Each failing follow-up's attempt start called `claims.renew_for_attempt`, which extended the claim to the attempt deadline plus 120 s. Repeated failures therefore kept a dead holder's claim alive until its follow-ups ran out, against decision 2.4's intent ("Failed or crashed runs renew nothing").
+- **Rule.** Only work that is making progress keeps a claim.
+  - An attempt start extends the holder's claims only if the holder's previous attempt on that claim did not fail.
+  - After a failed or crashed attempt, the next attempt may still run, but the claim is not extended. It lapses at its current expiry, and that attempt's writes to the record are then fenced as usual (`claim_lost`).
+  - Progress is a successful run (which renews to the full lease, as before), a successful session that parks for an approval, or a successful claim call (`records.claim`, an idempotent re-claim, or a holder transition). Each lets the next attempt start renew again.
+  - The heartbeat that renews a long confined call's own lease (ADR-023 amendment) is unchanged. It extends the task's lease, never a claim.
+- **Bound.** Let *P* be the holder's last progress on the claim and *E* the claim's expiry right after it (*P* plus the full lease after a successful run). If the holder's attempts all fail from then on, the claim is released by the sweep no later than max(*E*, *S* + *A* + 120 s) + 60 s.
+  - *S* is the start of the first attempt after *P* (which must start before *E*, while the claim is live).
+  - *A* is that attempt's lease: its `attempt_timeout_seconds` plus the 30 s settle margin.
+  - The 60 s is one minute tick for the sweep.
+  - So, on any lease: **within lease + one attempt's lease + 120 s + 60 s of the last progress, and never extended by an attempt that follows a failed one.**
+- **State.** Migration `m19_claim_attempt_renewal` adds `records.attempt_renewal` (1 by default, so existing claims behave as before until their next attempt). An attempt start sets it to 0; progress sets it to 1.
+- **What depends on it.** Nothing outside claim upkeep reads the renewal path:
+  - receipts record `lease_expires_at` only as an output of the claim calls themselves;
+  - `records.claimed` and the overview report the current expiry, which is now simply earlier for a failing holder;
+  - follow-up wakes still key on half the lease left and an idle holder.
+
+  A failing holder's claim can now lapse with `reason: lease_expired` before its follow-ups run out, where it used to end with `followups_exhausted`. Both reasons already existed, and the escalation mail is unchanged.
+- **Tests.** In `apps/api/tests/service/test_claims.py`:
+  - an attempt after a failed one does not extend the claim, and each kind of progress restores the renewal;
+  - on the scheduler's clock, a group member's two failing follow-up runs (two attempts each) extend the claim only once and stay within the bound, and the sweep releases the claim within one tick of its expiry.
+
+  The Debian check is `groups.py` test 4, which now measures the failing holder against this bound. It has not run.
 
 ## Implementation plan (PR-sized slices, dependency order)
 

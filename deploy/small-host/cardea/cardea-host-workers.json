@@ -295,6 +295,28 @@
         "CARDEA_REPOSITORIES": "/opt/cardea-code/repositories.json"
       }
     },
+    "vcs-merge": {
+      "argv": [
+        "/opt/cardea/apps/api/.venv/bin/python",
+        "-I",
+        "-m",
+        "cardea.hosts.operation_worker",
+        "vcs.merge",
+        "vcs.find_merge"
+      ],
+      "profiles": [
+        "vcs"
+      ],
+      "read_only": [
+        "/opt/cardea",
+        "/opt/cardea-vcs",
+        "/opt/cardea-code/repositories.json"
+      ],
+      "env": {
+        "CARDEA_VCS_CONFIG": "/opt/cardea-vcs/vcs.json",
+        "CARDEA_REPOSITORIES": "/opt/cardea-code/repositories.json"
+      }
+    },
     "vcs-read-change": {
       "argv": [
         "/opt/cardea/apps/api/.venv/bin/python",
