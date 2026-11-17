@@ -13,21 +13,88 @@
     "scripts": "experiments/debian-acceptance at main 6ba6e21 with this branch's script fixes; the evidence 'commit' field is null because the root-owned source tree is not readable to git as cardea-kernel"
   },
   "results": [
-    {"run": "M2 host fit (host_fit.py in the guest after vm.py start's provisioning: marker, cardea-fit account, pinned bubblewrap)", "result": "pass", "checks": "11/11", "evidence": "m2-host-fit.json"},
-    {"run": "ADR-028 probes (test_confined_debian.py as cardea-kernel through the packaged helper)", "result": "pass", "checks": "4/4", "evidence": "adr028-probes.json"},
-    {"run": "make try (real daemon, SIGKILL, restart)", "result": "pass", "evidence": "try.json"},
-    {"run": "upgrade.py --synthesize", "result": "pass", "checks": "11/11", "evidence": "upgrade.json"},
-    {"run": "registry_egress.py", "result": "pass", "checks": "7/7", "evidence": "registry-egress.json"},
-    {"run": "coding_run.sh long_call.py", "result": "pass", "checks": "22/22", "evidence": "long-call.json"},
-    {"run": "coding_run.sh gate_isolation.py", "result": "pass", "checks": "5/5", "evidence": "gate-isolation.json"},
-    {"run": "env_try.sh (after make try-toolchain)", "result": "pass", "checks": "15/15", "evidence": "env-try.json"},
-    {"run": "events_tls.py (loopback sender only, no --external-wait)", "result": "pass", "checks": "7/7", "evidence": "adr-035.json"},
-    {"run": "teams.py", "result": "pass", "checks": "15/15", "evidence": "teams.json"},
-    {"run": "groups.py (all tests, before the t3/t4 script fixes)", "result": "t5 and t10 pass (8/8); t3/t4 failed on script bugs since fixed", "evidence": "adr-034.json"},
-    {"run": "groups.py --tests 3,4", "result": "t3 pass (5/5); t4 5/6", "evidence": "adr-034-t34.json"},
-    {"run": "groups.py --tests 4 (rerun with the lapse-mail query fixed)", "result": "5/6: t4_failed_holder_loses_claim_within_lease_and_tick fails, see open_findings", "evidence": "adr-034-t4.json"},
-    {"run": "email_live.py", "result": "not run: its first step is a real send and the host has no email configuration yet"},
-    {"run": "experiments/code-session/debian.sh", "result": "not run: needs a Claude subscription token"}
+    {
+      "run": "M2 host fit (host_fit.py in the guest after vm.py start's provisioning: marker, cardea-fit account, pinned bubblewrap)",
+      "result": "pass",
+      "checks": "11/11",
+      "evidence": "m2-host-fit.json"
+    },
+    {
+      "run": "ADR-028 probes (test_confined_debian.py as cardea-kernel through the packaged helper)",
+      "result": "pass",
+      "checks": "4/4",
+      "evidence": "adr028-probes.json"
+    },
+    {
+      "run": "make try (real daemon, SIGKILL, restart)",
+      "result": "pass",
+      "evidence": "try.json"
+    },
+    {
+      "run": "upgrade.py --synthesize",
+      "result": "pass",
+      "checks": "11/11",
+      "evidence": "upgrade.json"
+    },
+    {
+      "run": "registry_egress.py",
+      "result": "pass",
+      "checks": "7/7",
+      "evidence": "registry-egress.json"
+    },
+    {
+      "run": "coding_run.sh long_call.py",
+      "result": "pass",
+      "checks": "22/22",
+      "evidence": "long-call.json"
+    },
+    {
+      "run": "coding_run.sh gate_isolation.py",
+      "result": "pass",
+      "checks": "5/5",
+      "evidence": "gate-isolation.json"
+    },
+    {
+      "run": "env_try.sh (after make try-toolchain)",
+      "result": "pass",
+      "checks": "15/15",
+      "evidence": "env-try.json"
+    },
+    {
+      "run": "events_tls.py (loopback sender only, no --external-wait)",
+      "result": "pass",
+      "checks": "7/7",
+      "evidence": "adr-035.json"
+    },
+    {
+      "run": "teams.py",
+      "result": "pass",
+      "checks": "15/15",
+      "evidence": "teams.json"
+    },
+    {
+      "run": "groups.py (all tests, before the t3/t4 script fixes)",
+      "result": "t5 and t10 pass (8/8); t3/t4 failed on script bugs since fixed",
+      "evidence": "adr-034.json"
+    },
+    {
+      "run": "groups.py --tests 3,4",
+      "result": "t3 pass (5/5); t4 5/6",
+      "evidence": "adr-034-t34.json"
+    },
+    {
+      "run": "groups.py --tests 4 on a package rebuilt from main a904610 (#81: only progress renews a claim, migration m19)",
+      "result": "pass 7/7, including t4_failed_holder_loses_claim_within_the_amended_bound and t4_no_attempt_after_a_failed_one_extends_the_claim",
+      "evidence": "adr-034-t4.json"
+    },
+    {
+      "run": "email_live.py",
+      "result": "not run: its first step is a real send and the host has no email configuration yet"
+    },
+    {
+      "run": "experiments/code-session/debian.sh",
+      "result": "not run: needs a Claude subscription token"
+    }
   ],
   "confinement": [
     "64 MiB worker OOM-killed (worker_memory_limit); task, CPU (throttled), wall-time, stdout and scratch limits hold; a detached descendant dies with its unit",
@@ -62,11 +129,12 @@
       "groups t3 lacked groups.manage; t4 used non-standalone claims with records.claim; t4 looked for the lapse mail under the wrong kind"
     ]
   },
-  "open_findings": [
-    "ADR-034 test 4 says a holder whose runs all fail loses its claim within lease + 60 s. With a 300 s lease the failing holder claimed at 03:44:49, its two follow-ups failed at 03:48:01 and 03:49:04, and the claim expired at 03:52:05: 436 s (410 s in an earlier run). Each follow-up's attempt start renews the claim to its attempt deadline + ATTEMPT_RENEWAL_MARGIN_SECONDS (120 s) in claims.renew_for_attempt, so failing follow-ups extend it by about 150 s each. The script's bound (420 s from the restart) passes or fails by scheduling. Kernel or ADR: a design decision, not changed here."
-  ],
+  "open_findings": [],
   "host_notes": [
     "No arm64- or Lima-specific deviation from the scripts' expectations was observed.",
     "The coding profile's LoadCredential needs /etc/cardea/credentials/claude-code; the plain-command harnesses never read it, so a placeholder stood in for each run and was removed after."
+  ],
+  "resolved_findings": [
+    "The open ADR-034 test 4 finding (a failing holder kept its claim 410-436 s on a 300 s lease because every follow-up attempt renewed it) is fixed by #81 (a904610): an attempt after a failed one no longer extends the claim. Rerun on the host with that package: 7/7."
   ]
 }
