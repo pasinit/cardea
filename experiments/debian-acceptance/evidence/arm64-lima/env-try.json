@@ -1,0 +1,326 @@
+{
+  "checks": {
+    "artifact_stored_as_object": true,
+    "bad_commit_fails_with_its_status": true,
+    "every_hostile_attempt_fails": true,
+    "forged_result_not_written": true,
+    "fourth_rerun_refused": true,
+    "good_commit_passes": true,
+    "identical_call_in_progress_refused": true,
+    "killed_worker_gives_no_result": true,
+    "no_stray_left_on_the_host": true,
+    "nothing_left_after_hostile": true,
+    "nothing_left_on_the_host": true,
+    "same_inputs_same_receipt": true,
+    "stray_process_killed_before_the_next_scenario": true,
+    "three_forced_reruns_run": true,
+    "time_limit_is_timeout": true
+  },
+  "commit": null,
+  "finished_at": "2026-11-17T02:48:57.453581+00:00",
+  "host": {
+    "machine": "aarch64",
+    "os_release": "Debian GNU/Linux 13 (trixie)",
+    "python": "3.13.5",
+    "release": "6.12.115+deb13.1-cloud-arm64"
+  },
+  "observations": {
+    "artifact_stored_as_object": {
+      "artifacts": [
+        {
+          "bytes": 35,
+          "name": "a0",
+          "parts": [
+            {
+              "content_digest": "2409a96cd419daf08bb21ea6cac6549ddd7f7988fab7360de8e383a17805a5c2",
+              "namespace": "acc",
+              "resource_id": "receipt-369fabc88a9a441abe1f704c78b294b6.a0.000",
+              "schema_version": "0.1",
+              "version": 1
+            }
+          ],
+          "sha256": "2409a96cd419daf08bb21ea6cac6549ddd7f7988fab7360de8e383a17805a5c2"
+        }
+      ]
+    },
+    "bad_commit_fails_with_its_status": {
+      "scenario": {
+        "artifacts": [
+          {
+            "bytes": 34,
+            "name": "a0",
+            "path": "out/report.json"
+          }
+        ],
+        "duration_ms": 33,
+        "exit_code": 3,
+        "log_tail": "scenario try mode bad\n",
+        "log_truncated": false,
+        "name": "try",
+        "outcome": "fail",
+        "stray_processes_killed": 0
+      }
+    },
+    "env_runs": [
+      {
+        "n": 7,
+        "state": "settled"
+      }
+    ],
+    "every_hostile_attempt_fails": {
+      "tried": {
+        "credentials": "FileNotFoundError",
+        "dns": "gaierror",
+        "fill_disk": "OSError",
+        "helper_spool": "FileNotFoundError",
+        "kernel_loopback": "TimeoutError",
+        "metadata": "TimeoutError",
+        "store": "FileNotFoundError",
+        "unlisted_host": "URLError"
+      }
+    },
+    "forged_result_not_written": {
+      "tried": {
+        "1": "PermissionError",
+        "mem": "PermissionError"
+      }
+    },
+    "fourth_rerun_refused": {
+      "failure": "env_rerun_limit",
+      "output": null,
+      "receipt_failure": null,
+      "receipt_id": null,
+      "state": "failed"
+    },
+    "good_commit_passes": {
+      "failure": null,
+      "output": {
+        "artifacts": [
+          {
+            "bytes": 35,
+            "name": "a0",
+            "parts": [
+              {
+                "content_digest": "2409a96cd419daf08bb21ea6cac6549ddd7f7988fab7360de8e383a17805a5c2",
+                "namespace": "acc",
+                "resource_id": "receipt-369fabc88a9a441abe1f704c78b294b6.a0.000",
+                "schema_version": "0.1",
+                "version": 1
+              }
+            ],
+            "sha256": "2409a96cd419daf08bb21ea6cac6549ddd7f7988fab7360de8e383a17805a5c2"
+          }
+        ],
+        "cached": false,
+        "catalog_sha256": "1ce0d7f39f1b4d993b69b7e4a3bd2ba48d2c49ab4f7dd58145fdde18072a025e",
+        "commit": "b60309854c8dd45af19f1e74b76d63f7c65e1489",
+        "dropped": {
+          "artifacts": 0,
+          "log_bytes": 0
+        },
+        "isolation": "subreaper",
+        "passed": true,
+        "repo": "env-acceptance",
+        "scenarios": [
+          {
+            "artifacts": [
+              {
+                "bytes": 35,
+                "name": "a0",
+                "path": "out/report.json"
+              }
+            ],
+            "duration_ms": 35,
+            "exit_code": 0,
+            "log_tail": "scenario try mode good\n",
+            "log_truncated": false,
+            "name": "try",
+            "outcome": "pass",
+            "stray_processes_killed": 0
+          },
+          {
+            "artifacts": [],
+            "duration_ms": 36,
+            "exit_code": 0,
+            "log_tail": "scenario teams mode good\n",
+            "log_truncated": false,
+            "name": "teams",
+            "outcome": "pass",
+            "stray_processes_killed": 0
+          }
+        ],
+        "tier": "process",
+        "toolchain_sha256": null
+      },
+      "receipt_failure": null,
+      "receipt_id": "receipt-369fabc88a9a441abe1f704c78b294b6",
+      "state": "succeeded"
+    },
+    "hostile_attempts": {
+      "credentials": "FileNotFoundError",
+      "dns": "gaierror",
+      "fill_disk": "OSError",
+      "helper_spool": "FileNotFoundError",
+      "kernel_loopback": "TimeoutError",
+      "metadata": "TimeoutError",
+      "store": "FileNotFoundError",
+      "unlisted_host": "URLError"
+    },
+    "identical_call_in_progress_refused": {
+      "first": {
+        "failure": null,
+        "output": {
+          "cached": false,
+          "catalog_sha256": "1ce0d7f39f1b4d993b69b7e4a3bd2ba48d2c49ab4f7dd58145fdde18072a025e",
+          "commit": "5c34f78194d2582dfb3d3a932c34bc88fb124c2b",
+          "dropped": {
+            "artifacts": 0,
+            "log_bytes": 0
+          },
+          "isolation": "subreaper",
+          "passed": false,
+          "repo": "env-acceptance",
+          "scenarios": [
+            {
+              "artifacts": [],
+              "duration_ms": 20004,
+              "exit_code": null,
+              "log_tail": "",
+              "log_truncated": false,
+              "name": "slow",
+              "outcome": "timeout",
+              "stray_processes_killed": 0
+            }
+          ],
+          "tier": "process",
+          "toolchain_sha256": null
+        },
+        "receipt_failure": null,
+        "receipt_id": "receipt-a3c5fa831df34ec7bfc2e8e5970c30d7",
+        "state": "succeeded"
+      },
+      "second": {
+        "failure": "env_run_in_progress",
+        "output": null,
+        "receipt_failure": null,
+        "receipt_id": null,
+        "state": "failed"
+      }
+    },
+    "killed_worker_gives_no_result": {
+      "failure": "worker_failed",
+      "output": null,
+      "receipt_failure": "worker_failed",
+      "receipt_id": "receipt-bcff6c2afb274007b0080930e9387bd2",
+      "state": "failed"
+    },
+    "nothing_left_after_hostile": {
+      "left": {
+        "units": []
+      }
+    },
+    "nothing_left_on_the_host": {
+      "left": {
+        "units": []
+      }
+    },
+    "same_inputs_same_receipt": {
+      "failure": null,
+      "output": {
+        "artifacts": [
+          {
+            "bytes": 35,
+            "name": "a0",
+            "parts": [
+              {
+                "content_digest": "2409a96cd419daf08bb21ea6cac6549ddd7f7988fab7360de8e383a17805a5c2",
+                "namespace": "acc",
+                "resource_id": "receipt-369fabc88a9a441abe1f704c78b294b6.a0.000",
+                "schema_version": "0.1",
+                "version": 1
+              }
+            ],
+            "sha256": "2409a96cd419daf08bb21ea6cac6549ddd7f7988fab7360de8e383a17805a5c2"
+          }
+        ],
+        "cached": true,
+        "cached_receipt_id": "receipt-369fabc88a9a441abe1f704c78b294b6",
+        "catalog_sha256": "1ce0d7f39f1b4d993b69b7e4a3bd2ba48d2c49ab4f7dd58145fdde18072a025e",
+        "commit": "b60309854c8dd45af19f1e74b76d63f7c65e1489",
+        "dropped": {
+          "artifacts": 0,
+          "log_bytes": 0
+        },
+        "isolation": "subreaper",
+        "passed": true,
+        "repo": "env-acceptance",
+        "scenarios": [
+          {
+            "artifacts": [
+              {
+                "bytes": 35,
+                "name": "a0",
+                "path": "out/report.json"
+              }
+            ],
+            "duration_ms": 35,
+            "exit_code": 0,
+            "log_tail": "scenario try mode good\n",
+            "log_truncated": false,
+            "name": "try",
+            "outcome": "pass",
+            "stray_processes_killed": 0
+          },
+          {
+            "artifacts": [],
+            "duration_ms": 36,
+            "exit_code": 0,
+            "log_tail": "scenario teams mode good\n",
+            "log_truncated": false,
+            "name": "teams",
+            "outcome": "pass",
+            "stray_processes_killed": 0
+          }
+        ],
+        "tier": "process",
+        "toolchain_sha256": null
+      },
+      "receipt_failure": null,
+      "receipt_id": "receipt-ebefad3e64184cebbc097985738c9efd",
+      "state": "succeeded"
+    },
+    "stray_process_killed_before_the_next_scenario": {
+      "scenarios": [
+        {
+          "artifacts": [],
+          "duration_ms": 640,
+          "exit_code": 0,
+          "log_tail": "scenario background mode good\n",
+          "log_truncated": false,
+          "name": "background",
+          "outcome": "pass",
+          "stray_processes_killed": 1
+        },
+        {
+          "artifacts": [],
+          "duration_ms": 555,
+          "exit_code": 0,
+          "log_tail": "scenario check mode good\n",
+          "log_truncated": false,
+          "name": "check",
+          "outcome": "pass",
+          "stray_processes_killed": 0
+        }
+      ]
+    },
+    "time_limit_is_timeout": {
+      "outcomes": [
+        "timeout",
+        "pass"
+      ]
+    }
+  },
+  "passed": true,
+  "script": "env-try",
+  "started_at": "2026-11-17T02:47:48.747663+00:00"
+}

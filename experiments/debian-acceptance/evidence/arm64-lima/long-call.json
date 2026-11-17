@@ -1,0 +1,163 @@
+{
+  "checks": {
+    "artifact_parts_at_most_one_mib": true,
+    "artifact_reads_back_by_digest": true,
+    "artifact_survives_backup_and_restore": true,
+    "bundle_artifact_listed": true,
+    "code_session_worker_installed": true,
+    "coding_profile_installed": true,
+    "fenced_call_is_outcome_unknown": true,
+    "fenced_call_not_started_again": true,
+    "fenced_task_failed": true,
+    "host_reaches_the_kernel_listener": true,
+    "lease_renewed_about_every_minute": true,
+    "long_call_succeeds": true,
+    "oversized_artifact_stores_nothing": true,
+    "oversized_call_reconciles_as_not_applied": true,
+    "restored_store_verifies": true,
+    "timeout_above_two_hours_invalid": true,
+    "timeout_beyond_profile_refused": true,
+    "tool_endpoint_not_on_127_0_0_1": true,
+    "worker_cannot_reach_127_0_0_1": true,
+    "worker_outlives_the_killed_service": true,
+    "worker_process_tree_is_gone": true,
+    "worker_reaches_the_tool_endpoint": true
+  },
+  "commit": null,
+  "finished_at": "2026-11-17T03:58:35.406592+00:00",
+  "host": {
+    "machine": "aarch64",
+    "os_release": "Debian GNU/Linux 13 (trixie)",
+    "python": "3.13.5",
+    "release": "6.12.115+deb13.1-cloud-arm64"
+  },
+  "observations": {
+    "artifact_parts_at_most_one_mib": {
+      "bytes": 9440482,
+      "parts": 10
+    },
+    "bundle_artifact_listed": {
+      "artifacts": [
+        {
+          "bytes": 9440482,
+          "name": "change.bundle",
+          "sha256": "98f0d0e6f6ccb9576aea64fd50fd67ec098f88e5fd7c4e3bb9869aa6b764402e"
+        }
+      ]
+    },
+    "coding_profile_installed": {
+      "wall_seconds": 3600
+    },
+    "fenced_call_is_outcome_unknown": {
+      "operations": [
+        {
+          "receipt_id": "receipt-d4e508f1d4e0481596c66b08a90688a5",
+          "state": "outcome_unknown"
+        }
+      ],
+      "renewals": 10,
+      "task_state": "failed"
+    },
+    "host_reaches_the_kernel_listener": {
+      "port": 44295
+    },
+    "lease_renewed_about_every_minute": {
+      "renewals": 20,
+      "seconds": 1205
+    },
+    "long_call_succeeds": {
+      "operations": [
+        {
+          "receipt_id": "receipt-1aa50a65c9c14577a09499ee47cc37e1",
+          "state": "succeeded"
+        }
+      ],
+      "renewals": 20,
+      "task_state": "succeeded"
+    },
+    "loopback_probe": {
+      "endpoint": {
+        "connected": true,
+        "status_line": "HTTP/1.1 401 Unauthorized"
+      },
+      "kernel": {
+        "connected": false,
+        "error": "TimeoutError"
+      }
+    },
+    "oversized_artifact_stores_nothing": {
+      "objects": 0,
+      "operations": [
+        {
+          "receipt_id": "receipt-9e7b9ffb4e5e488aa534548f0ade4f96",
+          "state": "outcome_unknown"
+        }
+      ],
+      "renewals": 0,
+      "task_state": "failed"
+    },
+    "profile": {
+      "concurrency": 1,
+      "cpu_percent": 200,
+      "credential": true,
+      "input_kb": 0,
+      "jit": true,
+      "memory_mb": 4096,
+      "network": {
+        "hosts": [
+          "api.anthropic.com"
+        ],
+        "policy": "model_api_only",
+        "proxy": "127.0.10.5:3128",
+        "registries": [
+          "pypi.org",
+          "files.pythonhosted.org"
+        ]
+      },
+      "output_kb": 14336,
+      "queue_timeout_seconds": 600,
+      "scratch_mb": 4096,
+      "sha256": "872d3fe24334bd16dd38a6682f9e42fdd489783bdab4be8b303c01d71655cda0",
+      "tasks": 512,
+      "wall_seconds": 3600
+    },
+    "recovery_seconds": 298,
+    "restored_store_verifies": {
+      "verify": {
+        "integrity": "ok",
+        "objects": 13,
+        "schema": "m18_env_runs",
+        "tasks": 1
+      }
+    },
+    "timeout_beyond_profile_refused": {
+      "code": "operation_timeout_exceeds_profile"
+    },
+    "tool_endpoint_not_on_127_0_0_1": {
+      "url": "http://127.0.11.1:38623/mcp"
+    },
+    "worker_cannot_reach_127_0_0_1": {
+      "kernel": {
+        "connected": false,
+        "error": "TimeoutError"
+      }
+    },
+    "worker_outlives_the_killed_service": {
+      "pids": [
+        70125
+      ]
+    },
+    "worker_process_tree_is_gone": {
+      "left": []
+    },
+    "worker_reaches_the_tool_endpoint": {
+      "endpoint": {
+        "connected": true,
+        "status_line": "HTTP/1.1 401 Unauthorized"
+      }
+    }
+  },
+  "passed": true,
+  "script": "long-call",
+  "started_at": "2026-11-17T03:16:45.126490+00:00"
+}

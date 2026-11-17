@@ -1,0 +1,87 @@
+{
+  "checks": {
+    "t4_both_members_hold_a_record": true,
+    "t4_failed_holder_loses_claim_within_lease_and_tick": false,
+    "t4_follow_ups_stop_at_max_followups": true,
+    "t4_idle_holder_kept_epoch_through_follow_ups": true,
+    "t4_lapse_is_followups_exhausted_with_supervisor_mail": true,
+    "t4_short_lease_refused_at_apply": true
+  },
+  "commit": null,
+  "finished_at": "2026-11-17T03:56:07.095611+00:00",
+  "host": {
+    "machine": "aarch64",
+    "os_release": "Debian GNU/Linux 13 (trixie)",
+    "python": "3.13.5",
+    "release": "6.12.115+deb13.1-cloud-arm64"
+  },
+  "observations": {
+    "t4_both_members_hold_a_record": {
+      "records": {
+        "hold.w.0": {
+          "claim_epoch": 1,
+          "followups": 0,
+          "holder": "hold.w.0",
+          "lease_expires_at": "2026-11-17T03:49:47.722473+00:00",
+          "version": 2
+        },
+        "hold.w.1": {
+          "claim_epoch": 1,
+          "followups": 0,
+          "holder": "hold.w.1",
+          "lease_expires_at": "2026-11-17T03:49:49.250022+00:00",
+          "version": 2
+        }
+      }
+    },
+    "t4_failed_holder_loses_claim_within_lease_and_tick": {
+      "history": [
+        {
+          "actor": "filer",
+          "at": "2026-11-17T03:44:46.466270+00:00",
+          "kind": "created",
+          "version": 1
+        },
+        {
+          "actor": "hold.w.1",
+          "at": "2026-11-17T03:44:49.068584+00:00",
+          "kind": "claimed",
+          "version": 2
+        },
+        {
+          "actor": "runtime",
+          "at": "2026-11-17T03:52:05.270653+00:00",
+          "kind": "claim_expired",
+          "version": 3
+        }
+      ],
+      "seconds": 436
+    },
+    "t4_follow_ups_stop_at_max_followups": {
+      "followups": [
+        "hold.w.0.claim.rec-0e7ac51d829942c487ad9a9170899081.1.1",
+        "hold.w.0.claim.rec-0e7ac51d829942c487ad9a9170899081.1.2"
+      ]
+    },
+    "t4_idle_holder_kept_epoch_through_follow_ups": {
+      "followups": [
+        "hold.w.0.claim.rec-0e7ac51d829942c487ad9a9170899081.1.1",
+        "hold.w.0.claim.rec-0e7ac51d829942c487ad9a9170899081.1.2"
+      ]
+    },
+    "t4_lapse_is_followups_exhausted_with_supervisor_mail": {
+      "notices": 2
+    },
+    "t4_seconds": 682,
+    "t4_short_lease_refused_at_apply": {
+      "result": {
+        "code": "claim_lease_too_short",
+        "ok": false,
+        "status": 422
+      }
+    }
+  },
+  "passed": false,
+  "script": "adr-034",
+  "started_at": "2026-11-17T03:44:42.598620+00:00"
+}

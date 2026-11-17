@@ -24,6 +24,7 @@ profile: the seccomp filter blocks `ptrace` (`@debug`), not `kill`.
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -212,7 +213,16 @@ def bundle_file(store: Path, artifact: dict[str, Any], name: str) -> str:
     with tempfile.TemporaryDirectory() as scratch:
         root = Path(scratch)
         (root / "c.bundle").write_bytes(content)
-        subprocess.run(["git", "clone", "--quiet", FIXTURE, str(root / "check")], check=True)
+        # The fixture is root's and this script runs as the kernel user: git refuses a
+        # repository another account owns unless it is named safe. A local clone ignores
+        # `-c safe.directory`, so name it in a global file used for this clone only.
+        safe = root / "gitconfig"
+        safe.write_text(f"[safe]\n\tdirectory = {FIXTURE}\n")
+        subprocess.run(
+            ["git", "clone", "--quiet", FIXTURE, str(root / "check")],
+            env={**os.environ, "GIT_CONFIG_GLOBAL": str(safe)},
+            check=True,
+        )
         subprocess.run(
             [
                 "git",

@@ -1,0 +1,107 @@
+{
+  "checks": {
+    "arbitrary_host_refused": true,
+    "host_loopback_refused": true,
+    "profile_lists_registries": true,
+    "proxy_carries_the_profiles_egress_rules": true,
+    "registries_reachable_over_tls": true,
+    "registry_on_another_port_refused": true,
+    "registry_over_plain_http_refused": true
+  },
+  "commit": null,
+  "finished_at": "2026-11-17T03:59:50.711224+00:00",
+  "host": {
+    "machine": "aarch64",
+    "os_release": "Debian GNU/Linux 13 (trixie)",
+    "python": "3.13.5",
+    "release": "6.12.115+deb13.1-cloud-arm64"
+  },
+  "observations": {
+    "arbitrary_host_refused": {
+      "result": {
+        "code": "000",
+        "connect": "403",
+        "curl_exit": 56,
+        "stderr": "curl: (56) CONNECT tunnel failed, response 403\n",
+        "url": "https://example.com/"
+      }
+    },
+    "host_loopback_refused": {
+      "results": [
+        {
+          "code": "000",
+          "connect": "403",
+          "curl_exit": 56,
+          "stderr": "curl: (56) CONNECT tunnel failed, response 403\n",
+          "url": "https://127.0.0.1/"
+        },
+        {
+          "code": "403",
+          "connect": "000",
+          "curl_exit": 0,
+          "stderr": "",
+          "url": "http://127.0.0.1:51723/"
+        }
+      ]
+    },
+    "network": {
+      "hosts": [
+        "api.anthropic.com"
+      ],
+      "policy": "model_api_only",
+      "proxy": "127.0.10.5:3128",
+      "registries": [
+        "pypi.org",
+        "files.pythonhosted.org"
+      ]
+    },
+    "profile_lists_registries": {
+      "registries": [
+        "pypi.org",
+        "files.pythonhosted.org"
+      ]
+    },
+    "proxy_carries_the_profiles_egress_rules": {
+      "missing": []
+    },
+    "registries_reachable_over_tls": {
+      "results": {
+        "files.pythonhosted.org": {
+          "code": "404",
+          "connect": "200",
+          "curl_exit": 0,
+          "stderr": "",
+          "url": "https://files.pythonhosted.org/"
+        },
+        "pypi.org": {
+          "code": "200",
+          "connect": "200",
+          "curl_exit": 0,
+          "stderr": "",
+          "url": "https://pypi.org/"
+        }
+      }
+    },
+    "registry_on_another_port_refused": {
+      "result": {
+        "code": "000",
+        "connect": "403",
+        "curl_exit": 56,
+        "stderr": "curl: (56) CONNECT tunnel failed, response 403\n",
+        "url": "https://pypi.org:8443/"
+      }
+    },
+    "registry_over_plain_http_refused": {
+      "result": {
+        "code": "403",
+        "connect": "000",
+        "curl_exit": 0,
+        "stderr": "",
+        "url": "http://pypi.org/"
+      }
+    }
+  },
+  "passed": true,
+  "script": "registry-egress",
+  "started_at": "2026-11-17T03:59:50.105164+00:00"
+}

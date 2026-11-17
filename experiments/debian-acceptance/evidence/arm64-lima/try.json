@@ -1,0 +1,12 @@
+{
+  "command": "sudo -u cardea-kernel env PYTHONPATH=/usr/lib/cardea:experiments/try /opt/venvs/cardea-kernel/bin/python experiments/try/try_.py",
+  "what": "make try on the host: the installed kernel's real daemon, SIGKILLed mid-task and restarted from the same store",
+  "result": {
+    "state": "succeeded",
+    "receipt_preserved_across_crash": true,
+    "outsider_denied": true,
+    "output": {"message": "Hello from Cardea"},
+    "seconds": 3.8
+  },
+  "passed": true
+}

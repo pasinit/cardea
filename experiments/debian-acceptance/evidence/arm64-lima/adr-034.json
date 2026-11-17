@@ -1,0 +1,171 @@
+{
+  "checks": {
+    "t10_burst_coalesces": true,
+    "t10_each_event_wakes_once_across_kills": true,
+    "t3_completed": false,
+    "t4_both_members_hold_a_record": false,
+    "t4_failed_holder_loses_claim_within_lease_and_tick": true,
+    "t4_follow_ups_stop_at_max_followups": false,
+    "t4_idle_holder_kept_epoch_through_follow_ups": false,
+    "t4_lapse_is_followups_exhausted_with_supervisor_mail": false,
+    "t4_short_lease_refused_at_apply": true,
+    "t5_dead_lettered_after_max_deliveries_with_notice": true,
+    "t5_failed_run_then_redelivered_once": true,
+    "t5_group_mail_delivered_to_every_member": true,
+    "t5_killed_before_delivery": true,
+    "t5_no_later_run_sees_it": true,
+    "t5_pool_mail_consumed_by_one_member": true
+  },
+  "commit": null,
+  "finished_at": "2026-11-17T03:08:12.595640+00:00",
+  "host": {
+    "machine": "aarch64",
+    "os_release": "Debian GNU/Linux 13 (trixie)",
+    "python": "3.13.5",
+    "release": "6.12.115+deb13.1-cloud-arm64"
+  },
+  "observations": {
+    "t10_burst_coalesces": {
+      "duplicates": {},
+      "runs": [
+        "wake.r.0.t0.e51962c209d5632d",
+        "wake.r.0.t0.eda548322d85df3a"
+      ]
+    },
+    "t10_each_event_wakes_once_across_kills": {
+      "admitted": [
+        {
+          "event_id": "event-1e9754eab5b14434b20637e9e0be7085",
+          "event_type": "cardea.record.created",
+          "task_id": "task-f3492e686f3e412d81fc96fbb0380068"
+        },
+        {
+          "event_id": "event-e81dc9bebdad451c82966ffed83a3990",
+          "event_type": "cardea.record.created",
+          "task_id": "task-03c367fb27ff47f19cbd087c975b0ac3"
+        },
+        {
+          "event_id": "event-c8d46f4d7246421386214fce4a66a1cb",
+          "event_type": "cardea.record.created",
+          "task_id": "task-d9b7d63701a94e2ebd4740d59cd972e2"
+        }
+      ],
+      "kill_offsets": [
+        32.4,
+        34.1,
+        53.0
+      ]
+    },
+    "t10_seconds": 729,
+    "t3_completed": {
+      "error": "ClientError: authority_denied"
+    },
+    "t3_seconds": 0,
+    "t4_both_members_hold_a_record": {
+      "records": {
+        "hold.w.0": {
+          "claim_epoch": 0,
+          "followups": 0,
+          "holder": null,
+          "lease_expires_at": null,
+          "version": 1
+        },
+        "hold.w.1": {
+          "claim_epoch": 0,
+          "followups": 0,
+          "holder": null,
+          "lease_expires_at": null,
+          "version": 1
+        }
+      }
+    },
+    "t4_failed_holder_loses_claim_within_lease_and_tick": {
+      "history": [
+        {
+          "actor": "filer",
+          "at": "2026-11-17T02:47:51.039559+00:00",
+          "kind": "created",
+          "version": 1
+        }
+      ],
+      "seconds": 0
+    },
+    "t4_follow_ups_stop_at_max_followups": {
+      "followups": []
+    },
+    "t4_idle_holder_kept_epoch_through_follow_ups": {
+      "followups": []
+    },
+    "t4_lapse_is_followups_exhausted_with_supervisor_mail": {
+      "notices": 0
+    },
+    "t4_seconds": 6,
+    "t4_short_lease_refused_at_apply": {
+      "result": {
+        "code": "claim_lease_too_short",
+        "ok": false,
+        "status": 422
+      }
+    },
+    "t5_dead_lettered_after_max_deliveries_with_notice": {
+      "delivery": [
+        {
+          "deliveries": 2,
+          "pool": null,
+          "recipient_id": "post.m.1",
+          "state": "dead",
+          "task_id": null
+        }
+      ],
+      "notices": [
+        {
+          "to_address": "sup"
+        }
+      ]
+    },
+    "t5_failed_run_then_redelivered_once": {
+      "delivery": [
+        {
+          "deliveries": 2,
+          "pool": null,
+          "recipient_id": "post.m.0",
+          "state": "consumed",
+          "task_id": "task-7f552fc43eef431cb45c2c560c5adab1"
+        }
+      ],
+      "seen": [
+        1,
+        2
+      ]
+    },
+    "t5_killed_before_delivery": {
+      "delivery": [
+        {
+          "deliveries": 0,
+          "pool": null,
+          "recipient_id": "post.m.0",
+          "state": "pending",
+          "task_id": null
+        }
+      ]
+    },
+    "t5_pool_mail_consumed_by_one_member": {
+      "deliveries": [
+        {
+          "deliveries": 1,
+          "pool": "post.m",
+          "recipient_id": "post.m.0",
+          "state": "consumed",
+          "task_id": "task-f09ec9de1afd4ffcb3f460209c9ce617"
+        }
+      ],
+      "readers": [
+        "post.m.0"
+      ]
+    },
+    "t5_seconds": 487
+  },
+  "passed": false,
+  "script": "adr-034",
+  "started_at": "2026-11-17T02:47:47.238272+00:00"
+}
