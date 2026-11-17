@@ -977,6 +977,8 @@ def write_claim(
     changed = conn.exec_driver_sql(
         "UPDATE records SET state=?,holder=?,claim_epoch=?,lease_expires_at=?,"
         "followups=CASE WHEN ? THEN 0 ELSE followups END,"
+        # A claim or a holder's transition is a successful call: progress (ADR-034 2.4).
+        "attempt_renewal=CASE WHEN ? IS NOT NULL THEN 1 ELSE attempt_renewal END,"
         "claim_transition=?,version=?,updated_at=? WHERE seq=? AND version=?",
         (
             new["state"],
@@ -984,6 +986,7 @@ def write_claim(
             new["claim_epoch"],
             new["lease_expires_at"],
             int(holder_event),
+            new["holder"],
             claim_transition if new["holder"] is not None else None,
             new["version"],
             new["updated_at"],
@@ -1002,7 +1005,9 @@ def renew(conn: sa.Connection, row: sa.RowMapping, until: datetime) -> dict[str,
     """Extend a live claim to at least `until`. A renewal changes no version or history."""
     lease = max(datetime.fromisoformat(str(row["lease_expires_at"])), until)
     conn.exec_driver_sql(
-        "UPDATE records SET lease_expires_at=?,followups=0 WHERE seq=?", (stamp(lease), row["seq"])
+        # An idempotent re-claim is a successful call: progress (ADR-034 2.4).
+        "UPDATE records SET lease_expires_at=?,followups=0,attempt_renewal=1 WHERE seq=?",
+        (stamp(lease), row["seq"]),
     )
     return {**record_view(row), "lease_expires_at": stamp(lease)}
 

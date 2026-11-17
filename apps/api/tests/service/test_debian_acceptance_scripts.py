@@ -227,7 +227,9 @@ def test_the_upgrade_check_finds_append_only_triggers(tmp_path: Path, scripts: N
     assert found["record_events_no_delete"]["action"] == "DELETE"
     # A fresh store has no rows to change: the probe reports that rather than passing.
     assert upgrade.probe(database, found["record_events_no_delete"]) == "empty"
-    assert upgrade.revision(database) == "m18_env_runs"
+    from cardea.service.database import SCHEMA_HEAD
+
+    assert upgrade.revision(database) == SCHEMA_HEAD
     assert upgrade.schema(database) == upgrade.schema(database)
 
 

@@ -1,12 +1,20 @@
 """Claim upkeep: renewal at run boundaries, expiry and follow-up wakes (ADR-034 2.4).
 
-A claim belongs to a principal, so it is renewed only by evidence that principal is alive:
-- each attempt start of one of its runs extends the lease to at least the attempt's
-  deadline plus 120 s;
+A claim belongs to a principal, so it is renewed only by evidence that the principal is
+making progress (ADR-034 2.4, amended 2026-11-17):
+- an attempt start of one of its runs extends the lease to at least the attempt's deadline
+  plus 120 s, but only if the holder's previous attempt on the claim did not fail;
 - a run that succeeds extends it to the collection's full lease from now;
 - an idempotent re-claim renews it (`records.claim`).
 
-Failed or crashed runs renew nothing. The per-minute trigger tick expires lapsed claims and,
+Failed or crashed attempts renew nothing, and an attempt that follows one does not either: it
+may still run, but the claim lapses at its current expiry and the attempt's effects on the
+record are then fenced (`claim_lost`). `records.attempt_renewal` carries this: an attempt
+start clears it, and progress (a successful run, a successful session that parks for an
+approval, a successful claim call) sets it again. A holder whose attempts all fail therefore
+loses the claim within its lease, plus one attempt's duration and the 120 s margin if an
+attempt started just before the lease ended, plus one minute tick for the sweep, after its
+last progress. The per-minute trigger tick expires lapsed claims and,
 for group members whose claim is past half its lease and who have no unfinished run, admits
 one coalesced follow-up run from the member's first trigger template, at most
 `max_followups` per epoch until the holder acts on the record again. A claim that lapses
@@ -61,11 +69,27 @@ def _extend(conn: sa.Connection, row: sa.RowMapping, until: datetime) -> None:
 
 
 def renew_for_attempt(conn: sa.Connection, holder: str, attempt_deadline: datetime) -> int:
-    """An attempt of the holder's run started: keep its claims past that attempt."""
+    """An attempt of the holder's run started: keep its claims past that attempt, unless the
+    holder's previous attempt on a claim failed. Returns how many claims were extended.
+
+    Every live claim of the holder then waits for this attempt's progress before the next
+    attempt start may extend it again (`attempt_renewal`)."""
     rows = _live(conn, holder, now())
     until = attempt_deadline + timedelta(seconds=ATTEMPT_RENEWAL_MARGIN_SECONDS)
+    renewed = 0
     for row in rows:
-        _extend(conn, row, until)
+        if int(row["attempt_renewal"]):
+            _extend(conn, row, until)
+            renewed += 1
+    _set_progress(conn, rows, False)
+    return renewed
+
+
+def mark_progress(conn: sa.Connection, holder: str, at: datetime) -> int:
+    """The holder's attempt made progress without finishing its run (a successful session
+    that parks for an approval): the next attempt start may extend its claims again."""
+    rows = _live(conn, holder, at)
+    _set_progress(conn, rows, True)
     return len(rows)
 
 
@@ -76,7 +100,15 @@ def renew_for_success(conn: sa.Connection, holder: str, at: datetime) -> int:
         claims = CollectionSpec.model_validate_json(row["spec_json"]).claims
         if claims is not None:
             _extend(conn, row, at + timedelta(seconds=claims.lease_seconds))
+    _set_progress(conn, rows, True)
     return len(rows)
+
+
+def _set_progress(conn: sa.Connection, rows: list[sa.RowMapping], allowed: bool) -> None:
+    for row in rows:
+        conn.exec_driver_sql(
+            "UPDATE records SET attempt_renewal=? WHERE seq=?", (int(allowed), row["seq"])
+        )
 
 
 def sweep(kernel: "Kernel", at: datetime) -> int:
