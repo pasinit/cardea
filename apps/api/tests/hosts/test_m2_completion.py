@@ -202,6 +202,7 @@ def helper(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     root.mkdir()
     monkeypatch.setattr(launcher, "ROOT", root)
     monkeypatch.setattr(launcher, "preflight", lambda: {})
+    monkeypatch.setattr(launcher, "shared_propagation", lambda: True)
 
     def run(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(

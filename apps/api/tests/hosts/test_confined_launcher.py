@@ -896,3 +896,57 @@ def test_scratch_may_not_exceed_memory_since_it_is_tmpfs() -> None:
     launcher.validate_profile({**BROWSER, "memory_mb": 512, "scratch_mb": 512})
     with pytest.raises(ValueError, match="invalid_profile"):
         launcher.validate_profile({**BROWSER, "memory_mb": 512, "scratch_mb": 513})
+
+
+# Mount propagation (found on the first Debian acceptance run: a root-mode mmdebstrap in
+# the host's namespace left every mount private, and systemd gave no unit its credential).
+
+
+def mountinfo_text(root: str, run: str) -> str:
+    def line(n: str, parent: str, point: str, tags: str, fs: str) -> str:
+        return " ".join([n, parent, "0:1", "/", point, "rw", *tags.split(), "-", fs, fs, "rw"])
+
+    return "\n".join(
+        [
+            line("22", "1", "/", root, "ext4"),
+            line("24", "22", "/dev", "shared:2", "devtmpfs"),
+            line("26", "22", "/run", run, "tmpfs"),
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    ("root", "run", "shared"),
+    [
+        ("shared:1", "shared:5", True),
+        ("shared:1 master:3", "shared:5", True),
+        ("", "shared:5", False),
+        ("shared:1", "", False),
+        ("master:3", "shared:5", False),
+    ],
+)
+def test_shared_propagation_reads_the_shared_tags_of_root_and_run(
+    tmp_path: Path, root: str, run: str, shared: bool
+) -> None:
+    mountinfo = tmp_path / "mountinfo"
+    mountinfo.write_text(mountinfo_text(root, run) + "\n")
+    assert launcher.shared_propagation(mountinfo) is shared
+
+
+def test_a_mount_on_top_decides_and_a_missing_run_is_not_shared(tmp_path: Path) -> None:
+    mountinfo = tmp_path / "mountinfo"
+    lines = mountinfo_text("shared:1", "shared:5")
+    mountinfo.write_text(lines + "\n40 26 0:30 / /run rw - tmpfs tmpfs rw\n")
+    assert launcher.shared_propagation(mountinfo) is False
+    mountinfo.write_text(lines.splitlines()[0] + "\n")
+    assert launcher.shared_propagation(mountinfo) is False
+
+
+def test_a_start_is_refused_before_staging_when_mounts_are_not_shared(
+    configured: list[list[str]], helper: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(launcher, "shared_propagation", lambda: False)
+    job = "d" * 32
+    with pytest.raises(launcher.Rejected, match="^host_mount_propagation$"):
+        launcher.handle(start(job, "session", "agent"))
+    assert configured == [] and not (helper / job).exists()

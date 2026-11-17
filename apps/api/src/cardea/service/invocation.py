@@ -95,6 +95,9 @@ def classify(error: BaseException, timeout: float) -> Failure:
     if isinstance(error, CallAbandoned):
         return Failure("call_abandoned", "abandoned", str(error), retryable=True)
     if isinstance(error, WorkerNotStarted):
+        if error.code != "operation_rejected":
+            # A typed host refusal (such as host_mount_propagation) keeps its code.
+            return Failure(error.code, "worker_refused", str(error))
         return Failure("operation_rejected", "worker_refused", str(error))
     if isinstance(error, ContentRefused):
         return Failure(error.code, "rejected", str(error), redact=error.refused)

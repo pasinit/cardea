@@ -237,6 +237,7 @@ used by the examples.
 | `content_refusal_ignored` | the worker continued after the content gate refused | `cardea.service.confined` |
 | `content_refused` | The content gate refused a call (ADR-037 decision 4). | `cardea.service.operations` |
 | `credential_in_change` | the change or a command's output contains the model credential; nothing is returned | `cardea_coding_ops.session` |
+| `credential_not_loaded` | systemd did not load the profile's credential: check that the credential file exists and that / is shared (findmnt -o PROPAGATION /) | `cardea.service.confined` |
 | `credential_unavailable` | — | `cardea_vcs_ops.ops` |
 | `deadline_exceeded` | Task deadline elapsed. | `cardea.kernel.store` |
 | `dependencies_mismatch` | dependencies is registries, but this worker's profile allows no package registry; dependencies is cache, but this worker's profile allows package registries ({…}); remove them from the profile and the proxy, or set dependencies to registries | `cardea_coding_ops.session` |
@@ -252,6 +253,7 @@ used by the examples.
 | `expectation_exceeded` | — | `cardea.service.agent_run_runtime` |
 | `gate_changed_checkout` | a gate changed the checkout ({…}); gates may check the change, not alter it | `cardea_coding_ops.session` |
 | `guard_refused` | {…} guard failed to evaluate: {…}; {…} guard refused this call | `cardea.service.records` |
+| `host_mount_propagation` | the host's / or /run mount is not shared, so systemd cannot give the worker its credential; run `mount --make-rshared /` or reboot the host | `cardea.service.confined` |
 | `host_outcome_unknown` | Interrupted host intent; no replay | `cardea.service.host_runtime` |
 | `host_refused` | The host reports a duplicate it does not list | `cardea_vcs_ops.ops` |
 | `input_digest_mismatch` | Staged input {…} does not match its digest | `cardea.hosts.operation_worker` |
