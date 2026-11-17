@@ -5504,7 +5504,7 @@
       },
       "ReceiptRequirement": {
         "additionalProperties": false,
-        "description": "Evidence a transition needs: a successful call of `operation` by the caller.\n\n`same_task` accepts a call of the caller's own task (its run). `same_caller` accepts one\nof any task of the same agent principal within `window_seconds` before the transition.\nThe cited call must name this record: its `record_id` argument, or an idempotency\ncontext `<record_id>.<epoch>`.",
+        "description": "Evidence a transition needs: a successful call of `operation` by the caller.\n\n`same_task` accepts a call of the caller's own task (its run). `same_caller` accepts one\nof any task of the same agent principal within `window_seconds` before the transition.\nThe cited call must name this record: its `record_id` argument, or an idempotency\ncontext `<record_id>.<epoch>`.\n\n`result` (ADR-034 amendment, 2026-11-16) is a CEL guard over the cited call's output,\nas `result`: for example `result.passed == true` accepts only a passing `env.try`\nrun. It has the record guards' limits (no comprehension macros), so an operation\nthat wants such a guard reports a summary field. False, an error, or a receipt with\nno output refuses the transition (`receipt_result_refused`).",
         "properties": {
           "in": {
             "default": "same_task",
@@ -5520,6 +5520,17 @@
             "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
             "title": "Operation",
             "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
           },
           "window_seconds": {
             "anyOf": [

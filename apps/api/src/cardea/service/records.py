@@ -62,6 +62,7 @@ from cardea.service.record_states import (
     GUARD_VARIABLES,
     MAX_STATES,
     MAX_TRANSITIONS,
+    RESULT_VARIABLES,
     GuardSource,
     ReceiptRequirement,
     StateMigration,
@@ -242,6 +243,10 @@ class CollectionDocument(Record):
         for key in ("states", "initial", "terminal", "transitions", "migrate"):
             if spec.get(key) in (None, []):
                 spec.pop(key, None)
+        for transition in spec.get("transitions") or ():
+            needs = transition.get("requires_receipt") if isinstance(transition, dict) else None
+            if isinstance(needs, dict) and needs.get("result") is None:
+                needs.pop("result", None)  # added 2026-11-16 (ADR-038 Q3)
         return spec
 
     @property
@@ -830,7 +835,26 @@ def check_receipt(
             raise OperationRejected("The cited call is outside the window", "receipt_invalid")
     if not _names_record(receipt, record_id, epoch):
         raise OperationRejected("The cited call was not made for this record", "receipt_invalid")
+    if need.result is not None:
+        check_result(need.result, receipt)
     return receipt_id
+
+
+def check_result(source: str, receipt: OperationReceipt) -> None:
+    """The cited call's output satisfies the requirement's `result` guard; fail closed."""
+    output = receipt.result.get("output") if isinstance(receipt.result, dict) else None
+    if not isinstance(output, dict):
+        raise OperationRejected("The cited call has no result to check", "receipt_result_refused")
+    value, error = execute_condition(source, {"result": output}, RESULT_VARIABLES)
+    if error is not None:
+        raise OperationRejected(
+            f"The receipt result guard failed to evaluate: {error}", "receipt_result_refused"
+        )
+    if value is not True:
+        raise OperationRejected(
+            "The cited call's result does not satisfy this transition",
+            "receipt_result_refused",
+        )
 
 
 # Claims (ADR-034 decision 2.4)
