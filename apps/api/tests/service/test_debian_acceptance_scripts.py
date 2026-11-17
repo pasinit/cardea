@@ -32,6 +32,7 @@ PROGRAMS = (
     "teams.py",
     "events_tls.py",
     "launcher.py",
+    "env_try.py",
     "registry_egress.py",
     "gate_isolation.py",
 )
@@ -83,6 +84,8 @@ def test_every_script_parses(path: str) -> None:
         ["gate_isolation.py", "--help"],
         ["gate_isolation.py", "run", "--help"],
         ["launcher.py", "--help"],
+        ["env_try.py", "--help"],
+        ["env_try.py", "run", "--help"],
     ],
 )
 def test_help_works_without_a_store(argv: list[str], tmp_path: Path) -> None:
@@ -222,7 +225,7 @@ def test_the_upgrade_check_finds_append_only_triggers(tmp_path: Path, scripts: N
     assert found["record_events_no_delete"]["action"] == "DELETE"
     # A fresh store has no rows to change: the probe reports that rather than passing.
     assert upgrade.probe(database, found["record_events_no_delete"]) == "empty"
-    assert upgrade.revision(database) == "m17_content_redaction"
+    assert upgrade.revision(database) == "m18_env_runs"
     assert upgrade.schema(database) == upgrade.schema(database)
 
 
@@ -329,3 +332,28 @@ def test_the_test_issuer_refuses_unauthenticated_introspection(scripts: None) ->
         assert answered.json()["active"] is True and answered.json()["sub"] == "human-1"
         keys = httpx.get(f"{issuer.url}/jwks").json()["keys"]
         assert keys and "d" not in keys[0]
+
+
+def test_the_env_try_wrapper_restores_the_registry_and_its_catalog_is_valid(
+    scripts: None,
+) -> None:
+    script = SCRIPTS / "env_try.sh"
+    subprocess.run(["sh", "-n", str(script)], check=True)
+    text = script.read_text()
+    assert "trap restore EXIT" in text and "pkill" not in text and "killall" not in text
+    env_try = load("env_try")
+    registry = Registry.model_validate(env_try.catalog("/opt/cardea-code/repos/x.git"))
+    (entry,) = registry.repositories.values()
+    assert entry.environment is not None and not entry.hosted
+    assert set(entry.environment.scenarios) == {
+        "try",
+        "teams",
+        "slow",
+        "forge",
+        "background",
+        "check",
+        "killer",
+    }
+    # The scenario is the commit's own code, which the catalog only names.
+    assert all(s.argv[2] == "scenario.py" for s in entry.environment.scenarios.values())
+    compile(env_try.SCENARIO, "scenario.py", "exec")

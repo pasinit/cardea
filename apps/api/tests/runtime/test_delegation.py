@@ -525,6 +525,8 @@ def test_m3_upgrade_preserves_existing_host_receipt(kernel: Kernel) -> None:
             "SELECT snapshot FROM operations WHERE task_id=?", (task,)
         ).scalar_one()
         for table in (
+            "env_reruns",
+            "env_runs",
             "expect_window_reports",
             "spend_reservations",
             "run_attempt_costs",

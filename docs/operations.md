@@ -18,7 +18,7 @@ Use `systemctl restart cardea-kernel` or reboot the host. DBOS recovers the **cu
 
 ## Upgrade
 
-The verified compatibility path is package `0.1.0-1` / schema `m4_001` to `0.1.0-2` / schema `m5_001`, keeping DBOS `3.0.0` and workflow version `cardea-m1-v1`. Later service schemas, up to the current head `m17_content_redaction`, have portable migration tests only; no package upgrade across them has run on Debian (see the [Debian acceptance checklist](acceptance/debian-adr-034-037.md)). Arbitrary future dependencies, runtime versions and host versions require another fit test.
+The verified compatibility path is package `0.1.0-1` / schema `m4_001` to `0.1.0-2` / schema `m5_001`, keeping DBOS `3.0.0` and workflow version `cardea-m1-v1`. Later service schemas, up to the current head `m18_env_runs`, have portable migration tests only; no package upgrade across them has run on Debian (see the [Debian acceptance checklist](acceptance/debian-adr-034-037.md)). Arbitrary future dependencies, runtime versions and host versions require another fit test.
 
 1. Arrange a maintenance window, stop admissions and reconcile outstanding work. Stop with `systemctl stop cardea-kernel`.
 2. As `cardea-kernel`, run `cardea backup /private/path/pre-upgrade.sqlite3 --config /etc/cardea/config.json`. The destination must not already exist.
@@ -207,6 +207,27 @@ The gate fails closed. A finding fails the call with `content_refused`. A missin
 ## Error codes
 
 [Error codes](error-codes.md) lists every code an API request can answer with, and every failure code a receipt or task can record, with its HTTP status and meaning. It is generated from the source (`make error-codes`), and a test keeps it current.
+
+## Throwaway test environments
+
+The `cardea-env-ops` package installs `env.try` ([ADR-038](decisions/038-throwaway-test-environments.md), the process tier).
+
+- **The call.** `{repo, commit, scenarios, rerun?, record_id?}`:
+  - `repo` is a repository alias;
+  - `commit` is a full 40-hex object ID; branches and short IDs are refused;
+  - `scenarios` are names from the alias's `environment` catalog in the repository registry. Callers never send a command, a path or a URL.
+- **Authority.** The call needs `env.try` and `repo:<alias>` in the caller's live ceiling.
+- **Confined.** It runs in the `try` worker profile, so it needs host execution and the root helper. See [deploy/small-host/README.md](../deploy/small-host/README.md), section 4, step 10. The commit's code is untrusted: the profile reaches only the listed package indexes and holds no credential.
+- **Evidence.** The result carries:
+  - `passed`;
+  - each scenario's `outcome`, exit code, duration and scrubbed log tail of at most 4 KiB;
+  - artifacts, up to 1 MiB, stored as objects.
+- **Gating records.** Require a passing run on a transition with `requires_receipt: {operation: env.try, in: same_task, result: "result.passed == true"}`. Pass the record's ID as `record_id` so the receipt names the record.
+- **Reuse.** The same commit and scenarios within 24 hours return the first result (`cached: true`, `cached_receipt_id`), and nothing runs. The comparison also covers the worker profile, the catalog and the toolchain image.
+  - `rerun: true` runs again, at most 3 times per commit per day (`429 env_rerun_limit`).
+  - An identical call while one runs is refused with `409 env_run_in_progress`; retry later.
+- **Toolchain.** `make try-toolchain` builds and pins the image; `cardea-try-toolchain.timer` refreshes it weekly.
+
 
 ## Retention and deletion
 

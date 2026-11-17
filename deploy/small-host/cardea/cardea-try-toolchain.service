@@ -1,0 +1,12 @@
+# Weekly refresh of the env.try toolchain image (ADR-038 decision 6). Install with its timer;
+# it builds a new image with mmdebstrap and pins its digest in the repository registry, so
+# the next env.try call has a new run key. Needs a checkout of the same commit as /opt/cardea.
+[Unit]
+Description=Build and pin the env.try toolchain image
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I /opt/cardea/packaging/try_toolchain.py build --registry /opt/cardea-code/repositories.json
+ExecStart=/usr/bin/python3 -I /opt/cardea/packaging/try_toolchain.py pin /opt/cardea-code/repositories.json

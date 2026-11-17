@@ -130,6 +130,10 @@ Debian-only: `tests/hosts/test_confined_debian.py`, skipped unless `CARDEA_CONFI
 - Headless Chromium under bubblewrap. It will need `--no-sandbox` (nested user namespaces are disabled), `--disable-dev-shm-usage` and its fonts bound read-only. TasksMax and memory sizing for it are unmeasured.
 - Proxy package versions and their ACL behaviour; native performance.
 
+## Amendment (2026-11-17): scratch counts against memory
+
+A worker's scratch (`/tmp`) is a bubblewrap tmpfs. Its pages are charged to the unit's cgroup, so a profile's `scratch_mb` above its `memory_mb` could never be filled and misstates what the worker may use. The helper refuses such a profile (`invalid_profile`). A disk-backed workspace (ADR-038 decision 2.2) would lift the coupling for the profiles that use it.
+
 ## Amendment (2026-11-16): a dedicated endpoint address
 
 Allowing `127.0.0.1/32` let a worker reach every listener on the host's loopback: the kernel API, a metrics port, anything an operator runs there. In `code.session` the agent's own commands run in the worker, so agent-controlled code could reach them.

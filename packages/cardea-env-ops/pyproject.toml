@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling==1.29.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cardea-env-ops"
+version = "0.1.0"
+description = "Throwaway test environments for Cardea agent teams (ADR-038): env.try, run in a confined worker"
+requires-python = ">=3.12"
+# Installed into the worker's read-only environment, which provides `cardea` and `pydantic`.
+dependencies = []
+
+# ADR-023: a confined operation's worker command resolves this entry point
+# (`cardea.hosts.operation_worker env.try`).
+[project.entry-points."cardea.operations"]
+"env.try" = "cardea_env_ops.try_:run"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cardea_env_ops"]
