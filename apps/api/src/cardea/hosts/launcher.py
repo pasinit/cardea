@@ -21,10 +21,16 @@ from pathlib import Path
 from typing import Any
 
 PROFILE = "debian-local-v1"
-# Debian 13's 6.12 LTS kernel, generic or cloud flavour. Point releases only bring fixes; the
-# enforcement checks below (cgroup controllers, seccomp, bwrap) still run on every request.
-# A host owner may replace it with `kernel_release_pattern` in HOST_CONFIG.
-KERNEL_RELEASE = r"6\.12\.\d{1,4}\+deb13(-cloud)?-amd64"
+# Debian 13's 6.12 LTS kernel, generic or cloud flavour, for each architecture the package is
+# built for. Point releases only bring fixes; the enforcement checks below (cgroup controllers,
+# seccomp, bwrap) still run on every request. amd64 is the verified profile; arm64 is a
+# development profile until a host fit passes on it (packaging/README.md).
+# A host owner may replace the pattern with `kernel_release_pattern` in HOST_CONFIG.
+ARCHITECTURES = {"x86_64": "amd64", "aarch64": "arm64"}
+KERNEL_RELEASES = {
+    machine: rf"6\.12\.\d{{1,4}}\+deb13(-cloud)?-{arch}" for machine, arch in ARCHITECTURES.items()
+}
+KERNEL_RELEASE = KERNEL_RELEASES["x86_64"]
 # Root-owned host-owner configuration: the kernel's uid and optional overrides.
 HOST_CONFIG = Path("/etc/cardea-host.json")
 ROOT = Path("/var/lib/cardea-host")
@@ -444,8 +450,11 @@ def supported_kernel(release: str, pattern: str = KERNEL_RELEASE) -> bool:
 def preflight() -> dict[str, Any]:
     if platform.system() != "Linux" or Path("/proc/1/comm").read_text().strip() != "systemd":
         raise ValueError("unsupported_host")
-    pattern = host_config().get("kernel_release_pattern", KERNEL_RELEASE)
-    if platform.machine() != "x86_64" or not supported_kernel(platform.release(), pattern):
+    machine = platform.machine()
+    if machine not in KERNEL_RELEASES:
+        raise ValueError("unsupported_kernel")
+    pattern = host_config().get("kernel_release_pattern", KERNEL_RELEASES[machine])
+    if not supported_kernel(platform.release(), pattern):
         raise ValueError("unsupported_kernel")
     if 'VERSION_ID="13"' not in Path("/etc/os-release").read_text():
         raise ValueError("unsupported_host")
