@@ -9,6 +9,9 @@ the kernel's real primitives and the real operation packages:
   in-process fake GitHub, with two planted tokens: the developers' bot account, and the
   owner's account for the principal engineers, who approve; the developer that opened a
   pull request merges it (ADR-037 amendment 2026-11-17);
+- `cardea-email-ops`: `email.send` for the product manager, through the AgentMail
+  adapter against the in-process fake AgentMail, with the host configuration in
+  `dev-team/email.json` (placeholder addresses only) and its reply poller;
 - the kernel's content gate, with a stand-in scanner and a denylist;
 - records with a state machine and claims, mailboxes, spend accounts and `expect` with
   `any_of`.
@@ -35,6 +38,12 @@ from pathlib import Path
 from typing import Any, cast
 
 import httpx2
+from cardea_email_ops import Email
+from cardea_email_ops import descriptors as email_descriptors
+from cardea_email_ops import handlers as email_handlers
+from cardea_email_ops.agentmail import AgentMail
+from cardea_email_ops.config import EmailConfig
+from cardea_email_ops.fake import FakeAgentMail
 from cardea_vcs_ops import Vcs
 from cardea_vcs_ops import in_process_descriptors as vcs_descriptors
 from cardea_vcs_ops.config import (
@@ -69,6 +78,7 @@ from cardea.service.models import (
 )
 from cardea.service.operations import OperationDescriptor, Registry
 from cardea.service.records import CollectionDocument, apply_collection
+from cardea.service.replies import ReplyPoller
 
 HERE = Path(__file__).resolve().parent / "dev-team"
 GROUP, NAMESPACE, SUPERVISOR = "dev-team", "dev", "sup-dev"
@@ -79,6 +89,7 @@ PLANTED = "PLANTED-DEMO-SECRET-not-a-real-key"
 AUTHOR = "fake-host-token-author-" + "rehearsal" * 2
 REVIEWER = "fake-host-token-reviewer-" + "rehearsal" * 2
 BOT, OWNER = "team-bot", "owner-account"
+MAIL_KEY = "fake-agentmail-key-" + "rehearsal" * 2  # the fake AgentMail's key; never real
 RUN_COST = 0.02  # what each scripted session reports spending
 Script = Callable[[ClientSession, SessionRequest], Awaitable[Any]]
 
@@ -197,6 +208,7 @@ class World:
     agents: ScriptedAgents
     host: FakeGitHub
     repo_path: Path
+    mail: FakeAgentMail
     tasks: list[str] = field(default_factory=list)
 
 
@@ -328,7 +340,20 @@ def world(directory: Path) -> Iterator[World]:
             / "packages/cardea-coding-ops/src/cardea_coding_ops/descriptors/code.session.json"
         ).read_text()
     )
-    registry = Registry((*vcs_descriptors(), session), vcs.handlers())
+    # The host owner's email configuration, with the key file moved into this directory.
+    raw = document("email.json")
+    key = directory / "agentmail.key"
+    key.write_text(MAIL_KEY)
+    key.chmod(0o600)
+    raw["transport"]["api_key_file"] = str(key)
+    mail_config = EmailConfig.model_validate(raw)
+    assert mail_config.transport.kind == "agentmail"
+    mail = FakeAgentMail(mail_config.transport.inbox_id, MAIL_KEY)
+    email = Email(mail_config, AgentMail(mail_config.transport, mail.transport()))
+    registry = Registry(
+        (*vcs_descriptors(), session, *email_descriptors()),
+        {**vcs.handlers(), **email_handlers(email)},
+    )
     database = Database(directory / "store")
     database.migrate()
     provision(database, provisioning(AgentGroup.model_validate(document("group.json"))), registry)
@@ -344,7 +369,7 @@ def world(directory: Path) -> Iterator[World]:
     )
     kernel.content_gate = gate(directory)
     try:
-        yield World(kernel, agents, host, repo_path)
+        yield World(kernel, agents, host, repo_path, mail)
     finally:
         database.close()
 
@@ -419,6 +444,31 @@ def file_work(title: str, body: str) -> Script:
             client_key=title.lower().replace(" ", "-")[:64],
             data={"title": title, "body": body},
         )
+
+    return script
+
+
+def ask_client(question: str) -> Script:
+    async def script(client: ClientSession, request: SessionRequest) -> Any:
+        # A short preference question with concrete options; the PM decides either way.
+        return await call(
+            client,
+            "email-send",
+            to="client",
+            subject="A quick preference question",
+            body=question,
+            client_key="api-client-preference",
+        )
+
+    return script
+
+
+def read_reply(found: dict[str, Any]) -> Script:
+    async def script(client: ClientSession, request: SessionRequest) -> Any:
+        start = request.prompt.index('<context operation="mailbox.inbox" status="ok"')
+        block = json.loads(request.prompt[start:].split(">", 1)[1].split("</context>", 1)[0])
+        found["messages"] = block["messages"]
+        return {"read": len(block["messages"])}
 
     return script
 
@@ -701,6 +751,23 @@ def rehearse(world: World) -> dict[str, Any]:
     )
     second = leaked["record"]["record_id"]
     print(f"  product's test pass filed {item} and {second}")
+    _, asked = run(
+        world,
+        f"{GROUP}.product.0",
+        ask_client("For the API client: REST first, or a typed SDK first?"),
+    )
+    assert "thread_id" in asked, asked
+    world.mail.reply(asked["thread_id"], "Client <client@example.invalid>", "REST first, please.")
+    world.mail.reply(asked["thread_id"], "someone@example.invalid", "Buy our product!")
+    polled = ReplyPoller(world.kernel).poll(force=True)
+    assert polled.delivered == 1 and polled.dropped == {"sender_not_allowed": 1}, polled
+    replied: dict[str, Any] = {}
+    run(world, f"{GROUP}.product.0", read_reply(replied))
+    (answer,) = replied["messages"]
+    print(
+        "  product emailed the client one preference question; the client's reply reached "
+        f"its mailbox ({answer['parts'][0]['text']!r}), a stranger's was dropped and counted"
+    )
     for work in (item, second):
         _, out = run(world, LEAD, assign(work))
         print(f"  the lead assigned {work} to the developers: {out['record']['state']}")

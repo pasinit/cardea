@@ -272,6 +272,7 @@ def test_in_process_digest_is_unchanged_by_executors() -> None:
         "evidence",
         "max_artifact_bytes",
         "run_window",
+        "replies",
     ):
         del dumped["cardea"][unset]
     assert described.digest == hashlib.sha256(rfc8785.dumps(dumped)).hexdigest()

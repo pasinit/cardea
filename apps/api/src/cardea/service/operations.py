@@ -7,7 +7,7 @@ recorded as descriptive hints only; authority, effect class and limits come from
 import json
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from hashlib import sha256
 from importlib.metadata import entry_points
 from pathlib import Path
@@ -127,6 +127,8 @@ class OperationContext:
     snapshot: Snapshot | None = None
     # The calling agent's group, from the kernel's member table (ADR-034); None outside one.
     group: str | None = None
+    # The calling agent's pool in that group; None outside one (ADR-039 role limits).
+    pool: str | None = None
     # Declared object inputs, staged by the kernel under the caller's ceiling: argument
     # pointer -> the object's verified bytes (ADR-037). Never recorded in the receipt.
     inputs: Mapping[str, bytes] = field(default_factory=dict)
@@ -138,6 +140,11 @@ class OperationContext:
     # operations: call `check_content(operation=..., diff=..., texts=...)` before
     # sending anything off the host; it raises `OperationRejected` on a finding.
     check_content: Callable[..., None] | None = None
+    # Bound for in-process installed operations (ADR-039): how many calls of this operation
+    # the caller's role made within the window, this call included. The role is the
+    # caller's group pool, or the agent itself outside a group. Running, succeeded and
+    # uncertain calls count; failed ones do not. A handler uses it for a rate limit.
+    count_calls: Callable[[timedelta], int] | None = None
 
 
 @dataclass(frozen=True)
@@ -162,6 +169,8 @@ class Reconciliation:
 
 Handler = Callable[[dict[str, JsonValue], OperationContext], Awaitable[dict[str, JsonValue]]]
 Reconciler = Callable[[dict[str, JsonValue], OperationContext], Awaitable[Reconciliation]]
+# A reply poller (ADR-039): one call's thread in, `replies.Polled` out.
+Poller = Callable[[dict[str, JsonValue]], Awaitable[Any]]
 HandlerName = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_.-]{0,127}$")]
 # RFC 6901 pointer into the operation arguments.
 Pointer = Annotated[str, Field(pattern=r"^(/([^~/]|~[01])*)+$", max_length=256)]
@@ -217,6 +226,20 @@ class EvidenceQuery(Record):
     fields: Annotated[tuple[EvidencePath, ...], Field(max_length=8)] = ()
     # Which end of the history: the newest receipts, or the oldest (the first such call).
     order: Literal["newest", "oldest"] = "newest"
+
+
+class ReplyPolling(Record):
+    """Replies to an effect, polled from its destination (ADR-039).
+
+    The kernel calls `poller` (an entry point) for each succeeded call of the operation in
+    the last `window_days`, every `interval_seconds`. The poller returns the replies it
+    accepts and the ones it drops; the kernel delivers accepted replies into the calling
+    agent's mailbox as untrusted data and counts dropped ones without their content.
+    """
+
+    poller: HandlerName
+    interval_seconds: Annotated[int, Field(strict=True, ge=60, le=86400)] = 300
+    window_days: Annotated[int, Field(strict=True, ge=1, le=90)] = 14
 
 
 class RunWindow(Record):
@@ -279,13 +302,19 @@ class Binding(Record):
     # output, stored as task-owned kernel objects in parts of at most 1 MiB (ADR-037). 0
     # means none. The output then carries the objects' references, not the bytes.
     max_artifact_bytes: Annotated[int, Field(strict=True, ge=0, le=MAX_ARTIFACT_BYTES)] = 0
+    # Replies to this effect that come back from its destination (ADR-039).
+    replies: ReplyPolling | None = None
     # Read operations only: reuse a settled run of the same inputs (ADR-038).
     run_window: RunWindow | None = None
 
     @model_validator(mode="after")
     def effect_only(self) -> Self:
-        if self.effect == "read" and (self.idempotency_scope is not None or self.reconciler):
-            raise ValueError("Read operations have no effect scope or reconciler")
+        if self.effect == "read" and (
+            self.idempotency_scope is not None or self.reconciler or self.replies
+        ):
+            raise ValueError("Read operations have no effect scope, reconciler or replies")
+        if self.replies is not None and self.executor is not None:
+            raise ValueError("Only in-process operations declare a reply poller")
         if (self.handler is None) == (self.executor is None):
             raise ValueError("Declare an in-process handler or a confined executor, not both")
         if self.executor is None and self.timeout_seconds > MAX_IN_PROCESS_TIMEOUT_SECONDS:
@@ -357,6 +386,7 @@ class OperationDescriptor(Record):
                 ("resource", self.cardea.resource),
                 ("inputs", self.cardea.inputs),
                 ("evidence", self.cardea.evidence),
+                ("replies", self.cardea.replies),
                 ("run_window", self.cardea.run_window),
             )
             if value is None
@@ -371,7 +401,7 @@ class Registry:
     def __init__(
         self,
         descriptors: Iterable[OperationDescriptor] = (),
-        handlers: Mapping[str, Handler | Reconciler] | None = None,
+        handlers: Mapping[str, Handler | Reconciler | Poller] | None = None,
     ) -> None:
         from cardea.service import mailbox
         from cardea.service.approval_requests import DECIDE_DESCRIPTOR
@@ -409,6 +439,8 @@ class Registry:
             # A confined operation's reconciler runs in its worker (ADR-037), not here.
             if descriptor.cardea.reconciler and descriptor.cardea.executor is None:
                 names.add(descriptor.cardea.reconciler)
+            if descriptor.cardea.replies is not None:
+                names.add(descriptor.cardea.replies.poller)
         return names
 
     @classmethod
@@ -462,6 +494,16 @@ class Registry:
             return cast(Reconciler, self.handlers[entry])
         except KeyError:
             raise Fault("operation_handler_missing", "Reconciler is not loaded", 503) from None
+
+    def poller(self, name: str) -> Poller:
+        """The reply poller of an operation that declares one (ADR-039)."""
+        replies = self.get(name).cardea.replies
+        if replies is None:
+            raise Fault("operation_invalid", "Operation declares no reply poller", 500)
+        try:
+            return cast(Poller, self.handlers[replies.poller])
+        except KeyError:
+            raise Fault("operation_handler_missing", "Reply poller is not loaded", 503) from None
 
     def scope_key(
         self, name: str, namespace: str, context: str, arguments: Mapping[str, JsonValue]

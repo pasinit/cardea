@@ -32,6 +32,7 @@ PROGRAMS = (
     "teams.py",
     "events_tls.py",
     "launcher.py",
+    "email_live.py",
     "env_try.py",
     "registry_egress.py",
     "gate_isolation.py",
@@ -56,6 +57,7 @@ def scripts() -> Iterator[None]:
             "oidc_issuer",
             "launcher",
             "devauth",
+            "email_live",
             "coding_fixture",
             "gate_isolation",
         ):
