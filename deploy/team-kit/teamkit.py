@@ -514,7 +514,8 @@ def client(host: dict[str, Any]) -> Any:
     from cardea.service.login import session_credentials
 
     kernel = host.get("kernel") or {}
-    socket = Path(kernel.get("socket", "/run/cardea/kernel.sock"))
+    # The kernel's private Unix socket, `<data_dir>/kernel.sock`.
+    socket = Path(kernel.get("socket", "/var/lib/cardea/kernel.sock"))
     if kernel.get("session"):
         session = Path(kernel["session"])
         return KernelClient(socket, lambda: session_credentials(session))

@@ -25,16 +25,53 @@ A transition that needs evidence cites a receipt. `submit` needs the run's `vcs.
 - `cardea-vcs-ops`, `cardea-coding-ops`, `cardea-env-ops` and, if the PM mails, `cardea-email-ops` installed, with their descriptors in `operations_dir`.
 - The private host file, from `deploy/team-kit/team.host.example.json`, at for example `/etc/cardea/team.host.json` (root, `0600`). It holds the namespace, the supervisor's identity, the repository alias, the credential names, the email alias, the model and the budgets.
 - The host owner's base provisioning document, without the team, at the host file's `provisioning.base`.
-- A supervisor session for the kit's client: `cardea login --session <file>` with the supervisor's identity, or a SPIFFE identity named in the host file.
+- The supervisor's identity for the kit's client: on one host, the SPIFFE ID below. A `cardea login --session <file>` OIDC session also works where a real OIDC provider exists.
+
+## Identity and the kernel service on one host
+
+The kit needs a running kernel and a supervisor identity the kernel accepts. On one dev host, use the production path, **SPIRE**, with the server and the agent on the same host. This is what the small-host kit already does ([deploy/small-host/README.md](../../deploy/small-host/README.md), sections 2 and 3, without the Telos host). It is the path fit for a week-long unattended run: SVIDs rotate on their own and nothing expires mid-week.
+
+The OIDC test issuer the acceptance scripts use (`experiments/debian-acceptance/oidc_issuer.py`) is **not** fit for this. It is a throwaway stand-in: it has no persistence, its keys live in memory, and it must be restarted by hand. Use it only inside an acceptance run.
+
+Steps, as root, on the dev host:
+
+1. **SPIRE.** Follow small-host sections 2.1–2.4 for one node, `spiffe://cardea.internal/node/cardea`. You need only the Cardea node's join token.
+2. **Register the kernel and the team supervisor.** Both use the `cardea-kernel` account. The kit talks to the kernel's private socket, `/var/lib/cardea/kernel.sock`, which only that account can open, so the kit runs as it (`sudo -u cardea-kernel`). Anything else running as `cardea-kernel` could also ask for the supervisor's SVID. Confined workers run as `cardea-worker`, so they cannot.
+
+   ```sh
+   S=/opt/spire/bin/spire-server; A="-socketPath /run/spire-server/api.sock"
+   $S entry create $A -parentID spiffe://cardea.internal/node/cardea \
+     -spiffeID spiffe://cardea.internal/runtime/kernel -selector unix:user:cardea-kernel
+   $S entry create $A -parentID spiffe://cardea.internal/node/cardea \
+     -spiffeID spiffe://cardea.internal/supervisor/dev-team -selector unix:user:cardea-kernel
+   ```
+
+3. **The kernel.**
+   - Use `deploy/small-host/cardea/config.confined.json` as `/etc/cardea/config.json` (`0600`, `cardea-kernel`). Its `spiffe_socket`, `trust_domain` and `runtime_spiffe_id` match step 2.
+   - Leave out the `network` listener unless something off the host must reach the kernel. The kit uses the Unix socket.
+   - Then follow small-host section 3: steps 1, 2, 5 and 6, and step 7's `init`.
+4. **The base provisioning document.** Write `/etc/cardea/provision.base.json` (`0600`, `cardea-kernel`) with:
+   - the `runtime` service principal (`auth_kind: spiffe`, `issuer: cardea.internal`, `subject: spiffe://cardea.internal/runtime/kernel`);
+   - no other team rows.
+
+   The kit adds the team supervisor, `spiffe://cardea.internal/supervisor/dev-team`, and its grants when you run `provision`.
+5. **Confined workers and the operations.** Follow small-host section 4, including steps 8–10, so the operations below are installed.
+   - The `coding` profile's credential is `/etc/cardea/credentials/claude-code`.
+   - The `vcs` profile's named credentials map each token name to its file. On a host whose files are `/etc/cardea/credentials/github` and `/etc/cardea/credentials/github-reviewer`, use `{"github": ".../github", "github-reviewer": ".../github-reviewer"}`, and set the host file's `credentials.author` to `github` and `credentials.reviewer` to `github-reviewer`.
+   - The email configuration's AgentMail key file is the one the email host file names, for example `/etc/cardea/agentmail.key` (`0600`, `cardea-kernel`).
+6. **Enable the service:** `systemctl enable --now cardea-kernel`, then check `systemctl status cardea-kernel` and the socket's presence.
+
+Every `teamkit.py` command below runs as `cardea-kernel`, with the kernel's Python: `sudo -u cardea-kernel /opt/cardea/apps/api/.venv/bin/python -I deploy/team-kit/teamkit.py ...`. `provision` writes under `/etc/cardea`, so give that account write access to the document it writes (`provisioning.out`), or run `provision` as root with the same Python.
 
 ## Start
 
 ```sh
 H=/etc/cardea/team.host.json
-python3 -I deploy/team-kit/teamkit.py render --host $H --out /etc/cardea/team   # review
-sudo python3 -I deploy/team-kit/teamkit.py provision --host $H                 # grants
-python3 -I deploy/team-kit/teamkit.py apply --host $H                          # group
-python3 -I deploy/team-kit/teamkit.py status --host $H
+KIT="sudo -u cardea-kernel /opt/cardea/apps/api/.venv/bin/python -I /opt/cardea/deploy/team-kit/teamkit.py"
+$KIT render --host $H --out /etc/cardea/team   # review
+$KIT provision --host $H                                # grants
+$KIT apply --host $H                                    # group
+$KIT status --host $H
 ```
 
 `render` also writes two fragments, which the host owner merges by hand:
@@ -72,7 +109,7 @@ To change a ceiling, edit `budgets` in the host file and `apply` again. The doll
 ## Pause (the kill switch)
 
 ```sh
-sudo python3 -I deploy/team-kit/teamkit.py pause --host $H
+$KIT pause --host $H
 ```
 
 1. **Cancel.** It cancels every member's unfinished run.
@@ -85,7 +122,7 @@ If the kit's client cannot reach the kernel, the second step alone is the kill s
 ## Resume
 
 ```sh
-sudo python3 -I deploy/team-kit/teamkit.py resume --host $H
+$KIT resume --host $H
 ```
 
 This provisions the supervisor enabled. Triggers admit again from their next slot or event. Claims taken before the pause lapse on their lease (4 hours) if their holder does not continue.
@@ -93,7 +130,7 @@ This provisions the supervisor enabled. Triggers admit again from their next slo
 ## Stop
 
 ```sh
-sudo python3 -I deploy/team-kit/teamkit.py stop --host $H
+$KIT stop --host $H
 ```
 
 1. **Cancel.** It cancels the runs.

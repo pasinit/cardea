@@ -4,17 +4,17 @@
   "supervisor": {
     "principal_id": "sup-dev",
     "kind": "human",
-    "auth_kind": "oidc",
-    "issuer": "https://issuer.example.invalid",
-    "subject": "owner-subject"
+    "auth_kind": "spiffe",
+    "issuer": "cardea.internal",
+    "subject": "spiffe://cardea.internal/supervisor/dev-team"
   },
   "timezone": "UTC",
-  "repository": "app",
+  "repository": "cardea",
   "harness": "claude",
   "model": "claude-sonnet-4-5",
   "developers": 2,
   "credentials": {
-    "author": "github-author",
+    "author": "github",
     "reviewer": "github-reviewer",
     "expires_on": "2027-01-31",
     "reviewer_login": "reviewer-account"
@@ -64,8 +64,12 @@
   },
   "grant_days": 14,
   "kernel": {
-    "socket": "/run/cardea/kernel.sock",
-    "session": "/var/lib/cardea-team/supervisor.session"
+    "socket": "/var/lib/cardea/kernel.sock",
+    "spiffe": {
+      "socket": "unix:///run/spire/agent.sock",
+      "id": "spiffe://cardea.internal/supervisor/dev-team",
+      "audience": "cardea-kernel"
+    }
   },
   "provisioning": {
     "cardea": [
