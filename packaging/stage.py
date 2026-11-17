@@ -17,7 +17,14 @@ def stage(destination: Path, uv: str) -> None:
         destination / "src",
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
-    shutil.copytree(ROOT / "packaging/debian", destination / "debian")
+    # Bytecode is never a package input: importing debian/verify_stage.py (its test does)
+    # leaves a __pycache__ that `debian/rules clean` then deletes on the builder, so a stage
+    # that recorded it fails its own manifest check.
+    shutil.copytree(
+        ROOT / "packaging/debian",
+        destination / "debian",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
     shutil.copyfile(ROOT / "apps/api/uv.lock", destination / "uv.lock")
     with (destination / "requirements.txt").open("w") as requirements:
         subprocess.run(

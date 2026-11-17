@@ -47,6 +47,15 @@ def test_a_fresh_stage_matches_its_manifest(stage: Path) -> None:
     assert load().problems(stage) == []
 
 
+def test_bytecode_is_never_staged(stage: Path) -> None:
+    # `load()` imports verify_stage.py from packaging/debian, which can leave a __pycache__
+    # there; `debian/rules clean` deletes it on the builder, so a staged copy would fail the
+    # manifest check as "missing".
+    load()
+    manifest = json.loads((stage / "source-manifest.json").read_text())
+    assert not [name for name in manifest if "__pycache__" in name or name.endswith(".pyc")]
+
+
 def test_the_rules_verify_the_stage_before_building() -> None:
     rules = (ROOT / "packaging" / "debian" / "rules").read_text()
     assert "execute_before_dh_auto_configure:\n\tpython3 debian/verify_stage.py ." in rules
