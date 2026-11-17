@@ -328,7 +328,8 @@ if __name__ == "__main__":
                 "bubblewrap",
                 "libseccomp2",
                 "python3",
-                "linux-image-cloud-amd64",
+                # The guest's kernel metapackage: amd64, or the arm64 development profile.
+                "linux-image-cloud-" + ("arm64" if platform.machine() == "aarch64" else "amd64"),
             ]
         ).stdout.splitlines(),
     }

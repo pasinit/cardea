@@ -121,6 +121,26 @@ def test_proxy_enforces_the_same_hosts_as_each_profile() -> None:
         assert listed is not None and listed.group(1).split() == network["hosts"]
 
 
+def test_the_proxy_file_carries_every_profiles_egress_rules() -> None:
+    """Each profile's `hosts` and `registries` reach the proxy as the helper renders them,
+    and after the deny rules, so the host's own and private addresses stay refused."""
+    lines = [
+        line.strip()
+        for line in (KIT / "cardea" / "squid-workers.conf").read_text().splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    last_deny = max(i for i, line in enumerate(lines) if line.startswith("http_access deny non"))
+    profiles = json.loads((KIT / "cardea" / "cardea-host-workers.json").read_text())["profiles"]
+    for name, entry in profiles.items():
+        for rule in launcher.egress_rules(name, entry["network"]):
+            assert rule in lines, (name, rule)
+            if rule.startswith("http_access"):
+                assert lines.index(rule) > last_deny, rule
+    # Registries are allowed only by CONNECT to port 443, never for plain HTTP.
+    registries = [line for line in lines if "_registries" in line and "http_access" in line]
+    assert registries and all(line.endswith("CONNECT tls_port") for line in registries)
+
+
 def test_proxy_config_is_standalone_and_denies_by_default() -> None:
     """The kit replaces Debian's squid.conf, whose localhost allow and wildcard port would
     otherwise relay every destination for loopback clients."""
@@ -145,9 +165,13 @@ def test_proxy_config_is_standalone_and_denies_by_default() -> None:
     allows = [line for line in access if line.startswith("http_access allow")]
     for line in allows:
         paired = re.fullmatch(r"http_access allow ([a-z][a-z0-9-]*)_port \1_hosts", line)
+        # A profile's package registries: TLS only (ADR-037 question 8).
+        registries = re.fullmatch(
+            r"http_access allow ([a-z][a-z0-9-]*)_port \1_registries CONNECT tls_port", line
+        )
         unrestricted = re.fullmatch(r"http_access allow ([a-z][a-z0-9-]*)_port", line)
         # Only a public_web profile's port may allow without a host list.
-        assert paired or (unrestricted and unrestricted.group(1) in public), line
+        assert paired or registries or (unrestricted and unrestricted.group(1) in public), line
     first_allow = access.index(allows[0])
     for rule in (
         "deny to_localhost",
@@ -286,6 +310,8 @@ def test_coding_profile_fits_code_session() -> None:
     assert bundle + 262144 <= profile["output_kb"] * 1024 <= launcher.MAX_OUTPUT
     assert profile["network"]["policy"] == "model_api_only"
     assert profile["network"]["hosts"] == ["api.anthropic.com"] and "credential" in profile
+    # ADR-037 question 8: PyPI by default; other registries are the host owner's opt-in.
+    assert profile["network"]["registries"] == ["pypi.org", "files.pythonhosted.org"]
     coding = json.loads((KIT / "cardea" / "cardea-coding.json").read_text())
     assert worker["env"]["CARDEA_CODING_CONFIG"] == "/opt/cardea-code/coding.json"
     # Repositories live in the host's one registry, which the kernel reads too (ADR-037).
@@ -299,6 +325,9 @@ def test_coding_profile_fits_code_session() -> None:
         assert repository.source.startswith("/opt/cardea-code/")
     assert any(path == "/opt/cardea-code" for path in worker["read_only"])
     fixed_env(coding["gate_env"])
+    assert coding["dependencies"] == "registries"
+    cache = json.loads((KIT / "cardea" / "strict-cache" / "coding.json").read_text())
+    assert cache["harness"] == coding["harness"]
     harness = coding["harness"]
     assert harness["kind"] == "claude-code" and harness["credential_kind"] == "oauth_token"
     assert "--bare" not in claude_code.argv({**harness, "binary": "/opt/x/claude"})
@@ -312,8 +341,6 @@ def test_vcs_profile_and_workers_fit_the_vcs_operations() -> None:
     import cardea_vcs_ops
     from cardea_vcs_ops.config import PersonalAccessTokensConfig, VcsConfig
 
-    from cardea.hosts import launcher as helper
-
     workers = json.loads((KIT / "cardea" / "cardea-host-workers.json").read_text())
     profile = workers["profiles"]["vcs"]
     assert profile["network"]["policy"] == "allow_list" and profile["kernel_callback"] is True
@@ -321,7 +348,7 @@ def test_vcs_profile_and_workers_fit_the_vcs_operations() -> None:
     assert profile["input_kb"] * 1024 >= 10 * 1048576 and "credential" not in profile
     # Two identities (ADR-037 amendment 2026-11-17): the author bot and the reviewer.
     assert sorted(profile["credentials"]) == ["github-author", "github-reviewer"]
-    helper.validate_profile(profile)
+    launcher.validate_profile(profile)
     for descriptor in cardea_vcs_ops.descriptors():
         executor = descriptor.cardea.executor
         assert executor is not None and executor.profile == "vcs"
@@ -346,3 +373,58 @@ def test_vcs_profile_and_workers_fit_the_vcs_operations() -> None:
     # README says how a host owner enables them for a reviewer pool.
     assert config.allow_approve is False and config.credentials.pools == {}
     assert config.merge is None
+
+
+def test_the_strict_cache_option_is_a_matching_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ADR-037 question 8: `dependencies: cache` is strict only with a profile and proxy that
+    allow no registry, so the kit ships all three together, and a mismatch is refused."""
+    from cardea_coding_ops.session import dependency_env, fixed_env
+
+    from cardea.service.operations import OperationRejected
+
+    strict = KIT / "cardea" / "strict-cache"
+    coding = json.loads((strict / "coding.json").read_text())
+    network = json.loads((strict / "coding-network.json").read_text())
+    workers = json.loads((KIT / "cardea" / "cardea-host-workers.json").read_text())
+    default = workers["profiles"]["coding"]
+    # The same profile, minus the registries.
+    assert network == {k: v for k, v in default["network"].items() if k != "registries"}
+    launcher.validate_profile({**default, "network": network})
+    # The squid lines are exactly what the helper renders for that network.
+    lines = [
+        line.strip()
+        for line in (strict / "squid-coding.conf").read_text().splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+    assert lines == launcher.egress_rules("coding", network)
+    assert not [line for line in lines if "registries" in line]
+    # The cache configuration: no network for the gates, the read-only cache instead.
+    assert coding["dependencies"] == "cache"
+    offline = fixed_env(coding["gate_env"])
+    assert offline["UV_OFFLINE"] == "1" and offline["PIP_NO_INDEX"] == "1"
+    assert all(v.startswith("/opt/cardea-code/cache") for k, v in offline.items() if "/" in v)
+
+    def told(registries: list[str]) -> dict[str, str]:
+        return {"CARDEA_REGISTRIES": ",".join(registries)}
+
+    # Matching pairs pass; each half with the other variant is refused, as the worker sees
+    # what the helper sets for the profile.
+    default_coding = json.loads((KIT / "cardea" / "cardea-coding.json").read_text())
+    proxy = {"HTTPS_PROXY": "http://127.0.10.5:3128"}
+    cases = [
+        (coding, told([]), None),
+        (default_coding, told(default["network"]["registries"]) | proxy, None),
+        (coding, told(default["network"]["registries"]), "dependencies_mismatch"),
+        (default_coding, told([]) | proxy, "dependencies_mismatch"),
+    ]
+    for config, env, refused in cases:
+        for name in ("CARDEA_REGISTRIES", "HTTPS_PROXY"):
+            monkeypatch.delenv(name, raising=False)
+        for name, value in env.items():
+            monkeypatch.setenv(name, value)
+        if refused is None:
+            dependency_env(config)
+        else:
+            with pytest.raises(OperationRejected) as error:
+                dependency_env(config)
+            assert error.value.code == refused

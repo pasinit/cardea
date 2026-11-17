@@ -15,14 +15,33 @@ from pathlib import Path
 from typing import Any
 
 HERE = Path(__file__).resolve().parent
-IMAGE_URL = (
-    "https://cloud.debian.org/images/cloud/trixie/20260914-2601/"
-    "debian-13-genericcloud-amd64-20260914-2601.qcow2"
-)
-IMAGE_SHA512 = (
-    "95e110dfcdbd0ed8a82a75ed9579802f9950cabf51a810dcc6388e81bc778188713878b9f2"
-    "8d583a0ea602fbf48b35996ae9ad37f584166d8fbd6489df248f53"
-)
+# Debian cloud build 20260914-2601 for each guest architecture, pinned from its SHA512SUMS.
+# amd64 is the guest the recorded M2-M5 evidence used. arm64 is a development profile: no host
+# fit has passed on it yet (packaging/README.md).
+IMAGES = {
+    "amd64": (
+        "https://cloud.debian.org/images/cloud/trixie/20260914-2601/"
+        "debian-13-genericcloud-amd64-20260914-2601.qcow2",
+        "95e110dfcdbd0ed8a82a75ed9579802f9950cabf51a810dcc6388e81bc778188713878b9f2"
+        "8d583a0ea602fbf48b35996ae9ad37f584166d8fbd6489df248f53",
+    ),
+    "arm64": (
+        "https://cloud.debian.org/images/cloud/trixie/20260914-2601/"
+        "debian-13-genericcloud-arm64-20260914-2601.qcow2",
+        "9eeabc75e74a682fcaff785f6c1f6896b486159397201f51f58298a8f95990f6debb8058b6"
+        "969ca95cf6823f6e8058dd6f8589ba940a194b2780cd7f95771d69",
+    ),
+}
+IMAGE_URL, IMAGE_SHA512 = IMAGES["amd64"]
+# The emulator image and the QEMU machine for each guest architecture.
+EMULATORS = {
+    "amd64": ("Dockerfile.vm", "cardea-m2-vm:fit", ["-machine", "q35,accel=tcg"]),
+    "arm64": (
+        "Dockerfile.vm-arm64",
+        "cardea-m2-vm-arm64:fit",
+        ["-machine", "virt,accel=tcg", "-bios", "/usr/share/qemu-efi-aarch64/QEMU_EFI.fd"],
+    ),
+}
 
 
 def command(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
@@ -58,7 +77,9 @@ def ssh(state: Path, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[s
     )
 
 
-def start(state: Path, image: Path | None = None) -> None:
+def start(state: Path, image: Path | None = None, guest: str = "amd64") -> None:
+    image_url, image_sha512 = IMAGES[guest]
+    dockerfile, tag, machine = EMULATORS[guest]
     state.mkdir(mode=0o700, parents=True, exist_ok=False)
     try:
         base = state / "base.qcow2"
@@ -66,10 +87,10 @@ def start(state: Path, image: Path | None = None) -> None:
         if image is not None:
             shutil.copyfile(image, base)
         else:
-            with urllib.request.urlopen(IMAGE_URL, timeout=60) as source, base.open("wb") as target:
+            with urllib.request.urlopen(image_url, timeout=60) as source, base.open("wb") as target:
                 shutil.copyfileobj(source, target)
         with base.open("rb") as source:
-            assert hashlib.file_digest(source, "sha512").hexdigest() == IMAGE_SHA512
+            assert hashlib.file_digest(source, "sha512").hexdigest() == image_sha512
         base.chmod(0o444)
         command(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(state / "key")])
         key = (state / "key.pub").read_text().strip()
@@ -86,9 +107,9 @@ def start(state: Path, image: Path | None = None) -> None:
             "--platform",
             f"linux/{arch}",
             "-f",
-            str(HERE / "Dockerfile.vm"),
+            str(HERE / dockerfile),
             "-t",
-            "cardea-m2-vm:fit",
+            tag,
             str(HERE),
             timeout=600,
         )
@@ -99,7 +120,7 @@ def start(state: Path, image: Path | None = None) -> None:
             "sh",
             "-v",
             f"{state}:/vm",
-            "cardea-m2-vm:fit",
+            tag,
             "-c",
             "genisoimage -quiet -output /vm/seed.iso -volid cidata -joliet -rock "
             "/vm/user-data /vm/meta-data && qemu-img create -f qcow2 -F qcow2 "
@@ -118,9 +139,8 @@ def start(state: Path, image: Path | None = None) -> None:
             "127.0.0.1::2222",
             "-v",
             f"{state}:/vm",
-            "cardea-m2-vm:fit",
-            "-machine",
-            "q35,accel=tcg",
+            tag,
+            *machine,
             "-cpu",
             "max",
             "-smp",
@@ -136,7 +156,10 @@ def start(state: Path, image: Path | None = None) -> None:
             "-drive",
             "file=/vm/guest.qcow2,if=virtio,format=qcow2",
             "-drive",
-            "file=/vm/seed.iso,media=cdrom,readonly=on",
+            # The arm64 virt machine has no IDE bus; cloud-init finds the seed by its label.
+            "file=/vm/seed.iso,media=cdrom,readonly=on"
+            if guest == "amd64"
+            else "file=/vm/seed.iso,if=virtio,format=raw,readonly=on",
             "-nic",
             "user,model=virtio-net-pci,hostfwd=tcp::2222-:22",
             capture_output=True,
@@ -146,8 +169,9 @@ def start(state: Path, image: Path | None = None) -> None:
         info = {
             "container": container,
             "port": int(binding.rsplit(":", 1)[1]),
-            "image_sha512": IMAGE_SHA512,
-            "image_url": IMAGE_URL,
+            "guest": guest,
+            "image_sha512": image_sha512,
+            "image_url": image_url,
         }
         (state / "vm.json").write_text(json.dumps(info, indent=2) + "\n")
         deadline = time.monotonic() + 180
@@ -214,9 +238,15 @@ if __name__ == "__main__":
     parser.add_argument(
         "--image", type=Path, help="Optional cached cloud image; digest still checked"
     )
+    parser.add_argument(
+        "--guest",
+        choices=sorted(IMAGES),
+        default="amd64",
+        help="guest architecture for start (arm64 is a development profile)",
+    )
     args = parser.parse_args()
     os.umask(0o077)
-    start(args.state.resolve(), args.image) if args.action == "start" else {
+    start(args.state.resolve(), args.image, args.guest) if args.action == "start" else {
         "fit": fit,
         "stop": stop,
     }[args.action](args.state.resolve())

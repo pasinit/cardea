@@ -21,10 +21,18 @@ from pathlib import Path
 from typing import Any
 
 PROFILE = "debian-local-v1"
-# Debian 13's 6.12 LTS kernel, generic or cloud flavour. Point releases only bring fixes; the
-# enforcement checks below (cgroup controllers, seccomp, bwrap) still run on every request.
-# A host owner may replace it with `kernel_release_pattern` in HOST_CONFIG.
-KERNEL_RELEASE = r"6\.12\.\d{1,4}\+deb13(-cloud)?-amd64"
+# Debian 13's 6.12 LTS kernel, generic or cloud flavour, for each architecture the package is
+# built for, with or without a point-release suffix (`+deb13` or `+deb13.N`). Point
+# releases only bring fixes; the enforcement checks below (cgroup controllers, seccomp,
+# bwrap) still run on every request. amd64 is the verified profile; arm64 is a development
+# profile until a host fit passes on it (packaging/README.md).
+# A host owner may replace the pattern with `kernel_release_pattern` in HOST_CONFIG.
+ARCHITECTURES = {"x86_64": "amd64", "aarch64": "arm64"}
+KERNEL_RELEASES = {
+    machine: rf"6\.12\.\d{{1,4}}\+deb13(\.\d{{1,3}})?(-cloud)?-{arch}"
+    for machine, arch in ARCHITECTURES.items()
+}
+KERNEL_RELEASE = KERNEL_RELEASES["x86_64"]
 # Root-owned host-owner configuration: the kernel's uid and optional overrides.
 HOST_CONFIG = Path("/etc/cardea-host.json")
 ROOT = Path("/var/lib/cardea-host")
@@ -120,6 +128,15 @@ DEFAULT_QUEUE_TIMEOUT = 600
 # addresses (private, loopback, link-local, CGNAT, multicast, reserved); there is no host list.
 NETWORK = {"none", "model_api_only", "allow_list", "public_web"}
 HOSTNAME = r"(\*\.)?[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+"
+# Package registries a profile may reach for dependencies (ADR-037 question 8): exact
+# hostnames only, reached over TLS on port 443. No wildcard, no port, no IP address (the
+# last label is alphabetic) and no single-label name such as `localhost`.
+REGISTRY_HOST = (
+    r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*"
+    r"\.[a-z]([a-z0-9-]{0,61}[a-z0-9])?"
+)
+MAX_REGISTRIES = 16
+NETWORK_KEYS = {"policy", "proxy", "hosts"}
 # Read-only binds may expose installed software and public trust roots, never service state.
 READ_ONLY_PREFIXES = ("/usr/", "/opt/", "/etc/ssl/", "/etc/fonts/")
 ENV_NAME = r"[A-Z][A-Z0-9_]{0,63}"
@@ -130,8 +147,12 @@ RESERVED_ENV = {
     "CARDEA_CREDENTIAL",
     "CARDEA_CREDENTIALS",
     "CARDEA_INPUTS",
+    "CARDEA_REGISTRIES",
     "NO_PROXY",
 }
+# Tells a worker which package registries its profile's proxy allows (ADR-037 question 8),
+# so `code.session` can refuse a configuration that claims fewer than the network allows.
+REGISTRIES_ENV = "CARDEA_REGISTRIES"
 CREDENTIAL = "/run/cardea/credential"
 # A profile's named credentials (ADR-037 amendment 2026-11-17): one file per name here.
 CREDENTIALS = "/run/cardea/credentials"
@@ -226,8 +247,10 @@ def validate_profile(entry: object) -> dict[str, Any]:
         _proxy(network["proxy"])
         return entry
     hosts = network.get("hosts")
+    registries = network.get("registries", [])
     if (
-        set(network) != {"policy", "proxy", "hosts"}
+        not NETWORK_KEYS <= set(network) <= {*NETWORK_KEYS, "registries"}
+        or not valid_registries(registries)
         or not isinstance(hosts, list)
         or not 1 <= len(hosts) <= 64
         or not all(isinstance(h, str) and re.fullmatch(HOSTNAME, h) for h in hosts)
@@ -235,6 +258,45 @@ def validate_profile(entry: object) -> dict[str, Any]:
         raise ValueError("invalid_network")
     _proxy(network["proxy"])
     return entry
+
+
+def valid_registries(registries: object) -> bool:
+    """A profile's optional registry allow-list: 1 to 16 distinct exact hostnames."""
+    if registries == []:
+        return True
+    return (
+        isinstance(registries, list)
+        and 1 <= len(registries) <= MAX_REGISTRIES
+        and len(set(registries)) == len(registries)
+        and all(
+            isinstance(h, str) and len(h) <= 253 and re.fullmatch(REGISTRY_HOST, h)
+            for h in registries
+        )
+    )
+
+
+def egress_rules(name: str, network: dict[str, Any]) -> list[str]:
+    """The egress proxy's rules for one networked profile, as squid.conf lines.
+
+    The unit reaches only its proxy (`IPAddressAllow`); these lines are what the proxy on
+    that port then allows. `hosts` are the profile's service hosts. `registries` may be
+    reached only by CONNECT to port 443, so a registry is TLS only. Every other destination,
+    the host's own and private addresses included, falls to the file's deny rules.
+    """
+    if network["policy"] == "none":
+        return []
+    if network["policy"] == "public_web":
+        return [f"http_access allow {name}_port"]
+    lines = [
+        f"acl {name}_hosts dstdomain {' '.join(network['hosts'])}",
+        f"http_access allow {name}_port {name}_hosts",
+    ]
+    if network.get("registries"):
+        lines += [
+            f"acl {name}_registries dstdomain {' '.join(network['registries'])}",
+            f"http_access allow {name}_port {name}_registries CONNECT tls_port",
+        ]
+    return lines
 
 
 def validate_worker(entry: object, profiles: dict[str, Any]) -> dict[str, Any]:
@@ -371,6 +433,9 @@ def confined_command(
         for key in ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"):
             environment[key] = url
         environment["NO_PROXY"] = environment["no_proxy"] = f"{ENDPOINT_ADDRESS},localhost"
+        # Always set for a networked unit, empty when the proxy allows no registry: the
+        # worker can tell "no registries" from "not told".
+        environment[REGISTRIES_ENV] = ",".join(network.get("registries", []))
     binds: list[str] = []
     loads: list[str] = []
     if profile.get("credential"):
@@ -483,8 +548,11 @@ def supported_kernel(release: str, pattern: str = KERNEL_RELEASE) -> bool:
 def preflight() -> dict[str, Any]:
     if platform.system() != "Linux" or Path("/proc/1/comm").read_text().strip() != "systemd":
         raise ValueError("unsupported_host")
-    pattern = host_config().get("kernel_release_pattern", KERNEL_RELEASE)
-    if platform.machine() != "x86_64" or not supported_kernel(platform.release(), pattern):
+    machine = platform.machine()
+    if machine not in KERNEL_RELEASES:
+        raise ValueError("unsupported_kernel")
+    pattern = host_config().get("kernel_release_pattern", KERNEL_RELEASES[machine])
+    if not supported_kernel(platform.release(), pattern):
         raise ValueError("unsupported_kernel")
     if 'VERSION_ID="13"' not in Path("/etc/os-release").read_text():
         raise ValueError("unsupported_host")
