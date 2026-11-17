@@ -53,6 +53,7 @@ OPERATIONS = (
     "vcs.read_change",
     "vcs.check_repository",
     "vcs.merge",
+    "vcs.read_branch",
 )
 RUN_GRANTS = (*RIGHTS, "models.invoke", *OPERATIONS, "repo:cardea")
 STEPS = count()
@@ -876,3 +877,22 @@ def test_the_entry_points_refuse_a_disagreeing_host_definitely(
     with pytest.warns(DeprecationWarning), pytest.raises(OperationRejected) as refused:
         cardea_vcs_ops._vcs()
     assert refused.value.code == "repositories_disagree"
+
+
+def test_read_branch_returns_the_head_and_refuses_unknown_branches(
+    kernel: Kernel, session: FakeSession, tmp_path: Path
+) -> None:
+    """The PM reads main's head before `env.try` (ADR-038), which needs a full commit."""
+    change = make_change(kernel, tmp_path)
+    branch = "agent/eng/head"
+    _, state, results = run_calls(
+        kernel,
+        session,
+        [
+            ("vcs-push_branch", {"repository": "cardea", "branch": branch, **change}),
+            ("vcs-read_branch", {"repository": "cardea", "branch": branch}),
+            ("vcs-read_branch", {"repository": "cardea", "branch": "no-such-branch"}),
+        ],
+    )
+    assert results[1].structured_content["head"] == change["head"], text(results[1])
+    assert results[2].is_error and "branch_unknown" in text(results[2])

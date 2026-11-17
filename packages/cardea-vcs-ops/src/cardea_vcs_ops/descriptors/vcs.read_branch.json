@@ -1,0 +1,59 @@
+{
+  "tool": {
+    "name": "vcs.read_branch",
+    "title": "Read a branch's head",
+    "description": "The head commit of one branch of an allowed repository, for example main before trying it with env.try. Needs repo:<alias>.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repository": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "branch": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._/-]{1,200}$"
+        }
+      },
+      "required": [
+        "repository",
+        "branch"
+      ]
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "repository": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "head": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        }
+      },
+      "required": [
+        "repository",
+        "branch",
+        "head"
+      ]
+    }
+  },
+  "cardea": {
+    "version": 1,
+    "effect": "read",
+    "executor": {
+      "kind": "confined",
+      "profile": "vcs",
+      "worker": "vcs-read-branch"
+    },
+    "timeout_seconds": 30,
+    "resource": {
+      "grant": "repo",
+      "argument": "/repository"
+    }
+  }
+}
