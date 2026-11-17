@@ -424,12 +424,14 @@ class Vcs:
                         "merge_head_moved",
                     )
                 at_head = [a for a in approvals if _field(a, "output/commit_id") == head]
+                if not approvals:
+                    raise OperationRejected(
+                        "No approval from an allowed reviewer", "merge_not_approved"
+                    )
                 if not at_head:
                     raise OperationRejected(
-                        "An allowed reviewer approved an earlier head; a new approval is needed"
-                        if approvals
-                        else "No approval from an allowed reviewer",
-                        "merge_approval_stale" if approvals else "merge_not_approved",
+                        "An allowed reviewer approved an earlier head; a new approval is needed",
+                        "merge_approval_stale",
                     )
                 # 3. The host shows the reviewer's approval of this head.
                 reviews = await host.reviews(number)
@@ -443,9 +445,9 @@ class Vcs:
                 _check_runs(runs)
                 # 5. The host can merge it.
                 if pull.get("mergeable") is not True:
+                    # `null` while the host is still computing it: try again later.
                     raise OperationRejected(
-                        "The host does not report the pull request as mergeable"
-                        + (" yet" if pull.get("mergeable") is None else ""),
+                        "The host does not report the pull request as mergeable",
                         "merge_not_mergeable",
                     )
                 merged = await host.merge(number, head)

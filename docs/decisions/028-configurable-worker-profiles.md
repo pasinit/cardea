@@ -140,6 +140,16 @@ Allowing `127.0.0.1/32` let a worker reach every listener on the host's loopback
 - **Tests.** The launcher tests check that the unit properties name `127.0.11.1/32` and contain no `127.0.0.1`, and that an allow-list profile without the callback reaches no endpoint address. `test_loopback.py` checks the refusal on any other local address; on Linux it checks that both endpoints bind only the dedicated address and that nothing listens for them on `127.0.0.1`.
 - **Debian.** `experiments/debian-acceptance/long_call.sh`, phase 6: from inside a `coding` worker, a connection to `127.0.0.1` at the kernel's port fails while a real tool endpoint on `127.0.11.1` answers. It has not run.
 
+## Amendment (2026-11-17): several named credentials
+
+Decided by the owner for [ADR-037](037-coding-and-vcs-operations.md#amendment-2026-11-17-the-developer-merges): the `vcs` worker acts on the repository host as one account for most callers and as a second account for the reviewer pool.
+
+- **Profile field.** `credentials: {<name>: <path>}`, with 1 to 8 entries, names matching `[a-z][a-z0-9-]{0,31}` and paths under `/etc/cardea/credentials/`, each used once. It replaces `credential` on a profile; a profile may not declare both.
+- **Unit.** One `LoadCredential=<name>:<path>` per entry. systemd reads each root-only file and exposes a copy only to the unit. The unit's credential directory is bound read-only at `/run/cardea/credentials` (`$CARDEA_CREDENTIALS`), one file per name.
+- **The kernel learns names only.** The helper's `profiles` answer lists the names, never the paths.
+- **Who chooses.** The worker's code, from the kernel-resolved caller in the job document (its member id and group), never from the call's arguments. All the profile's credentials are in the same sandbox, so the separation between them rests on the operation's code and the kernel's caller identity, not on confinement. A profile whose code runs untrusted commands (for example `coding`) must not hold more than one identity.
+- **Tests.** `test_confined_launcher.py`: one `LoadCredential` per name, the directory bind and variable, names without paths in the `profiles` answer, and five invalid declarations refused.
+
 ## Limits and open items
 
 - **Loopback exposure.** Narrowed by the [2026-11-16 amendment](#amendment-2026-11-16-a-dedicated-endpoint-address): workers reach only `127.0.11.1`, where only Cardea's per-call endpoints listen, and no longer `127.0.0.1`. Every port on that address is still reachable, so a worker can connect to another attempt's endpoint, which refuses it without that attempt's random bearer token. Narrowing to one port needs nftables `socket cgroupv2` rules (revisit).

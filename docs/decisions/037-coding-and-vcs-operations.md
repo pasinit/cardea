@@ -1,7 +1,7 @@
 # ADR-037: Coding and Version-Control Operations for an Agent Team
 
 - **Date / owner / milestones:** 2026-11-16; runtime, host-execution and API maintainers. Builds on [ADR-023](023-installed-operation-registry.md) (installed operations), [ADR-026](026-effect-idempotency-and-reconciliation.md) (effect scopes and reconciliation), [ADR-028](028-configurable-worker-profiles.md) (confined workers), [ADR-033](033-pluggable-agent-harnesses.md) (harnesses), [ADR-034](034-agent-groups-and-shared-records.md) (agent groups; its software-team example names `vcs.open_change`) and [ADR-036](036-approval-waits.md) (approval waits).
-- **Status:** proposed, except the parts below, which are selected and implemented; nothing is verified on Debian or against a real repository host. The owner decided questions 2–8 and 10 on 2026-11-16 (see [Decided by the owner](#decided-by-the-owner-2026-11-16)). Questions 1 and 9 are the lead's decisions (see [Decisions](#decisions-lead-2026-11-16)); question 10's answer amends question 1.
+- **Status:** proposed, except the parts below, which are selected and implemented; nothing is verified on Debian or against a real repository host. The owner decided questions 2–8 and 10 on 2026-11-16 (see [Decided by the owner](#decided-by-the-owner-2026-11-16)). Questions 1 and 9 are the lead's decisions (see [Decisions](#decisions-lead-2026-11-16)); question 10's answer amends question 1. On 2026-11-17 the owner decided that the developer who opened a pull request merges it once the principal engineer approved it. This supersedes "there is no merge operation" and "the owner merges"; see the [amendment](#amendment-2026-11-17-the-developer-merges).
   - **Implemented:**
     - the content gate (decision 4, plan slice 6), with redaction of refused content and the confined-worker callback (see [Content gate: implementation](#content-gate-implementation-2026-11-16) and [redaction and confined workers](#content-gate-redaction-and-confined-workers-2026-11-16));
     - plan slice 2, the [ADR-023 amendment](023-installed-operation-registry.md#amendment-2026-11-16-long-confined-operations);
@@ -30,7 +30,7 @@ An agent team (ADR-034) that works on software needs four things the kernel does
 2. **Repository-host effects with receipts.** Operations to push a branch, open a pull request, comment, and submit a review.
    - A pushed branch name is restricted to a configured prefix (`agent/<group>/`, question 3).
    - Each call is idempotent (an ADR-026 scope) and, after an interruption, is reconciled against the repository host's state, never blindly retried.
-   - There is no merge operation. Merging stays a human or host decision.
+   - There is no merge operation. Merging stays a human or host decision. *Superseded on 2026-11-17 by the owner: the developer that opened a pull request merges it with `vcs.merge`, once an allowed reviewer approved its head and every check passed (see the [amendment](#amendment-2026-11-17-the-developer-merges)).*
 3. **Credentials the agent never sees.** Only the worker of these operations holds a repository-host credential, and only for the call. For now it is a fine-grained personal access token stored as a host secret; the documented upgrade is a short-lived, repository-scoped token minted per call by a GitHub App (question 7). It never appears in arguments, outputs, receipts, prompts, logs or the coding session's environment. Repository-side branch rules are a second, independent guard.
 4. **A privacy gate.** Content leaving the host is checked first: a configurable content check (secret patterns plus a denylist the host owner maintains) runs in the worker on the change before any push, and on pull-request titles and bodies, comments, review bodies and commit messages before they are sent. A match refuses the call; nothing is sent.
 
@@ -105,7 +105,7 @@ Compose existing pieces into one operations package, `vcs.*` and `code.*`, insta
 | `vcs.comment {repository, number, body, client_key}` | effect | `/repository`, `/number`, `/client_key` | a comment on the pull request carries the marker `cardea:<effect_key>` → applied |
 | `vcs.review {repository, number, event, body, client_key}` | effect | `/repository`, `/number`, `/client_key` | a review by the app carries the marker → applied |
 
-- There is no `vcs.merge`; the owner merges. `vcs.review` accepts `COMMENT` and `REQUEST_CHANGES`. `APPROVE` is refused unless the host owner allows it, for every caller or for named pools (question 2, decided by the owner).
+- There is no `vcs.merge`; the owner merges. *Superseded on 2026-11-17: see the [amendment](#amendment-2026-11-17-the-developer-merges).* `vcs.review` accepts `COMMENT` and `REQUEST_CHANGES`. `APPROVE` is refused unless the host owner allows it, for every caller or for named pools (question 2, decided by the owner).
 - `code.session` returns, within the 64 KiB receipt: the base and head commits, file and line counts, a bounded diff excerpt, each gate's target, exit status, duration and output tail, and the agent's bounded summary, turns and cost. The whole change is a `git bundle` published as a task-owned kernel object (the ADR-014/015 publication path), which `vcs.push_branch` cites by exact version. Nothing else carries state between calls.
 - ADR-034 records cite these receipts: a `submit` transition can require a `vcs.open_change` receipt for the record (`requires_receipt`), as the ADR's worked example already does.
 
@@ -238,7 +238,7 @@ The owner may veto either.
 
 Each entry is the owner's answer to the question of that number in [Questions for the owner](#questions-for-the-owner), and what it changes.
 
-- **Question 2, `APPROVE` reviews: allowed, refused by default.** The generic default stays: `allow_approve` is off unless a host owner enables it. A host may allow it for every caller (`true`) or only for named pools (`["<group>.<pool>"]`). The dev-team rehearsal allows it for its principal engineers only. Agents still have no merge operation: the owner merges.
+- **Question 2, `APPROVE` reviews: allowed, refused by default.** The generic default stays: `allow_approve` is off unless a host owner enables it. A host may allow it for every caller (`true`) or only for named pools (`["<group>.<pool>"]`). The dev-team rehearsal allows it for its principal engineers only. Agents still have no merge operation: the owner merges. *Superseded on 2026-11-17 by the [amendment](#amendment-2026-11-17-the-developer-merges): the opener merges.*
 - **Question 3, branches: `agent/<group>/`,** as implemented.
 - **Question 4, repository authority: `repo:<alias>`,** as implemented, for `code.session` and `vcs.*`.
 - **Question 5, content gate: the added lines plus the pull-request text, and mail the supervisor on refusal,** as recommended and implemented. Every text that leaves the host is scanned: titles, bodies, comments, review bodies and commit messages. The mail was already wired (`notify_supervisor`, default on).
@@ -248,6 +248,68 @@ Each entry is the owner's answer to the question of that number in [Questions fo
 - **Question 10, the first harness: the subscription token without `--bare`,** with the explicit isolation flags, as implemented. The fit test records whether repository hooks or MCP servers run and whether the model follows the repository's `CLAUDE.md`.
 
 The owner did not change the lead's decisions on questions 1 (as amended by question 10) and 9.
+
+## Amendment (2026-11-17): the developer merges
+
+**Decided by the owner (2026-11-17).** The principal engineer approves pull requests on the repository host, and the pull request's own developer then merges it. This supersedes "there is no merge operation in the MVP" (requirement 2), "there is no `vcs.merge`; the owner merges" (decision 1) and the same words in question 2's answer.
+
+**Why two identities.** Every pull request an agent opens is authored by one bot account, and the repository host refuses an author's approval of its own pull request. So the principal approves as a second identity: the owner's account, through a fine-grained token limited to the one repository with pull-request write only. The developer merges as the bot account.
+
+**Reasoning.**
+- **Merging was the team's bottleneck.** The owner had to merge every approved change.
+- **Four eyes, enforced twice.** The host's ruleset (one approval, approval of the last push, no force push, no deletion) still decides on the host. Cardea additionally requires its own record of who opened the pull request and who approved which head.
+- **Attributable.** The member that wrote the change is the one that merges it, and the kernel's receipts say so.
+
+**What is built** (generic, configured by the host owner):
+1. **Per-caller credentials.** A worker profile may load several named credentials ([ADR-028 amendment](028-configurable-worker-profiles.md#amendment-2026-11-17-several-named-credentials)). The vcs provider `personal_access_tokens` holds one `expires_on` per token, a `default` token and `pools: {"<group>.<pool>": <name>}`. The kernel-resolved member id selects the token, matched as `allow_approve` is. No argument takes part, and a caller outside every listed pool gets the default.
+2. **`vcs.merge`,** an effect with a receipt, the ADR-026 scope `/repository`, `/number` and the reconciler `vcs.find_merge`. It needs the `vcs.merge` grant and `repo:<alias>`. Each of these refusals is typed and sends nothing:
+   - `merge_not_configured`: the host has no `merge` section.
+   - `merge_not_opened`, `merge_not_opener`: the caller must be the member recorded in the first `vcs.open_change` receipt for that pull request. This is Cardea's receipt, not the host's author field, which is the shared bot account.
+   - `merge_not_approved`, `merge_approval_stale`: the kernel must hold a `vcs.review` APPROVE receipt from an allowed pool whose recorded `commit_id` is the pull request's current head.
+   - `merge_host_not_approved`: the host must show the configured `reviewer_login`'s latest deciding review as an approval whose `commit_id` is the head.
+   - `merge_checks_missing`, `merge_checks_pending`, `merge_checks_failed`: there must be at least one check run on the head, none pending, and every one concluded `success`.
+   - `merge_not_mergeable`, `merge_not_open`, `merge_already_merged`, `merge_head_moved`: the host must report the pull request open, ready and mergeable, with the head the caller expects.
+
+   Then the operation squash-merges with the head SHA pinned (`PUT .../merge` with `sha`). The host answers 409 if the head moved, which becomes `merge_head_moved`. An interrupted merge is `outcome_unknown`, and `vcs.find_merge` reads the pull request before anything is retried: merged means applied.
+3. **Receipts as evidence.** A confined worker has no store, so the descriptor declares `evidence` queries ([ADR-023 amendment](023-installed-operation-registry.md#amendment-2026-11-17-evidence-from-the-kernels-own-receipts)). The kernel finds the matching receipts at admission and sends them in the job document.
+4. **`vcs.review`** records the head it approved (`commit_id`, descriptor version 2).
+5. **`vcs.check_repository`** now requires approval of the last push, no force push and no deletion on the default branch.
+6. **The kit and the rehearsal.** The small-host kit's `vcs` profile loads `github-author` and `github-reviewer`, and has a `vcs-merge` worker. As installed, nobody uses the reviewer token, `APPROVE` is refused and merging is refused; the README says how to enable them for a team. In the dev-team rehearsal the developers hold `vcs.merge`, and `dev-team.principal` holds the reviewer token and `allow_approve`.
+
+**Standards first.**
+- **The host's auto-merge** (merge when the branch rules pass) is the closest existing mechanism, and the host's rules stay the final word. But it cannot check Cardea's own facts, such as which member opened the change or which pool approved it, and enabling it is itself an effect someone must be allowed to make. `vcs.merge` uses the host's rules and adds the kernel's checks before the merge request.
+- **Merge bots** (hosted services that merge on rules) add a third party that holds a write credential. Rejected.
+- **A second GitHub App for the reviewer** is the upgrade path, as for the author: per-call tokens minted for one repository instead of a long-lived personal token. It fits the same named-credential provider.
+
+**Risks.**
+- **The owner's account approves without the owner reading.** The host's audit log shows the owner's approval. Anyone reading the host must know that this account's approvals on that repository are the principal agent's.
+- **A misused reviewer token can approve any pull request in its repository,** including one opened outside Cardea. It is limited to one repository and pull-request write, it expires, and it is selected only for the reviewer pool. Whether pull-request write alone lets it merge on the real host has not been checked. Check it before production, and if it can, rely on the branch rules (an approval by someone other than the last pusher).
+- **Both tokens are in one sandbox.** The separation rests on the vcs worker's code and the kernel's caller identity, not on confinement. The `vcs` worker runs no untrusted commands, unlike `coding`.
+- **A prompt-injected principal could approve a bad change.** The gates and checks still have to pass, the content gate scans what leaves the host, and a host owner can put an ADR-036 approval rule on `vcs.merge` or on `vcs.review` for a protected repository.
+- **A change after approval** is caught three ways: the receipt check, the host's own approval check of the head, and last-push approval. The SHA-pinned merge closes the window between the checks and the merge.
+- **The evidence lookup scans receipt JSON without an index.** That is acceptable at a small host's volume.
+
+**Tests** (fake host only; nothing has run against the real host):
+- `test_vcs_merge.py`:
+  - the opener merges an approved, green pull request;
+  - each refusal: unapproved, stale approval after a new push, red checks, pending checks, no checks, another developer, not mergeable, the wrong host reviewer, no `merge` section, an approval from a pool no longer allowed;
+  - the principal cannot merge;
+  - an interrupted merge is reconciled from the host, with exactly one merge;
+  - only the reviewer pool gets the reviewer token, including near-miss callers, and each token's expiry refuses its own callers only;
+  - each caller reaches the host with its own token;
+  - the host refuses the bot account's approval of its own pull request;
+  - the evidence binding keeps old digests and refuses bad paths.
+- `test_vcs_confined.py`:
+  - in the worker, the developer's calls carry only the author token, and the caller's pool alone switches to the reviewer token;
+  - the containment scan finds neither token in tool results, prompts, receipts, the store's files, logs, worker output or job documents;
+  - a merge in its worker receives the kernel's evidence;
+  - the readiness checks above.
+- `test_confined_launcher.py`: the named credentials.
+- `make teams-test`, the rehearsal:
+  - a developer merges an approved, green pull request;
+  - merging is refused while CI is pending or red, for another developer's pull request, before any approval, and with a stale approval after a new push;
+  - the principal's pool cannot merge.
+- `test_deploy_examples.py`: the kit's two credentials, the `vcs-merge` worker and the off-by-default configuration.
 
 ## Implementation status
 
@@ -369,14 +431,15 @@ The owner did not change the lead's decisions on questions 1 (as amended by ques
   - The worker checks each file's size and SHA-256 against the manifest again.
   - The files go with the job's cleanup. Inputs are never recorded: not in the receipt, the job document or the helper's status.
   - The helper's request limit grows to carry them base64-encoded.
-- **`vcs.check_repository`** (read, `repo:<alias>`) reports and enforces nothing. It reads the repository's default branch and the ruleset rules that apply (`GET /repos/{owner}/{repo}/rules/branches/{branch}`) to three branch names: the default branch, a branch outside the agent prefix, and one inside it. These probe names are never created. It reports three required checks and two recommendations, and lists under `missing` the required ones that fail:
+- **`vcs.check_repository`** (read, `repo:<alias>`) reports and enforces nothing. It reads the repository's default branch and the ruleset rules that apply (`GET /repos/{owner}/{repo}/rules/branches/{branch}`) to three branch names: the default branch, a branch outside the agent prefix, and one inside it. These probe names are never created. It reports required checks and recommendations, and lists under `missing` the required ones that fail:
   - **Required:**
     - `default_branch_requires_review`: a `pull_request` rule with at least one approving review;
     - `pushes_outside_agent_prefix_blocked`: `creation` and `update` rules outside the prefix;
-    - `agent_prefix_pushable`: neither rule under the prefix.
+    - `agent_prefix_pushable`: neither rule under the prefix;
+    - since 2026-11-17, because agents merge: `default_branch_last_push_approval`, `default_branch_no_force_push` (`non_fast_forward`) and `default_branch_no_deletion` (`deletion`).
   - **Recommended:**
-    - `default_branch_last_push_approval`;
-    - `agent_prefix_no_force_push`.
+    - `agent_prefix_no_force_push`;
+    - `default_branch_accepts_merges`: no `update` rule on the default branch, which would also refuse `vcs.merge`.
 
   It cannot see bypass actors or classic branch protection, and it says so in `not_checked`.
 - **Tests:**
