@@ -7,13 +7,6 @@
     "max_budget_usd": 5.0,
     "timeout_seconds": 1500
   },
-  "gate_env": {
-    "UV_CACHE_DIR": "/opt/cardea-code/cache/uv",
-    "UV_OFFLINE": "1",
-    "UV_NO_SYNC": "1",
-    "PIP_NO_INDEX": "1",
-    "PIP_FIND_LINKS": "/opt/cardea-code/cache/wheels",
-    "NPM_CONFIG_OFFLINE": "true",
-    "NPM_CONFIG_CACHE": "/opt/cardea-code/cache/npm"
-  }
+  "gate_env": {},
+  "dependencies": "registries"
 }

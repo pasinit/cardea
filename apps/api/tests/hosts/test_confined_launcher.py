@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import os
+import platform
 import subprocess
 import sys
 import time
@@ -347,20 +348,62 @@ def test_profiles_report_a_configured_queue_timeout(
 
 
 @pytest.mark.parametrize(
-    ("release", "supported"),
+    ("machine", "release", "supported"),
     [
-        ("6.12.107+deb13-cloud-amd64", True),
-        ("6.12.111+deb13-amd64", True),
-        ("6.12.48+deb13-amd64", True),
-        ("6.12.111+deb13-arm64", False),
-        ("6.13.1+deb13-amd64", False),
-        ("6.1.0-40-cloud-amd64", False),
-        ("6.12.111+deb13-rt-amd64", False),
-        ("6.12.111+deb13-amd64 ", False),
+        ("x86_64", "6.12.107+deb13-cloud-amd64", True),
+        ("x86_64", "6.12.111+deb13-amd64", True),
+        ("x86_64", "6.12.48+deb13-amd64", True),
+        ("x86_64", "6.12.111+deb13-arm64", False),
+        ("x86_64", "6.13.1+deb13-amd64", False),
+        ("x86_64", "6.1.0-40-cloud-amd64", False),
+        ("x86_64", "6.12.111+deb13-rt-amd64", False),
+        ("x86_64", "6.12.111+deb13-amd64 ", False),
+        ("aarch64", "6.12.111+deb13-arm64", True),
+        ("aarch64", "6.12.111+deb13-cloud-arm64", True),
+        ("aarch64", "6.12.111+deb13-amd64", False),
+        ("aarch64", "6.12.111+deb13-arm64-16k", False),
+        ("aarch64", "6.12.111+deb13-rt-arm64", False),
+        ("aarch64", "6.13.1+deb13-arm64", False),
+        # Point releases: `+deb13.N`.
+        ("aarch64", "6.12.115+deb13.1-cloud-arm64", True),
+        ("aarch64", "6.12.115+deb13.1-arm64", True),
+        ("x86_64", "6.12.115+deb13.1-amd64", True),
+        ("x86_64", "6.12.115+deb13.1-cloud-amd64", True),
+        ("x86_64", "6.12.115+deb13.1-cloud-arm64", False),
+        ("aarch64", "6.12.115+deb13.1-cloud-amd64", False),
+        ("x86_64", "6.12.115+deb13.1a-amd64", False),
+        ("x86_64", "6.12.115+deb13.-amd64", False),
+        ("x86_64", "6.12.115+deb13.1234-amd64", False),
+        ("x86_64", "6.12.115+deb14-amd64", False),
+        ("aarch64", "6.12.115+deb14.1-arm64", False),
     ],
 )
-def test_preflight_accepts_debian_13_6_12_kernels(release: str, supported: bool) -> None:
-    assert launcher.supported_kernel(release) is supported
+def test_preflight_accepts_debian_13_6_12_kernels(
+    machine: str, release: str, supported: bool
+) -> None:
+    assert launcher.supported_kernel(release, launcher.KERNEL_RELEASES[machine]) is supported
+
+
+@pytest.mark.parametrize(
+    ("machine", "release"),
+    [("aarch64", "6.12.111+deb13-amd64"), ("x86_64", "6.12.111+deb13-arm64"), ("riscv64", "x")],
+)
+def test_preflight_refuses_a_kernel_for_another_architecture(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, machine: str, release: str
+) -> None:
+    path = tmp_path / "cardea-host.json"
+    path.write_text(json.dumps({"kernel_uid": 990}))
+    monkeypatch.setattr(launcher, "HOST_CONFIG", path)
+    root_owned(monkeypatch, path)
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    real = Path.read_text
+    monkeypatch.setattr(  # only /proc/1/comm is read before the architecture check
+        Path, "read_text", lambda self, *a, **k: real(self) if self == path else "systemd"
+    )
+    monkeypatch.setattr(platform, "machine", lambda: machine)
+    monkeypatch.setattr(platform, "release", lambda: release)
+    with pytest.raises(ValueError, match="unsupported_kernel"):
+        launcher.preflight()
 
 
 def root_owned(monkeypatch: pytest.MonkeyPatch, path: Path) -> None:
@@ -724,3 +767,125 @@ def test_allow_list_profiles_without_the_callback_reach_no_loopback_endpoint(
 ) -> None:
     launcher.handle(start("b3" * 16, "browser", "fetch"))
     assert properties(configured[-1])["IPAddressAllow"] == "127.0.10.1/32"
+
+
+# Package registries for code.session's gates (ADR-037 question 8)
+
+REGISTRY_CODING = {
+    **SESSION,
+    "credential": "/etc/cardea/credentials/claude-code",
+    "network": {
+        "policy": "model_api_only",
+        "proxy": "127.0.10.5:3128",
+        "hosts": ["api.anthropic.com"],
+        "registries": ["pypi.org", "files.pythonhosted.org"],
+    },
+}
+
+
+@pytest.fixture
+def with_registries(configured: list[list[str]], monkeypatch: pytest.MonkeyPatch) -> None:
+    config = {
+        "profiles": {**cast(dict[str, Any], CONFIG["profiles"]), "coding": REGISTRY_CODING},
+        "workers": {
+            **cast(dict[str, Any], CONFIG["workers"]),
+            "code-session": {"argv": ["/usr/bin/true"], "profiles": ["coding"]},
+        },
+    }
+    monkeypatch.setattr(launcher, "worker_config", lambda: config)
+
+
+def test_a_profile_may_list_package_registries(with_registries: None) -> None:
+    launcher.validate_profile(REGISTRY_CODING)
+    reported = launcher.handle({"action": "profiles"})["profiles"]["coding"]
+    assert reported["network"]["registries"] == ["pypi.org", "files.pythonhosted.org"]
+    # Absent or empty is the stricter option: the cache only, no registry.
+    declared = cast(dict[str, Any], REGISTRY_CODING["network"])
+    without = {k: v for k, v in declared.items() if k != "registries"}
+    launcher.validate_profile({**REGISTRY_CODING, "network": without})
+    launcher.validate_profile({**REGISTRY_CODING, "network": {**without, "registries": []}})
+    browser = cast(dict[str, Any], BROWSER["network"])
+    allow_list = {**BROWSER, "network": {**browser, "registries": ["pypi.org"]}}
+    launcher.validate_profile(allow_list)
+
+
+@pytest.mark.parametrize(
+    "registries",
+    [
+        ["1.2.3.4"],
+        ["127.0.0.1"],
+        ["::1"],
+        ["[::1]"],
+        ["*.pythonhosted.org"],
+        ["*"],
+        ["pypi.org:443"],
+        ["pypi.org:80"],
+        ["https://pypi.org"],
+        ["pypi.org/simple"],
+        ["localhost"],
+        ["PyPI.org"],
+        ["pypi.org."],
+        ["-pypi.org"],
+        [""],
+        ["pypi.org", "pypi.org"],
+        [f"r{n}.example.org" for n in range(17)],
+        "pypi.org",
+        [7],
+    ],
+)
+def test_registries_must_be_exact_hostnames(registries: object) -> None:
+    network = {**cast(dict[str, Any], REGISTRY_CODING["network"]), "registries": registries}
+    with pytest.raises(ValueError, match="invalid_network"):
+        launcher.validate_profile({**REGISTRY_CODING, "network": network})
+
+
+@pytest.mark.parametrize(
+    "network",
+    [
+        {"policy": "none", "registries": ["pypi.org"]},
+        {"policy": "public_web", "proxy": "127.0.10.3:3128", "registries": ["pypi.org"]},
+    ],
+)
+def test_only_host_list_profiles_take_registries(network: dict[str, Any]) -> None:
+    with pytest.raises(ValueError, match="invalid_network"):
+        launcher.validate_profile({**SMALL, "network": network})
+
+
+def test_registries_reach_the_proxy_rules_and_open_nothing_else(
+    with_registries: None, configured: list[list[str]]
+) -> None:
+    network = cast(dict[str, Any], REGISTRY_CODING["network"])
+    rules = launcher.egress_rules("coding", network)
+    assert rules == [
+        "acl coding_hosts dstdomain api.anthropic.com",
+        "http_access allow coding_port coding_hosts",
+        "acl coding_registries dstdomain pypi.org files.pythonhosted.org",
+        # Registries over TLS only: CONNECT to port 443.
+        "http_access allow coding_port coding_registries CONNECT tls_port",
+    ]
+    plain = {k: v for k, v in network.items() if k != "registries"}
+    assert launcher.egress_rules("coding", plain) == rules[:2]
+    # The unit itself still reaches only its proxy and the endpoint address: the
+    # registries change what the proxy allows, never the unit's IP filter.
+    launcher.handle(start("c1" * 16, "coding", "code-session"))
+    props = properties(configured[-1])
+    assert props["IPAddressDeny"] == "any"
+    assert props["IPAddressAllow"].split() == ["127.0.10.5/32", f"{launcher.ENDPOINT_ADDRESS}/32"]
+    assert "127.0.0.1" not in props["IPAddressAllow"]
+    assert environment(configured[-1])["HTTPS_PROXY"] == "http://127.0.10.5:3128"
+
+
+def test_the_helper_tells_the_worker_which_registries_its_proxy_allows(
+    with_registries: None, configured: list[list[str]]
+) -> None:
+    """`code.session` refuses `dependencies: cache` on a profile with registries; the helper,
+    not the host owner's worker entry, is what tells it."""
+    launcher.handle(start("c2" * 16, "coding", "code-session"))
+    assert environment(configured[-1])["CARDEA_REGISTRIES"] == "pypi.org,files.pythonhosted.org"
+    # A networked profile without registries says so explicitly, with an empty list.
+    launcher.handle(start("c3" * 16, "session", "agent"))
+    assert environment(configured[-1])["CARDEA_REGISTRIES"] == ""
+    # A worker entry cannot set it.
+    worker = {"argv": ["/usr/bin/true"], "profiles": ["coding"], "env": {"CARDEA_REGISTRIES": ""}}
+    with pytest.raises(ValueError, match="invalid_worker"):
+        launcher.validate_worker(worker, {"coding": REGISTRY_CODING})

@@ -572,3 +572,114 @@ def test_a_lease_can_be_renewed_only_by_its_live_holder(
             expires_at=now() + timedelta(hours=1),
             at=now(),
         )
+
+
+# Dependencies for the gates (ADR-037 question 8): registries through the proxy, or the cache
+
+PROXY = {"HTTPS_PROXY": "http://127.0.10.5:3128", "NO_PROXY": "127.0.11.1,localhost"}
+# What the helper sets for a networked unit: the registries its profile's proxy allows.
+WITH_REGISTRIES = {"CARDEA_REGISTRIES": "pypi.org,files.pythonhosted.org"}
+WITHOUT_REGISTRIES = {"CARDEA_REGISTRIES": ""}
+
+
+def gate_env_of(kernel: Kernel, task_id: str) -> dict[str, str]:
+    output = receipt(kernel, task_id).result["output"]
+    return cast(dict[str, str], json.loads(output["gates"][0]["output_tail"]))
+
+
+def set_dependencies(tmp_path: Path, dependencies: str | None) -> None:
+    path = tmp_path / "coding.json"
+    config = json.loads(path.read_text())
+    if dependencies is not None:
+        config["dependencies"] = dependencies
+    path.write_text(json.dumps(config))
+
+
+@pytest.mark.parametrize(
+    ("dependencies", "profile"),
+    [("registries", WITH_REGISTRIES), ("cache", WITHOUT_REGISTRIES), (None, WITHOUT_REGISTRIES)],
+)
+def test_the_gates_get_the_proxy_only_when_the_profile_and_setting_agree(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source: Path,
+    dependencies: str | None,
+    profile: dict[str, str],
+) -> None:
+    kernel, host = coding_kernel(tmp_path, monkeypatch, source)
+    set_dependencies(tmp_path, dependencies)
+    host.env |= PROXY | profile
+    task_id = submit(kernel, "code.session", change({"a.txt": "a\n"}), key=str(dependencies))
+    assert OperationRuntime(kernel).execute(task_id) == "succeeded"
+    env = gate_env_of(kernel, task_id)
+    if dependencies == "registries":
+        assert {k: env[k] for k in PROXY} == PROXY
+    else:
+        # With a profile that allows no registry, the gates get no proxy variables either.
+        assert not {k for k in env if k.lower().endswith("_proxy")}
+    # Either way the gates get no credential: not the model's, not a planted host one.
+    assert "MODEL_API_KEY" not in env and not set(PLANTED) & set(env)
+
+
+@pytest.mark.parametrize(
+    ("dependencies", "profile"),
+    [
+        # `cache` claims no network, but the profile's proxy allows registries to every
+        # process in the unit, the harness and code in the checkout included.
+        ("cache", WITH_REGISTRIES),
+        (None, WITH_REGISTRIES),
+        # `registries` on a profile whose proxy allows none: the gates could not install.
+        ("registries", WITHOUT_REGISTRIES),
+    ],
+)
+def test_a_setting_that_disagrees_with_the_profile_is_refused_before_anything_runs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source: Path,
+    dependencies: str | None,
+    profile: dict[str, str],
+) -> None:
+    kernel, host = coding_kernel(tmp_path, monkeypatch, source)
+    set_dependencies(tmp_path, dependencies)
+    host.env |= PROXY | profile
+    task_id = submit(kernel, "code.session", change({"a.txt": "a\n"}), key=f"x{dependencies}")
+    assert OperationRuntime(kernel).execute(task_id) == "failed"
+    settled = receipt(kernel, task_id)
+    assert settled.failure is not None and settled.failure.code == "dependencies_mismatch"
+    # Refused before the harness ran: there is no change, no gate result and no object.
+    assert settled.result is None or not settled.result.get("output")
+
+
+def test_dependency_settings_are_checked(monkeypatch: pytest.MonkeyPatch) -> None:
+    from cardea_coding_ops.session import dependency_env, fixed_env
+
+    from cardea.service.operations import OperationRejected
+
+    for name in ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy", "CARDEA_REGISTRIES"):
+        monkeypatch.delenv(name, raising=False)
+    # Not told by the helper (no networked unit): the cache is the only option.
+    assert dependency_env({}) == {} and dependency_env({"dependencies": "cache"}) == {}
+    with pytest.raises(OperationRejected):
+        dependency_env({"dependencies": "internet"})
+    with pytest.raises(OperationRejected) as untold:
+        dependency_env({"dependencies": "registries"})
+    assert untold.value.code == "dependencies_mismatch"
+    monkeypatch.setenv("CARDEA_REGISTRIES", "pypi.org")
+    with pytest.raises(OperationRejected) as cached:
+        dependency_env({"dependencies": "cache"})
+    assert cached.value.code == "dependencies_mismatch" and "pypi.org" in str(cached.value)
+    # Registries need the profile's egress proxy; without one the call is refused.
+    with pytest.raises(OperationRejected):
+        dependency_env({"dependencies": "registries"})
+    for url in ("http://127.0.0.1:3128", "http://10.0.0.1:3128", "http://proxy.example:3128"):
+        monkeypatch.setenv("HTTPS_PROXY", url)
+        with pytest.raises(OperationRejected):
+            dependency_env({"dependencies": "registries"})
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.10.5:3128")
+    assert dependency_env({"dependencies": "registries"}) == {
+        "HTTPS_PROXY": "http://127.0.10.5:3128"
+    }
+    # A host owner cannot route the gates around the profile with gate_env.
+    for name in ("HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY"):
+        with pytest.raises(OperationRejected):
+            fixed_env({name: "http://127.0.10.9:3128"})

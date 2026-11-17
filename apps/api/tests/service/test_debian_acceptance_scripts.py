@@ -32,6 +32,7 @@ PROGRAMS = (
     "events_tls.py",
     "launcher.py",
     "email_live.py",
+    "registry_egress.py",
 )
 
 
@@ -76,6 +77,7 @@ def test_every_script_parses(path: str) -> None:
         ["groups.py", "--help"],
         ["teams.py", "--help"],
         ["events_tls.py", "--help"],
+        ["registry_egress.py", "--help"],
         ["launcher.py", "--help"],
     ],
 )
