@@ -12,9 +12,11 @@ private host configuration and never appear in arguments, outputs, receipts or l
 
 Replies: for each successful send in the reply window, the kernel calls `poll_replies`
 with the send's receipt. It accepts only messages on that thread from the address of the
-alias the send went to, and only when the provider does not report them unauthenticated
-or as spam. Accepted replies go to the sending agent's mailbox, where they are untrusted
-data. Everything else is dropped and counted by reason, and its content is not kept.
+alias the send went to, only when the sender is authenticated (`authentication.py`: an
+aligned DMARC, SPF or DKIM pass; unknown counts as not authenticated unless the host sets
+`accept_unauthenticated`), and never spam. Accepted replies go to the sending agent's
+mailbox, where they are untrusted data. Everything else is dropped and counted by
+reason, and its content is not kept.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -56,6 +58,7 @@ class Email:
     def __init__(self, config: EmailConfig, transport: Transport | None = None) -> None:
         self.config = config
         self.transport = transport or build_transport(config)
+        self.accept_unauthenticated = config.transport.accept_unauthenticated
 
     def role(self, context: OperationContext) -> str | None:
         if context.group is None or context.pool is None:
@@ -143,8 +146,14 @@ class Email:
             sender = parseaddr(message.sender)[1].lower()
             if expected is None or sender != expected:
                 dropped.append(Dropped(message.reply_id, "sender_not_allowed"))
-            elif message.authenticated is False:
-                dropped.append(Dropped(message.reply_id, "unauthenticated"))
+            elif message.authenticated is not True and not self.accept_unauthenticated:
+                # Fail closed: without an authenticated sender, From proves nothing.
+                reason = (
+                    "unauthenticated"
+                    if message.authenticated is False
+                    else ("authentication_unknown")
+                )
+                dropped.append(Dropped(message.reply_id, reason))
             elif message.spam:
                 dropped.append(Dropped(message.reply_id, "spam"))
             else:

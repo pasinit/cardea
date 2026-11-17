@@ -15,7 +15,9 @@ Checks, written to the evidence JSON:
 - the reconciler's lookup (`find_sent`) finds the send by its effect key;
 - within `--reply-wait` seconds, `email.poll_replies` accepts at least one reply on that
   thread from the alias's address (it accepts nothing from another sender by construction;
-  dropped replies are counted by reason).
+  dropped replies are counted by reason). The reply must come from an authenticated
+  sender: with SMTP/IMAP, set `imap.authserv_id` to the receiving server's id, or the
+  reply is dropped as `authentication_unknown` and this check fails.
 
 The evidence holds booleans, counts and SHA-256 digests only: no address, subject, body,
 inbox id or key. Nothing here has been run yet (see the README).

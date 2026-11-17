@@ -53,6 +53,10 @@ class AgentMailTransport(Record):
     # A private file holding the API key; read for each call, never logged or recorded.
     api_key_file: Path
     timeout_seconds: Annotated[int, Field(strict=True, ge=1, le=60)] = 20
+    # Weakens the reply check: accept replies whose sender is not authenticated (only the
+    # From header then identifies them, and anyone can forge it). For servers that report
+    # no verdicts; off by default (ADR-039).
+    accept_unauthenticated: bool = False
 
 
 class Endpoint(Record):
@@ -77,6 +81,10 @@ class ImapEndpoint(Endpoint):
     # The folder the server copies submitted mail into, if it does: the reconciler looks
     # there for an interrupted send. Without it, an interrupted send stays uncertain.
     sent_folder: Annotated[str, Field(strict=True, min_length=1, max_length=200)] | None = None
+    # The authserv-id the receiving server writes in its RFC 8601 Authentication-Results
+    # header (for example `mx.google.com`). Only that header's verdicts are trusted; without
+    # it every reply's authentication is unknown and the reply is dropped.
+    authserv_id: Host | None = None
 
 
 class SmtpImapTransport(Record):
@@ -89,6 +97,10 @@ class SmtpImapTransport(Record):
     smtp: Endpoint
     imap: ImapEndpoint
     timeout_seconds: Annotated[int, Field(strict=True, ge=1, le=60)] = 20
+    # Weakens the reply check: accept replies whose sender is not authenticated (only the
+    # From header then identifies them, and anyone can forge it). For servers that report
+    # no verdicts; off by default (ADR-039).
+    accept_unauthenticated: bool = False
 
     @model_validator(mode="after")
     def addresses(self) -> Self:

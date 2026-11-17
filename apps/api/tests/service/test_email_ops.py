@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from cardea_email_ops import Email, descriptors, handlers
+from cardea_email_ops import Email, authentication, descriptors, handlers
 from cardea_email_ops.agentmail import AgentMail
 from cardea_email_ops.config import EmailConfig
 from cardea_email_ops.fake import FakeAgentMail, FakeImap, FakeSmtp
@@ -397,11 +397,32 @@ def test_an_allow_listed_reply_reaches_the_sender_as_untrusted_mail(
 
 
 @pytest.mark.parametrize(
-    ("sender", "labels", "reason"),
+    ("sender", "labels", "authentication", "reason"),
     [
-        (STRANGER, ("received",), "sender_not_allowed"),
-        (CLIENT, ("received", "unauthenticated"), "unauthenticated"),
-        (CLIENT, ("received", "spam"), "spam"),
+        (STRANGER, ("received",), None, "sender_not_allowed"),
+        (CLIENT, ("received", "unauthenticated"), None, "unauthenticated"),
+        (CLIENT, ("received", "spam"), None, "spam"),
+        # No label but no verdicts either (for example mail from before 2026-09-09).
+        (CLIENT, ("received",), {}, "authentication_unknown"),
+        # A pass for another domain authenticates nothing about From.
+        (
+            CLIENT,
+            ("received",),
+            {"spf": "pass", "spf_domain": "bulk.example.net"},
+            "unauthenticated",
+        ),
+        (
+            CLIENT,
+            ("received",),
+            {"dkim": "pass", "dkim_domain": "bulk.example.net"},
+            "unauthenticated",
+        ),
+        (
+            CLIENT,
+            ("received",),
+            {"dmarc": "fail", "dmarc_domain": "example.invalid"},
+            "unauthenticated",
+        ),
     ],
 )
 def test_other_replies_are_dropped_counted_and_never_kept(
@@ -410,12 +431,13 @@ def test_other_replies_are_dropped_counted_and_never_kept(
     provider: FakeAgentMail,
     sender: str,
     labels: tuple[str, ...],
+    authentication: dict[str, str] | None,
     reason: str,
 ) -> None:
     _, results = run_calls(kernel, session, [question()])
     thread = results[0].structured_content["thread_id"]
     secret = "Unmatched mail content " + "q7" * 10
-    provider.reply(thread, sender, secret, labels=labels)
+    provider.reply(thread, sender, secret, labels=labels, authentication=authentication)
     poller = replies.ReplyPoller(kernel)
     assert poller.poll(force=True).dropped == {reason: 1}
     # Counted once, however often the thread is polled.
@@ -433,6 +455,74 @@ def test_other_replies_are_dropped_counted_and_never_kept(
             .all()
         )
         assert journal.adapt(conn, row, kernel.runtime_id) is None
+
+
+@pytest.mark.parametrize(
+    ("item", "verdict"),
+    [
+        ({"from": CLIENT, "labels": [], "authentication_results": {"dmarc": "pass"}}, True),
+        (
+            {
+                "from": f"Client <{CLIENT}>",
+                "labels": [],
+                "authentication_results": {"dkim": "pass", "dkim_domain": "mail.example.invalid"},
+            },
+            True,
+        ),
+        (
+            {
+                "from": CLIENT,
+                "labels": [],
+                "authentication_results": {"spf": "pass", "spf_domain": "example.invalid"},
+            },
+            True,
+        ),
+        # The label alone is AgentMail's looser acceptance decision, not authentication.
+        ({"from": CLIENT, "labels": ["received"]}, None),
+        ({"from": CLIENT, "labels": [], "authentication_results": {}}, None),
+        (
+            {
+                "from": CLIENT,
+                "labels": ["unauthenticated"],
+                "authentication_results": {"dmarc": "pass"},
+            },
+            False,
+        ),
+        (
+            {
+                "from": CLIENT,
+                "labels": [],
+                "authentication_results": {"dmarc": "pass", "dmarc_domain": "example.net"},
+            },
+            False,
+        ),
+    ],
+)
+def test_agentmail_counts_only_an_aligned_pass(item: dict[str, Any], verdict: bool | None) -> None:
+    assert authentication.from_agentmail(item) is verdict
+
+
+def test_the_opt_out_accepts_unauthenticated_replies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, session: FakeSession, provider: FakeAgentMail
+) -> None:
+    config = email_config(tmp_path)
+    assert config.transport.kind == "agentmail"
+    weakened = config.model_copy(
+        update={"transport": config.transport.model_copy(update={"accept_unauthenticated": True})}
+    )
+    assert weakened.transport.kind == "agentmail"
+    email = Email(weakened, AgentMail(weakened.transport, provider.transport()))
+    kernel = build_kernel(tmp_path, monkeypatch, session, email)
+    try:
+        _, results = run_calls(kernel, session, [question()])
+        thread = results[0].structured_content["thread_id"]
+        provider.reply(thread, CLIENT, "No verdicts here", authentication={})
+        provider.reply(thread, STRANGER, "Still not the client", authentication={})
+        tally = replies.ReplyPoller(kernel).poll(force=True)
+        # The opt-out weakens only authentication: the sender check still holds.
+        assert tally.delivered == 1 and tally.dropped == {"sender_not_allowed": 1}
+    finally:
+        kernel.database.close()
 
 
 def test_mail_on_other_threads_is_never_read(
@@ -536,7 +626,15 @@ def mail_servers() -> Iterator[tuple[FakeSmtp, FakeImap]]:
         yield smtp, imap
 
 
-def smtp_imap(tmp_path: Path, smtp: FakeSmtp, imap: FakeImap, sent: bool = True) -> SmtpImap:
+def smtp_imap(
+    tmp_path: Path, smtp: FakeSmtp, imap: FakeImap, sent: bool = True, **transport: Any
+) -> SmtpImap:
+    return SmtpImap(imap_config(tmp_path, smtp, imap, sent, **transport).transport)  # type: ignore[arg-type]
+
+
+def imap_config(
+    tmp_path: Path, smtp: FakeSmtp, imap: FakeImap, sent: bool = True, **transport: Any
+) -> EmailConfig:
     password = str(private(tmp_path / "mail.password", PASSWORD))
     config = EmailConfig.model_validate(
         {
@@ -557,20 +655,31 @@ def smtp_imap(tmp_path: Path, smtp: FakeSmtp, imap: FakeImap, sent: bool = True)
                     "security": "none",
                     "username": "agent",
                     "password_file": password,
+                    "authserv_id": "mx.receiver.invalid",
                     **({"sent_folder": "Sent"} if sent else {}),
                 },
+                **transport,
             },
             "recipients": {"client": CLIENT},
             "roles": {},
         }
     )
     assert config.transport.kind == "smtp_imap"
-    return SmtpImap(config.transport)
+    return config
 
 
-def reply_to(identity: str, sender: str, body: str, *, header: str = "In-Reply-To") -> bytes:
+def reply_to(
+    identity: str,
+    sender: str,
+    body: str,
+    *,
+    header: str = "In-Reply-To",
+    results: tuple[str, ...] = (),
+) -> bytes:
+    """A reply; `results` are Authentication-Results values, topmost first."""
+    added = "".join(f"Authentication-Results: {r}\r\n" for r in results)
     return (
-        f"From: {sender}\r\nTo: agent@example.invalid\r\nSubject: Re: question\r\n"
+        f"{added}From: {sender}\r\nTo: agent@example.invalid\r\nSubject: Re: question\r\n"
         f"Message-ID: <r{time.monotonic_ns()}@example.invalid>\r\n{header}: {identity}\r\n"
         f"Content-Type: text/plain; charset=utf-8\r\n\r\n{body}\r\n"
     ).encode()
@@ -604,6 +713,7 @@ def test_imap_reads_only_matching_replies_read_only(
     )
     found = asyncio.run(adapter.poll_replies(Thread(identity, identity, datetime.now(UTC))))
     assert sorted(m.text.strip() for m in found) == ["Or Y", "X please"]
+    # No Authentication-Results from the receiving server: unknown, so it would be dropped.
     assert all(m.sender == CLIENT and m.authenticated is None for m in found)
     assert sorted(imap.fetched) == sorted([by_reply, by_reference]) and other not in imap.fetched
     verbs = {
@@ -618,6 +728,91 @@ def test_imap_reads_only_matching_replies_read_only(
     )
     assert any(c.upper().startswith("EXAMINE") for c in imap.commands)
     assert all(PASSWORD not in c for c in imap.commands)
+
+
+PASS = "mx.receiver.invalid; dmarc=pass (p=reject) header.from=example.invalid"
+
+
+@pytest.mark.parametrize(
+    ("results", "accepted", "reason"),
+    [
+        # A spoofed From with no verdicts at all.
+        ((), False, "authentication_unknown"),
+        # A header the sender wrote, naming another server.
+        (
+            ("mx.attacker.invalid; dmarc=pass header.from=example.invalid",),
+            False,
+            "authentication_unknown",
+        ),
+        # A planted header with the right authserv-id below the server's own: the top wins.
+        (
+            (
+                "mx.receiver.invalid; dmarc=fail header.from=example.invalid; spf=fail",
+                PASS,
+            ),
+            False,
+            "unauthenticated",
+        ),
+        ((PASS,), True, ""),
+        (
+            (
+                "mx.receiver.invalid 1; spf=pass (sender ok) smtp.mailfrom=bounce.example.invalid; "
+                "dkim=none",
+            ),
+            True,
+            "",
+        ),
+        (
+            ("mx.receiver.invalid; dkim=pass header.d=bulk.example.net; dmarc=none",),
+            False,
+            "unauthenticated",
+        ),
+    ],
+)
+def test_imap_trusts_only_the_receiving_servers_verdict(
+    tmp_path: Path,
+    mail_servers: tuple[FakeSmtp, FakeImap],
+    results: tuple[str, ...],
+    accepted: bool,
+    reason: str,
+) -> None:
+    smtp, imap = mail_servers
+    config = imap_config(tmp_path, smtp, imap)
+    email = Email(config)
+    identity = f"<cardea.{'f' * 64}@agents.example.invalid>"
+    imap.deliver(reply_to(identity, f"Client <{CLIENT}>", "X please", results=results))
+    thread = {
+        "arguments": {"to": "client"},
+        "output": {
+            "thread_id": identity,
+            "message_id": identity,
+            "sent_at": datetime.now(UTC).isoformat(),
+        },
+    }
+    polled = asyncio.run(email.poll_replies(thread))  # type: ignore[arg-type]
+    assert len(polled.replies) == int(accepted)
+    assert [d.reason for d in polled.dropped] == ([] if accepted else [reason])
+
+
+def test_imap_opt_out_is_explicit(tmp_path: Path, mail_servers: tuple[FakeSmtp, FakeImap]) -> None:
+    smtp, imap = mail_servers
+    config = imap_config(tmp_path, smtp, imap, accept_unauthenticated=True)
+    identity = f"<cardea.{'9' * 64}@agents.example.invalid>"
+    imap.deliver(reply_to(identity, CLIENT, "No verdicts"))
+    imap.deliver(reply_to(identity, STRANGER, "Spoofer"))
+    thread = {
+        "arguments": {"to": "client"},
+        "output": {
+            "thread_id": identity,
+            "message_id": identity,
+            "sent_at": "2026-11-17T00:00:00+00:00",
+        },
+    }
+    polled = asyncio.run(Email(config).poll_replies(thread))  # type: ignore[arg-type]
+    assert len(polled.replies) == 1 and [d.reason for d in polled.dropped] == ["sender_not_allowed"]
+    # Off unless the host owner sets it.
+    assert not imap_config(tmp_path, smtp, imap).transport.accept_unauthenticated
+    assert not email_config(tmp_path).transport.accept_unauthenticated
 
 
 def test_imap_reconciles_from_the_sent_folder_or_stays_uncertain(

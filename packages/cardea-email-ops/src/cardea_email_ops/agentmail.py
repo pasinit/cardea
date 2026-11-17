@@ -16,6 +16,7 @@ from urllib.parse import quote
 
 import httpx
 
+from cardea_email_ops.authentication import from_agentmail
 from cardea_email_ops.config import AgentMailTransport, CredentialUnavailable, secret
 from cardea_email_ops.transport import Inbound, Outgoing, ProviderError, Refused, Sent, Thread
 
@@ -128,7 +129,9 @@ class AgentMail:
                     text=str(text),
                     received_at=str(item.get("timestamp") or ""),
                     own="sent" in labels or item.get("message_id") == thread.message_id,
-                    authenticated="unauthenticated" not in labels,
+                    # True only for an aligned pass in `authentication_results`; the
+                    # absence of the `unauthenticated` label alone is not enough.
+                    authenticated=from_agentmail(item),
                     spam="spam" in labels,
                 )
             )

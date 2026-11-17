@@ -51,10 +51,19 @@ class FakeAgentMail:
         *,
         labels: tuple[str, ...] = ("received", "unread"),
         subject: str = "Re: question",
+        authentication: dict[str, str] | None = None,
     ) -> str:
+        """A received message. `authentication` is its `authentication_results`; by default
+        a DMARC pass for the sender's own domain, as for an ordinary authenticated sender.
+        Pass `{}` for a message with no verdicts."""
         message_id = f"<{uuid.uuid4().hex}@fake.agentmail.invalid>"
+        domain = sender.rsplit("@", 1)[-1].strip(">").lower()
+        results = (
+            {"dmarc": "pass", "dmarc_domain": domain} if authentication is None else authentication
+        )
         self.messages.append(
             {
+                "authentication_results": results,
                 "inbox_id": self.inbox_id,
                 "thread_id": thread_id,
                 "message_id": message_id,

@@ -24,6 +24,7 @@ from email.message import EmailMessage
 from email.parser import BytesParser
 from email.policy import default
 
+from cardea_email_ops.authentication import from_header
 from cardea_email_ops.config import (
     CredentialUnavailable,
     Endpoint,
@@ -186,8 +187,8 @@ class SmtpImap:
             subject=str(parsed.get("Subject", "")),
             text=text,
             received_at=str(parsed.get("Date", "")),
-            # Without the receiving server's verdicts this adapter cannot tell (ADR-039).
-            authenticated=None,
+            # Only the configured receiving server's own Authentication-Results counts.
+            authenticated=from_header(parsed, self.config.imap.authserv_id),
         )
 
     async def poll_replies(self, thread: Thread) -> list[Inbound]:

@@ -26,7 +26,7 @@ Checked 2026-11-17.
 
 | Candidate | Version / licence / maintenance | Fit |
 |---|---|---|
-| SMTP submission ([RFC 6409](https://www.rfc-editor.org/rfc/rfc6409)) and IMAP4rev1 ([RFC 3501](https://www.rfc-editor.org/rfc/rfc3501)) with the standard library's `smtplib`, `imaplib` and `email` | CPython 3.12/3.13 stdlib; PSF licence; maintained with CPython | **Selected as the generic adapter.** It works with any provider that offers submission and IMAP, for example a hosted mailbox with an app password. Threads are standard: our `Message-ID` ([RFC 5322 §3.6.4](https://www.rfc-editor.org/rfc/rfc5322#section-3.6.4)) is named by a reply's `In-Reply-To` or `References`, and IMAP `SEARCH HEADER` finds exactly those messages. Gaps: SMTP does not deduplicate a resubmission, and IMAP gives no sender-authentication verdict unless the receiving server's `Authentication-Results` is trusted. Neither is used here; see Integration. |
+| SMTP submission ([RFC 6409](https://www.rfc-editor.org/rfc/rfc6409)) and IMAP4rev1 ([RFC 3501](https://www.rfc-editor.org/rfc/rfc3501)) with the standard library's `smtplib`, `imaplib` and `email` | CPython 3.12/3.13 stdlib; PSF licence; maintained with CPython | **Selected as the generic adapter.** It works with any provider that offers submission and IMAP, for example a hosted mailbox with an app password. Threads are standard: our `Message-ID` ([RFC 5322 §3.6.4](https://www.rfc-editor.org/rfc/rfc5322#section-3.6.4)) is named by a reply's `In-Reply-To` or `References`, and IMAP `SEARCH HEADER` finds exactly those messages. Gaps: SMTP does not deduplicate a resubmission (the reconciler reads the sent folder instead), and IMAP carries no sender-authentication verdict of its own. The verdict comes from the receiving server's RFC 8601 `Authentication-Results` header ([RFC 8601](https://www.rfc-editor.org/rfc/rfc8601)), trusted only under a configured authserv-id; see decision 5. |
 | [AgentMail](https://docs.agentmail.to/api-reference) HTTP API, `https://api.agentmail.to/v0` | Hosted service. Pricing per the [rate-limits page](https://docs.agentmail.to/knowledge-base/rate-limits): Free plan 3 inboxes, 100 emails a day, no monthly cap (about 3,000 a month, the owner's figure), no custom domains, no card | **Selected as the first host's adapter**, because the agent team gets its own inbox rather than the owner's mailbox. Fit from its documentation: [Send Message](https://docs.agentmail.to/api-reference/inboxes/messages/send) returns `message_id` and `thread_id`. [Idempotent Requests](https://docs.agentmail.to/idempotency): an `Idempotency-Key` header makes a retry within 24 hours return the first send and send nothing; the same key with a different request is `409`. [Get Thread](https://docs.agentmail.to/api-reference/inboxes/threads/get) lists a thread's messages with `from`, `labels`, `extracted_text` (the new text without the quoted history) and authentication verdicts. Received mail that fails authentication but is still delivered is labelled `unauthenticated` ([messages guide](https://docs.agentmail.to/messages)). [List Messages](https://docs.agentmail.to/api-reference/inboxes/messages/list) filters by label. Webhooks and WebSockets exist but are not needed: the rate-limit page allows slow polling ("one list call every few seconds per inbox is plenty"). Vendor risk: see Decision. |
 | JMAP ([RFC 8620](https://www.rfc-editor.org/rfc/rfc8620), [RFC 8621](https://www.rfc-editor.org/rfc/rfc8621)) | Standard; few providers offer it | Not selected now: neither the first host's provider nor common hosted mailboxes expose it. It is a natural third adapter behind the same interface. |
 | Provider inbound webhooks or an inbound SMTP gateway | Various | Rejected: they need a public endpoint, and the host is behind NAT. |
@@ -75,7 +75,11 @@ Checked 2026-11-17.
    - It records each dropped reply once as `operation.reply_dropped`.
    - A poller error is logged with its class name only and changes nothing.
 5. **`email.poll_replies`** asks the adapter for the messages on the thread and skips our own.
-   - It accepts a message only from the current address of the alias the send went to (compared exactly, lower-case), and only when the provider does not mark it `unauthenticated` or `spam`.
+   - It accepts a message only from the current address of the alias the send went to (compared exactly, lower-case), and never one marked `spam`.
+   - **It fails closed on authentication** (amended 2026-11-17 in review). The From header alone proves nothing, because anyone can forge it. A reply is accepted only when its sender is authenticated: a DMARC pass, or failing that an SPF or DKIM pass for a domain aligned with the From domain. Alignment is relaxed alignment (RFC 7489 §3.1), approximated without the public suffix list: the domains must be equal, or one must be a subdomain of the other. That is stricter, never looser. Anything else is dropped as `unauthenticated` (a verdict says it is not authenticated) or `authentication_unknown` (no verdict). Code: `cardea_email_ops/authentication.py`.
+     - **IMAP:** the verdict comes only from the topmost `Authentication-Results` header, and only when its authserv-id equals the configured `imap.authserv_id` (for example `mx.google.com` for Gmail). A receiving server prepends its own header, so a header a sender planted sits below it and is ignored, even when it claims the same authserv-id. With no such header, or no `authserv_id` configured, the verdict is unknown.
+     - **AgentMail:** the `unauthenticated` label means not authenticated. Its absence does not mean authenticated. AgentMail's [Get Message](https://docs.agentmail.to/api-reference/inboxes/messages/get) documentation guarantees four things. The label is AgentMail's acceptance decision and is looser than alignment: a message whose only pass is an unaligned envelope SPF is delivered without it. `authentication_results.spf` appears only when the envelope domain is aligned with From. `dkim_domain` must be compared with the From domain. The field is absent on mail received before 2026-09-09, or when a verdict could not be computed. So a reply is accepted only with an aligned pass in `authentication_results`, checked the same way as for IMAP.
+     - **Opt-out:** `accept_unauthenticated: true`, per transport in the host configuration, accepts replies without an authenticated sender. It is for servers that write no verdicts. It **weakens the check** to the From header alone. It defaults to false, and the sender-address check still applies.
    - The reply text is shortened to `max_reply_bytes` (default 8 KiB). With AgentMail it is the extracted new text.
    - The agent sees the alias, the subject, the received time and the thread id, never the address.
 6. **Narrow reading by construction.**
@@ -105,7 +109,7 @@ Checked 2026-11-17.
 
 ## Verification
 
-`apps/api/tests/service/test_email_ops.py`, 23 tests, all against fakes:
+`apps/api/tests/service/test_email_ops.py`, 42 tests, all against fakes:
 - a send reaches the configured address once, and a reworded retry with the same `client_key` is deduplicated;
 - the idempotency key is the effect key;
 - aliases outside the role, unknown aliases, an unconfigured role and a raw address are refused;
@@ -115,7 +119,10 @@ Checked 2026-11-17.
 - a 503 leaves the call `outcome_unknown`, the kernel's reconciler settles it as not applied, and the retry then sends once;
 - the reconciler finds a send by its label;
 - an allow-listed reply reaches the sender's next run as an untrusted block that hostile markup cannot close, exactly once across polls;
-- replies from another sender, or labelled `unauthenticated` or `spam`, are dropped, counted once and kept nowhere, and their journal row is invisible to triggers;
+- replies from another sender, labelled `unauthenticated` or `spam`, without verdicts, or whose only pass is for an unaligned domain or a DMARC failure, are dropped, counted once and kept nowhere, and their journal row is invisible to triggers;
+- AgentMail verdicts are `True` only for an aligned pass, never for the absence of the label alone;
+- the opt-out accepts unauthenticated replies and still drops other senders;
+- IMAP: a spoofed From with no `Authentication-Results` is dropped; a forged header naming another authserv-id is dropped; a forged pass with the right authserv-id below the server's failing header is dropped; DMARC pass, and SPF pass aligned to a subdomain, from the configured authserv-id are accepted; an unaligned DKIM pass is dropped; the opt-out is honoured and off by default;
 - mail on other threads is never requested;
 - a failing provider changes nothing;
 - the grep test for the key and the addresses;
@@ -128,8 +135,8 @@ Checked 2026-11-17.
 `examples/teams/test_dev_team.py` checks the rehearsal and that only `product` holds `email.send`. On macOS with Python 3.13, `make lint`, `make typecheck` and `make test` pass.
 
 Not verified:
-- **AgentMail itself.** Its documented behaviours (24-hour idempotency, label filtering on list, `extracted_text`, the `unauthenticated` and `spam` labels) are taken from its documentation. Only the fake exercises them.
-- **A real SMTP or IMAP server**, including STARTTLS and TLS.
+- **AgentMail itself.** Its documented behaviours (24-hour idempotency, label filtering on list, `extracted_text`, the `unauthenticated` and `spam` labels, and the `authentication_results` field and its keys) are taken from its documentation. Only the fake exercises them.
+- **A real SMTP or IMAP server**, including STARTTLS and TLS, and a real receiving server's `Authentication-Results` (its authserv-id, and whether it removes a planted header that claims its id, as RFC 8601 §5 recommends).
 - **The daemon's poller thread** under systemd.
 
 `experiments/debian-acceptance/email_live.py` is the live smoke step. It has not run.

@@ -50,8 +50,8 @@ class Inbound:
     received_at: str
     # Our own message on the thread (the send itself), never a reply.
     own: bool = False
-    # False when the provider says the sender is not authenticated (SPF/DKIM/DMARC);
-    # None when the adapter cannot tell.
+    # True only when the From domain is authenticated (DMARC pass, or an SPF or DKIM pass
+    # aligned with it); False when the verdicts say it is not; None when unknown.
     authenticated: bool | None = None
     spam: bool = False
 
