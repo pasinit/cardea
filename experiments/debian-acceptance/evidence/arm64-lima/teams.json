@@ -1,0 +1,255 @@
+{
+  "checks": {
+    "oidc_approver_token_introspected_by_the_kernel": true,
+    "oidc_bad_tokens_refused": true,
+    "oidc_human_decision_recorded": true,
+    "software_team_change_opened": true,
+    "software_team_item_done": true,
+    "software_team_overview_reads": true,
+    "software_team_restructured_to_3_developers": true,
+    "software_team_restructured_to_4_developers": true,
+    "trading_desk_approve_waits": true,
+    "trading_desk_approver_sees_one_request": true,
+    "trading_desk_fill_recorded": true,
+    "trading_desk_fill_webhook_admitted": true,
+    "trading_desk_held_transition_ran": true,
+    "trading_desk_placement_deduplicated_across_crash": true,
+    "trading_desk_reconciled": true
+  },
+  "commit": null,
+  "finished_at": "2026-11-17T04:00:15.145188+00:00",
+  "host": {
+    "machine": "aarch64",
+    "os_release": "Debian GNU/Linux 13 (trixie)",
+    "python": "3.13.5",
+    "release": "6.12.115+deb13.1-cloud-arm64"
+  },
+  "observations": {
+    "oidc_approver_token_introspected_by_the_kernel": {
+      "introspections": 1
+    },
+    "oidc_bad_tokens_refused": {
+      "results": {
+        "expired": {
+          "code": "invalid_credential",
+          "ok": false,
+          "status": 401
+        },
+        "forged": {
+          "code": "invalid_credential",
+          "ok": false,
+          "status": 401
+        },
+        "no_openid_scope": {
+          "code": "invalid_credential",
+          "ok": false,
+          "status": 401
+        },
+        "unknown_subject": {
+          "code": "unknown_identity",
+          "ok": false,
+          "status": 401
+        },
+        "wrong_audience": {
+          "code": "invalid_credential",
+          "ok": false,
+          "status": 401
+        }
+      }
+    },
+    "oidc_human_decision_recorded": {
+      "decided": {
+        "decision": {
+          "approver_id": "desk-approver",
+          "decided_at": "2026-11-17T04:00:09.624266+00:00",
+          "decision": "approve",
+          "decision_id": "d-1",
+          "reason": null
+        },
+        "request_id": "req-4f2f15ed5ced49f2993600d84475dd9c",
+        "schema_version": "0.2",
+        "state": "approved",
+        "task_id": "task-3f31fa443001482c9edcab35a70e119a",
+        "void_reason": null
+      },
+      "decisions": [
+        {
+          "approver_id": "desk-approver",
+          "decision": "approve"
+        }
+      ]
+    },
+    "oidc_issuer": {
+      "authorization_endpoint": "http://127.0.0.1:35693/authorize",
+      "id_token_signing_alg_values_supported": [
+        "RS256"
+      ],
+      "introspection_endpoint": "http://127.0.0.1:35693/introspect",
+      "introspection_endpoint_auth_methods_supported": [
+        "client_secret_basic"
+      ],
+      "issuer": "http://127.0.0.1:35693",
+      "jwks_uri": "http://127.0.0.1:35693/jwks",
+      "response_types_supported": [
+        "code"
+      ],
+      "subject_types_supported": [
+        "public"
+      ],
+      "token_endpoint": "http://127.0.0.1:35693/token"
+    },
+    "software-team_applied": {
+      "members_added": [
+        "eng-team.principal.0",
+        "eng-team.product.0",
+        "eng-team.lead.0",
+        "eng-team.dev.0",
+        "eng-team.dev.1",
+        "eng-team.dev.2"
+      ],
+      "members_disabled": [],
+      "members_draining": [],
+      "members_removed": [],
+      "triggers_installed": [
+        "eng-team.principal.0.t0",
+        "eng-team.product.0.t0",
+        "eng-team.lead.0.t0",
+        "eng-team.dev.0.t0",
+        "eng-team.dev.0.t1",
+        "eng-team.dev.1.t0",
+        "eng-team.dev.1.t1",
+        "eng-team.dev.2.t0",
+        "eng-team.dev.2.t1"
+      ],
+      "triggers_removed": [],
+      "triggers_updated": []
+    },
+    "software_team_item_done": {
+      "history": [
+        {
+          "actor": "eng-team.product.0",
+          "at": "2026-11-17T04:00:01.740120+00:00",
+          "kind": "created"
+        },
+        {
+          "actor": "eng-team.lead.0",
+          "at": "2026-11-17T04:00:03.287380+00:00",
+          "kind": "updated"
+        },
+        {
+          "actor": "eng-team.lead.0",
+          "at": "2026-11-17T04:00:03.310653+00:00",
+          "kind": "transitioned"
+        },
+        {
+          "actor": "eng-team.dev.1",
+          "at": "2026-11-17T04:00:04.252451+00:00",
+          "kind": "transitioned"
+        },
+        {
+          "actor": "eng-team.dev.1",
+          "at": "2026-11-17T04:00:05.334802+00:00",
+          "kind": "transitioned"
+        },
+        {
+          "actor": "eng-team.principal.0",
+          "at": "2026-11-17T04:00:06.335173+00:00",
+          "kind": "transitioned"
+        }
+      ]
+    },
+    "software_team_overview_reads": {
+      "as_of": "2026-11-17T04:00:07.335684+00:00",
+      "generation": 3
+    },
+    "software_team_restructured_to_3_developers": {
+      "active": [
+        "eng-team.dev.0",
+        "eng-team.dev.1",
+        "eng-team.dev.2"
+      ],
+      "plan": {
+        "members_added": [],
+        "members_disabled": [],
+        "members_draining": [
+          "eng-team.dev.3"
+        ],
+        "members_removed": [
+          "eng-team.dev.3"
+        ],
+        "triggers_installed": [],
+        "triggers_removed": [
+          "eng-team.dev.3.t0",
+          "eng-team.dev.3.t1"
+        ],
+        "triggers_updated": []
+      }
+    },
+    "software_team_restructured_to_4_developers": {
+      "active": [
+        "eng-team.dev.0",
+        "eng-team.dev.1",
+        "eng-team.dev.2",
+        "eng-team.dev.3"
+      ],
+      "plan": {
+        "members_added": [
+          "eng-team.dev.3"
+        ],
+        "members_disabled": [],
+        "members_draining": [],
+        "members_removed": [],
+        "triggers_installed": [
+          "eng-team.dev.3.t0",
+          "eng-team.dev.3.t1"
+        ],
+        "triggers_removed": [],
+        "triggers_updated": []
+      }
+    },
+    "trading-desk_applied": {
+      "members_added": [
+        "desk.analyst.0",
+        "desk.analyst.1",
+        "desk.risk.0",
+        "desk.execution.0"
+      ],
+      "members_disabled": [],
+      "members_draining": [],
+      "members_removed": [],
+      "triggers_installed": [
+        "desk.analyst.0.t0",
+        "desk.analyst.1.t0",
+        "desk.risk.0.t0",
+        "desk.execution.0.t0"
+      ],
+      "triggers_removed": [],
+      "triggers_updated": []
+    },
+    "trading_desk_approve_waits": {
+      "state": "waiting"
+    },
+    "trading_desk_fill_webhook_admitted": {
+      "delivery": {
+        "outcome": "admitted",
+        "schema_version": "0.2",
+        "status": 202,
+        "task_id": "task-e8fe01545b534d75ad3cf56e785b375f",
+        "trigger_id": "desk-fills"
+      }
+    },
+    "trading_desk_placement_deduplicated_across_crash": {
+      "placements": [
+        {
+          "broker_order_id": "B-ece520e5"
+        },
+        {
+          "broker_order_id": "B-ece520e5"
+        }
+      ]
+    }
+  },
+  "passed": true,
+  "script": "teams",
+  "started_at": "2026-11-17T03:59:57.990436+00:00"
+}

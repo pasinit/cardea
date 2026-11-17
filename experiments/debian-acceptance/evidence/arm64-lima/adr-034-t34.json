@@ -1,0 +1,131 @@
+{
+  "checks": {
+    "t3_lease_expiry_releases_with_new_epoch": true,
+    "t3_new_holder_proceeds": true,
+    "t3_old_holder_gets_claim_lost": true,
+    "t3_one_holder_after_restart": true,
+    "t3_one_winner_of_twenty": true,
+    "t4_both_members_hold_a_record": true,
+    "t4_failed_holder_loses_claim_within_lease_and_tick": true,
+    "t4_follow_ups_stop_at_max_followups": true,
+    "t4_idle_holder_kept_epoch_through_follow_ups": true,
+    "t4_lapse_is_followups_exhausted_with_supervisor_mail": false,
+    "t4_short_lease_refused_at_apply": true
+  },
+  "commit": null,
+  "finished_at": "2026-11-17T03:34:08.043341+00:00",
+  "host": {
+    "machine": "aarch64",
+    "os_release": "Debian GNU/Linux 13 (trixie)",
+    "python": "3.13.5",
+    "release": "6.12.115+deb13.1-cloud-arm64"
+  },
+  "observations": {
+    "t3_lease_expiry_releases_with_new_epoch": {
+      "record": {
+        "claim_epoch": 2,
+        "followups": 0,
+        "holder": null,
+        "lease_expires_at": null,
+        "version": 3
+      }
+    },
+    "t3_new_holder_proceeds": {
+      "record": {
+        "claim_epoch": 3,
+        "followups": 0,
+        "holder": "a1",
+        "lease_expires_at": "2026-11-17T03:27:09.379241+00:00",
+        "version": 4
+      },
+      "write": "succeeded"
+    },
+    "t3_old_holder_gets_claim_lost": {
+      "code": "claim_lost"
+    },
+    "t3_one_holder_after_restart": {
+      "record": {
+        "claim_epoch": 1,
+        "followups": 0,
+        "holder": "a2",
+        "lease_expires_at": "2026-11-17T03:22:01.225789+00:00",
+        "version": 2
+      }
+    },
+    "t3_one_winner_of_twenty": {
+      "holder": "a2",
+      "states": {
+        "failed": 10,
+        "succeeded": 10
+      }
+    },
+    "t3_seconds": 312,
+    "t4_both_members_hold_a_record": {
+      "records": {
+        "hold.w.0": {
+          "claim_epoch": 1,
+          "followups": 0,
+          "holder": "hold.w.0",
+          "lease_expires_at": "2026-11-17T03:27:14.000575+00:00",
+          "version": 2
+        },
+        "hold.w.1": {
+          "claim_epoch": 1,
+          "followups": 0,
+          "holder": "hold.w.1",
+          "lease_expires_at": "2026-11-17T03:27:15.022414+00:00",
+          "version": 2
+        }
+      }
+    },
+    "t4_failed_holder_loses_claim_within_lease_and_tick": {
+      "history": [
+        {
+          "actor": "filer",
+          "at": "2026-11-17T03:22:12.568976+00:00",
+          "kind": "created",
+          "version": 1
+        },
+        {
+          "actor": "hold.w.1",
+          "at": "2026-11-17T03:22:14.852684+00:00",
+          "kind": "claimed",
+          "version": 2
+        },
+        {
+          "actor": "runtime",
+          "at": "2026-11-17T03:29:04.810313+00:00",
+          "kind": "claim_expired",
+          "version": 3
+        }
+      ],
+      "seconds": 410
+    },
+    "t4_follow_ups_stop_at_max_followups": {
+      "followups": [
+        "hold.w.0.claim.rec-2a08891a91264d40aa88b1037beeaba5.1.1",
+        "hold.w.0.claim.rec-2a08891a91264d40aa88b1037beeaba5.1.2"
+      ]
+    },
+    "t4_idle_holder_kept_epoch_through_follow_ups": {
+      "followups": [
+        "hold.w.0.claim.rec-2a08891a91264d40aa88b1037beeaba5.1.1",
+        "hold.w.0.claim.rec-2a08891a91264d40aa88b1037beeaba5.1.2"
+      ]
+    },
+    "t4_lapse_is_followups_exhausted_with_supervisor_mail": {
+      "notices": 0
+    },
+    "t4_seconds": 716,
+    "t4_short_lease_refused_at_apply": {
+      "result": {
+        "code": "claim_lease_too_short",
+        "ok": false,
+        "status": 422
+      }
+    }
+  },
+  "passed": false,
+  "script": "adr-034",
+  "started_at": "2026-11-17T03:16:56.749732+00:00"
+}

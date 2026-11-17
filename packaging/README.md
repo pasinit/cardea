@@ -21,7 +21,7 @@ The package is built for **amd64** and **arm64** (`Architecture: amd64 arm64`). 
 | Architecture | Status |
 |---|---|
 | amd64 | The supported profile. The M2–M5 host fits and acceptance ran on it (an emulated Debian 13 amd64 guest). |
-| arm64 | **Development profile.** The package builds and installs on Debian 13 arm64 and the helper accepts Debian's arm64 6.12 kernels. No host fit has passed on arm64, so confinement on arm64 is **not verified**: do not treat an arm64 host as enforcing the M2 profile until `make m2-host-fit` on an arm64 guest (`vm.py start --guest arm64`) and the package acceptance have passed and their evidence is recorded. |
+| arm64 | **Development profile.** The package builds and installs on Debian 13 arm64 and the helper accepts Debian's arm64 6.12 kernels. On 2026-11-17 the M2 host fit, the ADR-028 probes and the Debian acceptance scripts ran on a Debian 13 arm64 dev host (kernel `6.12.115+deb13.1-cloud-arm64`) and passed, apart from one open ADR-034 timing finding ([evidence](../experiments/debian-acceptance/evidence/arm64-lima/summary.json)). It remains a development profile until that host type is adopted as supported. |
 
 ## Install and enroll
 

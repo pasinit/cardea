@@ -1,0 +1,72 @@
+{
+  "date": "2026-11-17",
+  "profile": "arm64 development profile (packaging/README.md#architectures); not the supported amd64 profile, so the checklist's records stay unverified until amd64 passes too",
+  "host": {
+    "machine": "Lima VM (Apple Virtualization framework), 4 vCPU, 8 GB RAM, 20 GB disk, no host folders mounted",
+    "os": "Debian 13.7",
+    "kernel": "6.12.115+deb13.1-cloud-arm64 (aarch64)",
+    "systemd": "257.13-1~deb13u1",
+    "bubblewrap": "0.12.0-1~deb13u1",
+    "squid": "6.13-2+deb13u4 with the kit's complete squid-workers.conf",
+    "package": "cardea-kernel_0.1.0-2_arm64.deb built on the host with dpkg-buildpackage from a clean stage of main 6ba6e21 (no AppleDouble files, dpkg -V clean)",
+    "kit": "/opt/cardea at 6ba6e21 (uv sync --locked plus the #72 .pth step); the kit's workers file, proxy, registry, coding file and env.try toolchain image",
+    "scripts": "experiments/debian-acceptance at main 6ba6e21 with this branch's script fixes; the evidence 'commit' field is null because the root-owned source tree is not readable to git as cardea-kernel"
+  },
+  "results": [
+    {"run": "M2 host fit (host_fit.py in the guest after vm.py start's provisioning: marker, cardea-fit account, pinned bubblewrap)", "result": "pass", "checks": "11/11", "evidence": "m2-host-fit.json"},
+    {"run": "ADR-028 probes (test_confined_debian.py as cardea-kernel through the packaged helper)", "result": "pass", "checks": "4/4", "evidence": "adr028-probes.json"},
+    {"run": "make try (real daemon, SIGKILL, restart)", "result": "pass", "evidence": "try.json"},
+    {"run": "upgrade.py --synthesize", "result": "pass", "checks": "11/11", "evidence": "upgrade.json"},
+    {"run": "registry_egress.py", "result": "pass", "checks": "7/7", "evidence": "registry-egress.json"},
+    {"run": "coding_run.sh long_call.py", "result": "pass", "checks": "22/22", "evidence": "long-call.json"},
+    {"run": "coding_run.sh gate_isolation.py", "result": "pass", "checks": "5/5", "evidence": "gate-isolation.json"},
+    {"run": "env_try.sh (after make try-toolchain)", "result": "pass", "checks": "15/15", "evidence": "env-try.json"},
+    {"run": "events_tls.py (loopback sender only, no --external-wait)", "result": "pass", "checks": "7/7", "evidence": "adr-035.json"},
+    {"run": "teams.py", "result": "pass", "checks": "15/15", "evidence": "teams.json"},
+    {"run": "groups.py (all tests, before the t3/t4 script fixes)", "result": "t5 and t10 pass (8/8); t3/t4 failed on script bugs since fixed", "evidence": "adr-034.json"},
+    {"run": "groups.py --tests 3,4", "result": "t3 pass (5/5); t4 5/6", "evidence": "adr-034-t34.json"},
+    {"run": "groups.py --tests 4 (rerun with the lapse-mail query fixed)", "result": "5/6: t4_failed_holder_loses_claim_within_lease_and_tick fails, see open_findings", "evidence": "adr-034-t4.json"},
+    {"run": "email_live.py", "result": "not run: its first step is a real send and the host has no email configuration yet"},
+    {"run": "experiments/code-session/debian.sh", "result": "not run: needs a Claude subscription token"}
+  ],
+  "confinement": [
+    "64 MiB worker OOM-killed (worker_memory_limit); task, CPU (throttled), wall-time, stdout and scratch limits hold; a detached descendant dies with its unit",
+    "network none: every connect PermissionError, 127.0.0.1 included; DNS fails",
+    "allow-list: direct connects time out; through the proxy the listed host gets CONNECT 200, an unlisted one 403",
+    "coding proxy: PyPI over TLS only; another host, plain HTTP, another port and 127.0.0.1 refused",
+    "ADR-028 loopback fence: from a coding worker 127.0.0.1 is unreachable (TimeoutError), the per-call tool endpoint on 127.0.11.1 answers (401 without its token)",
+    "workers see none of the store, /var/lib/cardea-host, helper configuration, /etc/cardea, /home, /root",
+    "gates against the worker (#71): /proc/<worker>/fd/1 write and /proc/<worker>/mem read both PermissionError; a detached setsid child is killed; a gate that kills the worker yields outcome_unknown and stores nothing; a gate editing the checkout is refused with gate_changed_checkout",
+    "env.try hostile scenario: credentials, DNS, disk fill, helper spool, kernel loopback, metadata address, store and an unlisted host all fail",
+    "long call: 20 lease renewals over 1205 s; a 9 MiB bundle in 10 parts of at most 1 MiB, read back by digest, kept across backup, restore and verify; a SIGKILLed service's worker is reaped with its tree, the call is outcome_unknown and not restarted; a 10.3 MiB artifact stores nothing; timeouts above the profile or 7200 s are refused"
+  ],
+  "fixed": {
+    "product": {
+      "#70": "packaging: a stage copied from macOS shipped AppleDouble ._* files; cardea init failed on every store (Alembic loaded ._m1_001.py)",
+      "#74": "packaging: the stage recorded debian/__pycache__, which dh_clean deletes, so the manifest check refused main's stage",
+      "#72": "kit: the kit venv lacks cardea and workers run python -I, so every kit worker failed with No module named 'cardea'",
+      "#73": "service: a start-up error after the runtime launched exited 1 with no log line",
+      "#76": "coding: code.session decoded git diff --text strictly; a change with non-UTF-8 bytes lost its whole result as worker_error",
+      "#77": "env.try: make try-toolchain ran mmdebstrap --mode=root in the host namespace, leaving / and /run private; systemd then gave no unit its LoadCredential file, so every credentialed confined worker failed until a reboot (and the weekly timer would repeat it)",
+      "#78": "confined: the helper refuses with host_mount_propagation when / or /run is not shared; a missing credential source becomes credential_not_loaded"
+    },
+    "scripts": [
+      "stack.registry passed an empty handler map (operation_handler_missing)",
+      "development tokens were signed with the OIDC-bearing config",
+      "tasks the scripts read back lacked tasks.inspect (task_grant_denied)",
+      "coding config without dependencies (dependencies_mismatch)",
+      "events TLS certificate written 0664 (unsafe_file)",
+      "a SystemExit was lost from the evidence",
+      "long_call counted objects by a missing column",
+      "gate_isolation could not clone the root-owned fixture as the kernel user (git ownership check)",
+      "groups t3 lacked groups.manage; t4 used non-standalone claims with records.claim; t4 looked for the lapse mail under the wrong kind"
+    ]
+  },
+  "open_findings": [
+    "ADR-034 test 4 says a holder whose runs all fail loses its claim within lease + 60 s. With a 300 s lease the failing holder claimed at 03:44:49, its two follow-ups failed at 03:48:01 and 03:49:04, and the claim expired at 03:52:05: 436 s (410 s in an earlier run). Each follow-up's attempt start renews the claim to its attempt deadline + ATTEMPT_RENEWAL_MARGIN_SECONDS (120 s) in claims.renew_for_attempt, so failing follow-ups extend it by about 150 s each. The script's bound (420 s from the restart) passes or fails by scheduling. Kernel or ADR: a design decision, not changed here."
+  ],
+  "host_notes": [
+    "No arm64- or Lima-specific deviation from the scripts' expectations was observed.",
+    "The coding profile's LoadCredential needs /etc/cardea/credentials/claude-code; the plain-command harnesses never read it, so a placeholder stood in for each run and was removed after."
+  ]
+}
