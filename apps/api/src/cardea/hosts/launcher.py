@@ -123,8 +123,21 @@ HOSTNAME = r"(\*\.)?[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61
 # Read-only binds may expose installed software and public trust roots, never service state.
 READ_ONLY_PREFIXES = ("/usr/", "/opt/", "/etc/ssl/", "/etc/fonts/")
 ENV_NAME = r"[A-Z][A-Z0-9_]{0,63}"
-RESERVED_ENV = {"PATH", "HOME", "CARDEA_DEADLINE", "CARDEA_CREDENTIAL", "CARDEA_INPUTS", "NO_PROXY"}
+RESERVED_ENV = {
+    "PATH",
+    "HOME",
+    "CARDEA_DEADLINE",
+    "CARDEA_CREDENTIAL",
+    "CARDEA_CREDENTIALS",
+    "CARDEA_INPUTS",
+    "NO_PROXY",
+}
 CREDENTIAL = "/run/cardea/credential"
+# A profile's named credentials (ADR-037 amendment 2026-11-17): one file per name here.
+CREDENTIALS = "/run/cardea/credentials"
+CREDENTIAL_PATH = r"/etc/cardea/credentials/[a-z0-9-]{1,64}"
+CREDENTIAL_NAME = r"[a-z][a-z0-9-]{0,31}"
+MAX_CREDENTIALS = 8
 # The one loopback address a confined worker may reach (ADR-028): the kernel's per-attempt
 # tool endpoint and content-gate callback listen there, never on 127.0.0.1, so a worker
 # (and an agent's own commands in it) cannot reach the kernel API or any other service on
@@ -149,6 +162,7 @@ def validate_profile(entry: object) -> dict[str, Any]:
     optional = {
         "jit",
         "credential",
+        "credentials",
         "concurrency",
         "queue_timeout_seconds",
         "input_kb",
@@ -179,8 +193,24 @@ def validate_profile(entry: object) -> dict[str, Any]:
         raise ValueError("invalid_profile")
     credential = entry.get("credential")
     if credential is not None and (
-        not isinstance(credential, str)
-        or not re.fullmatch(r"/etc/cardea/credentials/[a-z0-9-]{1,64}", credential)
+        not isinstance(credential, str) or not re.fullmatch(CREDENTIAL_PATH, credential)
+    ):
+        raise ValueError("invalid_profile")
+    # Several named credentials instead of one, for a worker that acts as different
+    # identities for different callers; the worker chooses by the kernel-resolved caller.
+    named = entry.get("credentials")
+    if named is not None and (
+        credential is not None
+        or not isinstance(named, dict)
+        or not 1 <= len(named) <= MAX_CREDENTIALS
+        or not all(
+            isinstance(name, str)
+            and re.fullmatch(CREDENTIAL_NAME, name)
+            and isinstance(path, str)
+            and re.fullmatch(CREDENTIAL_PATH, path)
+            for name, path in named.items()
+        )
+        or len(set(named.values())) != len(named)
     ):
         raise ValueError("invalid_profile")
     network = entry["network"]
@@ -285,6 +315,8 @@ def installed_profiles() -> dict[str, Any]:
                 "concurrency": entry.get("concurrency", 1 if entry.get("jit") else None),
                 "queue_timeout_seconds": entry.get("queue_timeout_seconds", DEFAULT_QUEUE_TIMEOUT),
                 "credential": entry.get("credential") is not None,
+                # Names only, never paths.
+                "credentials": sorted(entry.get("credentials") or {}),
                 "input_kb": entry.get("input_kb", 0),
                 "sha256": digest(entry),
             }
@@ -340,11 +372,17 @@ def confined_command(
             environment[key] = url
         environment["NO_PROXY"] = environment["no_proxy"] = f"{ENDPOINT_ADDRESS},localhost"
     binds: list[str] = []
+    loads: list[str] = []
     if profile.get("credential"):
         # systemd reads the root-only file; only this unit's user sees its copy.
-        props["LoadCredential"] = f"cardea:{profile['credential']}"
+        loads.append(f"cardea:{profile['credential']}")
         binds += ["--ro-bind", f"/run/credentials/{unit}/cardea", CREDENTIAL]
         environment["CARDEA_CREDENTIAL"] = CREDENTIAL
+    if profile.get("credentials"):
+        # One LoadCredential per name; the unit's credential directory holds them all.
+        loads += [f"{name}:{path}" for name, path in sorted(profile["credentials"].items())]
+        binds += ["--ro-bind", f"/run/credentials/{unit}", CREDENTIALS]
+        environment["CARDEA_CREDENTIALS"] = CREDENTIALS
     if inputs:
         binds += ["--ro-bind", str(directory / "inputs"), INPUTS]
         environment["CARDEA_INPUTS"] = INPUTS
@@ -356,6 +394,7 @@ def confined_command(
         "--quiet",
         f"--unit={unit}",
         *[f"--property={k}={v}" for k, v in props.items()],
+        *[f"--property=LoadCredential={load}" for load in loads],
         "--",
         "/usr/bin/bwrap",
         "--unshare-user",
