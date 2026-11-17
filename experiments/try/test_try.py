@@ -2,13 +2,22 @@
 
 import base64
 import json
+import os
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from cardea.service.database import Fault
-from cardea.service.models import ServiceConfig
+from cardea.service.admin import initialize
+from cardea.service.database import Database, Fault
+from cardea.service.kernel import provision
+from cardea.service.models import Provisioning, ServiceConfig
 from devauth import DevAuthentication, issue
-from try_ import run
+from try_ import Trial, run
 
 
 def config(tmp_path: Path, **changes: object) -> ServiceConfig:
@@ -57,3 +66,64 @@ def test_tokens_are_bound_to_key_audience_domain_and_expiry(tmp_path: Path) -> N
             auth.validate(token)
     with pytest.raises(Fault):
         auth.validate(issue(settings, subject), kind="oidc")
+
+
+@pytest.fixture
+def short_store() -> Iterator[Path]:
+    """A store with a short path: it holds the daemon's Unix socket (104 bytes on macOS)."""
+    root = Path(tempfile.mkdtemp(prefix="cardea-", dir="/tmp"))
+    store = root / "store"
+    store.mkdir(mode=0o700)
+    try:
+        yield store
+    finally:
+        shutil.rmtree(root)
+
+
+def test_a_startup_error_after_launch_is_logged_before_the_exit(
+    tmp_path: Path, short_store: Path
+) -> None:
+    # serve() ends with os._exit once the runtime is up, which discards the exception. A
+    # TLS certificate that is not private used to stop the daemon with status 1 and no
+    # log line at all (found on the first Debian acceptance run).
+    initialize(short_store)
+    certificate, key = tmp_path / "server.pem", tmp_path / "server.key"
+    certificate.write_text("not parsed: its mode is refused first\n")
+    certificate.chmod(0o644)
+    key.write_text("x\n")
+    key.chmod(0o600)
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    network = {"host": "127.0.0.1", "port": port}
+    files = {"certificate_file": str(certificate), "key_file": str(key)}
+    settings = config(short_store, network=network | files)
+    database = Database(short_store)
+    try:  # the runtime identity only, so that the daemon gets past its own enrollment
+        runtime = Trial.spiffe("runtime", settings.runtime_spiffe_id)
+        provision(database, Provisioning(principals=(runtime,), permissions=(), platform=()))
+    finally:
+        database.close()
+    path = tmp_path / "config.json"
+    path.write_text(settings.model_dump_json(exclude_none=True))
+    path.chmod(0o600)
+    here = Path(__file__).resolve().parent
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("DBOS_", "OTEL_"))}
+    env["PYTHONPATH"] = os.pathsep.join([str(here.parents[1] / "apps/api/src"), str(here)])
+    done = subprocess.run(
+        [sys.executable, str(here / "daemon.py"), str(path)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert done.returncode == 1
+    stopped = [
+        json.loads(line)
+        for line in done.stderr.splitlines()
+        if line.startswith("{") and "service stopped" in line
+    ]
+    assert stopped, done.stderr[-2000:]
+    assert stopped[0].get("code") == "unsafe_file", stopped[0]
+    assert stopped[0]["level"] == "CRITICAL"
