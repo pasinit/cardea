@@ -9,6 +9,7 @@ its reconciler, which reads the host and never sends again:
 | `vcs.open_change` | the pull request for the head branch               |
 | `vcs.comment`     | a comment carrying the marker `cardea:<effect key>` |
 | `vcs.review`      | a review carrying the same marker                  |
+| `vcs.merge`       | the pull request is merged                         |
 
 `vcs.check_repository` is a read: it reports whether the repository's rules are what
 the agent team relies on, and enforces nothing.
@@ -18,6 +19,8 @@ Rules checked here, before any network call:
   by the kernel, from the descriptor's `resource`);
 - a pushed branch, and a pull request's head, start with the caller's group prefix;
 - `APPROVE` reviews are refused unless the host owner allows them;
+- `vcs.merge` needs the kernel's own receipts: the caller opened the pull request, and an
+  allowed pool approved its current head (ADR-037 amendment 2026-11-17);
 - the change and every text that leaves the host pass the kernel's content gate first
   (`OperationContext.check_content`, ADR-037 slice 6), which fails closed.
 """
@@ -33,7 +36,7 @@ from pydantic import JsonValue
 
 from cardea.service import repositories
 from cardea.service.operations import OperationContext, OperationRejected, Reconciliation
-from cardea_vcs_ops.config import Repository, VcsConfig
+from cardea_vcs_ops.config import Repository, VcsConfig, member_of
 from cardea_vcs_ops.credentials import (
     Credential,
     CredentialUnavailable,
@@ -122,18 +125,17 @@ class Vcs:
 
         A pool entry matches the kernel's member id, `<group>.<pool>.<ordinal>`, of a caller
         whose group the kernel resolved from its member table."""
+        return self.approver(context.agent_id, context.group)
+
+    def approver(self, agent_id: object, group: object) -> bool:
+        """Whether a principal of a group may approve: the caller, or the caller recorded in
+        an earlier `vcs.review` receipt."""
         allowed = self.config.allow_approve
         if isinstance(allowed, bool):
             return allowed
-        if context.group is None or context.agent_id is None:
+        if not isinstance(agent_id, str) or not isinstance(group, str):
             return False
-        for address in allowed:
-            group, pool = address.split(".")
-            if group == context.group and re.fullmatch(
-                rf"{re.escape(group)}\.{re.escape(pool)}\.[0-9]+", context.agent_id
-            ):
-                return True
-        return False
+        return any(member_of(agent_id, group, address) for address in allowed)
 
     def check_branch(self, branch: str, context: OperationContext, alias: object) -> None:
         """Agent branches live under the caller's group prefix (ADR-037 open question 3),
@@ -173,16 +175,23 @@ class Vcs:
         context.check_content(operation=operation, diff=diff, texts=texts)
 
     async def credential(
-        self, repository: Repository, permissions: tuple[Permission, ...]
+        self,
+        repository: Repository,
+        context: OperationContext,
+        permissions: tuple[Permission, ...],
     ) -> Credential:
+        """The caller's credential: a provider with several identities chooses by the
+        kernel-resolved caller, never by an argument."""
         try:
-            return await self.credentials.credential(repository, permissions)
+            return await self.credentials.credential(repository, permissions, context)
         except CredentialUnavailable as missing:
             # Nothing was sent: a definite refusal, not an uncertain effect.
             raise OperationRejected(str(missing), "credential_unavailable") from None
 
-    async def client(self, repository: Repository, *permissions: Permission) -> GitHub:
-        credential = await self.credential(repository, permissions)
+    async def client(
+        self, repository: Repository, context: OperationContext, *permissions: Permission
+    ) -> GitHub:
+        credential = await self.credential(repository, context, permissions)
         return GitHub(repository, credential, self.transport)
 
     # vcs.push_branch
@@ -196,7 +205,7 @@ class Vcs:
         bundle = context.inputs.get("/change")
         if bundle is None:
             raise OperationRejected("The change bundle was not staged", "change_invalid")
-        credential = await self.credential(repository, ("contents:write",))
+        credential = await self.credential(repository, context, ("contents:write",))
         done: dict[str, JsonValue] = {
             "repository": str(arguments["repository"]),
             "branch": branch,
@@ -234,7 +243,7 @@ class Vcs:
     ) -> Reconciliation:
         repository = self.repository(arguments["repository"])
         branch, head = str(arguments["branch"]), str(arguments["head"])
-        async with await self.client(repository, "contents:write") as host:
+        async with await self.client(repository, context, "contents:write") as host:
             current = await host.branch_head(branch)
         if current != head:
             return Reconciliation(applied=False)
@@ -264,7 +273,7 @@ class Vcs:
         self.check_branch(head, context, arguments["repository"])
         title, body = str(arguments["title"]), str(arguments.get("body") or "")
         self.gate(context, "vcs.open_change", texts={"title": title, "body": body})
-        async with await self.client(repository, "pull_requests:write") as host:
+        async with await self.client(repository, context, "pull_requests:write") as host:
             try:
                 pull = await host.create_pull(head, base, title, body, bool(arguments.get("draft")))
             except DuplicatePull:
@@ -283,7 +292,7 @@ class Vcs:
         self, arguments: dict[str, JsonValue], context: OperationContext
     ) -> Reconciliation:
         repository = self.repository(arguments["repository"])
-        async with await self.client(repository, "pull_requests:write") as host:
+        async with await self.client(repository, context, "pull_requests:write") as host:
             pull = await host.find_pull(str(arguments["head"]))
         if pull is None:
             return Reconciliation(applied=False)
@@ -297,7 +306,7 @@ class Vcs:
         repository = self.repository(arguments["repository"])
         body = str(arguments["body"])
         self.gate(context, "vcs.comment", texts={"comment": body})
-        async with await self.client(repository, "issues:write") as host:
+        async with await self.client(repository, context, "issues:write") as host:
             try:
                 made = await host.create_comment(
                     int(str(arguments["number"])), f"{body}\n\n{marker(context)}"
@@ -310,7 +319,7 @@ class Vcs:
         self, arguments: dict[str, JsonValue], context: OperationContext
     ) -> Reconciliation:
         repository = self.repository(arguments["repository"])
-        async with await self.client(repository, "issues:write") as host:
+        async with await self.client(repository, context, "issues:write") as host:
             comments = await host.comments(int(str(arguments["number"])))
         found = next((c for c in comments if marker(context) in str(c.get("body", ""))), None)
         if found is None:
@@ -335,7 +344,7 @@ class Vcs:
                 "APPROVE reviews are not allowed on this host", "approve_refused"
             )
         self.gate(context, "vcs.review", texts={"review": body})
-        async with await self.client(repository, "pull_requests:write") as host:
+        async with await self.client(repository, context, "pull_requests:write") as host:
             try:
                 made = await host.create_review(
                     int(str(arguments["number"])), event, f"{body}\n\n{marker(context)}"
@@ -346,13 +355,15 @@ class Vcs:
             "review_id": int(made["id"]),
             "state": str(made.get("state", "")),
             "url": str(made.get("html_url", "")),
+            # The head the review applies to: `vcs.merge` needs an approval of the head.
+            "commit_id": str(made.get("commit_id", "")),
         }
 
     async def find_review(
         self, arguments: dict[str, JsonValue], context: OperationContext
     ) -> Reconciliation:
         repository = self.repository(arguments["repository"])
-        async with await self.client(repository, "pull_requests:write") as host:
+        async with await self.client(repository, context, "pull_requests:write") as host:
             reviews = await host.reviews(int(str(arguments["number"])))
         found = next((r for r in reviews if marker(context) in str(r.get("body", ""))), None)
         if found is None:
@@ -361,6 +372,113 @@ class Vcs:
             "review_id": int(found["id"]),
             "state": str(found.get("state", "")),
             "url": str(found.get("html_url", "")),
+            "commit_id": str(found.get("commit_id", "")),
+        }
+        return Reconciliation(applied=True, output=output)
+
+    # vcs.merge
+
+    async def merge(
+        self, arguments: dict[str, JsonValue], context: OperationContext
+    ) -> dict[str, JsonValue]:
+        """Squash-merge a pull request the caller opened, once it is approved and green
+        (ADR-037 amendment 2026-11-17). Every condition is checked before the merge request;
+        a refusal sends nothing and is definite."""
+        repository = self.repository(arguments["repository"])
+        number = int(str(arguments["number"]))
+        if self.config.merge is None:
+            raise OperationRejected("Merging is not enabled on this host", "merge_not_configured")
+        # 1. The caller opened it: the kernel's first `vcs.open_change` receipt for it.
+        opened = context.evidence.get("opened") or ()
+        if not opened:
+            raise OperationRejected(
+                "No vcs.open_change receipt for this pull request", "merge_not_opened"
+            )
+        opener = opened[0]
+        if context.agent_id is None or opener.get("agent_id") != context.agent_id:
+            raise OperationRejected(
+                "Only the member that opened the pull request may merge it", "merge_not_opener"
+            )
+        # 2. Approved by an allowed pool, as the kernel recorded it.
+        approvals = [
+            a
+            for a in context.evidence.get("approvals") or ()
+            if self.approver(a.get("agent_id"), a.get("group"))
+        ]
+        async with await self.client(repository, context, "contents:write") as host:
+            try:
+                pull = await host.pull(number)
+                if pull.get("merged"):
+                    raise OperationRejected(
+                        "The pull request is already merged", "merge_already_merged"
+                    )
+                if pull.get("state") != "open" or pull.get("draft"):
+                    raise OperationRejected(
+                        "Only an open, ready pull request can merge", "merge_not_open"
+                    )
+                head = str(pull["head"]["sha"])
+                expected = arguments.get("head_sha")
+                if expected is not None and expected != head:
+                    raise OperationRejected(
+                        "The pull request's head moved since the caller read it",
+                        "merge_head_moved",
+                    )
+                at_head = [a for a in approvals if _field(a, "output/commit_id") == head]
+                if not at_head:
+                    raise OperationRejected(
+                        "An allowed reviewer approved an earlier head; a new approval is needed"
+                        if approvals
+                        else "No approval from an allowed reviewer",
+                        "merge_approval_stale" if approvals else "merge_not_approved",
+                    )
+                # 3. The host shows the reviewer's approval of this head.
+                reviews = await host.reviews(number)
+                if not _host_approved(reviews, self.config.merge.reviewer_login, head):
+                    raise OperationRejected(
+                        "The host shows no approval of the head by the configured reviewer",
+                        "merge_host_not_approved",
+                    )
+                # 4. Every check run on the head succeeded.
+                runs = await host.check_runs(head)
+                _check_runs(runs)
+                # 5. The host can merge it.
+                if pull.get("mergeable") is not True:
+                    raise OperationRejected(
+                        "The host does not report the pull request as mergeable"
+                        + (" yet" if pull.get("mergeable") is None else ""),
+                        "merge_not_mergeable",
+                    )
+                merged = await host.merge(number, head)
+            except HostRefused as refused:
+                if refused.status == 409:
+                    raise OperationRejected(
+                        "The head moved before the merge", "merge_head_moved"
+                    ) from None
+                raise OperationRejected(str(refused), "host_refused") from None
+        return {
+            "number": number,
+            "merged": True,
+            "sha": str(merged.get("sha", "")),
+            "head_sha": head,
+            "opened_receipt": str(opener.get("receipt_id")),
+            "approval_receipt": str(at_head[0].get("receipt_id")),
+        }
+
+    async def find_merge(
+        self, arguments: dict[str, JsonValue], context: OperationContext
+    ) -> Reconciliation:
+        """Applied when the host shows the pull request merged; never merges."""
+        repository = self.repository(arguments["repository"])
+        number = int(str(arguments["number"]))
+        async with await self.client(repository, context, "contents:write") as host:
+            pull = await host.pull(number)
+        if not pull.get("merged"):
+            return Reconciliation(applied=False)
+        output: dict[str, JsonValue] = {
+            "number": number,
+            "merged": True,
+            "sha": str(pull.get("merge_commit_sha") or ""),
+            "head_sha": str(pull["head"]["sha"]),
         }
         return Reconciliation(applied=True, output=output)
 
@@ -371,7 +489,7 @@ class Vcs:
     ) -> dict[str, JsonValue]:
         repository = self.repository(arguments["repository"])
         number = int(str(arguments["number"]))
-        async with await self.client(repository, "pull_requests:read") as host:
+        async with await self.client(repository, context, "pull_requests:read") as host:
             try:
                 pull = await host.pull(number)
                 reviews = await host.reviews(number)
@@ -407,13 +525,14 @@ class Vcs:
     async def check_repository(
         self, arguments: dict[str, JsonValue], context: OperationContext
     ) -> dict[str, JsonValue]:
-        """Whether the host's rules hold what the team relies on (ADR-037): a human review
-        on the default branch, and pushes only under the agent prefix. Reports only."""
+        """Whether the host's rules hold what the team relies on (ADR-037): on the default
+        branch one approving review, approval of the last push, no force push and no
+        deletion; pushes only under the agent prefix. Reports only."""
         repository = self.repository(arguments["repository"])
         prefix = self.branch_prefix(arguments["repository"])
         root = prefix.split("{group}", 1)[0] or "agent/"
         inside = prefix.format(group=context.group or "readiness") + PROBE
-        async with await self.client(repository, "metadata:read") as host:
+        async with await self.client(repository, context, "metadata:read") as host:
             try:
                 default = str((await host.metadata()).get("default_branch") or "main")
                 on_default = await host.branch_rules(default)
@@ -448,7 +567,45 @@ class Vcs:
             "vcs.find_review": self.find_review,
             "vcs.read_change": self.read_change,
             "vcs.check_repository": self.check_repository,
+            "vcs.merge": self.merge,
+            "vcs.find_merge": self.find_merge,
         }
+
+
+def _field(entry: Mapping[str, JsonValue], path: str) -> JsonValue:
+    fields = entry.get("fields")
+    return fields.get(path) if isinstance(fields, dict) else None
+
+
+def _host_approved(reviews: list[dict[str, Any]], login: str, head: str) -> bool:
+    """The reviewer's latest deciding review is an approval of exactly this head."""
+    deciding = [
+        r
+        for r in reviews
+        if (r.get("user") or {}).get("login") == login
+        and r.get("state") in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}
+    ]
+    return (
+        bool(deciding)
+        and deciding[-1]["state"] == "APPROVED"
+        and (deciding[-1].get("commit_id") == head)
+    )
+
+
+def _check_runs(runs: list[dict[str, Any]]) -> None:
+    """Every check run on the head completed with success, and there is at least one."""
+    if not runs:
+        raise OperationRejected("No check ran on the head", "merge_checks_missing")
+    pending = sorted(str(r.get("name")) for r in runs if r.get("status") != "completed")
+    if pending:
+        raise OperationRejected(
+            f"Checks still running: {', '.join(pending)[:200]}", "merge_checks_pending"
+        )
+    failed = sorted(str(r.get("name")) for r in runs if r.get("conclusion") != "success")
+    if failed:
+        raise OperationRejected(
+            f"Checks did not succeed: {', '.join(failed)[:200]}", "merge_checks_failed"
+        )
 
 
 def _rule(rules: list[dict[str, Any]], kind: str) -> dict[str, Any] | None:
@@ -497,11 +654,31 @@ def readiness(
             f"branches under {root}* may be created and updated by the agent team"
             + (f" (blocked by: {', '.join(open_inside)})" if open_inside else ""),
         ),
+        # Required since agents merge (ADR-037 amendment 2026-11-17): a push after the
+        # approval needs a new one, and the default branch keeps its history.
         check(
             "default_branch_last_push_approval",
-            False,
+            True,
             parameters.get("require_last_push_approval") is True,
             "the most recent push must be approved by someone other than its pusher",
+        ),
+        check(
+            "default_branch_no_force_push",
+            True,
+            _rule(on_default, "non_fast_forward") is not None,
+            f"{default} may not be force-pushed",
+        ),
+        check(
+            "default_branch_no_deletion",
+            True,
+            _rule(on_default, "deletion") is not None,
+            f"{default} may not be deleted",
+        ),
+        check(
+            "default_branch_accepts_merges",
+            False,
+            _rule(on_default, "update") is None,
+            f"an update rule on {default} also refuses vcs.merge unless the token may bypass it",
         ),
         check(
             "agent_prefix_no_force_push",

@@ -215,6 +215,8 @@ class EvidenceQuery(Record):
         default_factory=dict
     )
     fields: Annotated[tuple[EvidencePath, ...], Field(max_length=8)] = ()
+    # Which end of the history: the newest receipts, or the oldest (the first such call).
+    order: Literal["newest", "oldest"] = "newest"
 
 
 class Binding(Record):

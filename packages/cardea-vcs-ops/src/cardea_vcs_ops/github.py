@@ -177,3 +177,28 @@ class GitHub:
 
     async def reviews(self, number: int) -> list[dict[str, Any]]:
         return await self._list(f"/pulls/{number}/reviews")
+
+    # Checks and merging (vcs.merge)
+
+    async def check_runs(self, sha: str) -> list[dict[str, Any]]:
+        """Every check run on a commit, across pages."""
+        found: list[dict[str, Any]] = []
+        for page in range(1, MAX_PAGES + 1):
+            response = await self._request(
+                "GET",
+                f"/commits/{quote(sha)}/check-runs",
+                params={"per_page": PAGE, "page": page},
+            )
+            runs = response.json().get("check_runs", [])
+            found.extend(runs)
+            if len(runs) < PAGE:
+                break
+        return found
+
+    async def merge(self, number: int, sha: str) -> dict[str, Any]:
+        """Squash-merge, only if the head is still `sha` (the host answers 409 if not)."""
+        response = await self._request(
+            "PUT", f"/pulls/{number}/merge", json={"merge_method": "squash", "sha": sha}
+        )
+        result: dict[str, Any] = response.json()
+        return result

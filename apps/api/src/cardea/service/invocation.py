@@ -205,7 +205,9 @@ def _evidence(
         rows = conn.exec_driver_sql(
             "SELECT snapshot FROM operations WHERE "
             + " AND ".join(clauses)
-            + f" ORDER BY json_extract(snapshot,'$.updated_at') DESC LIMIT {MAX_EVIDENCE}",
+            + " ORDER BY json_extract(snapshot,'$.created_at') "
+            + ("ASC" if query.order == "oldest" else "DESC")
+            + f" LIMIT {MAX_EVIDENCE}",
             tuple(values),
         ).all()
         entries = []

@@ -212,6 +212,7 @@ def test_a_profile_may_load_several_named_credentials(
     reported = launcher.handle({"action": "profiles"})["profiles"]["vcs"]
     assert reported["credentials"] == ["github-author", "github-reviewer"]
     assert "/etc/cardea" not in json.dumps(reported)
+    bad: dict[str, Any]
     for bad in (
         {"credentials": {}},
         {"credentials": {"Bad": "/etc/cardea/credentials/x"}},
