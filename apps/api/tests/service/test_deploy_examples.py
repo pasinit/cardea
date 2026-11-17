@@ -52,6 +52,20 @@ def test_readme_requires_a_private_store_directory() -> None:
     assert "-m 0700 /var/lib/cardea" in readme and "unsafe_directory" in readme
 
 
+def test_isolated_workers_can_import_the_kernel_from_the_kit_venv() -> None:
+    # Every kit worker runs the kit venv's Python with -I, which ignores PYTHONPATH, so the
+    # kernel source must be on that venv's own path (found on the first Debian host run).
+    workers = json.loads((KIT / "cardea" / "cardea-host-workers.json").read_text())["workers"]
+    kit_python = "/opt/cardea/apps/api/.venv/bin/python"
+    isolated = [w for w in workers.values() if w["argv"][:2] == [kit_python, "-I"]]
+    assert isolated, "the kit's workers no longer use the kit venv; revisit the README step"
+    pyproject = (KIT.parents[1] / "apps" / "api" / "pyproject.toml").read_text()
+    assert "[build-system]" not in pyproject  # so `uv sync` does not install `cardea` itself
+    readme = (KIT / "README.md").read_text()
+    pth = "echo /opt/cardea/apps/api/src > /opt/cardea/apps/api/.venv/lib/python3.13/site-packages/"
+    assert pth in readme
+
+
 # Confined workers
 
 
