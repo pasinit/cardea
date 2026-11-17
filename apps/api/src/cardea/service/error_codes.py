@@ -127,7 +127,9 @@ def collect() -> tuple[dict[str, Entry], dict[str, Entry]]:
                 failures[code].add(module, _text(_argument(node, 2, "summary")))
             elif name == "KernelFailure" and (code := _code(_argument(node, 0, "code"))):
                 failures[code].add(module, _text(_argument(node, 1, "message")))
-            elif name == "OperationRejected" and (code := _code(_argument(node, 1, "code"))):
+            elif name in {"OperationRejected", "WorkerNotStarted"} and (
+                code := _code(_argument(node, 1, "code"))
+            ):
                 failures[code].add(module, _text(_argument(node, 0, "message")) or fallback)
     return dict(api), dict(failures)
 
