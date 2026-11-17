@@ -104,8 +104,23 @@ def adapt(
         "actor": actor,
         **({"subject": event.subject} if event.subject is not None else {}),
         **({"time": event.time} if event.time else {}),
+        **_record_extensions(kind, data),
     }
     return event, attributes
+
+
+def _record_extensions(kind: object, data: object) -> dict[str, str]:
+    """CloudEvents extension attributes of record events, so a trigger can filter on them
+    (amendment 2026-11-17): `recordstate`, the record's state after the change, and
+    `transition`, the transition that made it."""
+    if not str(kind).startswith("cardea.record.") or not isinstance(data, dict):
+        return {}
+    found: dict[str, str] = {}
+    if isinstance(data.get("state"), str):
+        found["recordstate"] = data["state"]
+    if isinstance(data.get("transition"), str):
+        found["transition"] = data["transition"]
+    return found
 
 
 def _record(
