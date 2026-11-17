@@ -353,13 +353,16 @@ def test_vcs_profile_and_workers_fit_the_vcs_operations() -> None:
     """The `vcs` profile (ADR-037): the repository host only, the gate callback, a staged
     change bundle, and one worker per operation that runs its handler, then reconciler."""
     import cardea_vcs_ops
-    from cardea_vcs_ops.config import PersonalAccessTokenConfig, VcsConfig
+    from cardea_vcs_ops.config import PersonalAccessTokensConfig, VcsConfig
 
     workers = json.loads((KIT / "cardea" / "cardea-host-workers.json").read_text())
     profile = workers["profiles"]["vcs"]
     assert profile["network"]["policy"] == "allow_list" and profile["kernel_callback"] is True
     assert profile["network"]["hosts"] == ["api.github.com", "github.com"]
-    assert profile["input_kb"] * 1024 >= 10 * 1048576 and "credential" in profile
+    assert profile["input_kb"] * 1024 >= 10 * 1048576 and "credential" not in profile
+    # Two identities (ADR-037 amendment 2026-11-17): the author bot and the reviewer.
+    assert sorted(profile["credentials"]) == ["github-author", "github-reviewer"]
+    launcher.validate_profile(profile)
     for descriptor in cardea_vcs_ops.descriptors():
         executor = descriptor.cardea.executor
         assert executor is not None and executor.profile == "vcs"
@@ -377,8 +380,13 @@ def test_vcs_profile_and_workers_fit_the_vcs_operations() -> None:
         assert registry in worker["read_only"]
     # The worker's configuration holds no secret: the token is the profile's credential.
     config = VcsConfig.model_validate_json((KIT / "cardea" / "cardea-vcs.json").read_text())
-    assert isinstance(config.credentials, PersonalAccessTokenConfig)
-    assert config.allow_approve is False  # the generic default: refused (question 2)
+    assert isinstance(config.credentials, PersonalAccessTokensConfig)
+    assert set(config.credentials.tokens) == set(profile["credentials"])
+    assert config.credentials.default == "github-author"
+    # The generic defaults: no APPROVE, nobody on the reviewer token, no merging; the
+    # README says how a host owner enables them for a reviewer pool.
+    assert config.allow_approve is False and config.credentials.pools == {}
+    assert config.merge is None
 
 
 def test_the_strict_cache_option_is_a_matching_set(monkeypatch: pytest.MonkeyPatch) -> None:

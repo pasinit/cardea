@@ -113,6 +113,10 @@ def run(handler: Any, document: dict[str, Any]) -> dict[str, Any]:
         slot_time=recorded.get("slot_time"),
         group=recorded.get("group"),
         inputs=inputs,
+        # Receipts the kernel found for the descriptor's evidence queries (ADR-037).
+        evidence={
+            str(name): tuple(entries) for name, entries in (recorded.get("evidence") or {}).items()
+        },
         # The kernel's content gate over its loopback callback (ADR-037); the gate's files
         # and binary never enter the sandbox.
         check_content=remote_check(recorded.get("content_gate")),

@@ -88,6 +88,22 @@ Decided by the lead for [ADR-037](037-coding-and-vcs-operations.md) (its questio
 - **Digests.** Descriptors without artifacts keep their digest.
 - **Tests.** `apps/api/tests/service/test_code_session.py`: a renewed lease keeps a long call alive; a refused renewal stops and fences it; only the live holder can renew; timeouts beyond the profile or the hard maximum are refused; artifacts are stored and read back by digest; an oversized artifact stores nothing and reconciles as not applied. Not run on Debian.
 
+## Amendment (2026-11-17): evidence from the kernel's own receipts
+
+Added for `vcs.merge` ([ADR-037, amendment 2026-11-17](037-coding-and-vcs-operations.md#amendment-2026-11-17-the-developer-merges)). A confined worker has no store, and a caller's own claims about earlier calls cannot be trusted. Some operations need facts that only the kernel's receipts hold: who opened a pull request, and who approved it at which commit.
+
+- **Descriptor field.** `evidence`: up to four queries, each with:
+  - `name`;
+  - `operation`;
+  - `match`: receipt paths `arguments/...` or `output/...`, each mapped to a pointer into this call's arguments;
+  - `equals`: receipt paths with literal values;
+  - `fields`: the receipt paths to return;
+  - `order`: `newest` (the default) or `oldest`.
+- **What the kernel finds.** At admission, in the transaction that records the intent, it looks up the successful receipts of `operation` in the caller's namespace whose recorded values match. It hands the handler at most 20 per query, in `OperationContext.evidence`, and a confined worker gets them in its job document. Each entry holds the receipt ID, the recorded caller (`agent_id` and `group`), the time and the requested fields. Nothing else about other calls is passed.
+- **Unforgeable.** Only the kernel writes receipts, and nothing in the call's arguments, beyond the matched values, takes part.
+- **Digests.** Descriptors without `evidence` keep their digest.
+- **Cost.** The lookup reads the receipt snapshots' JSON without an index. This is acceptable at a small host's volume, and an index is the first step if it is not.
+
 ## Revisit
 
 Revisit if:

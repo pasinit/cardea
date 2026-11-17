@@ -1,9 +1,9 @@
 """Repository-host operations for Cardea agent teams (ADR-037 slices 4 and 5).
 
-`vcs.push_branch`, `vcs.open_change`, `vcs.comment`, `vcs.review`, `vcs.read_change` and
-`vcs.check_repository`
-against a GitHub-compatible REST API. Each is an ADR-023 installed operation: an MCP tool
-descriptor in `descriptors/` plus a handler under the `cardea.operations` entry-point group.
+`vcs.push_branch`, `vcs.open_change`, `vcs.comment`, `vcs.review`, `vcs.merge`,
+`vcs.read_change` and `vcs.check_repository` against a GitHub-compatible REST API. Each
+is an ADR-023 installed operation: an MCP tool descriptor in `descriptors/` plus a
+handler under the `cardea.operations` entry-point group.
 
 The entry points use one process-wide `Vcs`, built on first use from the host-owner
 configuration file (`CARDEA_VCS_CONFIG`) and the repository registry
@@ -103,3 +103,11 @@ async def read_change(arguments: dict[str, JsonValue], ctx: OperationContext) ->
 
 async def check_repository(arguments: dict[str, JsonValue], ctx: OperationContext) -> JsonValue:
     return await _vcs().check_repository(arguments, ctx)
+
+
+async def merge(arguments: dict[str, JsonValue], ctx: OperationContext) -> JsonValue:
+    return await _vcs().merge(arguments, ctx)
+
+
+async def find_merge(arguments: dict[str, JsonValue], ctx: OperationContext) -> Reconciliation:
+    return await _vcs().find_merge(arguments, ctx)

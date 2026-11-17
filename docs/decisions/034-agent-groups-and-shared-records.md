@@ -390,7 +390,7 @@ spec:
 - **The review gate** is the `approve` and `request_changes` transitions. Only the principal pool is granted them, and the guard stops a holder from approving its own work.
 - **"Can block"** means that without `approve`, nothing reaches `done`.
 - **"Assigns to developers"** is the `triage` guard plus the `start` guard.
-- **A human-approved merge** would be an ADR-036 rule on `vcs.merge_change`. It needs no record configuration.
+- **A human-approved merge** would be an ADR-036 rule on `vcs.merge`. It needs no record configuration.
 
 ### B. Discretionary trading desk
 

@@ -52,6 +52,7 @@ OPERATIONS = (
     "vcs.review",
     "vcs.read_change",
     "vcs.check_repository",
+    "vcs.merge",
 )
 RUN_GRANTS = (*RIGHTS, "models.invoke", *OPERATIONS, "repo:cardea")
 STEPS = count()
@@ -402,6 +403,8 @@ def test_approve_reviews_are_refused_unless_allowed(
     kernel: Kernel, session: FakeSession, host: FakeGitHub, vcs: Vcs, tmp_path: Path
 ) -> None:
     opened = open_pull(kernel, session, tmp_path)
+    # Opened by another account: the host refuses an author's approval of its own change.
+    host.repositories["acme/cardea"].pulls[0]["user"] = {"login": "author[bot]"}
     approve = {
         "repository": "cardea",
         "number": opened,

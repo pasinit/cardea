@@ -90,7 +90,7 @@ errors answer 409. A request that fails schema validation answers
 | `intent_mismatch` | 409 | intent_digest does not match the stored intent | `cardea.service.approval_requests` |
 | `internal_error` | — | Operation failed; inspect state before retry | `cardea.service.app` |
 | `invalid_approve` | 403 | Only installed operations take approve rights | `cardea.service.kernel` |
-| `invalid_arguments` | 422 | Malformed gate request; The resource argument must name a resource; Input {…} must name an object version (and 3 more) | `cardea.service.content_gate`, `cardea.service.invocation`, `cardea.service.mailbox`, `cardea.service.operations` |
+| `invalid_arguments` | 422 | Malformed gate request; The resource argument must name a resource; Input {…} must name an object version (and 4 more) | `cardea.service.content_gate`, `cardea.service.invocation`, `cardea.service.mailbox`, `cardea.service.operations` |
 | `invalid_backup` | 400 | Use a standalone SQLite backup, not the active file; Wrong database application identity; Unsupported base schema (and 5 more) | `cardea.service.admin`, `cardea.service.maintenance` |
 | `invalid_checkpoint` | 409 | This store checkpoints only settled work. | `cardea.kernel.store` |
 | `invalid_credential` | 401 | Bound coordinator proof required; Bearer authentication is required; Credential has expired (and 2 more) | `cardea.runtime.a2a`, `cardea.service.app`, `cardea.service.auth` |
@@ -262,6 +262,19 @@ used by the examples.
 | `invalid_arguments` | Invalid decision; commit must be a full 40-hex object ID | `cardea.service.approval_requests`, `cardea_env_ops.try_` |
 | `isolation_failed` | untrusted steps not contained: {…} | `cardea_coding_ops.session` |
 | `member_draining` | A draining group member takes no new claims | `cardea.service.records` |
+| `merge_already_merged` | The pull request is already merged | `cardea_vcs_ops.ops` |
+| `merge_approval_stale` | An allowed reviewer approved an earlier head; a new approval is needed | `cardea_vcs_ops.ops` |
+| `merge_checks_failed` | Checks did not succeed: {…} | `cardea_vcs_ops.ops` |
+| `merge_checks_missing` | No check ran on the head | `cardea_vcs_ops.ops` |
+| `merge_checks_pending` | Checks still running: {…} | `cardea_vcs_ops.ops` |
+| `merge_head_moved` | The pull request's head moved since the caller read it; The head moved before the merge | `cardea_vcs_ops.ops` |
+| `merge_host_not_approved` | The host shows no approval of the head by the configured reviewer | `cardea_vcs_ops.ops` |
+| `merge_not_approved` | No approval from an allowed reviewer | `cardea_vcs_ops.ops` |
+| `merge_not_configured` | Merging is not enabled on this host | `cardea_vcs_ops.ops` |
+| `merge_not_mergeable` | The host does not report the pull request as mergeable | `cardea_vcs_ops.ops` |
+| `merge_not_open` | Only an open, ready pull request can merge | `cardea_vcs_ops.ops` |
+| `merge_not_opened` | No vcs.open_change receipt for this pull request | `cardea_vcs_ops.ops` |
+| `merge_not_opener` | Only the member that opened the pull request may merge it | `cardea_vcs_ops.ops` |
 | `operation_failed` | no result within {…} s; {…} (HTTP {…}) | `cardea.service.invocation` |
 | `operation_outcome_unknown` | Interrupted operation; no replay | `cardea.service.invocation` |
 | `operation_rejected` | — | `cardea.service.invocation` |

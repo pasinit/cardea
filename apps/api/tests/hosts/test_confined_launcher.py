@@ -181,6 +181,53 @@ def test_session_profile_gets_one_credential_and_the_tool_endpoint(
     assert env["NO_PROXY"] == "127.0.11.1,localhost"
 
 
+def test_a_profile_may_load_several_named_credentials(
+    configured: list[list[str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-037 amendment (2026-11-17): one LoadCredential per name, the unit's credential
+    directory bound read-only; the kernel learns the names, never the paths."""
+    named = {
+        **BROWSER,
+        "credentials": {
+            "github-author": "/etc/cardea/credentials/github-author",
+            "github-reviewer": "/etc/cardea/credentials/github-reviewer",
+        },
+    }
+    launcher.validate_profile(named)
+    config: dict[str, Any] = json.loads(json.dumps(CONFIG))
+    config["profiles"]["vcs"] = named
+    config["workers"]["fetch"]["profiles"] = ["vcs"]
+    monkeypatch.setattr(launcher, "worker_config", lambda: config)
+    job = "f" * 32
+    assert launcher.handle(start(job, "vcs", "fetch")) == {"started": True}
+    (command,) = configured
+    loads = [a for a in command if a.startswith("--property=LoadCredential=")]
+    assert loads == [
+        "--property=LoadCredential=github-author:/etc/cardea/credentials/github-author",
+        "--property=LoadCredential=github-reviewer:/etc/cardea/credentials/github-reviewer",
+    ]
+    source = f"/run/credentials/cardea-host-{job}.service"
+    assert command[command.index(source) + 1] == launcher.CREDENTIALS
+    env = environment(command)
+    assert env["CARDEA_CREDENTIALS"] == launcher.CREDENTIALS and "CARDEA_CREDENTIAL" not in env
+    reported = launcher.handle({"action": "profiles"})["profiles"]["vcs"]
+    assert reported["credentials"] == ["github-author", "github-reviewer"]
+    assert "/etc/cardea" not in json.dumps(reported)
+    bad: dict[str, Any]
+    for bad in (
+        {"credentials": {}},
+        {"credentials": {"Bad": "/etc/cardea/credentials/x"}},
+        {"credentials": {"a": "/tmp/x"}},
+        {"credentials": {"a": "/etc/cardea/credentials/x", "b": "/etc/cardea/credentials/x"}},
+        {
+            "credentials": {"a": "/etc/cardea/credentials/x"},
+            "credential": "/etc/cardea/credentials/y",
+        },
+    ):
+        with pytest.raises(ValueError):
+            launcher.validate_profile({**BROWSER, **bad})
+
+
 def test_none_profile_keeps_the_m2_network_denial(configured: list[list[str]]) -> None:
     launcher.handle(start("d" * 32, "small", "hash"))
     props = properties(configured[0])

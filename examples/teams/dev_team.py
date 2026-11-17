@@ -6,7 +6,9 @@ the kernel's real primitives and the real operation packages:
 - `cardea-coding-ops`: `code.session`, in its confined-worker shape, with a fake harness
   and fake gates, against a local bare repository;
 - `cardea-vcs-ops`: `vcs.*` in process (not in their `vcs` worker) against the
-  in-process fake GitHub, with the test-only token;
+  in-process fake GitHub, with two planted tokens: the developers' bot account, and the
+  owner's account for the principal engineers, who approve; the developer that opened a
+  pull request merges it (ADR-037 amendment 2026-11-17);
 - `cardea-email-ops`: `email.send` for the product manager, through the AgentMail
   adapter against the in-process fake AgentMail, with the host configuration in
   `dev-team/email.json` (placeholder addresses only) and its reply poller;
@@ -44,12 +46,17 @@ from cardea_email_ops.config import EmailConfig
 from cardea_email_ops.fake import FakeAgentMail
 from cardea_vcs_ops import Vcs
 from cardea_vcs_ops import in_process_descriptors as vcs_descriptors
-from cardea_vcs_ops.config import FixedTokenConfig, VcsConfig
+from cardea_vcs_ops.config import (
+    MergeConfig,
+    NamedToken,
+    PersonalAccessTokensConfig,
+    VcsConfig,
+)
+from cardea_vcs_ops.credentials import PersonalAccessTokens
 from cardea_vcs_ops.fake import FakeGitHub
 from fastapi.testclient import TestClient
 from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamable_http_client
-from pydantic import SecretStr
 
 import cardea
 from cardea.runtime.agent_session import SessionRequest, SessionResult
@@ -78,7 +85,10 @@ GROUP, NAMESPACE, SUPERVISOR = "dev-team", "dev", "sup-dev"
 LEAD = "dev-team.lead.0"
 # The secret a developer's change carries by mistake; the gate's denylist names it.
 PLANTED = "PLANTED-DEMO-SECRET-not-a-real-key"
-TOKEN = "fake-host-token-" + "rehearsal" * 2  # the fake host's test token; never real
+# The fake host's tokens, one per identity; planted, never real.
+AUTHOR = "fake-host-token-author-" + "rehearsal" * 2
+REVIEWER = "fake-host-token-reviewer-" + "rehearsal" * 2
+BOT, OWNER = "team-bot", "owner-account"
 MAIL_KEY = "fake-agentmail-key-" + "rehearsal" * 2  # the fake AgentMail's key; never real
 RUN_COST = 0.02  # what each scripted session reports spending
 Script = Callable[[ClientSession, SessionRequest], Awaitable[Any]]
@@ -285,7 +295,9 @@ def coding(directory: Path, host: FakeGitHub) -> tuple[Path, Path]:
 @contextmanager
 def world(directory: Path) -> Iterator[World]:
     setattr(kernel_module, "DBOSClient", NoQueue)  # noqa: B010
-    host = FakeGitHub(directory / "host")
+    # Every pull request is authored by the team's bot account, which the host does not
+    # let approve its own pull requests; the principal engineers act as the owner's account.
+    host = FakeGitHub(directory / "host", logins={AUTHOR: BOT, REVIEWER: OWNER})
     host.root.mkdir()
     host.add("acme", "app")
     repo_path = host.repositories["acme/app"].path
@@ -297,12 +309,28 @@ def world(directory: Path) -> Iterator[World]:
     git(seed, "commit", "-q", "-m", "Initial")
     git(seed, "push", "-q", str(repo_path), "main")
     coding_config, registry_file = coding(directory, host)
+    expiry = NamedToken(expires_on=(datetime.now(UTC) + timedelta(days=90)).date())
+    tokens = PersonalAccessTokensConfig(
+        kind="personal_access_tokens",
+        tokens={"github-author": expiry, "github-reviewer": expiry},
+        default="github-author",
+        # The principal engineers' calls use the reviewer token; everyone else the author's.
+        pools={f"{GROUP}.principal": "github-reviewer"},
+    )
+    secrets = directory / "credentials"
+    secrets.mkdir()
+    for name, token in (("github-author", AUTHOR), ("github-reviewer", REVIEWER)):
+        (secrets / name).write_text(token + "\n")
+        (secrets / name).chmod(0o600)
     vcs = Vcs(
         VcsConfig(
-            # APPROVE for the principal engineers only (ADR-037 question 2); no pool merges.
+            # APPROVE for the principal engineers only (ADR-037 question 2).
             allow_approve=(f"{GROUP}.principal",),
-            credentials=FixedTokenConfig(kind="test", token=SecretStr(TOKEN)),
+            credentials=tokens,
+            # A developer merges its own pull request once the owner's account approved it.
+            merge=MergeConfig(reviewer_login=OWNER),
         ),
+        PersonalAccessTokens(tokens, directory=secrets),
         transport=host.transport(),
         environ={"CARDEA_REPOSITORIES": str(registry_file)},
     )
@@ -565,12 +593,79 @@ def security_review(item: str, number: int, notes: dict[str, Any]) -> Script:
     return script
 
 
-def owner_merges(world: World, number: int) -> None:
-    """Outside the team: the owner merges the pull request on the host (simulated)."""
+def merge_own(number: int, notes: dict[str, Any], key: str) -> Script:
+    """A developer merges its pull request; when the merge is refused, it tells the lead."""
+
+    async def script(client: ClientSession, request: SessionRequest) -> Any:
+        merged = await call(client, "vcs-merge", repository="app", number=number)
+        notes[key] = merged
+        if "error" in merged:
+            return await tell_lead(client, f"merge-{key}", f"#{number} cannot merge yet.")
+        return merged
+
+    return script
+
+
+def approve_again(number: int, notes: dict[str, Any]) -> Script:
+    """The principal approves the pull request's new head, without moving the item."""
+
+    async def script(client: ClientSession, request: SessionRequest) -> Any:
+        notes["again"] = await call(
+            client,
+            "vcs-review",
+            repository="app",
+            number=number,
+            event="APPROVE",
+            body="The follow-up commit is fine too.",
+            client_key=f"again-{number}",
+        )
+        return notes["again"]
+
+    return script
+
+
+def principal_merges(number: int, notes: dict[str, Any]) -> Script:
+    async def script(client: ClientSession, request: SessionRequest) -> Any:
+        notes["merge"] = await call(client, "vcs-merge", repository="app", number=number)
+        return notes["merge"]
+
+    return script
+
+
+# Outside the team: the repository host's CI and a later push (simulated)
+
+
+def ci(world: World, number: int, outcome: str) -> str:
+    """The host's checks on the pull request's head: `success`, `failure` or `pending`."""
     repo = world.host.repositories["acme/app"]
-    pull = next(p for p in repo.pulls if p["number"] == number)
-    git(world.repo_path, "update-ref", "refs/heads/main", str(repo.head(pull["head"]["ref"])))
-    pull.update({"state": "closed", "merged": True})
+    pull = repo.pull(number)
+    assert pull is not None
+    head = str(pull["head"]["sha"])
+    repo.pass_checks(head, "lint", "test")
+    if outcome == "failure":
+        repo.checks[head][1]["conclusion"] = "failure"
+    elif outcome == "pending":
+        repo.checks[head][1].update(status="in_progress", conclusion=None)
+    return head
+
+
+def later_push(world: World, number: int, directory: Path) -> str:
+    """A follow-up commit lands on the pull request's branch after its approval."""
+    repo = world.host.repositories["acme/app"]
+    pull = repo.pull(number)
+    assert pull is not None
+    branch = str(pull["head"]["ref"])
+    work = directory / f"follow-up-{number}"
+    subprocess.run(["git", "clone", "-q", "-b", branch, str(repo.path), str(work)], check=True)
+    (work / "FOLLOW_UP").write_text("follow-up\n")
+    git(work, "add", "FOLLOW_UP")
+    git(work, "commit", "-q", "-m", "Follow-up")
+    git(work, "push", "-q", "origin", branch)
+    return str(repo.head(branch))
+
+
+def refused(notes: dict[str, Any], key: str, code: str) -> None:
+    assert code in str(notes[key].get("error", "")), (key, notes[key])
 
 
 # Checks at the end
@@ -697,8 +792,25 @@ def rehearse(world: World) -> dict[str, Any]:
     ]
     assert len(approvals) == 1, approvals
     print(f"  the principal read #{number}, approved it on the host and moved the item: {state}")
-    owner_merges(world, number)
-    print(f"  the owner merged #{number} on the host (outside the team)")
+    merging: dict[str, Any] = {}
+    ci(world, number, "pending")
+    run(world, f"{GROUP}.dev.0", merge_own(number, merging, "pending"))
+    refused(merging, "pending", "merge_checks_pending")
+    ci(world, number, "failure")
+    run(world, f"{GROUP}.dev.0", merge_own(number, merging, "red"))
+    refused(merging, "red", "merge_checks_failed")
+    print(f"  dev.0 could not merge #{number} while CI was pending, then red")
+    head = ci(world, number, "success")
+    run(world, f"{GROUP}.dev.1", merge_own(number, merging, "other"))
+    refused(merging, "other", "merge_not_opener")
+    print(f"  dev.1 could not merge #{number}: dev.0 opened it")
+    run(world, f"{GROUP}.principal.0", principal_merges(number, merging))
+    assert "error" in merging["merge"], merging
+    print(f"  the principal could not merge #{number}: its pool has no vcs.merge")
+    run(world, f"{GROUP}.dev.0", merge_own(number, merging, "green"))
+    assert merging["green"].get("merged") is True, merging["green"]
+    assert world.host.repositories["acme/app"].head("main") == head
+    print(f"  CI went green: dev.0 merged its approved #{number} on the host")
 
     blocked: dict[str, Any] = {}
     secret = {"client.py": f"API_TOKEN = '{PLANTED}'\n"}
@@ -733,6 +845,11 @@ def rehearse(world: World) -> dict[str, Any]:
     state, out = run(world, f"{GROUP}.dev.1", implement(third, {"limit.py": "LIMIT = 5\n"}, again))
     assert out["record"]["state"] == "in_review", out
     third_number = int(again["change"]["number"])
+    third_merge: dict[str, Any] = {}
+    ci(world, third_number, "success")
+    run(world, f"{GROUP}.dev.1", merge_own(third_number, third_merge, "unapproved"))
+    refused(third_merge, "unapproved", "merge_not_approved")
+    print(f"  dev.1 could not merge #{third_number} before any approval")
     security: dict[str, Any] = {}
     script = security_review(third, third_number, security)
     _, reviewed_by = run(world, f"{GROUP}.security.0", script)
@@ -742,7 +859,17 @@ def rehearse(world: World) -> dict[str, Any]:
     final: dict[str, Any] = {}
     _, out = run(world, f"{GROUP}.principal.0", review(third, third_number, final))
     print(f"  {third} went dev.1 -> security.0 review -> principal: {out['record']['state']}")
-    owner_merges(world, third_number)
+    later_push(world, third_number, world.repo_path.parent)
+    ci(world, third_number, "success")
+    run(world, f"{GROUP}.dev.1", merge_own(third_number, third_merge, "stale"))
+    refused(third_merge, "stale", "merge_approval_stale")
+    print(f"  a follow-up commit landed on #{third_number}: the approval was stale, no merge")
+    reapproved: dict[str, Any] = {}
+    run(world, f"{GROUP}.principal.0", approve_again(third_number, reapproved))
+    assert "review_id" in reapproved["again"], reapproved
+    run(world, f"{GROUP}.dev.1", merge_own(third_number, third_merge, "merged"))
+    assert third_merge["merged"].get("merged") is True, third_merge["merged"]
+    print(f"  the principal approved the new head and dev.1 merged #{third_number}")
     return {
         "first": item,
         "blocked": second,

@@ -65,14 +65,14 @@
         "grants": [
           "objects.read", "objects.write", "models.invoke",
           "record:work/read", "record:work/start", "record:work/submit",
-          "code.session", "vcs.push_branch", "vcs.open_change", "repo:app",
+          "code.session", "vcs.push_branch", "vcs.open_change", "vcs.merge", "repo:app",
           "mail:dev-team.lead.0", "mailbox.send", "mailbox.inbox"
         ],
         "run": {
-          "instructions": "Take ready work assigned to the developers, implement it with a coding session, push it, open a change and submit the item for review. If you are blocked, tell the team lead.",
+          "instructions": "Take ready work assigned to the developers, implement it with a coding session, push it, open a change and submit the item for review. If you are blocked, tell the team lead. Once the principal engineer approved your change and every check passed, merge it.",
           "operations": [
             "records.query", "records.transition",
-            "code.session", "vcs.push_branch", "vcs.open_change", "mailbox.send"
+            "code.session", "vcs.push_branch", "vcs.open_change", "vcs.merge", "mailbox.send"
           ],
           "context": [
             {"operation": "mailbox.inbox"},
@@ -83,6 +83,7 @@
             {
               "any_of": [
                 {"operation": "vcs.open_change"},
+                {"operation": "vcs.merge"},
                 {"operation": "mailbox.send", "match": {"/to/instance": "dev-team.lead.0"}}
               ]
             }

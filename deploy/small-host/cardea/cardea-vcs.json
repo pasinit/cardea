@@ -1,7 +1,16 @@
 {
   "allow_approve": false,
   "credentials": {
-    "kind": "personal_access_token",
-    "expires_on": "2027-02-01"
+    "kind": "personal_access_tokens",
+    "tokens": {
+      "github-author": {
+        "expires_on": "2027-02-01"
+      },
+      "github-reviewer": {
+        "expires_on": "2027-02-01"
+      }
+    },
+    "default": "github-author",
+    "pools": {}
   }
 }

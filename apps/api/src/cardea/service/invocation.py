@@ -19,6 +19,7 @@ from cardea.kernel.models import (
     MAX_DOCUMENT_BYTES,
     KernelFailure,
     ObjectVersion,
+    OperationReceipt,
     OperationRequest,
     OperationState,
     ResourceRef,
@@ -33,6 +34,7 @@ from cardea.service.confined import CallAbandoned, ExecutorBusy, WorkerFailed, W
 from cardea.service.database import Fault
 from cardea.service.models import now
 from cardea.service.operations import (
+    MAX_EVIDENCE,
     ContentRefused,
     OperationContext,
     OperationDescriptor,
@@ -171,6 +173,77 @@ def _stage_inputs(
     return staged
 
 
+def _json_path(path: str) -> str:
+    """A receipt snapshot's JSON path for an evidence path (keys are plain names)."""
+    head, *keys = path.split("/")
+    base = "$.request.arguments.arguments" if head == "arguments" else "$.result.output"
+    return base + "".join(f'."{key}"' for key in keys)
+
+
+def _evidence(
+    conn: sa.Connection,
+    namespace: str,
+    descriptor: OperationDescriptor,
+    arguments: dict[str, JsonValue],
+) -> dict[str, tuple[dict[str, JsonValue], ...]]:
+    """The receipts a call's declared evidence queries find (ADR-037 amendment)."""
+    found: dict[str, tuple[dict[str, JsonValue], ...]] = {}
+    for query in descriptor.cardea.evidence or ():
+        clauses = [
+            "state='succeeded'",
+            "json_extract(snapshot,'$.request.name')=?",
+            "json_extract(snapshot,'$.request.resource.namespace')=?",
+        ]
+        values: list[object] = [query.operation, namespace]
+        for path, pointer in query.match.items():
+            wanted = _argument(arguments, pointer)
+            if not isinstance(wanted, str | int | bool):
+                raise Fault(
+                    "invalid_arguments", f"Evidence argument {pointer} must be a scalar", 422
+                )
+            clauses.append(f"json_extract(snapshot,'{_json_path(path)}')=?")
+            values.append(wanted)
+        for path, expected in query.equals.items():
+            clauses.append(f"json_extract(snapshot,'{_json_path(path)}')=?")
+            values.append(expected)
+        rows = conn.exec_driver_sql(
+            "SELECT snapshot FROM operations WHERE "
+            + " AND ".join(clauses)
+            + " ORDER BY json_extract(snapshot,'$.created_at') "
+            + ("ASC" if query.order == "oldest" else "DESC")
+            + f" LIMIT {MAX_EVIDENCE}",
+            tuple(values),
+        ).all()
+        entries = []
+        for (snapshot,) in rows:
+            receipt = OperationReceipt.model_validate_json(snapshot)
+            recorded = receipt.request.arguments
+            context = recorded.get("context")
+            caller = context if isinstance(context, dict) else {}
+            document = {
+                "arguments": recorded.get("arguments"),
+                "output": (receipt.result or {}).get("output"),
+            }
+            fields: dict[str, JsonValue] = {}
+            for path in query.fields:
+                head, *keys = path.split("/")
+                value: JsonValue = document.get(head)
+                for key in keys:
+                    value = value.get(key) if isinstance(value, dict) else None
+                fields[path] = value
+            entries.append(
+                {
+                    "receipt_id": receipt.receipt_id,
+                    "agent_id": caller.get("agent_id"),
+                    "group": caller.get("group"),
+                    "at": receipt.updated_at.isoformat(),
+                    "fields": fields,
+                }
+            )
+        found[query.name] = tuple(entries)
+    return found
+
+
 @dataclass(frozen=True)
 class Admitted:
     context: OperationContext
@@ -216,6 +289,7 @@ def admit(
             raise Fault("invalid_arguments", "The resource argument must name a resource", 422)
         policy.ceiling(task.task_id, f"{resource.grant}:{value}")
     inputs = _stage_inputs(conn, tx, policy, task, namespace, descriptor, arguments)
+    evidence = _evidence(conn, namespace, descriptor, arguments)
     member = conn.exec_driver_sql(
         "SELECT group_name,pool FROM group_members WHERE principal_id=? AND namespace=?",
         (agent_id, namespace),
@@ -332,6 +406,7 @@ def admit(
         group=group,
         pool=pool,
         inputs=inputs,
+        evidence=evidence,
     )
     if prior is not None:
         tx.change_operation(

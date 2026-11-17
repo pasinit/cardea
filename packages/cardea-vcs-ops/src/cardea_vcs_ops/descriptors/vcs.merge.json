@@ -1,0 +1,55 @@
+{
+  "tool": {
+    "name": "vcs.merge",
+    "title": "Merge your pull request",
+    "description": "Squash-merge a pull request you opened, once an allowed reviewer approved its current head and every check passed. Refused, with nothing sent, otherwise. Needs repo:<alias>.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repository": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"},
+        "number": {"type": "integer", "minimum": 1},
+        "head_sha": {"type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"},
+        "record_id": {"type": "string", "minLength": 1, "maxLength": 128}
+      },
+      "required": ["repository", "number"]
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "number": {"type": "integer"},
+        "merged": {"type": "boolean"},
+        "sha": {"type": "string"},
+        "head_sha": {"type": "string"},
+        "opened_receipt": {"type": "string"},
+        "approval_receipt": {"type": "string"}
+      },
+      "required": ["number", "merged", "sha", "head_sha"]
+    }
+  },
+  "cardea": {
+    "version": 1,
+    "effect": "effect",
+    "executor": {"kind": "confined", "profile": "vcs", "worker": "vcs-merge"},
+    "timeout_seconds": 60,
+    "idempotency_scope": ["/repository", "/number"],
+    "reconciler": "vcs.find_merge",
+    "resource": {"grant": "repo", "argument": "/repository"},
+    "evidence": [
+      {
+        "name": "opened",
+        "operation": "vcs.open_change",
+        "match": {"arguments/repository": "/repository", "output/number": "/number"},
+        "fields": ["output/head"],
+        "order": "oldest"
+      },
+      {
+        "name": "approvals",
+        "operation": "vcs.review",
+        "match": {"arguments/repository": "/repository", "arguments/number": "/number"},
+        "equals": {"arguments/event": "APPROVE"},
+        "fields": ["output/commit_id"]
+      }
+    ]
+  }
+}

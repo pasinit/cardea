@@ -403,6 +403,11 @@ def job_document(
             "idempotency_context": context.idempotency_context,
             "slot_time": context.slot_time,
             "group": context.group,
+            **(
+                {"evidence": {k: list(v) for k, v in context.evidence.items()}}
+                if context.evidence
+                else {}
+            ),
         },
     }
 

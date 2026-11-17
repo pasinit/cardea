@@ -33,8 +33,27 @@ PoolAddress = Annotated[
 ]
 
 
+# A worker profile's named credential (ADR-028 amendment): a file in `$CARDEA_CREDENTIALS`.
+CredentialName = Annotated[str, Field(strict=True, pattern=r"^[a-z][a-z0-9-]{0,31}$")]
+
+
 class Record(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+def member_of(agent_id: str | None, group: str | None, address: str) -> bool:
+    """Whether a caller is a member of the pool `<group>.<pool>`.
+
+    `group` is the caller's group as the kernel resolved it from its member table, and
+    `agent_id` its principal; the kernel names pool members `<group>.<pool>.<ordinal>`.
+    Group and pool names hold no dots, so the match is exact. Nothing the caller sends
+    takes part."""
+    if agent_id is None or group is None:
+        return False
+    wanted_group, pool = address.split(".")
+    return wanted_group == group and bool(
+        re.fullmatch(rf"{re.escape(wanted_group)}\.{re.escape(pool)}\.[0-9]+", agent_id)
+    )
 
 
 class Repository(Record):
@@ -77,8 +96,54 @@ class PersonalAccessTokenConfig(Record):
     expires_on: date
 
 
+class NamedToken(Record):
+    # The expiry the owner set when creating the token; refused from that day on.
+    expires_on: date
+
+
+class PersonalAccessTokensConfig(Record):
+    """Several fine-grained personal access tokens, one per repository-host identity,
+    chosen by the caller (ADR-037 amendment 2026-11-17).
+
+    Each token is a named credential of the `vcs` profile (systemd `LoadCredential`), read
+    from `$CARDEA_CREDENTIALS/<name>` for each call; none is in this file. `pools` maps
+    `<group>.<pool>` to a token name, matched on the kernel-resolved member id as
+    `allow_approve` is; every other caller gets `default`. Only the caller's identity
+    selects a token: no argument can.
+    """
+
+    kind: Literal["personal_access_tokens"]
+    tokens: Annotated[dict[CredentialName, NamedToken], Field(min_length=1, max_length=8)]
+    default: CredentialName
+    pools: Annotated[dict[PoolAddress, CredentialName], Field(max_length=32)] = Field(
+        default_factory=dict
+    )
+
+    @model_validator(mode="after")
+    def names_exist(self) -> Self:
+        unknown = {self.default, *self.pools.values()} - set(self.tokens)
+        if unknown:
+            raise ValueError(f"credentials name unknown tokens: {sorted(unknown)}")
+        return self
+
+    def select(self, agent_id: str | None, group: str | None) -> str:
+        """The token name for a caller: its pool's, else the default."""
+        for address, name in self.pools.items():
+            if member_of(agent_id, group, address):
+                return name
+        return self.default
+
+
+class MergeConfig(Record):
+    """`vcs.merge` (ADR-037 amendment 2026-11-17). Without it, merging is refused."""
+
+    # The repository-host account whose approval at the head is required, besides the
+    # kernel's own `vcs.review` receipt: the identity the reviewer pool's token acts as.
+    reviewer_login: Name
+
+
 # Providers whose secret lives outside the configuration file, so the file may be shared.
-NoSecret = ProfileCredentialConfig | PersonalAccessTokenConfig
+NoSecret = ProfileCredentialConfig | PersonalAccessTokenConfig | PersonalAccessTokensConfig
 
 
 class VcsConfig(Record):
@@ -96,9 +161,13 @@ class VcsConfig(Record):
     # as in mail addresses, allows them only for members of those pools.
     allow_approve: bool | Annotated[tuple[PoolAddress, ...], Field(max_length=32)] = False
     credentials: Annotated[
-        FixedTokenConfig | ProfileCredentialConfig | PersonalAccessTokenConfig,
+        FixedTokenConfig
+        | ProfileCredentialConfig
+        | PersonalAccessTokenConfig
+        | PersonalAccessTokensConfig,
         Field(discriminator="kind"),
     ]
+    merge: MergeConfig | None = None
 
     @model_validator(mode="after")
     def prefix_names_the_group(self) -> Self:

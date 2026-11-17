@@ -20,13 +20,14 @@
       "properties": {
         "review_id": {"type": "integer"},
         "state": {"type": "string"},
-        "url": {"type": "string"}
+        "url": {"type": "string"},
+        "commit_id": {"type": "string"}
       },
       "required": ["review_id", "state", "url"]
     }
   },
   "cardea": {
-    "version": 1,
+    "version": 2,
     "effect": "effect",
     "executor": {"kind": "confined", "profile": "vcs", "worker": "vcs-review"},
     "timeout_seconds": 60,
