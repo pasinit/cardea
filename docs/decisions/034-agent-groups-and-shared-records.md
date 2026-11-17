@@ -249,7 +249,7 @@ transitions:
    - that `state ∈ from`;
    - the guard, under the CEL limits of decision 2.3. A failing guard (false or an evaluation error) **refuses the transition** with `guard_refused`;
    - the claim rule. `acquire` claims the record as in decision 2.4. `holder` requires the current holder and epoch. `release` requires them and then clears the claim.
-   - the evidence, when `requires_receipt` is set: the call must cite a receipt ID of a successful (or reconciled-applied) call of that operation, made by the caller's task, under an idempotency context that names this record.
+   - the evidence, when `requires_receipt` is set: the call must cite a receipt ID of a successful (or reconciled-applied) call of that operation, made by the caller's task, under an idempotency context that names this record. With `result`, the cited call's output must also satisfy a guard ([amendment, 2026-11-16](#amendment-2026-11-16-guards-over-the-cited-receipts-result)).
 
    It then writes the state and the history row and emits the event. There are no implicit transitions.
 2. **Approval gates are ADR-036 rules, not a second mechanism.** A transition's `approval` compiles into an ADR-036 per-grant rule on `records.transition`. Its condition is `args.collection == 'C' && args.transition == 't1'`, combined with the transition's own condition if it has one. The call then follows ADR-036 exactly:
@@ -506,6 +506,27 @@ Portable tests go in `apps/api/tests/service/`. Before the record is called veri
   - **Bounds.** Every list is bounded and says how many entries it left out (`truncated`).
   - **No new storage.** It needs no migration, no index and no new state.
 - **No page.** The kernel serves no static pages, and adding a web UI is out of scope. The walkthrough (`make teams`) prints the software team's overview at the end of its run.
+
+## Amendment (2026-11-16): guards over the cited receipt's result
+
+- **Requirement.** "Accept only after a passing run" must be enforced by the kernel, not left to the reviewer agent ([ADR-038](038-throwaway-test-environments.md), owner decision on question 3). Receipt evidence (decision 3) checks only that a successful call of the named operation exists. A call that ran and reported a failure is still a successful call.
+- **Decision.** `requires_receipt` gains an optional `result`: a CEL guard over the cited call's output, bound as `result`.
+
+  ```yaml
+  requires_receipt: {operation: env.try, in: same_task, result: "result.passed == true"}
+  ```
+
+  - **What it sees.** Only `result`, the output recorded in the cited receipt (or the reconciled output, for a reconciled-applied call). It cannot read the record, the transition's `args` or the caller; those remain the transition's own `guard`.
+  - **Limits.** It uses the same evaluator and limits as other guards (ADR-036): size, the allowed functions, and no comprehension macros. An operation whose result such a guard should check reports a summary field, as `env.try` reports `passed`.
+  - **It fails closed.** A false value, an evaluation error (a missing field, a type mismatch) or a receipt with no output refuses the transition with `receipt_result_refused`. Nothing changes.
+  - **Which receipt.** The same receipt the requirement already selects. With `same_task` and no `receipt_id`, that is the task's latest successful call for the record, so a later failing run cannot be passed over in favour of an earlier passing one.
+  - **Checked at apply.** A guard that does not compile, or that names any variable other than `result`, is refused when the collection is applied (`422`).
+  - **Compatibility.** The field is optional. A requirement without it is unchanged and keeps the collection's digest and generation, since the stored spec omits the absent field. No migration is needed.
+- **Tests** (`apps/api/tests/service/test_state_machines.py`):
+  - a failing cited result is refused with `receipt_result_refused`, and a passing one is accepted;
+  - a guard that cannot evaluate refuses;
+  - guards naming `record` or `args`, using a comprehension macro, or empty, are refused at apply;
+  - a requirement without `result` keeps its digest.
 
 ## Implementation plan (PR-sized slices, dependency order)
 

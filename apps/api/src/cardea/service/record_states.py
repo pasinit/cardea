@@ -26,6 +26,8 @@ from cardea.service.approvals import (
 from cardea.service.models import RECORD_ACTION, Record, record_grant
 
 GUARD_VARIABLES = frozenset({"record", "args", "caller"})
+# A receipt-result guard reads the cited call's output, and nothing else (ADR-038 Q3).
+RESULT_VARIABLES = frozenset({"result"})
 MAX_STATES = 64
 MAX_TRANSITIONS = 64
 # Actions of the built-in record operations; a transition cannot take one of their names.
@@ -44,6 +46,14 @@ def _guard(source: str) -> str:
 GuardSource = Annotated[str, Field(strict=True), AfterValidator(_guard)]
 
 
+def _result_guard(source: str) -> str:
+    compile_condition(source, RESULT_VARIABLES)
+    return source
+
+
+ResultGuardSource = Annotated[str, Field(strict=True), AfterValidator(_result_guard)]
+
+
 class _Aliased(Record):
     model_config = ConfigDict(
         extra="forbid", frozen=True, allow_inf_nan=False, populate_by_name=True
@@ -57,11 +67,18 @@ class ReceiptRequirement(_Aliased):
     of any task of the same agent principal within `window_seconds` before the transition.
     The cited call must name this record: its `record_id` argument, or an idempotency
     context `<record_id>.<epoch>`.
+
+    `result` (ADR-034 amendment, 2026-11-16) is a CEL guard over the cited call's output,
+    as `result`: for example `result.passed == true` accepts only a passing `env.try`
+    run. It has the record guards' limits (no comprehension macros), so an operation
+    that wants such a guard reports a summary field. False, an error, or a receipt with
+    no output refuses the transition (`receipt_result_refused`).
     """
 
     operation: OperationName
     within: Literal["same_task", "same_caller"] = Field("same_task", alias="in")
     window_seconds: Annotated[int, Field(strict=True, ge=60, le=30 * 24 * 3600)] | None = None
+    result: ResultGuardSource | None = None
 
     @model_validator(mode="after")
     def window(self) -> Self:

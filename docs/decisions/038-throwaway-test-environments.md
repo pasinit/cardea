@@ -1,7 +1,7 @@
 # ADR-038: Throwaway Test Environments for Agent Teams
 
 - **Date / owner / milestones:** 2026-11-16; kernel/host execution and runtime maintainers. Roadmap gap T9. Builds on ADR-012 and ADR-028 (host confinement and worker profiles), ADR-023 (installed operations), ADR-026 (receipts, scopes and reconciliation), ADR-029 (run evidence), ADR-031 (context operations), ADR-034 (records, state machines and receipt evidence), ADR-030 (the small-host profile) and [ADR-037](037-coding-and-vcs-operations.md) (coding and version-control operations, proposed in parallel), whose repository aliases this record reuses.
-- **Status:** proposed, 2026-11-16. Nothing is selected, implemented or verified. No fit test below has run. The open questions at the end are for the project owner.
+- **Status:** accepted, 2026-11-16. The owner answered every open question as recommended (see [Decisions](#decisions-owner-2026-11-16)). The process tier is selected as the default. Nothing is implemented in this record's text yet beyond the ADR-034 receipt-result guard; implementation status is recorded below as it lands. Nothing is verified on Debian, and no fit test below has run.
 - **Requirement:** an agent team, typically a developer, a reviewer and a product-manager agent, needs evidence that a given commit actually works before it is accepted. Evidence from reading the diff is not enough. One installed operation, `env.try`:
   1. builds or installs a given commit of a given repository into a throwaway, confined instance;
   2. runs named scenarios against it, such as the repository's `make try`, getting-started use cases, end-to-end checks and `make teams`;
@@ -127,7 +127,7 @@ Grants: the operation name, as any installed operation, plus `objects.write` for
 - **Result**, bounded to the 64 KiB receipt document (ADR-029):
 
   ```json
-  {"repo": "cardea", "commit": "...", "environment_sha256": "...", "cached": false,
+  {"repo": "cardea", "commit": "...", "environment_sha256": "...", "cached": false, "passed": true,
    "scenarios": [{"name": "try", "outcome": "pass", "exit_code": 0, "duration_ms": 41210,
                   "log_tail": "...", "log_truncated": false,
                   "artifacts": [{"resource_id": "...", "version": 1, "sha256": "...", "bytes": 1834}]}],
@@ -193,7 +193,18 @@ None. This record is proposed; no fit test or acceptance test has run, and nothi
 - Builds need network beyond package indexes: reconsider per scenario, never by giving the profile `public_web`.
 - A forge's CI becomes the team's source of truth: wrap it as an operation instead of duplicating it.
 
-## Open questions for the owner
+## Decisions (owner, 2026-11-16)
+
+The owner answered every question as recommended.
+
+1. **Default tier: the process tier.** `env.try` is available on every supported host, in the ADR-028 systemd + bubblewrap composition. The `init` tier stays a later option after its fit test, and a scenario that needs it is refused where it is missing (`env_tier_unavailable`).
+2. **Repository grants: `repo:<alias>`.** `env.try` declares the resource grant `{grant: repo, argument: /repo}` and reads its repositories from the shared host repository registry (`CARDEA_REPOSITORIES`, ADR-037), as `code.session` and `vcs.*` do.
+3. **The kernel enforces the guard.** ADR-034's receipt evidence gains a guard over the cited receipt's result ([ADR-034 amendment](034-agent-groups-and-shared-records.md#amendment-2026-11-16-guards-over-the-cited-receipts-result)). A transition such as `accept` declares `requires_receipt: {operation: env.try, in: same_task, result: "result.passed == true"}`, and is refused unless it cites a passing `env.try` receipt. `env.try` therefore reports a top-level `passed`.
+4. **Window and reruns.** The result window defaults to 24 hours. `rerun: true` is limited to 3 forced reruns per commit per day, counted per namespace, repository and commit over the preceding 24 hours; a fourth is refused with `env_rerun_limit`.
+5. **A run table, migration m18.** The run key, state and receipt live in a small dedicated table (item 4). ADR-026 is not amended.
+6. **Toolchain images.** The host owner builds and pins the toolchain root image with a make target, refreshed weekly. The image digest is part of the environment digest, and so of the run key: a refreshed image is a different run.
+
+## Open questions for the owner (answered 2026-11-16)
 
 1. **Default tier.** Is the process tier acceptable as the default for agent-written commits, given the shared kernel? Or should `env.try` stay unavailable on hosts without an init or microVM tier?
 2. **Repository grants.** Should `env.try` follow ADR-037's answer on `repo:<alias>` grants, or is the operation grant plus the host catalog enough for an operation that changes nothing outside its box?
