@@ -286,7 +286,11 @@ def world(directory: Path) -> Iterator[World]:
     git(seed, "push", "-q", str(repo_path), "main")
     coding_config, registry_file = coding(directory, host)
     vcs = Vcs(
-        VcsConfig(credentials=FixedTokenConfig(kind="test", token=SecretStr(TOKEN))),
+        VcsConfig(
+            # APPROVE for the principal engineers only (ADR-037 question 2); no pool merges.
+            allow_approve=(f"{GROUP}.principal",),
+            credentials=FixedTokenConfig(kind="test", token=SecretStr(TOKEN)),
+        ),
         transport=host.transport(),
         environ={"CARDEA_REPOSITORIES": str(registry_file)},
     )
@@ -463,25 +467,18 @@ def implement(item: str, files: dict[str, str], notes: dict[str, Any]) -> Script
 
 
 def review(item: str, number: int, notes: dict[str, Any], *, approve: bool = True) -> Script:
-    """The principal engineer reads the change, reviews it and moves the item."""
+    """The principal engineer reads the change, approves it on the host and moves the item.
+    The host allows `APPROVE` for the principal pool only (ADR-037 question 2); the owner
+    still merges."""
 
     async def script(client: ClientSession, request: SessionRequest) -> Any:
         notes["read"] = await call(client, "vcs-read_change", repository="app", number=number)
-        notes["approve_review"] = await call(
-            client,
-            "vcs-review",
-            repository="app",
-            number=number,
-            event="APPROVE",
-            body="Looks good.",
-            client_key=f"approve-{item}",
-        )
         notes["review"] = await call(
             client,
             "vcs-review",
             repository="app",
             number=number,
-            event="COMMENT",
+            event="APPROVE" if approve else "REQUEST_CHANGES",
             body="Reviewed: the change does what the item asks.",
             client_key=f"review-{item}",
         )
@@ -494,6 +491,16 @@ def security_review(item: str, number: int, notes: dict[str, Any]) -> Script:
     async def script(client: ClientSession, request: SessionRequest) -> Any:
         notes["security_read"] = await call(
             client, "vcs-read_change", repository="app", number=number
+        )
+        # The security pool holds `vcs.review` but is not allowed to approve.
+        notes["approve_attempt"] = await call(
+            client,
+            "vcs-review",
+            repository="app",
+            number=number,
+            event="APPROVE",
+            body="Security approves.",
+            client_key=f"security-approve-{item}",
         )
         return await call(
             client,
@@ -616,9 +623,13 @@ def rehearse(world: World) -> dict[str, Any]:
 
     reviewed: dict[str, Any] = {}
     _, out = run(world, f"{GROUP}.principal.0", review(item, number, reviewed))
-    assert "approve_refused" in reviewed["approve_review"]["error"]
+    assert "review_id" in reviewed["review"], reviewed
     state = out["record"]["state"]
-    print(f"  the principal read #{number}, was refused APPROVE, commented and approved: {state}")
+    approvals = [
+        r for r in world.host.repositories["acme/app"].reviews[number] if r["state"] == "APPROVED"
+    ]
+    assert len(approvals) == 1, approvals
+    print(f"  the principal read #{number}, approved it on the host and moved the item: {state}")
     owner_merges(world, number)
     print(f"  the owner merged #{number} on the host (outside the team)")
 
@@ -659,6 +670,8 @@ def rehearse(world: World) -> dict[str, Any]:
     script = security_review(third, third_number, security)
     _, reviewed_by = run(world, f"{GROUP}.security.0", script)
     assert "review_id" in reviewed_by, reviewed_by
+    assert "approve_refused" in security["approve_attempt"]["error"], security
+    print("  security.0 was refused APPROVE (only the principal pool may approve) and commented")
     final: dict[str, Any] = {}
     _, out = run(world, f"{GROUP}.principal.0", review(third, third_number, final))
     print(f"  {third} went dev.1 -> security.0 review -> principal: {out['record']['state']}")
