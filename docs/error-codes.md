@@ -242,7 +242,6 @@ used by the examples.
 | `effect_not_applied` | Destination shows no effect | `cardea.service.operation_runtime` |
 | `env_commit_unknown` | the commit is not in the repository; the checkout is not the named commit | `cardea_env_ops.try_` |
 | `env_invalid` | the scenario environment may not set {…} | `cardea_env_ops.try_` |
-| `env_isolation_failed` | Scenario isolation failed: {…} | `cardea_env_ops.isolation` |
 | `env_scenario_unknown` | Unknown scenarios: {…} | `cardea_env_ops.try_` |
 | `env_source_unavailable` | the repository source could not be read | `cardea_env_ops.try_` |
 | `env_tier_unavailable` | Scenario {…} needs the {…} tier, which this host does not offer | `cardea_env_ops.try_` |
@@ -250,6 +249,7 @@ used by the examples.
 | `env_unavailable` | env.try is not configured for this repository | `cardea_env_ops.try_` |
 | `executor_busy` | — | `cardea.service.invocation` |
 | `expectation_exceeded` | — | `cardea.service.agent_run_runtime` |
+| `gate_changed_checkout` | a gate changed the checkout ({…}); gates may check the change, not alter it | `cardea_coding_ops.session` |
 | `guard_refused` | {…} guard failed to evaluate: {…}; {…} guard refused this call | `cardea.service.records` |
 | `host_outcome_unknown` | Interrupted host intent; no replay | `cardea.service.host_runtime` |
 | `host_refused` | The host reports a duplicate it does not list | `cardea_vcs_ops.ops` |
@@ -257,6 +257,7 @@ used by the examples.
 | `input_too_large` | The call's inputs exceed what a worker may take | `cardea.service.confined` |
 | `input_unavailable` | The job's inputs were not staged; A staged input is missing | `cardea.hosts.operation_worker` |
 | `invalid_arguments` | Invalid decision; commit must be a full 40-hex object ID | `cardea.service.approval_requests`, `cardea_env_ops.try_` |
+| `isolation_failed` | untrusted steps not contained: {…} | `cardea_coding_ops.session` |
 | `member_draining` | A draining group member takes no new claims | `cardea.service.records` |
 | `operation_failed` | no result within {…} s; {…} (HTTP {…}) | `cardea.service.invocation` |
 | `operation_outcome_unknown` | Interrupted operation; no replay | `cardea.service.invocation` |

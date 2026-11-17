@@ -17,7 +17,8 @@ One call, nothing kept afterwards:
    dropped and counted.
 4. **Isolation.** The worker is non-dumpable and a child subreaper, each scenario runs in
    its own session, and every process it started is killed before the next scenario and
-   before the report (`isolation`), so the commit cannot forge or disturb the result.
+   before the report (`cardea.hosts.isolation`, shared with `code.session`), so the commit
+   cannot forge or disturb the result.
 5. **Tear down.** The scratch is deleted here; the root helper removes the unit and its
    staging whatever happens (ADR-028).
 
@@ -40,11 +41,13 @@ from typing import Any
 
 from pydantic import JsonValue
 
+from cardea.hosts import isolation
 from cardea.service import repositories
 from cardea.service.operations import OperationContext, OperationRejected, WithArtifacts
-from cardea_env_ops import isolation
 
 TIER = "process"
+# The refusal when a scenario's processes cannot be contained.
+CODE = "env_isolation_failed"
 MAX_TAIL = 4096
 MAX_ARTIFACT = 256 * 1024
 MAX_ARTIFACTS_TOTAL = 1024 * 1024
@@ -127,54 +130,28 @@ def stage(source: str, commit: str, scratch: Path) -> Path:
     return checkout
 
 
-def _run(
-    argv: tuple[str, ...], cwd: Path, env: dict[str, str], timeout: float, log_path: Path
-) -> dict[str, Any]:
-    """One scenario in its own session; afterwards nothing it started is left running.
-
-    Its output goes to a file, not a pipe, so a process it leaves behind holding the output
-    open cannot hold the scenario open; the scenario ends when its own process does.
-    """
-    started = time.monotonic()
-    group: int | None = None
-    stray = 0
+def _run(argv: tuple[str, ...], cwd: Path, env: dict[str, str], timeout: float) -> dict[str, Any]:
+    """One scenario in its own session, through the shared isolation helper: afterwards
+    nothing it started is left running (or the call fails with `env_isolation_failed`)."""
     try:
-        with log_path.open("wb") as log:
-            process = subprocess.Popen(
-                list(argv),
-                cwd=cwd,
-                env=env,
-                stdin=subprocess.DEVNULL,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                close_fds=True,
-                start_new_session=True,
-            )
-        group = process.pid
-        try:
-            code: int | None = process.wait(timeout=timeout)
-            outcome = "pass" if code == 0 else "fail"
-        except subprocess.TimeoutExpired:
-            stray += isolation.clear(group)
-            process.wait()
-            code, outcome = None, "timeout"
-    except OSError as error:
-        log_path.write_bytes(f"could not start: {type(error).__name__}".encode())
-        code, outcome = None, "error"
-    stray += isolation.clear(group)
-    size = log_path.stat().st_size
-    with log_path.open("rb") as stream:
-        stream.seek(max(0, size - 4 * MAX_TAIL))
-        text = stream.read().decode(errors="replace")
-    log_path.unlink()
+        step = isolation.run_step(list(argv), cwd, env, timeout, code=CODE)
+    except isolation.IsolationFailed as failed:
+        raise OperationRejected(str(failed), failed.code) from None
+    if step.timed_out:
+        outcome = "timeout"
+    elif step.returncode is None:
+        outcome = "error"  # it could not start
+    else:
+        outcome = "pass" if step.returncode == 0 else "fail"
+    text = step.stdout + step.stderr
     return {
         "outcome": outcome,
-        "exit_code": code,
-        "duration_ms": int((time.monotonic() - started) * 1000),
+        "exit_code": step.returncode,
+        "duration_ms": step.duration_ms,
         "log_tail": scrub(text[-MAX_TAIL:]),
-        "log_truncated": size > MAX_TAIL,
-        "stray_processes_killed": stray,
-        "dropped_log_bytes": max(0, size - MAX_TAIL),
+        "log_truncated": len(text) > MAX_TAIL,
+        "stray_processes_killed": step.killed,
+        "dropped_log_bytes": max(0, len(text.encode()) - MAX_TAIL),
     }
 
 
@@ -246,12 +223,15 @@ def try_commit(
             results.append({"name": name, "outcome": "not_run", "exit_code": None})
             continue
         limit = min(float(scenario.timeout_seconds), remaining)
-        ran = _run(scenario.argv, checkout, env, limit, scratch / f"{name}.log")
+        ran = _run(scenario.argv, checkout, env, limit)
         dropped["log_bytes"] += int(ran.pop("dropped_log_bytes"))
         ran["artifacts"] = collect(checkout, scenario.artifacts, kept, dropped)
         results.append({"name": name, **ran})
     # Nothing the commit started may outlive its scenarios into the report.
-    isolation.clear()
+    try:
+        isolation.clear(code=CODE)
+    except isolation.IsolationFailed as failed:
+        raise OperationRejected(str(failed), failed.code) from None
     passed = all(isinstance(r, dict) and r.get("outcome") == "pass" for r in results)
     output: dict[str, JsonValue] = {
         "repo": alias,
@@ -271,7 +251,10 @@ def try_commit(
 async def run(arguments: dict[str, JsonValue], context: OperationContext) -> Any:
     """The confined worker's entry point (`env.try`)."""
     # Before anything is staged: the commit's code must not reach this process.
-    mode = isolation.harden()
+    try:
+        mode = isolation.harden(code=CODE)
+    except isolation.IsolationFailed as failed:
+        raise OperationRejected(str(failed), failed.code) from None
     scratch = Path(tempfile.mkdtemp(prefix="env-try-"))
     try:
         return try_commit(arguments, context, scratch, mode)
