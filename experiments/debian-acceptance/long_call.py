@@ -47,7 +47,7 @@ from typing import Any
 
 # `python -I` leaves the script's own directory off the path; the shared modules are there.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from coding_fixture import FIXTURE, merged_registry  # noqa: E402
+from coding_fixture import FIXTURE, WORKERS, harness_config, merged_registry  # noqa: E402
 from common import (  # noqa: E402
     HERE,
     Evidence,
@@ -103,12 +103,11 @@ def repositories(source: str) -> dict[str, Any]:
     }
 
 
-def coding_config(source: str) -> dict[str, Any]:
+def coding_config(source: str, workers: Path = WORKERS) -> dict[str, Any]:
     """The `code.session` configuration `long_call.sh` installs for this test; its
-    repositories are in `repositories(source)`."""
-    return {
-        "harness": {"argv": ["/usr/bin/python3", "-I", "-c", HARNESS], "timeout_seconds": 3500},
-    }
+    repositories are in `repositories(source)`. `dependencies` follows the installed
+    `coding` profile (`coding_fixture.harness_config`)."""
+    return harness_config(HARNESS, workers=workers)
 
 
 class Auth:

@@ -18,6 +18,15 @@ from typing import Any
 from common import DOMAIN, HERE, REFERENCE_OPS, TRY, Processes, wait_for
 
 TERMINAL = {"succeeded", "failed", "cancelled"}
+# Reading a task (GET /tasks/{id}, its receipt and output) is checked against the task's own
+# grants, like every other right: a supervisor can inspect only a task granted
+# `tasks.inspect`. The scripts read every task they start, so each one carries it.
+INSPECT = "tasks.inspect"
+
+
+def inspectable(grants: list[str]) -> list[str]:
+    """`grants` with `tasks.inspect`, once."""
+    return [*grants, INSPECT] if INSPECT not in grants else list(grants)
 
 
 def spiffe(name: str) -> str:
@@ -67,11 +76,14 @@ class Stack:
     def registry(self) -> Any:
         from cardea.service.operations import Registry
 
+        # Provisioning needs the descriptors only, as `cardea provision` loads them: no
+        # handlers (`None`). An empty mapping would mean "these handlers, and no others",
+        # which every reference entry point fails (operation_handler_missing).
         if self.reference_ops:
             from cardea_reference_ops import descriptors
 
-            return Registry(descriptors(), {})
-        return Registry((), {})
+            return Registry(descriptors(), None)
+        return Registry((), None)
 
     def provision(self, document: dict[str, Any]) -> None:
         """What `cardea provision` does, before the daemon starts or while it runs."""
@@ -128,7 +140,9 @@ class Stack:
     def token(self, principal: str) -> str:
         from devauth import issue
 
-        return str(issue(self.config, spiffe(principal)))
+        # The development identity refuses a configuration with an `oidc` block; it signs
+        # SPIFFE tokens only. The launcher hands it the same copy (launcher.py).
+        return str(issue(self.config.model_copy(update={"oidc": None}), spiffe(principal)))
 
     def request(
         self,
@@ -178,7 +192,7 @@ class Stack:
             "objective": f"Acceptance: {operation}",
             "operation": operation,
             "arguments": arguments,
-            "grants": ["objects.read", "objects.write", *grants],
+            "grants": inspectable(["objects.read", "objects.write", *grants]),
         }
         view = self.request(supervisor, "POST", "/operation-tasks", json=body)
         return str(view["task"]["task_id"])
@@ -194,6 +208,7 @@ class Stack:
             "attempt_timeout_seconds": 120,
             **fields,
         }
+        body["grants"] = inspectable(list(body.get("grants", [])))
         return str(self.request(supervisor, "POST", "/agent-runs", json=body)["task"]["task_id"])
 
     def task(self, principal: str, task_id: str) -> dict[str, Any]:

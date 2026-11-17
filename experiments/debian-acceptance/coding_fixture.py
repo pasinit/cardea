@@ -14,6 +14,8 @@ from typing import Any
 FIXTURE = "/opt/cardea-code/repos/acceptance.git"
 GATES_DIR = "/opt/cardea-code/acceptance-gates"
 PYTHON = "/usr/bin/python3"
+PROFILE = "coding"
+WORKERS = Path("/etc/cardea-host-workers.json")
 # A harness that writes the files the task names: `{"write": {path: content}}`.
 WRITE_HARNESS = (
     "import json, os, pathlib\n"
@@ -26,10 +28,25 @@ WRITE_HARNESS = (
 )
 
 
-def harness_config(code: str, timeout: int = 3500) -> dict[str, Any]:
-    """The coding file the wrapper installs: the harness only (repositories are in the
-    registry)."""
-    return {"harness": {"argv": [PYTHON, "-I", "-c", code], "timeout_seconds": timeout}}
+def harness_config(code: str, timeout: int = 3500, workers: Path = WORKERS) -> dict[str, Any]:
+    """The coding file the wrapper installs: the harness (repositories are in the registry),
+    and `dependencies` as the installed `coding` profile requires (ADR-037 question 8):
+    `registries` when its network lists any, else `cache`. Any other setting is refused at
+    every call with `dependencies_mismatch` before the harness starts."""
+    return {
+        "harness": {"argv": [PYTHON, "-I", "-c", code], "timeout_seconds": timeout},
+        "dependencies": "registries" if profile_registries(workers) else "cache",
+    }
+
+
+def profile_registries(workers: Path = WORKERS) -> list[str]:
+    """The installed `coding` profile's package registries; none if it lists none."""
+    try:
+        profiles = json.loads(workers.read_text()).get("profiles", {})
+    except FileNotFoundError:
+        return []
+    network = profiles.get(PROFILE, {}).get("network", {})
+    return list(network.get("registries", []))
 
 
 def merged_registry(existing: Path | None, entries: dict[str, Any]) -> dict[str, Any]:

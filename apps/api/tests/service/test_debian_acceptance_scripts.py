@@ -11,6 +11,7 @@ triggers of a fresh store.
 import ast
 import base64
 import importlib
+import json
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -236,6 +237,24 @@ def test_the_long_call_configuration_names_only_the_fixture(scripts: None) -> No
     assert alias == long_call.REPOSITORY_ALIAS and not registry.repositories[alias].hosted
     assert config["harness"]["argv"][:2] == ["/usr/bin/python3", "-I"]
     assert "CARDEA_TASK" in config["harness"]["argv"][3]
+
+
+def test_the_long_call_dependencies_follow_the_installed_profile(
+    scripts: None, tmp_path: Path
+) -> None:
+    # A `cache` setting on a profile with registries is refused (dependencies_mismatch).
+    long_call = load("long_call")
+    workers = tmp_path / "cardea-host-workers.json"
+    kit = Path(__file__).resolve().parents[4] / "deploy/small-host/cardea"
+    installed = json.loads((kit / "cardea-host-workers.json").read_text())
+    workers.write_text(json.dumps(installed))
+    assert long_call.coding_config("/r", workers)["dependencies"] == "registries"
+    # The strict option: the same profile with the strict network, no registries.
+    strict = json.loads((kit / "strict-cache" / "coding-network.json").read_text())
+    installed["profiles"]["coding"]["network"] = strict
+    workers.write_text(json.dumps(installed))
+    assert long_call.coding_config("/r", workers)["dependencies"] == "cache"
+    assert long_call.coding_config("/r", tmp_path / "absent.json")["dependencies"] == "cache"
 
 
 def oidc_config(tmp_path: Path, issuer: object) -> object:

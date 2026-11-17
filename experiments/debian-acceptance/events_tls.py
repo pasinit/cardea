@@ -46,7 +46,7 @@ from common import (  # noqa: E402
     use_kernel,
     wait_for,
 )
-from stack import Stack, agents, people, platform, rights  # noqa: E402
+from stack import Stack, agents, inspectable, people, platform, rights  # noqa: E402
 
 NAME = "adr-035"
 SUP = "sup"
@@ -119,7 +119,9 @@ def certificates(directory: Path, names: list[str]) -> dict[str, Path]:
         "-extfile",
         str(extensions),
     )
-    for path in (ca_key, key):
+    # The kernel reads its certificate and key only from private files (`unsafe_file`
+    # otherwise); openssl writes them with the caller's umask (0664 under Debian's sudo).
+    for path in (ca_key, key, cert):
         path.chmod(0o600)
     return {"ca": ca, "certificate": cert, "key": key}
 
@@ -268,7 +270,10 @@ def main(argv: list[str]) -> int:
                 "objective": "Acknowledge an acceptance event",
                 "instructions": "Play the acceptance plan.",
                 "operations": ["runs.recent"],
-                "grants": ["objects.read", "objects.write", "models.invoke", "runs.recent"],
+                # The supervisor reads back the run the trigger starts (stack.INSPECT).
+                "grants": inspectable(
+                    ["objects.read", "objects.write", "models.invoke", "runs.recent"]
+                ),
                 "max_attempts": 1,
                 "attempt_timeout_seconds": 60,
             },

@@ -303,6 +303,8 @@ def run_script(evidence: Evidence, body: Callable[[], None]) -> int:
     """Run the script body; an exception is recorded in the evidence, not lost."""
     try:
         body()
-    except Exception as error:  # noqa: BLE001 - every failure belongs in the evidence
+    # SystemExit too: the stack raises it when its daemon exits early, and that run still
+    # owes its evidence.
+    except (Exception, SystemExit) as error:  # noqa: BLE001 - every failure belongs in the evidence
         return evidence.write(f"{type(error).__name__}: {error}")
     return evidence.write()
