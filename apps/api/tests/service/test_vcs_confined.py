@@ -50,6 +50,7 @@ WORKERS = {
     "vcs-review": ["vcs.review", "vcs.find_review"],
     "vcs-read-change": ["vcs.read_change"],
     "vcs-check-repository": ["vcs.check_repository"],
+    "vcs-merge": ["vcs.merge", "vcs.find_merge"],
 }
 INPUT_KB = 16384
 
@@ -395,9 +396,14 @@ def test_check_repository_reports_what_is_missing(
     _, _, (bare,) = run_calls(kernel, session, [("vcs-check_repository", {"repository": "cardea"})])
     report = bare.structured_content
     assert report["ready"] is False and report["default_branch"] == "main"
+    # The owner's ruleset (ADR-037 amendment 2026-11-17): one approval, approval of the
+    # last push, no force push and no deletion on the default branch.
     assert report["missing"] == [
         "default_branch_requires_review",
         "pushes_outside_agent_prefix_blocked",
+        "default_branch_last_push_approval",
+        "default_branch_no_force_push",
+        "default_branch_no_deletion",
     ]
     repo.rulesets = [
         {
@@ -409,12 +415,14 @@ def test_check_repository_reports_what_is_missing(
                         "required_approving_review_count": 1,
                         "require_last_push_approval": True,
                     },
-                }
+                },
+                {"type": "non_fast_forward"},
+                {"type": "deletion"},
             ],
         },
         {
             "include": ["~ALL"],
-            "exclude": ["agent/**"],
+            "exclude": ["agent/**", "~DEFAULT_BRANCH"],
             "rules": [{"type": "creation"}, {"type": "update"}, {"type": "deletion"}],
         },
         {"include": ["agent/**"], "rules": [{"type": "non_fast_forward"}]},
@@ -430,6 +438,13 @@ def test_check_repository_reports_what_is_missing(
         kernel, session, [("vcs-check_repository", {"repository": "cardea"})]
     )
     assert closed.structured_content["missing"] == ["agent_prefix_pushable"]
+    merges = next(c for c in closed.structured_content["checks"] if c["name"].endswith("merges"))
+    assert merges["ok"] is False and merges["required"] is False  # update now covers main
+    # Without approval of the last push, a push after the approval could merge unseen.
+    repo.rulesets[1]["exclude"] = ["agent/**", "~DEFAULT_BRANCH"]
+    repo.rulesets[0]["rules"][0]["parameters"]["require_last_push_approval"] = False
+    _, _, (lax,) = run_calls(kernel, session, check)
+    assert lax.structured_content["missing"] == ["default_branch_last_push_approval"]
 
 
 def test_a_tampered_staged_input_is_refused_in_the_worker(

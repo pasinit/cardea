@@ -9,6 +9,14 @@ process (the `vcs` confined worker in tests). Rulesets are a list of
 `{"include": [...], "exclude": [...], "rules": [...]}` with `fnmatch` branch patterns, plus
 `~DEFAULT_BRANCH` and `~ALL`, which `rules/branches/<branch>` evaluates.
 
+Identities: `logins` maps a bearer token to the account it acts as (default
+`cardea-test-app[bot]`). Pull requests, comments and reviews record their author, a
+review records the head it applies to (`commit_id`), and, as on GitHub, an author cannot
+approve its own pull request. `checks` holds each commit's check runs. `PUT
+.../pulls/<n>/merge` squash-merges only when the head still matches, the pull request is
+mergeable, and the base's `pull_request` rule holds: enough approvals of the current head
+by accounts other than the author.
+
 `fail_after` makes the fake apply a request and then drop the connection, the case that
 leaves an effect in doubt: for example `{"create_pull"}` creates the pull request and then
 raises `httpx.ConnectError`, as a crash after the host acted would look to the kernel.
@@ -44,6 +52,21 @@ class FakeRepository:
     reviews: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
     default_branch: str = "main"
     rulesets: list[dict[str, Any]] = field(default_factory=list)
+    # Commit SHA to its check runs: `{"name", "status", "conclusion"}`.
+    checks: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+
+    def pass_checks(self, sha: str, *names: str) -> None:
+        self.checks[sha] = [
+            {"name": name, "status": "completed", "conclusion": "success"}
+            for name in names or ("test",)
+        ]
+
+    def pull(self, number: int) -> dict[str, Any] | None:
+        """A pull request as the host shows it now: an open one follows its branch head."""
+        pull = next((p for p in self.pulls if p["number"] == number), None)
+        if pull is not None and not pull["merged"]:
+            pull["head"]["sha"] = self.head(pull["head"]["ref"])
+        return pull
 
     def rules_for(self, branch: str) -> list[dict[str, Any]]:
         def matches(pattern: str) -> bool:
@@ -80,6 +103,12 @@ class FakeGitHub:
     authorizations: list[str] = field(default_factory=list)
     calls: list[str] = field(default_factory=list)
     next_id: int = 1000
+    # Bearer token to the account it acts as.
+    logins: dict[str, str] = field(default_factory=dict)
+
+    def login(self, request: httpx.Request) -> str:
+        token = request.headers.get("Authorization", "").removeprefix("Bearer ")
+        return self.logins.get(token, "cardea-test-app[bot]")
 
     def add(self, owner: str, name: str) -> Repository:
         path = self.root / f"{owner}-{name}.git"
@@ -141,21 +170,30 @@ class FakeGitHub:
                 return httpx.Response(404, json={"message": "Not Found"})
             return httpx.Response(200, json={"ref": "/".join(rest[1:]), "object": {"sha": sha}})
         if rest == ["pulls"] and method == "POST":
-            return self._create_pull(repo, body)
+            return self._create_pull(repo, body, self.login(request))
         if rest == ["pulls"] and method == "GET":
             head = request.url.params.get("head", "")
             branch = head.split(":", 1)[1] if ":" in head else head
-            return httpx.Response(200, json=[p for p in repo.pulls if p["head"]["ref"] == branch])
+            found = [repo.pull(p["number"]) for p in repo.pulls if p["head"]["ref"] == branch]
+            return httpx.Response(200, json=found)
         if len(rest) == 2 and rest[0] == "pulls" and method == "GET":
-            pull = next((p for p in repo.pulls if p["number"] == int(rest[1])), None)
+            pull = repo.pull(int(rest[1]))
             if pull is None:
                 return httpx.Response(404, json={"message": "Not Found"})
             return httpx.Response(200, json=pull)
+        if len(rest) == 3 and rest[0] == "commits" and rest[2] == "check-runs" and method == "GET":
+            page = int(request.url.params.get("page", "1"))
+            runs = repo.checks.get(rest[1], []) if page == 1 else []
+            return httpx.Response(200, json={"total_count": len(runs), "check_runs": runs})
+        if len(rest) == 3 and rest[0] == "pulls" and rest[2] == "merge" and method == "PUT":
+            return self._merge(repo, int(rest[1]), body, self.login(request))
         if len(rest) == 3 and rest[0] in {"issues", "pulls"} and rest[2] in {"comments", "reviews"}:
             number = int(rest[1])
             if not any(p["number"] == number for p in repo.pulls):
                 return httpx.Response(404, json={"message": "Not Found"})
             store = repo.comments if rest[2] == "comments" else repo.reviews
+            pull = repo.pull(number)
+            assert pull is not None
             if method == "GET":
                 page = int(request.url.params.get("page", "1"))
                 per = int(request.url.params.get("per_page", "30"))
@@ -165,18 +203,65 @@ class FakeGitHub:
                 "id": self._id(),
                 "body": body["body"],
                 "html_url": f"https://github.test/{repo.owner}/{repo.name}/pull/{number}#c",
-                "user": {"login": "cardea-test-app[bot]"},
+                "user": {"login": self.login(request)},
             }
             if rest[2] == "reviews":
+                if body["event"] == "APPROVE" and item["user"] == pull["user"]:
+                    return httpx.Response(
+                        422,
+                        json={
+                            "message": "Unprocessable Entity",
+                            "errors": ["Review Can not approve your own pull request"],
+                        },
+                    )
                 item["state"] = {"REQUEST_CHANGES": "CHANGES_REQUESTED", "APPROVE": "APPROVED"}.get(
                     body["event"], "COMMENTED"
                 )
+                item["commit_id"] = pull["head"]["sha"]
             store.setdefault(number, []).append(item)
             kind = "create_comment" if rest[2] == "comments" else "create_review"
             return self._done(kind, httpx.Response(200, json=item))
         return httpx.Response(404, json={"message": "Not Found"})
 
-    def _create_pull(self, repo: FakeRepository, body: dict[str, Any]) -> httpx.Response:
+    def _merge(
+        self, repo: FakeRepository, number: int, body: dict[str, Any], login: str
+    ) -> httpx.Response:
+        pull = repo.pull(number)
+        if pull is None:
+            return httpx.Response(404, json={"message": "Not Found"})
+        if pull["merged"] or pull["state"] != "open" or pull.get("mergeable") is not True:
+            return httpx.Response(405, json={"message": "Pull Request is not mergeable"})
+        head = pull["head"]["sha"]
+        if body.get("sha") != head:
+            return httpx.Response(
+                409, json={"message": "Head branch was modified. Review and try the merge again."}
+            )
+        for rule in repo.rules_for(pull["base"]["ref"]):
+            if rule.get("type") != "pull_request":
+                continue
+            needed = int((rule.get("parameters") or {}).get("required_approving_review_count", 0))
+            approvers = {
+                r["user"]["login"]
+                for r in repo.reviews.get(number, [])
+                if r.get("state") == "APPROVED"
+                and r.get("commit_id") == head
+                and r["user"] != pull["user"]
+            }
+            if len(approvers) < needed:
+                return httpx.Response(
+                    405, json={"message": "Repository rule violations found: approval required"}
+                )
+        subprocess.run(
+            ["git", "-C", str(repo.path), "update-ref", f"refs/heads/{pull['base']['ref']}", head],
+            check=True,
+        )
+        pull.update(merged=True, state="closed", merge_commit_sha=head, merged_by={"login": login})
+        answer = {"sha": head, "merged": True, "message": "Pull Request successfully merged"}
+        return self._done("merge", httpx.Response(200, json=answer))
+
+    def _create_pull(
+        self, repo: FakeRepository, body: dict[str, Any], login: str
+    ) -> httpx.Response:
         head, base = body["head"], body["base"]
         if repo.head(head) is None:
             return httpx.Response(
@@ -208,6 +293,9 @@ class FakeGitHub:
             "state": "open",
             "draft": bool(body.get("draft")),
             "merged": False,
+            "mergeable": True,
+            "merge_commit_sha": None,
+            "user": {"login": login},
             "html_url": f"https://github.test/{repo.owner}/{repo.name}/pull/{number}",
             "head": {"ref": head, "sha": repo.head(head)},
             "base": {"ref": base},
