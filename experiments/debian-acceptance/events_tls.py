@@ -46,7 +46,7 @@ from common import (  # noqa: E402
     use_kernel,
     wait_for,
 )
-from stack import Stack, agents, people, platform, rights  # noqa: E402
+from stack import Stack, agents, inspectable, people, platform, rights  # noqa: E402
 
 NAME = "adr-035"
 SUP = "sup"
@@ -268,7 +268,10 @@ def main(argv: list[str]) -> int:
                 "objective": "Acknowledge an acceptance event",
                 "instructions": "Play the acceptance plan.",
                 "operations": ["runs.recent"],
-                "grants": ["objects.read", "objects.write", "models.invoke", "runs.recent"],
+                # The supervisor reads back the run the trigger starts (stack.INSPECT).
+                "grants": inspectable(
+                    ["objects.read", "objects.write", "models.invoke", "runs.recent"]
+                ),
                 "max_attempts": 1,
                 "attempt_timeout_seconds": 60,
             },

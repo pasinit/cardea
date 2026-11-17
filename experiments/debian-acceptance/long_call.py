@@ -63,6 +63,8 @@ from common import (  # noqa: E402
 NAME = "long-call"
 NAMESPACE = "acc"
 REPOSITORY_ALIAS = "acceptance"
+PROFILE = "coding"
+WORKERS = Path("/etc/cardea-host-workers.json")
 MIB = 1024 * 1024
 # The harness inside the sandbox: sleep in a child whose argv carries a unique token, so
 # the host can find the worker's processes by it, then write the payload file.
@@ -103,12 +105,28 @@ def repositories(source: str) -> dict[str, Any]:
     }
 
 
-def coding_config(source: str) -> dict[str, Any]:
+def coding_config(source: str, workers: Path = WORKERS) -> dict[str, Any]:
     """The `code.session` configuration `long_call.sh` installs for this test; its
-    repositories are in `repositories(source)`."""
+    repositories are in `repositories(source)`.
+
+    `dependencies` must agree with the installed `coding` profile (ADR-037 question 8):
+    `registries` when its network lists any, else `cache`. Otherwise code.session refuses
+    every call with `dependencies_mismatch` before the harness starts.
+    """
     return {
         "harness": {"argv": ["/usr/bin/python3", "-I", "-c", HARNESS], "timeout_seconds": 3500},
+        "dependencies": "registries" if profile_registries(workers) else "cache",
     }
+
+
+def profile_registries(workers: Path = WORKERS) -> list[str]:
+    """The installed `coding` profile's package registries; none if it lists none."""
+    try:
+        profiles = json.loads(workers.read_text()).get("profiles", {})
+    except FileNotFoundError:
+        return []
+    network = profiles.get(PROFILE, {}).get("network", {})
+    return list(network.get("registries", []))
 
 
 class Auth:
