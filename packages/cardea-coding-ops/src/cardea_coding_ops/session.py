@@ -181,7 +181,11 @@ def _git(repo: Path, env: dict[str, str], *args: str) -> str:
         cwd=repo,
         env=env,
         capture_output=True,
-        text=True,
+        # A change may hold binary or non-UTF-8 files, and `diff --text` prints them raw.
+        # Strict decoding raised UnicodeDecodeError and lost the whole result; replacing
+        # undecodable bytes keeps every ASCII run, so the credential scan still sees a token.
+        encoding="utf-8",
+        errors="replace",
         timeout=300,
         check=False,
     )
