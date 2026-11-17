@@ -11,6 +11,7 @@ triggers of a fresh store.
 import ast
 import base64
 import importlib
+import json
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -33,6 +34,7 @@ PROGRAMS = (
     "launcher.py",
     "email_live.py",
     "registry_egress.py",
+    "gate_isolation.py",
 )
 
 
@@ -55,6 +57,8 @@ def scripts() -> Iterator[None]:
             "launcher",
             "devauth",
             "email_live",
+            "coding_fixture",
+            "gate_isolation",
         ):
             sys.modules.pop(name, None)
 
@@ -78,6 +82,8 @@ def test_every_script_parses(path: str) -> None:
         ["teams.py", "--help"],
         ["events_tls.py", "--help"],
         ["registry_egress.py", "--help"],
+        ["gate_isolation.py", "--help"],
+        ["gate_isolation.py", "run", "--help"],
         ["launcher.py", "--help"],
     ],
 )
@@ -97,6 +103,7 @@ def test_help_works_without_a_store(argv: list[str], tmp_path: Path) -> None:
 
 def test_every_program_is_covered_by_help() -> None:
     assert {p.name for p in SCRIPTS.glob("*.py")} - set(PROGRAMS) == {
+        "coding_fixture.py",
         "common.py",
         "oidc_issuer.py",
         "plan.py",
@@ -104,12 +111,35 @@ def test_every_program_is_covered_by_help() -> None:
     }
 
 
-def test_shell_wrapper_is_valid_and_restores_the_owner_configuration() -> None:
-    script = SCRIPTS / "long_call.sh"
-    subprocess.run(["sh", "-n", str(script)], check=True)
-    text = script.read_text()
-    assert "trap restore_config EXIT" in text and "--no-verify" not in text
-    assert "pkill" not in text and "killall" not in text
+def test_shell_wrappers_are_valid_and_restore_the_owner_configuration() -> None:
+    for name in ("long_call.sh", "coding_run.sh"):
+        script = SCRIPTS / name
+        subprocess.run(["sh", "-n", str(script)], check=True)
+        text = script.read_text()
+        assert "--no-verify" not in text and "pkill" not in text and "killall" not in text
+    text = (SCRIPTS / "coding_run.sh").read_text()
+    assert "trap restore EXIT" in text and ".before-acceptance" in text
+    assert "coding_run.sh" in (SCRIPTS / "long_call.sh").read_text()
+
+
+def test_the_test_aliases_are_added_to_the_host_registry_never_over_it(
+    tmp_path: Path, scripts: None
+) -> None:
+    from cardea.service.repositories import Registry
+
+    fixture = load("coding_fixture")
+    gates = load("gate_isolation")
+    existing = tmp_path / "repositories.json"
+    existing.write_text('{"repositories": {"app": {"source": "/opt/cardea-code/repos/app.git"}}}')
+    merged = fixture.merged_registry(existing, gates.registry_entries())
+    registry = Registry.model_validate(merged)
+    assert {"app", *gates.CASES} == set(registry.repositories)
+    assert fixture.merged_registry(tmp_path / "absent.json", {"x": {}})["repositories"] == {"x": {}}
+    with pytest.raises(SystemExit):
+        fixture.merged_registry(existing, {"app": {}})
+    # Every case's gates are files the wrapper writes.
+    named = {g for case in gates.CASES.values() for g in case}
+    assert named <= set(gates.GATES)
 
 
 def test_no_script_signals_processes_by_name() -> None:
@@ -209,6 +239,24 @@ def test_the_long_call_configuration_names_only_the_fixture(scripts: None) -> No
     assert alias == long_call.REPOSITORY_ALIAS and not registry.repositories[alias].hosted
     assert config["harness"]["argv"][:2] == ["/usr/bin/python3", "-I"]
     assert "CARDEA_TASK" in config["harness"]["argv"][3]
+
+
+def test_the_long_call_dependencies_follow_the_installed_profile(
+    scripts: None, tmp_path: Path
+) -> None:
+    # A `cache` setting on a profile with registries is refused (dependencies_mismatch).
+    long_call = load("long_call")
+    workers = tmp_path / "cardea-host-workers.json"
+    kit = Path(__file__).resolve().parents[4] / "deploy/small-host/cardea"
+    installed = json.loads((kit / "cardea-host-workers.json").read_text())
+    workers.write_text(json.dumps(installed))
+    assert long_call.coding_config("/r", workers)["dependencies"] == "registries"
+    # The strict option: the same profile with the strict network, no registries.
+    strict = json.loads((kit / "strict-cache" / "coding-network.json").read_text())
+    installed["profiles"]["coding"]["network"] = strict
+    workers.write_text(json.dumps(installed))
+    assert long_call.coding_config("/r", workers)["dependencies"] == "cache"
+    assert long_call.coding_config("/r", tmp_path / "absent.json")["dependencies"] == "cache"
 
 
 def oidc_config(tmp_path: Path, issuer: object) -> object:

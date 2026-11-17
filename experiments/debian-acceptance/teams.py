@@ -44,7 +44,7 @@ from common import (  # noqa: E402
     wait_for,
 )
 from plan import set_plan, transcript  # noqa: E402
-from stack import Stack, people, platform, rights  # noqa: E402
+from stack import Stack, inspectable, people, platform, rights  # noqa: E402
 
 NAME = "teams"
 EXAMPLES = REPOSITORY / "examples" / "teams"
@@ -432,6 +432,8 @@ class Teams:
         path.chmod(0o600)
         fills = document("trading-desk/trigger.fills.json")
         fills["event"]["secret_file"] = str(path)
+        # The script reads back the run the webhook starts (stack.INSPECT).
+        fills["template"]["grants"] = inspectable(fills["template"]["grants"])
         st.provision(provisioning(self.issuer.url, [fills]))
         set_plan(
             st.work,
