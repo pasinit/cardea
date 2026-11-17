@@ -90,11 +90,11 @@
       "credential": "/etc/cardea/credentials/claude-code"
     },
     "vcs": {
-      "memory_mb": 512,
+      "memory_mb": 1024,
       "cpu_percent": 100,
       "tasks": 128,
       "wall_seconds": 300,
-      "scratch_mb": 1024,
+      "scratch_mb": 512,
       "output_kb": 256,
       "input_kb": 12288,
       "network": {
@@ -111,6 +111,23 @@
         "github-author": "/etc/cardea/credentials/github-author",
         "github-reviewer": "/etc/cardea/credentials/github-reviewer"
       }
+    },
+    "try": {
+      "memory_mb": 3072,
+      "cpu_percent": 200,
+      "tasks": 512,
+      "wall_seconds": 3600,
+      "scratch_mb": 2048,
+      "output_kb": 2048,
+      "network": {
+        "policy": "allow_list",
+        "proxy": "127.0.10.7:3128",
+        "hosts": [
+          "pypi.org",
+          "files.pythonhosted.org"
+        ]
+      },
+      "concurrency": 1
     }
   },
   "workers": {
@@ -339,6 +356,27 @@
       ],
       "env": {
         "CARDEA_VCS_CONFIG": "/opt/cardea-vcs/vcs.json",
+        "CARDEA_REPOSITORIES": "/opt/cardea-code/repositories.json"
+      }
+    },
+    "env-try": {
+      "argv": [
+        "/opt/cardea/apps/api/.venv/bin/python",
+        "-I",
+        "-m",
+        "cardea.hosts.operation_worker",
+        "env.try"
+      ],
+      "profiles": [
+        "try"
+      ],
+      "read_only": [
+        "/opt/cardea",
+        "/opt/cardea-code/repositories.json",
+        "/opt/cardea-code/repos",
+        "/opt/cardea-try/toolchain"
+      ],
+      "env": {
         "CARDEA_REPOSITORIES": "/opt/cardea-code/repositories.json"
       }
     }

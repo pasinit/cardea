@@ -1,0 +1,14 @@
+{
+  "transport": {
+    "kind": "agentmail",
+    "inbox_id": "dev-team@agentmail.example.invalid",
+    "api_key_file": "/etc/cardea/agentmail.key"
+  },
+  "recipients": {"client": "client@example.invalid"},
+  "roles": {
+    "dev-team.product": {
+      "recipients": ["client"],
+      "rate_limit": {"count": 3, "window_days": 7}
+    }
+  }
+}

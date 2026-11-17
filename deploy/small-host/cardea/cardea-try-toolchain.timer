@@ -1,0 +1,10 @@
+[Unit]
+Description=Weekly env.try toolchain image refresh
+
+[Timer]
+OnCalendar=Mon *-*-* 03:00:00
+Persistent=true
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target

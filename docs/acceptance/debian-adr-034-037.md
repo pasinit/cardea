@@ -8,7 +8,7 @@ Each item names the script that exists, or says **gap** when no script exists ye
 
 - [ ] **A disposable Debian 13 amd64 machine** with a Debian 13 6.12 LTS kernel, as ADR-028 requires. `python3 experiments/m2/vm.py start --state <dir>` starts the owned QEMU guest the M2 and M5 fixtures use ([experiments/m2/README.md](../../experiments/m2/README.md)). Never use a machine that holds real data.
 - [ ] **The package built from the commit under test.** `make m5-stage M5_STAGE=<new dir>`, then build and install it on the guest as in [packaging](../../packaging/README.md). Record the commit and the package version.
-- [ ] **Migrations on the host.** `cardea init` on a fresh store reaches `m17_content_redaction`. `cardea init` on an M5 store (`m5_001`) migrates it through every later revision, and `cardea verify` passes afterwards. Today only the `m4_001` to `m5_001` upgrade is verified there. **Script:** `upgrade.py --source <M5 backup>` ([README](../../experiments/debian-acceptance/README.md)) upgrades a copy with the installed `cardea init` and checks row counts, the schema against a fresh store, `cardea verify` and the append-only triggers.
+- [ ] **Migrations on the host.** `cardea init` on a fresh store reaches `m18_env_runs`. `cardea init` on an M5 store (`m5_001`) migrates it through every later revision, and `cardea verify` passes afterwards. Today only the `m4_001` to `m5_001` upgrade is verified there. **Script:** `upgrade.py --source <M5 backup>` ([README](../../experiments/debian-acceptance/README.md)) upgrades a copy with the installed `cardea init` and checks row counts, the schema against a fresh store, `cardea verify` and the append-only triggers.
 - [ ] **Identities.** Real SPIRE 1.15.3 with disposable identities, as the M5 fixture sets up (`experiments/m5/installed_acceptance.py` with `experiments/m1/provider_lab.py` and `experiments/spire/binding.py`). ADR-036 also needs one OIDC human identity. `experiments/debian-acceptance/oidc_issuer.py` is a throwaway test issuer for that: discovery, JWKS and RFC 7662 introspection on a random loopback port, with tokens signed by `joserfc`, which the pinned `authlib` already depends on.
 
 ## Regression first
@@ -71,6 +71,32 @@ ADR-036 slice 6 defines the host acceptance: a real OIDC human approver and a SP
 - [ ] **Snapshot restore** voids open requests (`snapshot_restored`).
 
 Slice 5 (per-grant rules) is not implemented, so it has nothing to verify.
+
+## ADR-038: throwaway test environments (`env.try`)
+
+None of these has run. **Script:** `sudo sh experiments/debian-acceptance/env_try.sh`, on a host with the small-host kit's `try` profile, `env-try` worker and squid `try` port (deploy/small-host/README.md, section 4, step 10).
+
+- [ ] **Pass and fail** (acceptance test 1). A good commit passes `try` and `teams`. A bad one fails `try` with its exit status, a bounded log tail and its artifact stored as an object. No `cardea-host-*` unit is left. Phase 1.
+- [ ] **Same receipt and reruns** (test 2). The same commit and scenarios, in any order, return the first receipt (`cached: true`) without starting a unit. Three forced reruns run, and a fourth in a day is refused with `env_rerun_limit`. Phase 2.
+- [ ] **Confinement** (test 3). A hostile commit's scenario reaches none of: the store, the helper spool, the credentials directory, the kernel on 127.0.0.1, DNS, the metadata address, a host the proxy does not list. Filling the disk fails the scenario, not the host. Phase 3.
+- [ ] **Caps** (test 4). A scenario past its time limit reports `timeout`, and the next scenario still runs. Phase 4. Memory and task caps are the profile's systemd properties; a memory cap kill fails the call as `worker_memory_limit` (ADR-028 probes).
+- [ ] **The result cannot be forged** (lead review). Each of these must fail to change the reported result:
+  - a scenario writing a forged result to `/proc/<worker>/fd/*`, or reading `/proc/<worker>/mem`;
+  - a `setsid` background process, which must be killed before the next scenario and leave nothing on the host;
+  - a scenario that kills the worker, which must leave the call failed with no result.
+
+  The arm64 dev VM can run this now. Phase 6.
+- [ ] **Concurrency** (test 6). An identical call while the first runs is refused with `env_run_in_progress` and starts nothing. Phase 5.
+- [ ] **The toolchain image.** `make try-toolchain` on the host builds a Debian 13 minbase image with `mmdebstrap`, unpacks it read-only under its SHA-256 in `/opt/cardea-try/toolchain/` and pins it in the repository registry. The next call has a new run key. Enable `cardea-try-toolchain.timer` for the weekly refresh.
+
+## ADR-039: external email
+
+Portable tests: `test_email_ops.py` (both adapters against in-process fakes) and the dev-team rehearsal. None of the steps below has run.
+
+- [ ] **A live send and reply.** On a host with the private `/etc/cardea/email.json` and its key or password file (mode `0600`, owned by `cardea-kernel`), one email reaches the alias's address, a human reply from that address is accepted by `email.poll_replies`, and the reconciler finds the send by its effect key. With AgentMail, a repeated send with the same idempotency key sends nothing more. **Script:** `runuser -u cardea-kernel -- /opt/venvs/cardea-kernel/bin/python experiments/debian-acceptance/email_live.py --alias client`. It sends one real email and waits up to 15 minutes for the reply. Its evidence holds no address or text.
+- [ ] **Through the daemon.** The `email.send` descriptor installed under `operations_dir` and the package in the service's environment. A product-manager run sends one question. The reply reaches that member's mailbox within one poll interval plus the 30-second loop, and the member's next run receives it as an untrusted `mailbox.inbox` block. A reply from another address is dropped and counted (`operation.reply_dropped`), and its text appears nowhere in the store or the journal. **Gap:** no script yet.
+- [ ] **Credentials stay in the operation.** After the run above, the API key or password appears in no table, no journald line of `cardea-kernel`, no receipt and no agent prompt (`grep -r` over a `cardea backup` and `journalctl -u cardea-kernel`).
+- [ ] **No inbound endpoint.** The host has no listener for mail: replies come only from polling (`ss -ltnp` shows only the kernel's configured listeners).
 
 ## Recording the result
 

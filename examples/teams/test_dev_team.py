@@ -34,3 +34,19 @@ def test_the_dev_team_runs_on_the_real_operation_packages(
         assert line in printed, line
     assert "pools principal, product, lead, dev, security" in printed
     assert "security.0 review -> principal: done" in printed
+    assert "the client's reply reached its mailbox" in printed
+    assert "a stranger's was dropped and counted" in printed
+
+
+def test_only_the_product_manager_may_email_the_client() -> None:
+    for name in ("group.json", "group.restructured.json"):
+        pools = dev_team.document(name)["spec"]["pools"]
+        senders = [p["name"] for p in pools if "email.send" in p["grants"]]
+        assert senders == ["product"], name
+    config = dev_team.document("email.json")
+    assert set(config["roles"]) == {"dev-team.product"}
+    role = config["roles"]["dev-team.product"]
+    assert role == {"recipients": ["client"], "rate_limit": {"count": 3, "window_days": 7}}
+    # Placeholders only: real addresses live in the host's private configuration.
+    assert all(a.endswith(".invalid") for a in config["recipients"].values())
+    assert config["transport"]["inbox_id"].endswith(".invalid")

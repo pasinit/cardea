@@ -19,6 +19,7 @@ help:
 	@printf "  make kernel-openapi Export the separate v0.2 kernel API\n"
 	@printf "  make error-codes  Regenerate docs/error-codes.md from the source\n"
 	@printf "  make acceptance-check Lint the Debian acceptance scripts\n"
+	@printf "  make try-toolchain Build and pin the env.try toolchain image (root, Debian host)\n"
 	@printf "  make spire-fit    Run real SPIRE bootstrap and identity binding tests\n"
 	@printf "  make dbos-fit     Run isolated DBOS SQLite/PostgreSQL experiments\n"
 	@printf "  make dbos-integration-fit Run DBOS/Cardea commit and recovery tests\n"
@@ -123,7 +124,7 @@ kernel-demo: check-uv
 
 lint: lint-api
 
-REFERENCE_OPS := ../../packages/cardea-reference-ops/src ../../packages/cardea-vcs-ops/src ../../packages/cardea-coding-ops/src ../../examples
+REFERENCE_OPS := ../../packages/cardea-email-ops/src ../../packages/cardea-reference-ops/src ../../packages/cardea-vcs-ops/src ../../packages/cardea-coding-ops/src ../../packages/cardea-env-ops/src ../../examples
 
 fix-lint: check-uv
 	cd $(API_DIR) && "$(UV)" run ruff check . $(REFERENCE_OPS) --fix
@@ -136,7 +137,7 @@ lint-api: check-uv
 	cd $(API_DIR) && "$(UV)" run ruff format --check . $(REFERENCE_OPS)
 
 typecheck-api: check-uv
-	cd $(API_DIR) && "$(UV)" run mypy src tests ../../packages/cardea-reference-ops/src ../../packages/cardea-vcs-ops/src ../../packages/cardea-coding-ops/src ../../examples/teams
+	cd $(API_DIR) && "$(UV)" run mypy src tests ../../packages/cardea-email-ops/src ../../packages/cardea-reference-ops/src ../../packages/cardea-vcs-ops/src ../../packages/cardea-coding-ops/src ../../packages/cardea-env-ops/src ../../examples/teams
 
 typecheck: typecheck-api
 
@@ -185,6 +186,14 @@ m4-test: check-uv
 m4-check: check-uv
 	"$(UV)" run --locked --project $(API_DIR) ruff check --config apps/api/pyproject.toml experiments/m4
 	"$(UV)" run --locked --project $(API_DIR) mypy --follow-imports=silent --ignore-missing-imports --check-untyped-defs experiments/m4
+
+.PHONY: try-toolchain
+# ADR-038 decision 6: the host owner builds the env.try toolchain image with mmdebstrap and
+# pins its digest in the repository registry; the kit's timer refreshes it weekly.
+TRY_REGISTRY ?= /opt/cardea-code/repositories.json
+try-toolchain:
+	sudo python3 -I packaging/try_toolchain.py build --registry $(TRY_REGISTRY)
+	sudo python3 -I packaging/try_toolchain.py pin $(TRY_REGISTRY)
 
 .PHONY: acceptance-check
 # The Debian acceptance scripts (docs/acceptance/debian-adr-034-037.md): lint and types only;
