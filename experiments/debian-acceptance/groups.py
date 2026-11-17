@@ -52,7 +52,7 @@ from common import (  # noqa: E402
     wait_for,
 )
 from plan import set_plan, transcript  # noqa: E402
-from stack import Stack, agents, people, platform, rights  # noqa: E402
+from stack import Stack, agents, inspectable, people, platform, rights  # noqa: E402
 
 NAME = "adr-034"
 SUP = "sup"
@@ -85,7 +85,8 @@ def pool(name: str, replicas: int, grants: list[str], operations: list[str], **r
     return {
         "name": name,
         "replicas": replicas,
-        "grants": [*RUN, *grants],
+        # The supervisor reads back the runs a pool starts (stack.INSPECT).
+        "grants": inspectable([*RUN, *grants]),
         "run": {
             "instructions": "Play the acceptance plan.",
             "operations": operations,
