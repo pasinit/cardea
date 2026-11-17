@@ -1,6 +1,6 @@
 # Debian acceptance scripts (ADR-034, ADR-035, ADR-023 amendment)
 
-These scripts close the "no script yet" gaps (and the ADR-037 question 8 registry check) of the [Debian acceptance checklist](../../docs/acceptance/debian-adr-034-037.md). An operator runs them on a Debian 13 dev host. **None of them has been run yet.** Until one has passed on the host and its evidence is committed, the records it covers stay "portable tests only". A first run may well show bugs in a script itself; fix the script, and record what changed next to the evidence.
+These scripts close the "no script yet" gaps (and the ADR-037 question 8 registry check) of the [Debian acceptance checklist](../../docs/acceptance/debian-adr-034-037.md). An operator runs them on a Debian 13 dev host. **They first ran on 2026-11-17, on a Debian 13 arm64 dev host** ([evidence and the script fixes it needed](evidence/arm64-lima/summary.json)); the supported amd64 profile has not run them yet. Until one has passed on the host on the host and its evidence is committed, the records it covers stay "portable tests only". A first run may well show bugs in a script itself; fix the script, and record what changed next to the evidence.
 
 `make acceptance-check` lints and type-checks them, and `apps/api/tests/service/test_debian_acceptance_scripts.py` checks that each one parses and answers `--help`. Neither of those runs them.
 

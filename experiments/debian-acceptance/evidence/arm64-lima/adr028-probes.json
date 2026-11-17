@@ -1,0 +1,44 @@
+{
+  "command": "sudo -u cardea-kernel env CARDEA_CONFINED_DEBIAN=1 PYTHONPATH=<pytest 9.0.3>:/usr/lib/cardea /opt/venvs/cardea-kernel/bin/python -m pytest -v apps/api/tests/hosts/test_confined_debian.py",
+  "helper": "/usr/libexec/cardea-host from cardea-kernel_0.1.0-2_arm64.deb built from main 6ba6e21",
+  "profiles": "the module's own test profiles (python3 -I test_confined_debian.py > /etc/cardea-host-workers.json)",
+  "proxy": "squid 6.13-2+deb13u4 on 127.0.10.1:3128 allowing only example.org by CONNECT 443 (complete squid.conf, no localhost allow, no wildcard port)",
+  "pytest": {
+    "test_memory_cap_kills_the_worker_and_reports_it": "passed",
+    "test_network_none_denies_every_connection": "passed",
+    "test_allow_list_reaches_only_the_proxy_and_allowed_hosts": "passed",
+    "test_worker_cannot_see_the_store_or_host_configuration": "passed"
+  },
+  "summary": "4 passed in 8.78s",
+  "kernel": "6.12.115+deb13.1-cloud-arm64",
+  "machine": "aarch64",
+  "observations": {
+    "probe-none/memory": {
+      "worker_failed": "worker_memory_limit"
+    },
+    "probe-none/network": {
+      "1.1.1.1": "PermissionError",
+      "127.0.0.1": "PermissionError",
+      "dns": "gaierror"
+    },
+    "probe-allow/network": {
+      "1.1.1.1": "TimeoutError",
+      "127.0.0.1": "TimeoutError",
+      "dns": "gaierror"
+    },
+    "probe-allow/proxy": {
+      "example.org:443": "HTTP/1.1 200 Connection established",
+      "example.com:443": "HTTP/1.1 403 Forbidden"
+    },
+    "probe-none/store": {
+      "/var/lib/cardea": false,
+      "/var/lib/cardea-host": false,
+      "/etc/cardea-host.json": false,
+      "/etc/cardea-host-workers.json": false,
+      "/etc/cardea": false,
+      "/home": false,
+      "/root": false,
+      "/run/cardea/credential": false
+    }
+  }
+}

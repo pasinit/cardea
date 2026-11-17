@@ -1,0 +1,320 @@
+{
+  "checks": {
+    "append_only_triggers_found": true,
+    "append_only_triggers_refuse_changes": true,
+    "cardea_init_succeeds": true,
+    "cardea_verify_passes": true,
+    "pre_migration_snapshot_kept": true,
+    "reaches_schema_head": true,
+    "row_counts_preserved": true,
+    "schema_equals_a_fresh_head_store": true,
+    "second_init_changes_nothing": true,
+    "snapshot_is_the_m5_store": true,
+    "starts_at_m5": true
+  },
+  "commit": null,
+  "finished_at": "2026-11-17T03:59:49.974651+00:00",
+  "host": {
+    "machine": "aarch64",
+    "os_release": "Debian GNU/Linux 13 (trixie)",
+    "python": "3.13.5",
+    "release": "6.12.115+deb13.1-cloud-arm64"
+  },
+  "observations": {
+    "append_only_triggers": {
+      "agent_groups_no_delete": {
+        "action": "DELETE",
+        "columns": [],
+        "result": "empty",
+        "table": "agent_groups",
+        "trigger": "agent_groups_no_delete"
+      },
+      "approval_decisions_no_delete": {
+        "action": "DELETE",
+        "columns": [],
+        "result": "empty",
+        "table": "approval_decisions",
+        "trigger": "approval_decisions_no_delete"
+      },
+      "approval_decisions_no_update": {
+        "action": "UPDATE",
+        "columns": [],
+        "result": "empty",
+        "table": "approval_decisions",
+        "trigger": "approval_decisions_no_update"
+      },
+      "delegation_no_delete": {
+        "action": "DELETE",
+        "columns": [],
+        "result": "empty",
+        "table": "delegation_links",
+        "trigger": "delegation_no_delete"
+      },
+      "delegation_no_update": {
+        "action": "UPDATE",
+        "columns": [],
+        "result": "empty",
+        "table": "delegation_links",
+        "trigger": "delegation_no_update"
+      },
+      "events_no_delete": {
+        "action": "DELETE",
+        "columns": [],
+        "result": "empty",
+        "table": "events",
+        "trigger": "events_no_delete"
+      },
+      "events_no_update": {
+        "action": "UPDATE",
+        "columns": [],
+        "result": "empty",
+        "table": "events",
+        "trigger": "events_no_update"
+      },
+      "expect_window_reports_no_delete": {
+        "action": "DELETE",
+        "columns": [],
+        "result": "empty",
+        "table": "expect_window_reports",
+        "trigger": "expect_window_reports_no_delete"
+      },
+      "group_members_no_delete": {
+        "action": "DELETE",
+        "columns": [],
+        "result": "empty",
+        "table": "group_members",
+        "trigger": "group_members_no_delete"
+      },
+      "journal_trigger_cursors_no_delete": {
+        "action": "DELETE",
+        "columns": [],
+        "result": "empty",
+        "table": "journal_trigger_cursors",
+        "trigger": "journal_trigger_cursors_no_delete"
+      },
+      "mailbox_deliveries_no_delete": {
+        "action": "DELETE",
+        "columns": [],
+        "result": "empty",
+        "table": "mailbox_deliveries",
+        "trigger": "mailbox_deliveries_no_delete"
+      },
+      "mailbox_delivery_events_no_delete": {
+        "action": "DELETE",
+        "columns": [],
+        "result": "empty",
+        "table": "mailbox_delivery_events",
+        "trigger": "mailbox_delivery_events_no_delete"
+      },
+      "mailbox_delivery_events_no_update": {
+        "action": "UPDATE",
+        "columns": [],
+        "result": "empty",
+        "table": "mailbox_delivery_events",
+        "trigger": "mailbox_delivery_events_no_update"
+      },
+      "mailbox_messages_no_delete": {
+        "action": "DELETE",
+        "columns": [],
+        "result": "empty",
+        "table": "mailbox_messages",
+        "trigger": "mailbox_messages_no_delete"
+      },
+      "mailbox_messages_no_update": {
+        "action": "UPDATE",
+        "columns": [],
+        "result": "empty",
+        "table": "mailbox_messages",
+        "trigger": "mailbox_messages_no_update"
+      },
+      "record_events_no_delete": {
+        "action": "DELETE",
+        "columns": [],
+        "result": "empty",
+        "table": "record_events",
+        "trigger": "record_events_no_delete"
+      },
+      "record_events_no_update": {
+        "action": "UPDATE",
+        "columns": [],
+        "result": "empty",
+        "table": "record_events",
+        "trigger": "record_events_no_update"
+      },
+      "records_no_delete": {
+        "action": "DELETE",
+        "columns": [],
+        "result": "empty",
+        "table": "records",
+        "trigger": "records_no_delete"
+      },
+      "recovery_epochs_no_delete": {
+        "action": "DELETE",
+        "columns": [],
+        "result": "empty",
+        "table": "recovery_epochs",
+        "trigger": "recovery_epochs_no_delete"
+      },
+      "recovery_epochs_no_update": {
+        "action": "UPDATE",
+        "columns": [],
+        "result": "empty",
+        "table": "recovery_epochs",
+        "trigger": "recovery_epochs_no_update"
+      },
+      "run_attempt_costs_no_delete": {
+        "action": "DELETE",
+        "columns": [],
+        "result": "empty",
+        "table": "run_attempt_costs",
+        "trigger": "run_attempt_costs_no_delete"
+      },
+      "trigger_deliveries_no_delete": {
+        "action": "DELETE",
+        "columns": [],
+        "result": "empty",
+        "table": "trigger_deliveries",
+        "trigger": "trigger_deliveries_no_delete"
+      },
+      "trigger_deliveries_no_update": {
+        "action": "UPDATE",
+        "columns": [],
+        "result": "empty",
+        "table": "trigger_deliveries",
+        "trigger": "trigger_deliveries_no_update"
+      },
+      "trigger_events_no_delete": {
+        "action": "DELETE",
+        "columns": [],
+        "result": "empty",
+        "table": "trigger_events",
+        "trigger": "trigger_events_no_delete"
+      },
+      "trigger_events_no_update": {
+        "action": "UPDATE",
+        "columns": [],
+        "result": "empty",
+        "table": "trigger_events",
+        "trigger": "trigger_events_no_update"
+      },
+      "triggers_no_delete": {
+        "action": "DELETE",
+        "columns": [],
+        "result": "empty",
+        "table": "triggers",
+        "trigger": "triggers_no_delete"
+      }
+    },
+    "append_only_triggers_refuse_changes": {
+      "allowed": [],
+      "exercised": []
+    },
+    "cardea_init_succeeds": {
+      "init": {
+        "exit": 0,
+        "stderr": "",
+        "stdout": ""
+      }
+    },
+    "cardea_verify_passes": {
+      "verify": {
+        "exit": 0,
+        "stderr": "",
+        "stdout": "{\"schema\": \"m18_env_runs\", \"tasks\": 0, \"objects\": 0, \"integrity\": \"ok\"}\n"
+      }
+    },
+    "kernel_lib": "/usr/lib/cardea",
+    "pre_migration_snapshot_kept": {
+      "snapshots": [
+        "before-migration-e39a4b7d3d8a40b488452ef750a32e76.sqlite3"
+      ]
+    },
+    "row_counts_preserved": {
+      "changed": {}
+    },
+    "rows_after": {
+      "agent_effects": 0,
+      "agent_groups": 0,
+      "agent_inputs": 0,
+      "agent_runs": 0,
+      "approval_decisions": 0,
+      "approval_requests": 0,
+      "approval_rules": 0,
+      "cardea_alembic_version": 1,
+      "collections": 0,
+      "control_requests": 0,
+      "delegation_links": 0,
+      "dispatch_leases": 0,
+      "effect_scopes": 0,
+      "env_reruns": 0,
+      "env_runs": 0,
+      "events": 0,
+      "expect_window_reports": 0,
+      "group_members": 0,
+      "host_budget_limits": 0,
+      "host_reservations": 0,
+      "journal_trigger_cursors": 0,
+      "mailbox_deliveries": 0,
+      "mailbox_delivery_events": 0,
+      "mailbox_messages": 0,
+      "model_budget_limits": 0,
+      "objects": 0,
+      "operations": 0,
+      "policies": 0,
+      "principals": 0,
+      "record_events": 0,
+      "records": 0,
+      "recovery_epochs": 0,
+      "run_attempt_costs": 0,
+      "service_meta": 1,
+      "spend_reservations": 0,
+      "task_bindings": 0,
+      "tasks": 0,
+      "trigger_deliveries": 0,
+      "trigger_events": 0,
+      "triggers": 0
+    },
+    "rows_before": {
+      "agent_effects": 0,
+      "agent_inputs": 0,
+      "agent_runs": 0,
+      "cardea_alembic_version": 1,
+      "control_requests": 0,
+      "delegation_links": 0,
+      "dispatch_leases": 0,
+      "events": 0,
+      "host_budget_limits": 0,
+      "host_reservations": 0,
+      "model_budget_limits": 0,
+      "objects": 0,
+      "operations": 0,
+      "policies": 0,
+      "principals": 0,
+      "recovery_epochs": 0,
+      "service_meta": 1,
+      "task_bindings": 0,
+      "tasks": 0
+    },
+    "schema_equals_a_fresh_head_store": {
+      "difference": {
+        "different": [],
+        "extra": [],
+        "missing": []
+      }
+    },
+    "schema_head": "m18_env_runs",
+    "source": {
+      "revision": "m5_001",
+      "synthesized": true
+    },
+    "verify_report": {
+      "integrity": "ok",
+      "objects": 0,
+      "schema": "m18_env_runs",
+      "tasks": 0
+    }
+  },
+  "passed": true,
+  "script": "upgrade",
+  "started_at": "2026-11-17T03:59:45.546992+00:00"
+}

@@ -1,0 +1,61 @@
+{
+  "checks": {
+    "detached_child_killed_before_it_tampers": true,
+    "forge_through_proc_refused": true,
+    "gate_editing_the_checkout_refused": true,
+    "killed_worker_reports_nothing": true,
+    "worker_memory_unreadable": true
+  },
+  "commit": null,
+  "finished_at": "2026-11-17T02:45:09.374580+00:00",
+  "host": {
+    "machine": "aarch64",
+    "os_release": "Debian GNU/Linux 13 (trixie)",
+    "python": "3.13.5",
+    "release": "6.12.115+deb13.1-cloud-arm64"
+  },
+  "observations": {
+    "detached_child_killed_before_it_tampers": {
+      "bundle_a_txt": "written by the harness\n",
+      "gates": [
+        {
+          "duration_ms": 111,
+          "exit_code": 0,
+          "name": "detach",
+          "output_tail": "detached a child\n",
+          "passed": true,
+          "stray_processes_killed": 1,
+          "timed_out": false
+        },
+        {
+          "duration_ms": 3038,
+          "exit_code": 0,
+          "name": "pause",
+          "output_tail": "second gate\n",
+          "passed": true,
+          "stray_processes_killed": 0,
+          "timed_out": false
+        }
+      ],
+      "killed": 1
+    },
+    "forge_through_proc_refused": {
+      "gate_output": "forge: denied PermissionError\nmem: denied PermissionError\n",
+      "isolation": "subreaper"
+    },
+    "gate_editing_the_checkout_refused": {
+      "code": "gate_changed_checkout",
+      "state": "failed"
+    },
+    "killed_worker_reports_nothing": {
+      "receipt_state": "outcome_unknown",
+      "state": "failed"
+    },
+    "worker_memory_unreadable": {
+      "gate_output": "forge: denied PermissionError\nmem: denied PermissionError\n"
+    }
+  },
+  "passed": true,
+  "script": "gate-isolation",
+  "started_at": "2026-11-17T02:39:59.245493+00:00"
+}

@@ -440,16 +440,22 @@ def run(args: argparse.Namespace) -> int:
         task_id = submit(store, "oversize", 5, int(args.oversize_mib * MIB), token)
         service(task_id, "oversize").wait(timeout=900)
         observed = call_rows(store, task_id)
-        stored = rows(
-            store / "kernel.sqlite3",
-            "SELECT COUNT(*) AS n FROM objects WHERE task_id=?",
-            task_id,
+        # Task-owned objects are named after the call's receipt (`<receipt_id>.<part>`);
+        # the objects table has no task column.
+        stored = sum(
+            int(
+                rows(
+                    store / "kernel.sqlite3",
+                    "SELECT COUNT(*) AS n FROM objects WHERE resource_id LIKE ?",
+                    f"{o['receipt_id']}.%",
+                )[0]["n"]
+            )
+            for o in observed["operations"]
         )
         evidence.check(
             "oversized_artifact_stores_nothing",
-            int(stored[0]["n"]) == 0
-            and [o["state"] for o in observed["operations"]] == ["outcome_unknown"],
-            objects=int(stored[0]["n"]),
+            stored == 0 and [o["state"] for o in observed["operations"]] == ["outcome_unknown"],
+            objects=stored,
             **observed,
         )
         from cardea.service.operation_runtime import OperationRuntime
