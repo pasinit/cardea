@@ -333,6 +333,15 @@ def serve(
             finally:
                 for sock, _ in listeners:
                     sock.close()
+        except BaseException as error:
+            if runtime_launched:
+                # `os._exit` below discards the exception, so this is the only record of why
+                # the service stopped (for example a TLS file that is not private).
+                if isinstance(error, Fault):
+                    log.critical("service stopped: %s", error.code, extra={"code": error.code})
+                else:
+                    log.critical("service stopped: %s", type(error).__name__, exc_info=True)
+            raise
         finally:
             if runtime_launched:
                 # DBOS 3's synchronous executor shutdown does not join active workflows.
