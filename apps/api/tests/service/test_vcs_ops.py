@@ -52,6 +52,7 @@ OPERATIONS = (
     "vcs.review",
     "vcs.read_change",
     "vcs.check_repository",
+    "vcs.merge",
 )
 RUN_GRANTS = (*RIGHTS, "models.invoke", *OPERATIONS, "repo:cardea")
 STEPS = count()

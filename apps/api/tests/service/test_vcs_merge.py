@@ -468,3 +468,26 @@ def test_the_host_refuses_an_authors_approval_of_its_own_pull_request(
     )
     refused(approve(kernel, session, number), "host_refused")
     assert number not in host.repositories["acme/cardea"].reviews
+
+
+# The kernel's evidence binding
+
+
+def test_evidence_queries_keep_old_digests_and_reject_bad_paths() -> None:
+    from cardea_vcs_ops import descriptors
+    from pydantic import ValidationError
+
+    from cardea.service.operations import EvidenceQuery, OperationDescriptor
+
+    (merging,) = [d for d in descriptors() if d.name == "vcs.merge"]
+    assert [q.name for q in merging.cardea.evidence or ()] == ["opened", "approvals"]
+    plain = merging.model_dump(mode="json")
+    del plain["cardea"]["evidence"]
+    without = OperationDescriptor.model_validate(plain)
+    explicit = OperationDescriptor.model_validate(
+        {**plain, "cardea": {**plain["cardea"], "evidence": None}}
+    )
+    assert without.digest == explicit.digest != merging.digest
+    for bad in ({"arguments/a.b": "/a"}, {"request/x": "/x"}, {"arguments/x": "x"}, {}):
+        with pytest.raises(ValidationError):
+            EvidenceQuery.model_validate({"name": "q", "operation": "vcs.review", "match": bad})

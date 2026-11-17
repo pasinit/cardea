@@ -610,3 +610,101 @@ def test_the_personal_access_token_provider(
     shared.write_text(json.dumps({"credentials": config.model_dump(mode="json")}))
     shared.chmod(0o644)
     assert load(shared).credentials == config
+
+
+# Several named credentials, one per repository-host identity (ADR-037 amendment 2026-11-17)
+
+AUTHOR = "planted-author-token-not-real-0123456789abcdef"
+REVIEWER = "planted-reviewer-token-not-real-0123456789abcd"
+
+
+def use_named_tokens(helper: LocalVcsHost, tmp_path: Path, pools: dict[str, str]) -> None:
+    """Both tokens in the profile's credential directory, as systemd would load them; the
+    shared configuration names them and their expiries, never their values."""
+    config = Path(helper.env["CARDEA_VCS_CONFIG"])
+    tokens = {"expires_on": "2999-01-01"}
+    config.write_text(
+        json.dumps(
+            {
+                "credentials": {
+                    "kind": "personal_access_tokens",
+                    "tokens": {"github-author": tokens, "github-reviewer": tokens},
+                    "default": "github-author",
+                    "pools": pools,
+                }
+            }
+        )
+    )
+    config.chmod(0o644)
+    directory = tmp_path / "credentials"
+    directory.mkdir(exist_ok=True)
+    for name, token in (("github-author", AUTHOR), ("github-reviewer", REVIEWER)):
+        (directory / name).write_text(token + "\n")
+        (directory / name).chmod(0o600)
+    helper.env.pop("CARDEA_CREDENTIAL", None)
+    helper.env["CARDEA_CREDENTIALS"] = str(directory)
+
+
+def test_the_worker_chooses_the_callers_token_and_neither_leaks(
+    kernel: Kernel,
+    session: FakeSession,
+    host: FakeGitHub,
+    helper: LocalVcsHost,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level("DEBUG")
+    # The reviewer token belongs to another pool: the developer never gets it.
+    use_named_tokens(helper, tmp_path, {"eng.principal": "github-reviewer"})
+    change = make_change(kernel, tmp_path)
+    branch = "agent/eng/named"
+    steps = [
+        ("vcs-push_branch", {"repository": "cardea", "branch": branch, **change}),
+        ("vcs-open_change", {"repository": "cardea", "head": branch, "base": "main", "title": "N"}),
+        ("vcs-read_change", {"repository": "cardea", "number": 1}),
+    ]
+    _, state, results = run_calls(kernel, session, steps)
+    assert state == "succeeded", [text(r) for r in results]
+    assert host.authorizations and set(host.authorizations) == {f"Bearer {AUTHOR}"}
+    # The same worker command, the caller's pool mapped to the reviewer token: only that.
+    use_named_tokens(helper, tmp_path, {"eng.dev": "github-reviewer"})
+    seen = len(host.authorizations)
+    _, state, results = run_calls(
+        kernel, session, [("vcs-read_change", {"repository": "cardea", "number": 1})]
+    )
+    assert state == "succeeded", [text(r) for r in results]
+    assert set(host.authorizations[seen:]) == {f"Bearer {REVIEWER}"}
+    for token in (AUTHOR, REVIEWER):
+        assert all(token not in json.dumps(r.model_dump(mode="json")) for r in results)
+        assert_token_absent(kernel, helper, session, caplog, token=token)
+
+
+def test_a_merge_runs_in_its_worker_with_the_kernels_evidence(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, helper: LocalVcsHost, tmp_path: Path
+) -> None:
+    """The worker has no store: the kernel sends the receipts the descriptor's evidence
+    queries found in the job document, and nothing else about other calls."""
+    use_named_tokens(helper, tmp_path, {})
+    change = make_change(kernel, tmp_path)
+    branch = "agent/eng/merge"
+    _, _, results = run_calls(
+        kernel,
+        session,
+        [
+            ("vcs-push_branch", {"repository": "cardea", "branch": branch, **change}),
+            (
+                "vcs-open_change",
+                {"repository": "cardea", "head": branch, "base": "main", "title": "M"},
+            ),
+            ("vcs-merge", {"repository": "cardea", "number": 1}),
+        ],
+    )
+    # This host has no `merge` section: refused in the worker, with nothing sent.
+    assert results[2].is_error and "merge_not_configured" in text(results[2])
+    worker, document, _ = helper.requests[-1]
+    assert worker == "vcs-merge"
+    evidence = json.loads(document)["context"]["evidence"]
+    (opened,) = evidence["opened"]
+    assert opened["agent_id"] == "eng.dev.0" and opened["group"] == "eng"
+    assert opened["fields"] == {"output/head": branch} and evidence["approvals"] == []
+    assert "merge" not in host.calls
