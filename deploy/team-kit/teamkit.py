@@ -582,7 +582,7 @@ def summarise(view: dict[str, Any]) -> list[str]:
     for pool in view.get("pools", []):
         for member in pool.get("members", []):
             active = member.get("active_task_id") or "idle"
-            last = (member.get("last_run") or {}).get("state", "-")
+            last = (member.get("last_run") or {}).get("outcome", "-")
             lines.append(f"  {member.get('principal_id')}: {active} (last {last})")
     for collection in view.get("collections", []):
         counts = ", ".join(

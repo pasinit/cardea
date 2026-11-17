@@ -371,3 +371,21 @@ def test_the_team_stops_at_its_daily_run_ceiling(team: tuple[Kernel, FakeSession
     assert (
         refused.value.code == "budget_exhausted" and "pool pm run ceiling" in refused.value.message
     )
+
+
+def test_status_summarises_the_overview(team: tuple[Kernel, FakeSession]) -> None:
+    from fastapi.testclient import TestClient
+
+    from cardea.service.app import create_app
+
+    kernel, _ = team
+    view = TestClient(create_app(kernel)).get(
+        "/v0.2/groups/dev-team/overview",
+        params={"namespace": "dev"},
+        headers={"Authorization": "Bearer sup-dev"},
+    )
+    assert view.status_code == 200, view.text
+    lines = kit().summarise(view.json())
+    assert any(line.strip().startswith("dev-team.dev.0: idle") for line in lines), lines
+    assert any("spend group" in line and "runs 0/30" in line for line in lines), lines
+    assert any("spend pool:pm" in line and "runs 0/4" in line for line in lines), lines

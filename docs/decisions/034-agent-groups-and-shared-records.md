@@ -528,6 +528,18 @@ Portable tests go in `apps/api/tests/service/`. Before the record is called veri
   - guards naming `record` or `args`, using a comprehension macro, or empty, are refused at apply;
   - a requirement without `result` keeps its digest.
 
+## Amendment (2026-11-17): run ceilings, refused-trigger notices and record event attributes
+
+These came from deploying a dev team on a real host (`deploy/team-kit`, [runbook](../runbooks/dev-team.md)). That team shares the owner's model subscription, so it needs a bound that does not depend on reported cost, and a supervisor who hears when that bound stops the team.
+
+- **Run ceilings.** A spend account (decision 5.3) may hold `runs`, admitted runs per day or week, with or without `usd`. Admission counts the window's reservations and refuses the next run past the ceiling with `budget_exhausted`, exactly as for dollars. A retry or approval continuation of an admitted run is not a new run. An account without `runs` keeps its stored form and digest. The overview reports `runs` and `used_runs`.
+- **A refused trigger mails the supervisor.** When a schedule or journal trigger's admission is refused by a ceiling, the kernel mails the group's supervisor once per pool and window. The client key names the windows, so later refusals add nothing. The notice carries `code: budget_exhausted`, the pool and the windows. Runs resume when the window turns, on the trigger's next slot or event. Together with the existing stop before a retry, this makes a ceiling a hard stop until the next day.
+- **Record event attributes.** Record journal events now carry two CloudEvents extension attributes: `recordstate`, the record's state after the change, and `transition`, the transition that made it. A trigger can then wake only on, for example, `{"exact": {"recordstate": "in_review"}}` instead of on every change.
+- **Tests:**
+  - `test_group_spend.py`: run ceilings for the group and for pools, `usd` and `runs` together, the validation, and one notice per window from refused schedule slots.
+  - `test_journal_triggers.py`: the attributes, and a filter on them.
+  - `test_team_kit.py`: the kit end to end on a kernel. An assignment wakes both developers and only one claims the item; the kill switch refuses new runs; the PM stops at its role's run ceiling; the status summary.
+
 ## Implementation plan (PR-sized slices, dependency order)
 
 1. **Collections and records:** the migration, the `Collection` model, `PUT/GET` of collections, `records.create/get/query/update` with compare-and-set, write guards and history.
