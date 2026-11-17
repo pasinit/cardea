@@ -117,6 +117,24 @@ class Vcs:
             return self.config.branch_prefix
         return self.registry.repositories[str(alias)].branch_prefix
 
+    def may_approve(self, context: OperationContext) -> bool:
+        """Whether the caller may submit an `APPROVE` review (ADR-037 question 2).
+
+        A pool entry matches the kernel's member id, `<group>.<pool>.<ordinal>`, of a caller
+        whose group the kernel resolved from its member table."""
+        allowed = self.config.allow_approve
+        if isinstance(allowed, bool):
+            return allowed
+        if context.group is None or context.agent_id is None:
+            return False
+        for address in allowed:
+            group, pool = address.split(".")
+            if group == context.group and re.fullmatch(
+                rf"{re.escape(group)}\.{re.escape(pool)}\.[0-9]+", context.agent_id
+            ):
+                return True
+        return False
+
     def check_branch(self, branch: str, context: OperationContext, alias: object) -> None:
         """Agent branches live under the caller's group prefix (ADR-037 open question 3),
         which the registry sets per repository."""
@@ -310,9 +328,9 @@ class Vcs:
     ) -> dict[str, JsonValue]:
         repository = self.repository(arguments["repository"])
         event, body = str(arguments["event"]), str(arguments["body"])
-        if event == "APPROVE" and not self.config.allow_approve:
-            # An app's approval could satisfy the repository's review rule: an unattended
-            # merge path (ADR-037 open question 2). Refused unless the host owner allows it.
+        if event == "APPROVE" and not self.may_approve(context):
+            # An approval could satisfy the repository's review rule: an unattended merge
+            # path (ADR-037 question 2). Refused unless the host owner allows the caller.
             raise OperationRejected(
                 "APPROVE reviews are not allowed on this host", "approve_refused"
             )

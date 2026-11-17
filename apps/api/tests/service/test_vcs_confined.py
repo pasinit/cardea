@@ -60,6 +60,7 @@ class LocalVcsHost:
     def __init__(self, root: Path, env: dict[str, str]) -> None:
         self.root, self.env = root, env
         self.outputs: dict[str, bytes] = {}
+        self.errors: dict[str, bytes] = {}
         # Everything the kernel sent the helper: job documents and staged inputs.
         self.requests: list[tuple[str, bytes, list[dict[str, str]] | None]] = []
 
@@ -116,6 +117,8 @@ class LocalVcsHost:
             check=False,
         )
         self.outputs[job] = done.stdout
+        # The worker's own log output, which the helper's journal would keep.
+        self.errors[job] = done.stderr
 
     def status(self, job: str) -> dict[str, Any]:
         return {
@@ -283,7 +286,11 @@ def make_bundle_bytes(kernel: Kernel, change: dict[str, Any]) -> bytes:
 
 
 def assert_token_absent(
-    kernel: Kernel, helper: LocalVcsHost, session: FakeSession, caplog: pytest.LogCaptureFixture
+    kernel: Kernel,
+    helper: LocalVcsHost,
+    session: FakeSession,
+    caplog: pytest.LogCaptureFixture,
+    token: str = TOKEN,
 ) -> None:
     with kernel.database.read() as conn:
         tables = [
@@ -291,14 +298,19 @@ def assert_token_absent(
         ]
         for table in tables:
             for row in conn.exec_driver_sql(f'SELECT * FROM "{table}"'):
-                assert TOKEN not in repr(tuple(row)), table
-    assert TOKEN not in caplog.text
-    assert all(TOKEN not in repr(request) for request in session.requests)
+                assert token not in repr(tuple(row)), table
+    assert token not in caplog.text
+    assert all(token not in repr(request) for request in session.requests)
     for _, document, staged in helper.requests:
-        assert TOKEN.encode() not in document and TOKEN not in json.dumps(staged)
-    assert all(TOKEN.encode() not in output for output in helper.outputs.values())
-    assert TOKEN not in json.dumps(dict(os.environ))
-    assert TOKEN not in repr(kernel.operations.handlers)
+        assert token.encode() not in document and token not in json.dumps(staged)
+    assert all(token.encode() not in output for output in helper.outputs.values())
+    assert all(token.encode() not in errors for errors in helper.errors.values())
+    assert token not in json.dumps(dict(os.environ))
+    assert token not in repr(kernel.operations.handlers)
+    # Every file the store keeps: the database, its log, objects and attempt logs.
+    for path in Path(kernel.database.path).parent.rglob("*"):
+        if path.is_file():
+            assert token.encode() not in path.read_bytes(), path
 
 
 def test_refusals_keep_their_codes_and_send_nothing(
@@ -473,3 +485,113 @@ def test_without_the_profile_credential_nothing_is_sent(
     )
     assert refused.is_error and "credential_unavailable" in text(refused)
     assert untouched(host, before)
+
+
+# A fine-grained personal access token as the profile credential (ADR-037 question 7)
+
+# Planted for these tests; shaped so no secret scanner mistakes it for a real token.
+PAT = "planted-fine-grained-pat-not-a-real-token-0123456789"
+
+
+def use_pat(helper: LocalVcsHost, tmp_path: Path, expires_on: str) -> None:
+    """The host owner's file names the provider and the token's expiry, never the token;
+    the token is the host secret systemd loads into the worker unit."""
+    config = Path(helper.env["CARDEA_VCS_CONFIG"])
+    config.write_text(
+        json.dumps({"credentials": {"kind": "personal_access_token", "expires_on": expires_on}})
+    )
+    config.chmod(0o644)  # holds no secret: may be shared and read-only
+    secret = tmp_path / "pat"
+    secret.write_text(PAT + "\n")
+    secret.chmod(0o600)
+    helper.env["CARDEA_CREDENTIAL"] = str(secret)
+
+
+def test_a_personal_access_token_is_injected_only_inside_the_vcs_worker(
+    kernel: Kernel,
+    session: FakeSession,
+    host: FakeGitHub,
+    helper: LocalVcsHost,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level("DEBUG")
+    use_pat(helper, tmp_path, "2999-01-01")
+    change = make_change(kernel, tmp_path)
+    branch = "agent/eng/pat"
+    task_id, state, results = run_calls(
+        kernel,
+        session,
+        [
+            ("vcs-push_branch", {"repository": "cardea", "branch": branch, **change}),
+            (
+                "vcs-open_change",
+                {"repository": "cardea", "head": branch, "base": "main", "title": "PAT"},
+            ),
+            ("vcs-comment", {"repository": "cardea", "number": 1, "body": "ok", "client_key": "c"}),
+            ("vcs-read_change", {"repository": "cardea", "number": 1}),
+        ],
+    )
+    assert state == "succeeded", [text(r) for r in results]
+    # The PAT reached the host, from the worker, as the bearer of every REST call.
+    assert host.authorizations and set(host.authorizations) == {f"Bearer {PAT}"}
+    assert host.repositories["acme/cardea"].head(branch) == change["head"]
+    # Never agent-visible: not in the tool results the agent read, nor its prompts.
+    assert all(PAT not in json.dumps(r.model_dump(mode="json")) for r in results)
+    # Never in receipts, the store, logs, job documents, staged inputs or worker output.
+    assert all(PAT not in repr(c) for c in calls(kernel, task_id))
+    assert_token_absent(kernel, helper, session, caplog, token=PAT)
+    assert all(TOKEN not in a for a in host.authorizations)
+
+
+def test_an_expired_personal_access_token_sends_nothing(
+    kernel: Kernel,
+    session: FakeSession,
+    host: FakeGitHub,
+    helper: LocalVcsHost,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    use_pat(helper, tmp_path, "2000-01-01")
+    before = len(host.authorizations)
+    _, _, (refused,) = run_calls(
+        kernel, session, [("vcs-read_change", {"repository": "cardea", "number": 1})]
+    )
+    assert refused.is_error and "credential_unavailable" in text(refused)
+    assert "expired on 2000-01-01" in text(refused)
+    assert untouched(host, before)
+    assert_token_absent(kernel, helper, session, caplog, token=PAT)
+
+
+def test_the_personal_access_token_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+    from datetime import date
+
+    from cardea_vcs_ops.config import PersonalAccessTokenConfig, Repository
+    from cardea_vcs_ops.credentials import (
+        CredentialUnavailable,
+        PersonalAccessToken,
+        provider,
+    )
+
+    secret = tmp_path / "pat"
+    secret.write_text(PAT)
+    monkeypatch.setenv("CARDEA_CREDENTIAL", str(secret))
+    config = PersonalAccessTokenConfig(kind="personal_access_token", expires_on=date(2027, 2, 1))
+    repository = Repository(owner="acme", name="app", api_url="https://x.test", git_url="g")
+    valid = PersonalAccessToken(config, today=lambda: date(2027, 1, 31))
+    credential = asyncio.run(valid.credential(repository, ("contents:write",)))
+    assert credential.token == PAT and credential.expires_at.date() == date(2027, 2, 1)
+    assert PAT not in repr(credential) and PAT not in str(credential)
+    assert PAT not in repr(valid) and PAT not in repr(config)
+    lapsed = PersonalAccessToken(config, today=lambda: date(2027, 2, 1))
+    with pytest.raises(CredentialUnavailable, match="expired"):
+        asyncio.run(lapsed.credential(repository, ("contents:write",)))
+    assert isinstance(provider(config), PersonalAccessToken)
+    # The configuration holds no token: a shared, read-only file is accepted.
+    shared = tmp_path / "vcs.json"
+    shared.write_text(json.dumps({"credentials": config.model_dump(mode="json")}))
+    shared.chmod(0o644)
+    assert load(shared).credentials == config

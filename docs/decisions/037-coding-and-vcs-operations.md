@@ -1,17 +1,21 @@
 # ADR-037: Coding and Version-Control Operations for an Agent Team
 
 - **Date / owner / milestones:** 2026-11-16; runtime, host-execution and API maintainers. Builds on [ADR-023](023-installed-operation-registry.md) (installed operations), [ADR-026](026-effect-idempotency-and-reconciliation.md) (effect scopes and reconciliation), [ADR-028](028-configurable-worker-profiles.md) (confined workers), [ADR-033](033-pluggable-agent-harnesses.md) (harnesses), [ADR-034](034-agent-groups-and-shared-records.md) (agent groups; its software-team example names `vcs.open_change`) and [ADR-036](036-approval-waits.md) (approval waits).
-- **Status:** proposed, except the parts below, which are selected and implemented; nothing is verified on Debian or against a real repository host. Open question 1 is decided by the lead and questions 2–4 carry the lead's recommendations, all subject to the owner's veto (see [Decisions](#decisions-lead-2026-11-16)); questions 7, 8 and 10 are pending the owner, and the remaining questions are at the end.
+- **Status:** proposed, except the parts below, which are selected and implemented; nothing is verified on Debian or against a real repository host. The owner decided questions 2–8 and 10 on 2026-11-16 (see [Decided by the owner](#decided-by-the-owner-2026-11-16)). Questions 1 and 9 are the lead's decisions (see [Decisions](#decisions-lead-2026-11-16)); question 10's answer amends question 1.
   - **Implemented:**
     - the content gate (decision 4, plan slice 6), with redaction of refused content and the confined-worker callback (see [Content gate: implementation](#content-gate-implementation-2026-11-16) and [redaction and confined workers](#content-gate-redaction-and-confined-workers-2026-11-16));
     - plan slice 2, the [ADR-023 amendment](023-installed-operation-registry.md#amendment-2026-11-16-long-confined-operations);
     - plan slice 3, `code.session`, with the Claude Code harness entry, the `coding` profile in the small-host kit and the Debian fit-test script;
     - plan slices 4 and 5, the repository-host operations `vcs.push_branch`, `vcs.open_change`, `vcs.comment`, `vcs.review` and `vcs.read_change` (package `packages/cardea-vcs-ops`), with reconcilers, against a fake host and a test credential provider.
-    - the `vcs` confined-worker profile (the `vcs.*` handlers and reconcilers run in ADR-028 workers with the profile's credential), staged inputs for confined workers, and the read-only readiness check `vcs.check_repository`.
+    - the `vcs` confined-worker profile (the `vcs.*` handlers and reconcilers run in ADR-028 workers with the profile's credential), staged inputs for confined workers, and the read-only readiness check `vcs.check_repository`;
+    - the owner's decisions that change the code: a fine-grained personal access token as the credential (question 7) and `APPROVE` allowed per pool (question 2). See [Owner decisions implemented](#owner-decisions-implemented-2026-11-16-portable-tests-only).
 
     See [Implementation status](#implementation-status).
-  - **Not implemented:** credential minting (a GitHub App or a personal access token, open question 7), so the `vcs.*` operations must not be pointed at a real host; allow-listed package registries for gates (question 8).
-  - **Portable tests only:** everything implemented. The harness is tested against a fake `claude`, and the `vcs.*` operations against a fake repository host. Apart from the Gitleaks fit test, no fit test has run: the `code.session` fit test in `experiments/code-session/` is written, not run, and nothing has run with the real CLI, a real repository host, a GitHub App or a ruleset. Every other "fit" is from documentation and says so.
+  - **Not implemented:**
+    - the GitHub App minter, the documented upgrade from the personal access token (question 7);
+    - allow-listed package registries for gates (question 8), which a separate change implements;
+    - the 30-day retention of change bundles (question 6): today every object is kept for the store's lifetime.
+  - **Portable tests only:** everything implemented. The harness is tested against a fake `claude`, and the `vcs.*` operations against a fake repository host. Apart from the Gitleaks fit test, no fit test has run: the `code.session` fit test in `experiments/code-session/` is written, not run, and nothing has run with the real CLI, a real repository host, a real personal access token, a GitHub App or a ruleset. Every other "fit" is from documentation and says so.
   - **Verified on Debian:** nothing yet (plan slice 7); see the [Debian acceptance checklist](../acceptance/debian-adr-034-037.md).
 - **Affected components:** [operation broker](../components/operation-broker.md), [installed host operations](../components/installed-host-operations.md), [Debian host](../components/debian-host.md), [identity and capabilities](../components/identity-capabilities.md), [agent runtime](../components/agent-runtime.md).
 
@@ -24,10 +28,10 @@ An agent team (ADR-034) that works on software needs four things the kernel does
    - It has no credential for the repository host and cannot push. Its network is limited to the model API and a read-only source of the repository.
    - Its output is bounded and receipted like any operation; the full change is stored as a kernel object the following calls can cite.
 2. **Repository-host effects with receipts.** Operations to push a branch, open a pull request, comment, and submit a review.
-   - A pushed branch name is restricted to a configured prefix (default `agent/*`).
+   - A pushed branch name is restricted to a configured prefix (`agent/<group>/`, question 3).
    - Each call is idempotent (an ADR-026 scope) and, after an interruption, is reconciled against the repository host's state, never blindly retried.
    - There is no merge operation. Merging stays a human or host decision.
-3. **Credentials the agent never sees.** The kernel mints a short-lived, repository-scoped token for the call and injects it only into the worker of these operations. It never appears in arguments, outputs, receipts, prompts, logs or the coding session's environment. Repository-side branch rules are a second, independent guard.
+3. **Credentials the agent never sees.** Only the worker of these operations holds a repository-host credential, and only for the call. For now it is a fine-grained personal access token stored as a host secret; the documented upgrade is a short-lived, repository-scoped token minted per call by a GitHub App (question 7). It never appears in arguments, outputs, receipts, prompts, logs or the coding session's environment. Repository-side branch rules are a second, independent guard.
 4. **A privacy gate.** Content leaving the host is checked first: a configurable content check (secret patterns plus a denylist the host owner maintains) runs in the worker on the change before any push, and on pull-request titles and bodies, comments, review bodies and commit messages before they are sent. A match refuses the call; nothing is sent.
 
 **Trust boundary.**
@@ -101,7 +105,7 @@ Compose existing pieces into one operations package, `vcs.*` and `code.*`, insta
 | `vcs.comment {repository, number, body, client_key}` | effect | `/repository`, `/number`, `/client_key` | a comment on the pull request carries the marker `cardea:<effect_key>` → applied |
 | `vcs.review {repository, number, event, body, client_key}` | effect | `/repository`, `/number`, `/client_key` | a review by the app carries the marker → applied |
 
-- There is no `vcs.merge`. `vcs.review` accepts `COMMENT` and `REQUEST_CHANGES`; `APPROVE` is refused unless the host owner enables it (open question 2).
+- There is no `vcs.merge`; the owner merges. `vcs.review` accepts `COMMENT` and `REQUEST_CHANGES`. `APPROVE` is refused unless the host owner allows it, for every caller or for named pools (question 2, decided by the owner).
 - `code.session` returns, within the 64 KiB receipt: the base and head commits, file and line counts, a bounded diff excerpt, each gate's target, exit status, duration and output tail, and the agent's bounded summary, turns and cost. The whole change is a `git bundle` published as a task-owned kernel object (the ADR-014/015 publication path), which `vcs.push_branch` cites by exact version. Nothing else carries state between calls.
 - ADR-034 records cite these receipts: a `submit` transition can require a `vcs.open_change` receipt for the record (`requires_receipt`), as the ADR's worked example already does.
 
@@ -109,20 +113,26 @@ Compose existing pieces into one operations package, `vcs.*` and `code.*`, insta
 
 - **`code.session`** runs as an ADR-028 confined worker under a new host-owner profile (name it `coding`):
   - a scratch workspace and no other writable path;
-  - network to the model API and to a read-only repository source only: either a host-side mirror served over the loopback, or the host's read endpoint with no credential for public repositories (open question 8 covers package registries for `make test`);
+  - network to the model API and to a read-only repository source only: either a host-side mirror served over the loopback, or the host's read endpoint with no credential for public repositories; and the package registries the gates need (question 8, decided by the owner);
   - no repository-host credential at all.
 
   Inside it, the worker clones `base_ref` with hooks disabled for its own git commands, runs the selected harness non-interactively (for Claude Code: `--bare`, an explicit tool list, `--permission-prompts none` and a budget; for OpenCode: the pinned binary with its permissions set to the same effect), commits the result, runs the gate targets with their own timeouts, and publishes the bundle. The harness and model are an ADR-033 selection, granted like an agent run's (`harness:<id>`).
 - **`vcs.*` effects** run as confined workers under a second profile (`vcs`) whose network allow-list is the repository host's API and git endpoints. They never check out the change: `vcs.push_branch` fetches the bundle into an empty bare repository and pushes one ref, with hooks disabled.
-- **Timeouts.** ADR-023 caps an operation at 600 s, which a coding session plus a full test run can exceed. This needs a small ADR-023 amendment: a confined operation may declare up to the profile's wall-time limit (open question 9).
+- **Timeouts.** ADR-023 caps an operation at 600 s, which a coding session plus a full test run can exceed. This needs a small ADR-023 amendment: a confined operation may declare up to the profile's wall-time limit (question 9, decided by the lead).
 
 ### 3. Credentials
 
-- The host owner installs a GitHub App on the allowed repositories and gives the kernel its private key as a private file (like other credentials, ADR-010/028), plus the installation and repository ids.
-- For each `vcs.*` effect, the kernel mints an installation access token restricted to the single repository (`repository_ids`) and to the call's permissions (`contents: write` for a push, `pull_requests: write` or `issues: write` for the others), valid for at most an hour.
-- The token goes to the worker on its private input channel, outside the recorded arguments, and is used through a credential helper (`GIT_ASKPASS`) or an HTTP header. Receipts, outputs, attempt logs and error summaries never contain it (ADR-026's failure-reason rules already keep exception text out).
+*Revised after the owner's answer to question 7 (2026-11-16).*
+
+- **Now: a fine-grained personal access token.** The host owner creates one on the repository host, limited to the registry's repositories, with the permissions the operations need (contents, pull requests and issues read and write; metadata read) and an expiry. It is stored as the `vcs` profile's root-only credential file, a host secret that systemd loads into each worker unit (ADR-010/028). The host-owner file names the provider and the expiry, never the token: `{"kind": "personal_access_token", "expires_on": "<date>"}`.
+- **Injected only inside `vcs.*`.** The worker reads the token for each call through the `RepositoryCredentials` provider and uses it only for that call's HTTP `Authorization` header and its push child (`GIT_ASKPASS`). The kernel never reads it. Arguments, tool results the agent sees, receipts, the store, job documents, staged inputs, worker output and logs never contain it (ADR-026's failure-reason rules already keep exception text out). From its expiry day on, every call is refused with `credential_unavailable` and nothing is sent.
+- **The trade-off, accepted by the owner:**
+  - *The secret lives longer:* months, until the owner rotates it, instead of at most an hour. A leaked token is useful to an attacker for that long.
+  - *No per-call minting:* the token's repositories and permissions are fixed when it is created. A call cannot narrow it to one repository or to the permissions that call needs, so every call carries the whole grant.
+  - *Branch protection is the second guard:* the repository's rules (below), checked by `vcs.check_repository`, are what stop a misused token from pushing outside the agent prefix or merging into the default branch.
+- **The documented upgrade: a GitHub App.** The host owner installs an App on the allowed repositories, and the App's private key becomes the profile credential. For each `vcs.*` effect, the worker mints an installation access token restricted to the single repository (`repository_ids`) and to the call's permissions (`contents: write` for a push, `pull_requests: write` or `issues: write` for the others), valid for at most an hour. It drops into the same provider interface; it is not built.
 - The coding session never receives a token.
-- **Second guard on the host:** a ruleset restricts the app to creating and updating branches matching the prefix, blocks force pushes and deletions elsewhere, and keeps the default branch behind required reviews that the app cannot bypass. The kernel checks at install time that the ruleset exists and reports drift as a failed readiness check; it cannot enforce it.
+- **Second guard on the host:** a ruleset restricts pushes to branches matching the prefix, blocks force pushes and deletions elsewhere, and keeps the default branch behind required reviews that the token cannot bypass. `vcs.check_repository` reports whether the ruleset exists and what is missing; Cardea cannot enforce it.
 
 ### 4. Content gate
 
@@ -130,12 +140,13 @@ Compose existing pieces into one operations package, `vcs.*` and `code.*`, insta
 - **Before push:** the `vcs.push_branch` worker scans the added lines of the change with Gitleaks and the denylist. A match fails the call with `content_refused` naming the rule and file, never the matched text.
 - **Before send:** titles, bodies, comments, review bodies and commit messages are checked by the same gate inside the call that sends them.
 - The gate runs before any network call, so a refusal sends nothing and is a definite failure, not `outcome_unknown`.
+- **Scope (question 5, decided by the owner):** the change's added lines plus every text that leaves the host (pull-request titles and bodies, comments, review bodies and commit messages), not the whole tree. A refusal also sends kernel mail to the run's supervisor (ADR-034 decision 4).
 
 ### 5. Authority
 
-- Each operation is a grant (ADR-023). Repositories are resource-qualified like ADR-033's `harness:<id>`: a call names a repository alias from host configuration, and needs `repo:<alias>` in its grants and in the supervisor's live ceiling (open question 4).
+- Each operation is a grant (ADR-023). Repositories are resource-qualified like ADR-033's `harness:<id>`: a call names a repository alias from host configuration, and needs `repo:<alias>` in its grants and in the supervisor's live ceiling (question 4, decided by the owner).
 - Operations that leave the host can carry ADR-036 rules, for example "always" for `vcs.open_change` on a protected repository.
-- Branch names come from the operation, not the agent: `agent/<group>/<record or task>` by default, inside the configured prefix (open question 3).
+- Branch names come from the operation, not the agent: `agent/<group>/<record or task>` by default, inside the configured prefix (question 3, decided by the owner).
 
 ### Content gate: implementation (2026-11-16)
 
@@ -161,8 +172,8 @@ Compose existing pieces into one operations package, `vcs.*` and `code.*`, insta
   - The kernel hands every in-process installed operation `OperationContext.check_content(operation=…, diff=…, texts=…)`. The future `vcs.*` operations call it before any network request.
   - A finding raises `OperationRejected` with code `content_refused`. The refusal names each rule and location (at most ten, then a count), never the matched text. Nothing is sent and the failure is definite.
   - When the gate is not configured, the scanner is missing or tampered with, or the scan fails, the call is refused with `content_gate_unavailable`.
-- **Supervisor mail.** A refusal also sends kernel mail to the run's supervisor (ADR-034 decision 4), listing the rules and locations. This is the lead's recommendation on open question 5 and can be turned off with `notify_supervisor: false`.
-- **Scope.** Added lines only, as recommended on open question 5. Whole-tree scanning is not built.
+- **Supervisor mail.** A refusal also sends kernel mail to the run's supervisor (ADR-034 decision 4), listing the rules and locations. The owner decided this on question 5. A host owner can still turn it off with `notify_supervisor: false`.
+- **Scope.** Added lines plus every text sent, as the owner decided on question 5. Whole-tree scanning is not built.
 - **Tests** (`apps/api/tests/service/test_content_gate.py`; the Gitleaks tests run in CI with the pinned binary):
   - diff and text locations;
   - the denylist's terms and patterns, case-insensitive;
@@ -220,8 +231,23 @@ Compose existing pieces into one operations package, `vcs.*` and `code.*`, insta
 The owner may veto either.
 
 1. **Question 9, long calls.** ADR-023's 600 s cap is raised for confined operations only, to the profile's declared wall time, with a hard maximum of two hours. `code.session` stays one call. See [ADR-023, Amendment (2026-11-16)](023-installed-operation-registry.md#amendment-2026-11-16-long-confined-operations).
-2. **Question 1, first harness.** Claude Code in `--bare` mode is the first harness for `code.session`, consistent with the subscription-token decision for agent runs. *These two parts conflict; see question 10.*
-3. **Question 8, network for gates: pending the owner.** The implementation assumes the lead's recommendation: no network beyond the model API, and dependencies from a pre-provisioned, read-only package cache bound into the sandbox. Allow-listing package registries is not implemented.
+2. **Question 1, first harness.** Claude Code in `--bare` mode is the first harness for `code.session`, consistent with the subscription-token decision for agent runs. *These two parts conflicted. The owner's answer to question 10 settles it: Claude Code with the subscription token, without `--bare`.*
+3. **Question 8, network for gates.** *Superseded by the owner's answer (2026-11-16): allow the package registries.* The lead had recommended no network beyond the model API, with dependencies from a pre-provisioned, read-only package cache.
+
+## Decided by the owner (2026-11-16)
+
+Each entry is the owner's answer to the question of that number in [Questions for the owner](#questions-for-the-owner), and what it changes.
+
+- **Question 2, `APPROVE` reviews: allowed, refused by default.** The generic default stays: `allow_approve` is off unless a host owner enables it. A host may allow it for every caller (`true`) or only for named pools (`["<group>.<pool>"]`). The dev-team rehearsal allows it for its principal engineers only. Agents still have no merge operation: the owner merges.
+- **Question 3, branches: `agent/<group>/`,** as implemented.
+- **Question 4, repository authority: `repo:<alias>`,** as implemented, for `code.session` and `vcs.*`.
+- **Question 5, content gate: the added lines plus the pull-request text, and mail the supervisor on refusal,** as recommended and implemented. Every text that leaves the host is scanned: titles, bodies, comments, review bodies and commit messages. The mail was already wired (`notify_supervisor`, default on).
+- **Question 6, change bundles: a 10 MiB cap, kept 30 days.** The cap is implemented (`code.session` artifacts and the `vcs` profile's staged input). The retention is not: change bundles are task-owned objects, and every object is kept for the store's lifetime today. Enforcing 30 days needs object expiry in the kernel, a separate change.
+- **Question 7, credentials: a fine-grained personal access token for now.** A GitHub App is not required. The token is stored as a host secret and injected only inside `vcs.*`, through the existing profile credential and `RepositoryCredentials` provider. The App stays the documented upgrade. The trade-off is in [decision 3](#3-credentials): the secret lives longer, nothing is minted per call, and branch protection is the second guard.
+- **Question 8, network for gates: allow the package registries.** The `coding` profile's allow list admits the package registries the gates need, beside the model API, so `make test` may install packages; the read-only cache stays available. Gates still get no repository-host credential and no other host. The cost: repository code that the gates run can reach those registries. Publishing to one needs a credential the sandbox does not hold. A separate change implements it.
+- **Question 10, the first harness: the subscription token without `--bare`,** with the explicit isolation flags, as implemented. The fit test records whether repository hooks or MCP servers run and whether the model follows the repository's `CLAUDE.md`.
+
+The owner did not change the lead's decisions on questions 1 (as amended by question 10) and 9.
 
 ## Implementation status
 
@@ -270,7 +296,7 @@ The owner may veto either.
 - **Package.** `packages/cardea-vcs-ops` installs `vcs.push_branch`, `vcs.open_change`, `vcs.comment`, `vcs.review` and `vcs.read_change` as ADR-023 operations: descriptors, entry points and an in-process handler per operation over the pinned `httpx`. Host configuration is one private file, `CARDEA_VCS_CONFIG`, holding `allow_approve` and the credential provider. The repository aliases, their hosts and branch prefixes come from the host repository registry (`CARDEA_REPOSITORIES`) that `code.session` reads too.
 - **Credentials.** A `RepositoryCredentials` provider is asked for one repository and the call's permissions (`contents:write`, `pull_requests:write`, `issues:write` or `pull_requests:read`) at every call.
   - The credential goes only to that call's HTTP client (the `Authorization` header) and to its push child process, through `GIT_ASKPASS` and one environment variable. It is never on a command line, in a URL, on disk, in arguments, outputs, receipts, logs or an agent's environment.
-  - The only provider is `FixedTestToken`, for tests and fakes. The GitHub App minter is not implemented; it waits on open question 7.
+  - The only provider at that point was `FixedTestToken`, for tests and fakes. The personal access token came later (see [Owner decisions implemented](#owner-decisions-implemented-2026-11-16-portable-tests-only)).
 - **Operations and reconcilers,** as in decision 1. The reconcilers read the host and never send again:
   - the branch's head equals the named commit;
   - the pull request for the head branch;
@@ -333,7 +359,7 @@ The owner may veto either.
   - A configuration file that holds no secret may be a shared, read-only host-owner file. The worker reads it at `/opt/cardea-vcs/vcs.json`, bound read-only; an example is `cardea/cardea-vcs.json`.
   - A file holding the test provider's token must still be private.
   - A missing credential is a definite refusal, `credential_unavailable`, with nothing sent.
-  - The future GitHub App minter (open question 7) fits here: the App's key becomes the profile credential and minting happens in the worker.
+  - The GitHub App minter, the documented upgrade (question 7), fits here: the App's key becomes the profile credential and minting happens in the worker.
 - **Content gate** through the #53 callback: the worker's `check_content` asks the kernel over loopback. A refusal keeps its code (`content_refused`) and names no matched text.
 - **Rejection codes.** A worker's refusal now carries its code (`{"rejected", "code"}`), so `branch_not_allowed`, `approve_refused`, `content_refused` and the others reach the caller as they do in-process.
 - **Group.** The caller's group goes to the worker in the job document, as the recorded context already carries it for reconcilers.
@@ -367,7 +393,28 @@ The owner may veto either.
   - `test_confined_launcher.py` covers staged inputs as read-only files bound read-only, digest, size and count refusals before the fence, a profile without `input_kb`, and `kernel_callback` only on `allow_list` profiles.
   - `test_deploy_examples.py` checks that the profile and its six workers fit the descriptors.
   - #54's in-process tests (`test_vcs_ops.py`) keep testing the handler logic, with the executor removed.
-- **Not yet:** the App minter (open question 7), and a Debian fit test of the `vcs` profile against a real repository host. No migration was needed.
+- **Not yet:** the App minter (the documented upgrade, question 7), and a Debian fit test of the `vcs` profile against a real repository host. No migration was needed.
+
+### Owner decisions implemented (2026-11-16, portable tests only)
+
+- **Personal access token (question 7).** `cardea_vcs_ops.credentials.PersonalAccessToken`, configured as `{"kind": "personal_access_token", "expires_on": "<date>"}`:
+  - it reads the `vcs` profile's credential at `$CARDEA_CREDENTIAL` for each call, as `profile_credential` does;
+  - from `expires_on` on it refuses with `credential_unavailable` before any network call;
+  - the configuration holds no secret, so it may be a shared, read-only file.
+
+  The small-host kit's `cardea-vcs.json` uses it, and the kit's README says how to create the token.
+- **`APPROVE` per pool (question 2).** `allow_approve` is `false` (the default), `true`, or a list of `<group>.<pool>` addresses. A pool entry matches a caller whose group the kernel resolved from its member table and whose member id is `<group>.<pool>.<ordinal>`, the id the kernel gives pool members. Group and pool names hold no dots, so the match is exact. The dev-team rehearsal allows `dev-team.principal`: the principal approves on the host, and the restructured team's `security` pool, which also holds `vcs.review`, is refused.
+- **Tests:**
+  - `test_vcs_confined.py`:
+    - the PAT is the bearer of every REST call the worker makes, and a push, a pull request, a comment and a read succeed with it;
+    - a containment scan finds the PAT in none of these: the tool results the agent read, its prompts, receipts, any database row, any file under the store's directory, the kernel's logs, the worker's output and standard error, job documents, staged inputs, the kernel's environment or its handlers;
+    - an expired PAT sends nothing;
+    - unit tests of the provider: expiry, `repr` and `str` redacted, and a shared configuration accepted.
+  - `test_vcs_ops.py`: `APPROVE` refused by default, refused for another pool, allowed for the caller's pool and allowed for everyone; and exact matching of pool entries, including a longer pool name, another group and a caller outside a group, plus invalid entries refused.
+  - `make teams-test`: the principal's approval lands on the host, and security's is refused.
+  - `test_deploy_examples.py`: the kit uses the PAT provider with `allow_approve` off.
+
+  No migration was needed.
 
 ### Milestone 1 dress rehearsal (2026-11-16, portable)
 
@@ -397,20 +444,23 @@ Revisit if:
 - the repository host adds idempotency keys for pull requests, comments or reviews, so reconciliation reads become unnecessary;
 - a headless coding agent ships a sandbox that meets ADR-028's requirements by itself;
 - a second forge is needed (the `vcs.*` names stay; a second package implements them);
-- tokens with narrower scopes than an installation token (for example per-branch) become available.
+- tokens with narrower scopes than an installation token (for example per-branch) become available;
+- a deployment needs per-call minting or shorter-lived secrets than a personal access token gives: move to the GitHub App (question 7).
 
-## Open questions for the owner
+## Questions for the owner
 
-1. *Decided by the lead (2026-11-16): Claude Code in `--bare` mode.* Which harness should `code.session` run first: Claude Code in `--bare` mode, or OpenCode with a configured provider? Both are already pinned for agent runs.
-2. May an agent submit an `APPROVE` review? The proposal refuses it by default, because an app's approval could satisfy the repository's review rule and amount to an unattended merge path. **Lead recommendation (2026-11-16, pending the owner):** refuse by default; a host owner may enable it per host (`allow_approve`). Implemented that way.
-3. Branch naming: a fixed prefix (`agent/*`), or one per group (`agent/<group>/*`) so rulesets can separate teams? **Lead recommendation (2026-11-16, pending the owner):** one prefix per group, `agent/<group>/`, checked in the operation from the kernel's member table. Callers outside a group cannot push. Implemented that way.
-4. Repository authority: resource-qualified grants `repo:<alias>` with aliases in host configuration, or one installed package per repository? **Lead recommendation (2026-11-16, pending the owner):** `repo:<alias>` grants with aliases in host configuration. Implemented that way.
-5. Content gate scope: added lines only, or the whole tree of the pushed branch? And should a refusal notify the supervisor by mail (ADR-034 decision 4) as well as failing the call?
-6. Change transport: what size cap and retention for change bundles stored as objects?
-7. Credentials for small deployments: is a GitHub App required, or is a fine-grained personal access token an accepted fallback (no per-call minting, longer-lived secret)?
-8. *Pending the owner; the lead's recommendation is assumed (no network beyond the model API, a read-only pre-provisioned package cache).* Network for gates: `make test` often installs packages. Allow-list the package registries in the `coding` profile, or require pre-provisioned caches and no network beyond the model API?
+All decided; the answers are in [Decided by the owner](#decided-by-the-owner-2026-11-16) and [Decisions](#decisions-lead-2026-11-16).
+
+1. *Decided by the lead (2026-11-16): Claude Code in `--bare` mode; amended by the owner's answer to question 10 (2026-11-16): without `--bare`.* Which harness should `code.session` run first: Claude Code in `--bare` mode, or OpenCode with a configured provider? Both are already pinned for agent runs.
+2. *Decided by the owner (2026-11-16): allowed, refused by default; a host enables it, for every caller or for named pools.* May an agent submit an `APPROVE` review? The proposal refuses it by default, because an app's approval could satisfy the repository's review rule and amount to an unattended merge path. **Lead recommendation (2026-11-16, accepted by the owner):** refuse by default; a host owner may enable it per host (`allow_approve`). Implemented that way.
+3. *Decided by the owner (2026-11-16): `agent/<group>/`.* Branch naming: a fixed prefix (`agent/*`), or one per group (`agent/<group>/*`) so rulesets can separate teams? **Lead recommendation (2026-11-16, accepted by the owner):** one prefix per group, `agent/<group>/`, checked in the operation from the kernel's member table. Callers outside a group cannot push. Implemented that way.
+4. *Decided by the owner (2026-11-16): `repo:<alias>`.* Repository authority: resource-qualified grants `repo:<alias>` with aliases in host configuration, or one installed package per repository? **Lead recommendation (2026-11-16, accepted by the owner):** `repo:<alias>` grants with aliases in host configuration. Implemented that way.
+5. *Decided by the owner (2026-11-16): the added lines plus the pull-request text, and mail the supervisor on refusal.* Content gate scope: added lines only, or the whole tree of the pushed branch? And should a refusal notify the supervisor by mail (ADR-034 decision 4) as well as failing the call?
+6. *Decided by the owner (2026-11-16): 10 MiB, kept 30 days.* Change transport: what size cap and retention for change bundles stored as objects?
+7. *Decided by the owner (2026-11-16): a fine-grained personal access token for now; the GitHub App is the documented upgrade.* Credentials for small deployments: is a GitHub App required, or is a fine-grained personal access token an accepted fallback (no per-call minting, longer-lived secret)?
+8. *Decided by the owner (2026-11-16): allow the package registries.* Network for gates: `make test` often installs packages. Allow-list the package registries in the `coding` profile, or require pre-provisioned caches and no network beyond the model API?
 9. *Decided by the lead (2026-11-16): raise the cap for confined operations to the profile's wall time, at most two hours.* Long calls: raise ADR-023's 600 s cap for confined operations to the profile's wall time, or split a session into code and gate calls?
-10. `--bare` and the subscription token (raised 2026-11-16). Claude Code's documentation says bare mode does not read `CLAUDE_CODE_OAUTH_TOKEN`, and that a script passing `--bare` must authenticate with `ANTHROPIC_API_KEY` or an `apiKeyHelper` ([headless mode](https://code.claude.com/docs/en/headless), [authentication](https://code.claude.com/docs/en/authentication)). Question 1's decision, `--bare` with the subscription token, therefore cannot be met as written. The implementation supports both:
+10. *Decided by the owner (2026-11-16): the subscription token without `--bare`, with the explicit isolation flags.* `--bare` and the subscription token (raised 2026-11-16). Claude Code's documentation says bare mode does not read `CLAUDE_CODE_OAUTH_TOKEN`, and that a script passing `--bare` must authenticate with `ANTHROPIC_API_KEY` or an `apiKeyHelper` ([headless mode](https://code.claude.com/docs/en/headless), [authentication](https://code.claude.com/docs/en/authentication)). Question 1's decision, `--bare` with the subscription token, therefore cannot be met as written. The implementation supports both:
     - with a subscription token (`oauth_token`, the default and the kit's setting), Claude Code runs without `--bare`, and the isolation comes from explicit flags ([CLI reference](https://code.claude.com/docs/en/cli-reference)): `--setting-sources user` with an empty configuration directory, `disableAllHooks`, an empty strict MCP configuration and no slash commands;
     - with an API key (`api_key`), it also passes `--bare`.
 
