@@ -6,6 +6,11 @@
 override_dh_virtualenv:
 	dh_virtualenv --builtin-venv --python /usr/bin/python3 --skip-install --extra-pip-arg=--no-deps --extra-pip-arg=--only-binary=:all: --extra-pip-arg=--no-compile
 
+# The tree must be exactly the staged one: a copy from macOS can add AppleDouble ._ files,
+# which dh_install would ship (debian/verify_stage.py).
+execute_before_dh_auto_configure:
+	python3 debian/verify_stage.py .
+
 override_dh_auto_build:
 
 override_dh_auto_test:
