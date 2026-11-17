@@ -242,6 +242,7 @@ used by the examples.
 | `effect_not_applied` | Destination shows no effect | `cardea.service.operation_runtime` |
 | `env_commit_unknown` | the commit is not in the repository; the checkout is not the named commit | `cardea_env_ops.try_` |
 | `env_invalid` | the scenario environment may not set {…} | `cardea_env_ops.try_` |
+| `env_isolation_failed` | Scenario isolation failed: {…} | `cardea_env_ops.isolation` |
 | `env_scenario_unknown` | Unknown scenarios: {…} | `cardea_env_ops.try_` |
 | `env_source_unavailable` | the repository source could not be read | `cardea_env_ops.try_` |
 | `env_tier_unavailable` | Scenario {…} needs the {…} tier, which this host does not offer | `cardea_env_ops.try_` |

@@ -297,7 +297,15 @@ def test_the_env_try_wrapper_restores_the_registry_and_its_catalog_is_valid(
     registry = Registry.model_validate(env_try.catalog("/opt/cardea-code/repos/x.git"))
     (entry,) = registry.repositories.values()
     assert entry.environment is not None and not entry.hosted
-    assert set(entry.environment.scenarios) == {"try", "teams", "slow"}
+    assert set(entry.environment.scenarios) == {
+        "try",
+        "teams",
+        "slow",
+        "forge",
+        "background",
+        "check",
+        "killer",
+    }
     # The scenario is the commit's own code, which the catalog only names.
     assert all(s.argv[2] == "scenario.py" for s in entry.environment.scenarios.values())
     compile(env_try.SCENARIO, "scenario.py", "exec")

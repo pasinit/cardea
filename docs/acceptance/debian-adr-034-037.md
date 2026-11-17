@@ -79,6 +79,12 @@ None of these has run. **Script:** `sudo sh experiments/debian-acceptance/env_tr
 - [ ] **Same receipt and reruns** (test 2). The same commit and scenarios, in any order, return the first receipt (`cached: true`) without starting a unit. Three forced reruns run, and a fourth in a day is refused with `env_rerun_limit`. Phase 2.
 - [ ] **Confinement** (test 3). A hostile commit's scenario reaches none of: the store, the helper spool, the credentials directory, the kernel on 127.0.0.1, DNS, the metadata address, a host the proxy does not list. Filling the disk fails the scenario, not the host. Phase 3.
 - [ ] **Caps** (test 4). A scenario past its time limit reports `timeout`, and the next scenario still runs. Phase 4. Memory and task caps are the profile's systemd properties; a memory cap kill fails the call as `worker_memory_limit` (ADR-028 probes).
+- [ ] **The result cannot be forged** (lead review). Each of these must fail to change the reported result:
+  - a scenario writing a forged result to `/proc/<worker>/fd/*`, or reading `/proc/<worker>/mem`;
+  - a `setsid` background process, which must be killed before the next scenario and leave nothing on the host;
+  - a scenario that kills the worker, which must leave the call failed with no result.
+
+  The arm64 dev VM can run this now. Phase 6.
 - [ ] **Concurrency** (test 6). An identical call while the first runs is refused with `env_run_in_progress` and starts nothing. Phase 5.
 - [ ] **The toolchain image.** `make try-toolchain` on the host builds a Debian 13 minbase image with `mmdebstrap`, unpacks it read-only under its SHA-256 in `/opt/cardea-try/toolchain/` and pins it in the repository registry. The next call has a new run key. Enable `cardea-try-toolchain.timer` for the weekly refresh.
 

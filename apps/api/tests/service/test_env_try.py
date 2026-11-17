@@ -377,3 +377,139 @@ def test_only_a_passing_run_satisfies_the_records_guard(
     # A cached answer carries the same verdict.
     _, cached = call(kernel, "again", commit=repo["good"], scenarios=["try"])
     check_result("result.passed == true && result.cached == true", cached)
+
+
+# A hostile commit cannot change the reported result (ADR-038 review)
+
+HOSTILE = r"""
+import json, os, pathlib, signal, subprocess, sys, time
+name = sys.argv[1]
+worker = os.getppid()
+if name == "forge":
+    forged = json.dumps({"output": {"repo": "app", "commit": "0" * 40, "cached": False,
+                                    "passed": True, "scenarios": []}}).encode()
+    tried = {}
+    for target in sorted(pathlib.Path(f"/proc/{worker}/fd").glob("*")) or [
+        pathlib.Path(f"/proc/{worker}/fd/1")
+    ]:
+        try:
+            with open(target, "wb") as stream:
+                stream.write(forged)
+            tried[target.name] = "written"
+        except OSError as error:
+            tried[target.name] = type(error).__name__
+    try:
+        with open(f"/proc/{worker}/mem", "rb") as stream:
+            stream.read(1)
+        tried["mem"] = "read"
+    except OSError as error:
+        tried["mem"] = type(error).__name__
+    print("FORGE", json.dumps(tried, sort_keys=True))
+    sys.exit(1)
+if name == "background":
+    # A detached process that would rewrite the next scenario's checkout and the report.
+    code = (
+        "import os, pathlib, time\n"
+        "while True:\n"
+        "    pathlib.Path('verdict').write_text('pass')\n"
+        "    time.sleep(0.05)\n"
+    )
+    subprocess.Popen([sys.executable, "-c", code, "stray-marker"], start_new_session=True)
+    time.sleep(0.5)
+    sys.exit(0)
+if name == "check":
+    # Runs after `background`: the stray must be gone, so `verdict` stops changing.
+    path = pathlib.Path("verdict")
+    path.write_text("fail")
+    time.sleep(0.5)
+    print("VERDICT", path.read_text())
+    sys.exit(0 if path.read_text() == "fail" else 1)
+if name == "killer":
+    os.kill(worker, signal.SIGKILL)
+    time.sleep(1)
+    sys.exit(0)
+"""
+
+
+@pytest.fixture
+def hostile_kernel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo: dict[str, Any]
+) -> tuple[Kernel, EnvHost]:
+    script = tmp_path / "hostile.py"
+    script.write_text(HOSTILE)
+    scenarios = {
+        name: {"argv": [sys.executable, str(script), name], "timeout_seconds": 30}
+        for name in ("forge", "background", "check", "killer")
+    }
+    path = tmp_path / "repositories.json"
+    path.write_text(
+        json.dumps(
+            {
+                "repositories": {
+                    "app": {"source": str(repo["source"]), "environment": {"scenarios": scenarios}}
+                }
+            }
+        )
+    )
+    path.chmod(0o644)
+    monkeypatch.setenv("CARDEA_REPOSITORIES", str(path))
+    host = EnvHost({"CARDEA_REPOSITORIES": str(path)})
+    kernel = kernel_for(tmp_path, host, monkeypatch, Registry(descriptors(), {}), "env.try")
+    return kernel, host
+
+
+LINUX = pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="the isolation guards need Linux prctl and /proc"
+)
+
+
+@LINUX
+def test_a_scenario_cannot_write_the_workers_result(
+    hostile_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
+) -> None:
+    kernel, _ = hostile_kernel
+    _, settled = call(kernel, "forge", commit=repo["good"], scenarios=["forge"])
+    result = output(settled)
+    assert result["passed"] is False and result["isolation"] == "subreaper"
+    (scenario,) = result["scenarios"]
+    assert scenario["outcome"] == "fail"
+    line = next(x for x in scenario["log_tail"].splitlines() if x.startswith("FORGE "))
+    tried = json.loads(line.removeprefix("FORGE "))
+    assert tried and all(v not in {"written", "read"} for v in tried.values()), tried
+
+
+@LINUX
+def test_a_detached_background_process_does_not_outlive_its_scenario(
+    hostile_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
+) -> None:
+    kernel, _ = hostile_kernel
+    _, settled = call(kernel, "bg", commit=repo["good"], scenarios=["background", "check"])
+    result = output(settled)
+    background, check = result["scenarios"]
+    assert background["stray_processes_killed"] >= 1
+    assert check["outcome"] == "pass", check["log_tail"]
+    assert result["passed"] is True
+    # Nothing it started is still running anywhere.
+    left = [
+        p.name
+        for p in Path("/proc").iterdir()
+        if p.name.isdigit() and b"stray-marker" in _cmdline(p)
+    ]
+    assert not left
+
+
+def _cmdline(path: Path) -> bytes:
+    try:
+        return (path / "cmdline").read_bytes()
+    except OSError:
+        return b""
+
+
+@LINUX
+def test_a_scenario_that_kills_the_worker_gets_no_result(
+    hostile_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
+) -> None:
+    kernel, _ = hostile_kernel
+    state, settled = call(kernel, "kill", commit=repo["good"], scenarios=["killer"])
+    assert state == "failed" and settled.state is not OperationState.SUCCEEDED
+    assert settled.result is None

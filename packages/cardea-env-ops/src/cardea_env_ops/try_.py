@@ -15,7 +15,10 @@ One call, nothing kept afterwards:
    of at most 4 KiB; and the catalog's artifact paths, each at most 256 KiB and 1 MiB in
    all, returned as artifacts the kernel stores as objects. Anything over a limit is
    dropped and counted.
-4. **Tear down.** The scratch is deleted here; the root helper removes the unit and its
+4. **Isolation.** The worker is non-dumpable and a child subreaper, each scenario runs in
+   its own session, and every process it started is killed before the next scenario and
+   before the report (`isolation`), so the commit cannot forge or disturb the result.
+5. **Tear down.** The scratch is deleted here; the root helper removes the unit and its
    staging whatever happens (ADR-028).
 
 The run window (the same inputs within 24 hours give the same receipt) and the rerun limit
@@ -39,6 +42,7 @@ from pydantic import JsonValue
 
 from cardea.service import repositories
 from cardea.service.operations import OperationContext, OperationRejected, WithArtifacts
+from cardea_env_ops import isolation
 
 TIER = "process"
 MAX_TAIL = 4096
@@ -123,34 +127,54 @@ def stage(source: str, commit: str, scratch: Path) -> Path:
     return checkout
 
 
-def _run(argv: tuple[str, ...], cwd: Path, env: dict[str, str], timeout: float) -> dict[str, Any]:
+def _run(
+    argv: tuple[str, ...], cwd: Path, env: dict[str, str], timeout: float, log_path: Path
+) -> dict[str, Any]:
+    """One scenario in its own session; afterwards nothing it started is left running.
+
+    Its output goes to a file, not a pipe, so a process it leaves behind holding the output
+    open cannot hold the scenario open; the scenario ends when its own process does.
+    """
     started = time.monotonic()
+    group: int | None = None
+    stray = 0
     try:
-        done = subprocess.run(
-            list(argv),
-            cwd=cwd,
-            env=env,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            timeout=timeout,
-            check=False,
-        )
-        log, code = done.stdout or b"", done.returncode
-        outcome = "pass" if code == 0 else "fail"
-    except subprocess.TimeoutExpired as expired:
-        log, code, outcome = expired.stdout or b"", None, "timeout"
+        with log_path.open("wb") as log:
+            process = subprocess.Popen(
+                list(argv),
+                cwd=cwd,
+                env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                close_fds=True,
+                start_new_session=True,
+            )
+        group = process.pid
+        try:
+            code: int | None = process.wait(timeout=timeout)
+            outcome = "pass" if code == 0 else "fail"
+        except subprocess.TimeoutExpired:
+            stray += isolation.clear(group)
+            process.wait()
+            code, outcome = None, "timeout"
     except OSError as error:
-        log, code, outcome = f"could not start: {type(error).__name__}".encode(), None, "error"
-    text = log.decode(errors="replace") if isinstance(log, bytes) else str(log)
-    tail = scrub(text[-MAX_TAIL:])
+        log_path.write_bytes(f"could not start: {type(error).__name__}".encode())
+        code, outcome = None, "error"
+    stray += isolation.clear(group)
+    size = log_path.stat().st_size
+    with log_path.open("rb") as stream:
+        stream.seek(max(0, size - 4 * MAX_TAIL))
+        text = stream.read().decode(errors="replace")
+    log_path.unlink()
     return {
         "outcome": outcome,
         "exit_code": code,
         "duration_ms": int((time.monotonic() - started) * 1000),
-        "log_tail": tail,
-        "log_truncated": len(text) > MAX_TAIL,
-        "dropped_log_bytes": max(0, len(text.encode()) - MAX_TAIL),
+        "log_tail": scrub(text[-MAX_TAIL:]),
+        "log_truncated": size > MAX_TAIL,
+        "stray_processes_killed": stray,
+        "dropped_log_bytes": max(0, size - MAX_TAIL),
     }
 
 
@@ -181,7 +205,10 @@ def collect(
 
 
 def try_commit(
-    arguments: dict[str, JsonValue], context: OperationContext, scratch: Path
+    arguments: dict[str, JsonValue],
+    context: OperationContext,
+    scratch: Path,
+    mode: str = "subreaper",
 ) -> WithArtifacts | dict[str, JsonValue]:
     alias, commit = str(arguments["repo"]), str(arguments["commit"])
     names = [str(n) for n in arguments["scenarios"]]  # type: ignore[union-attr]
@@ -218,15 +245,19 @@ def try_commit(
         if remaining <= 1:
             results.append({"name": name, "outcome": "not_run", "exit_code": None})
             continue
-        ran = _run(scenario.argv, checkout, env, min(float(scenario.timeout_seconds), remaining))
+        limit = min(float(scenario.timeout_seconds), remaining)
+        ran = _run(scenario.argv, checkout, env, limit, scratch / f"{name}.log")
         dropped["log_bytes"] += int(ran.pop("dropped_log_bytes"))
         ran["artifacts"] = collect(checkout, scenario.artifacts, kept, dropped)
         results.append({"name": name, **ran})
+    # Nothing the commit started may outlive its scenarios into the report.
+    isolation.clear()
     passed = all(isinstance(r, dict) and r.get("outcome") == "pass" for r in results)
     output: dict[str, JsonValue] = {
         "repo": alias,
         "commit": commit,
         "tier": TIER,
+        "isolation": mode,
         "catalog_sha256": catalog.digest(),
         "toolchain_sha256": catalog.toolchain.sha256 if catalog.toolchain else None,
         "cached": False,
@@ -239,8 +270,10 @@ def try_commit(
 
 async def run(arguments: dict[str, JsonValue], context: OperationContext) -> Any:
     """The confined worker's entry point (`env.try`)."""
+    # Before anything is staged: the commit's code must not reach this process.
+    mode = isolation.harden()
     scratch = Path(tempfile.mkdtemp(prefix="env-try-"))
     try:
-        return try_commit(arguments, context, scratch)
+        return try_commit(arguments, context, scratch, mode)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)

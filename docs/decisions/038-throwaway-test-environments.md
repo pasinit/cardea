@@ -196,16 +196,25 @@ Both are confined workers under ADR-028 with the same repository aliases; they s
     - a settled row inside 24 hours answers with its output, `cached: true` and `cached_receipt_id`, recorded as a deduplicated receipt without starting a worker;
     - `rerun: true` skips the window, at most 3 times per namespace, repository and commit in 24 hours (`429 env_rerun_limit`), and the new receipt records `rerun_of`.
   - **At settlement.** Success keeps the row. A failure or an interrupted call deletes it, so the call can be made again. A running row past its call's deadline plus five minutes is ignored.
+- **Trusting the result** (lead review, 2026-11-17). The commit's code runs as the worker's uid, in its unit and PID namespace, so on its own it could forge the result that `requires_receipt.result` trusts. `cardea_env_ops.isolation` guards against that:
+  - **Non-dumpable worker.** Before anything is staged, the worker calls `prctl(PR_SET_DUMPABLE, 0)` through `ctypes` and reads it back. A same-uid process can then open neither `/proc/<worker>/fd/*`, which would let it write a forged result to the worker's output, nor `/proc/<worker>/mem`, and cannot ptrace it. The unit's seccomp filter also denies `@debug`, which holds `ptrace`, `process_vm_*` and `pidfd_getfd`. No sandbox option sets this on a running process, so `ctypes` is the smallest way.
+  - **Child subreaper.** The worker sets `PR_SET_CHILD_SUBREAPER`, so a process a scenario starts, double-forks or detaches with `setsid` is reparented to the worker and stays in its process tree. A process group is not enough, because `setsid` leaves it. The unit's cgroup also holds the worker, and a per-scenario sub-cgroup would need a delegated cgroup tree from the root helper. The process tree under a subreaper needs nothing new from the helper.
+  - **Each scenario in its own session.** After each scenario, on its timeout and before the report, the worker kills and reaps every descendant, found by walking `/proc/*/stat`, and checks that none is left. A survivor refuses the call with `env_isolation_failed`. Each scenario reports `stray_processes_killed`.
+  - **No inherited descriptors.** The scenario's stdin is `/dev/null` and `close_fds` is on. Its output goes to a file in the scratch, not a pipe, so a stray holding the output open cannot hold the scenario open.
+  - **Killing the worker.** Signals between processes of one uid are allowed, so a scenario can still kill the worker. The call then fails with no result (`worker_output_invalid` or a worker failure), never a forged one.
+  - **The output records** `isolation: "subreaper"`. Off Linux (portable tests only) it is `process_group`, a fallback that kills each scenario's process group.
+  - **Tests.** Linux-only tests show that a scenario writing a forged result to every `/proc/<worker>/fd/*` and reading `/proc/<worker>/mem` fails and is reported as its own `fail`. A `setsid` background process is killed before the next scenario, which sees no tampering, and none is left on the host. A scenario that kills the worker leaves the call failed with no result. With the guards disabled in a negative-control run, the forged write reached the worker's output and the stray survived. The same cases are phases of the Debian acceptance script.
+- **Profile sizing.** The scratch is a tmpfs, whose pages are charged to the unit's memory. The helper now refuses a profile whose `scratch_mb` exceeds its `memory_mb` (`invalid_profile`). The kit's `vcs` profile is resized to 1 GiB of memory and 512 MiB of scratch.
 - **Toolchain image** (decision 6). `make try-toolchain` runs `packaging/try_toolchain.py`:
   - `build` runs `mmdebstrap` for a Debian 13 minbase root with `SOURCE_DATE_EPOCH` set to the ISO week's start, and unpacks it read-only under its SHA-256. It keeps the last two images and any pinned one.
   - `pin` writes the path and digest into every registry `environment`, atomically.
   - The kit's `cardea-try-toolchain.timer` refreshes the image weekly.
 - **Kit** (`deploy/small-host/cardea`):
-  - the `try` profile: `allow_list` through squid port `127.0.10.7` to `pypi.org` and `files.pythonhosted.org`, no credential, concurrency 1, 4 GiB of memory, 6 GiB of scratch and one hour of wall time;
+  - the `try` profile: `allow_list` through squid port `127.0.10.7` to `pypi.org` and `files.pythonhosted.org`, no credential, concurrency 1, 3 GiB of memory, 2 GiB of scratch (sized to run beside `coding`'s 4 GiB on an 8 GB host) and one hour of wall time;
   - the `env-try` worker, which binds read-only the kernel environment, the registry, the mirrors and the toolchain directory;
   - an example catalog in `repositories.json`.
 - **Tests:**
-  - `test_env_try.py` (19 tests) runs the real worker command locally against a fixture with a good and a bad commit. It covers:
+  - `test_env_try.py` (22 tests) runs the real worker command locally against a fixture with a good and a bad commit. It covers:
     - pass and fail;
     - log scrubbing and artifacts, including dropped ones;
     - no planted credential reaching a scenario;

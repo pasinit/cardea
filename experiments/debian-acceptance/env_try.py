@@ -21,6 +21,10 @@ acceptance tests):
    attempt; every one must fail, and the host must be unaffected.
 4. **Caps.** A scenario that outlives its time limit is `timeout`; the remaining scenarios
    still report.
+6. **The worker's result** (ADR-038 review). Scenarios that try to write a forged result
+   to `/proc/<worker>/fd/*` and read `/proc/<worker>/mem` fail and report nothing forged;
+   a `setsid` background process is killed before the next scenario, which sees no
+   tampering; a scenario that kills the worker leaves the call failed with no result.
 5. **Concurrency.** With the profile's concurrency of 1, an identical call made while the
    first runs is refused with `env_run_in_progress` and starts nothing.
 
@@ -61,6 +65,45 @@ name = sys.argv[1]
 print("scenario", name, "mode", mode)
 pathlib.Path("out").mkdir(exist_ok=True)
 pathlib.Path("out/report.json").write_text(json.dumps({"scenario": name, "mode": mode}))
+worker = os.getppid()
+if name == "forge":
+    forged = json.dumps({"output": {"passed": True, "scenarios": []}}).encode()
+    tried = {}
+    for target in sorted(pathlib.Path(f"/proc/{worker}/fd").glob("*")) or [
+        pathlib.Path(f"/proc/{worker}/fd/1")
+    ]:
+        try:
+            with open(target, "wb") as stream:
+                stream.write(forged)
+            tried[target.name] = "written"
+        except OSError as error:
+            tried[target.name] = type(error).__name__
+    try:
+        with open(f"/proc/{worker}/mem", "rb") as stream:
+            stream.read(1)
+        tried["mem"] = "read"
+    except OSError as error:
+        tried["mem"] = type(error).__name__
+    print("FORGE", json.dumps(tried, sort_keys=True))
+    sys.exit(1)
+if name == "background":
+    import subprocess
+    stray = (
+        "import pathlib, time\nwhile True:\n"
+        "    pathlib.Path('verdict').write_text('pass')\n    time.sleep(0.05)\n"
+    )
+    subprocess.Popen([sys.executable, "-c", stray, "env-try-stray"], start_new_session=True)
+    time.sleep(0.5)
+    sys.exit(0)
+if name == "check":
+    pathlib.Path("verdict").write_text("fail")
+    time.sleep(0.5)
+    sys.exit(0 if pathlib.Path("verdict").read_text() == "fail" else 1)
+if name == "killer":
+    import signal
+    os.kill(worker, signal.SIGKILL)
+    time.sleep(1)
+    sys.exit(0)
 if name == "slow":
     time.sleep(3600)
 if mode == "bad" and name == "try":
@@ -109,6 +152,10 @@ def catalog(source: str) -> dict[str, Any]:
                         },
                         "teams": {"argv": [*run, "teams"], "timeout_seconds": 600},
                         "slow": {"argv": [*run, "slow"], "timeout_seconds": 20},
+                        "forge": {"argv": [*run, "forge"], "timeout_seconds": 60},
+                        "background": {"argv": [*run, "background"], "timeout_seconds": 60},
+                        "check": {"argv": [*run, "check"], "timeout_seconds": 60},
+                        "killer": {"argv": [*run, "killer"], "timeout_seconds": 60},
                     },
                 },
             }
@@ -258,6 +305,13 @@ def call(store: Path, commit: str, scenarios: list[str], rerun: bool = False) ->
         instance.database.close()
 
 
+def _cmdline(path: Path) -> bytes:
+    try:
+        return (path / "cmdline").read_bytes()
+    except OSError:
+        return b""
+
+
 def leftovers() -> dict[str, Any]:
     units = subprocess.run(
         ["/usr/bin/systemctl", "list-units", "--all", "--no-legend", "cardea-host-*"],
@@ -326,6 +380,42 @@ def run(args: argparse.Namespace) -> int:
         slow = call(store, commits["good"], ["slow", "try"])
         outcomes = [s.get("outcome") for s in (slow.get("output") or {}).get("scenarios", [])]
         evidence.check("time_limit_is_timeout", outcomes == ["timeout", "pass"], outcomes=outcomes)
+
+        # 6. The worker's result cannot be forged or disturbed.
+        forged = call(store, commits["good"], ["forge"])
+        result = forged.get("output") or {}
+        tail = str(((result.get("scenarios") or [{}])[0]).get("log_tail"))
+        line = next((x for x in tail.splitlines() if x.startswith("FORGE ")), "")
+        tried = json.loads(line.removeprefix("FORGE ")) if line else {}
+        evidence.check(
+            "forged_result_not_written",
+            result.get("passed") is False
+            and result.get("isolation") == "subreaper"
+            and bool(tried)
+            and all(v not in {"written", "read"} for v in tried.values()),
+            tried=tried,
+        )
+        background = call(store, commits["good"], ["background", "check"])
+        steps = (background.get("output") or {}).get("scenarios") or [{}, {}]
+        evidence.check(
+            "stray_process_killed_before_the_next_scenario",
+            steps[0].get("stray_processes_killed", 0) >= 1 and steps[1].get("outcome") == "pass",
+            scenarios=steps,
+        )
+        evidence.check(
+            "no_stray_left_on_the_host",
+            not [
+                p.name
+                for p in Path("/proc").iterdir()
+                if p.name.isdigit() and b"env-try-stray" in _cmdline(p)
+            ],
+        )
+        killed = call(store, commits["good"], ["killer"])
+        evidence.check(
+            "killed_worker_gives_no_result",
+            killed.get("state") == "failed" and not killed.get("output"),
+            **killed,
+        )
 
         # 5. Concurrency: an identical call while the first runs.
         results: dict[str, Any] = {}

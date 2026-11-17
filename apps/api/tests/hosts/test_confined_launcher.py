@@ -889,3 +889,10 @@ def test_the_helper_tells_the_worker_which_registries_its_proxy_allows(
     worker = {"argv": ["/usr/bin/true"], "profiles": ["coding"], "env": {"CARDEA_REGISTRIES": ""}}
     with pytest.raises(ValueError, match="invalid_worker"):
         launcher.validate_worker(worker, {"coding": REGISTRY_CODING})
+
+
+def test_scratch_may_not_exceed_memory_since_it_is_tmpfs() -> None:
+    """Scratch pages are charged to the unit's memory (ADR-038 review)."""
+    launcher.validate_profile({**BROWSER, "memory_mb": 512, "scratch_mb": 512})
+    with pytest.raises(ValueError, match="invalid_profile"):
+        launcher.validate_profile({**BROWSER, "memory_mb": 512, "scratch_mb": 513})
