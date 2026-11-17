@@ -130,6 +130,10 @@ class OperationContext:
     # Declared object inputs, staged by the kernel under the caller's ceiling: argument
     # pointer -> the object's verified bytes (ADR-037). Never recorded in the receipt.
     inputs: Mapping[str, bytes] = field(default_factory=dict)
+    # Receipts the descriptor's `evidence` queries found, by query name (ADR-037
+    # amendment 2026-11-17): the kernel's own record of earlier calls, never the caller's
+    # claim. Each entry is `{receipt_id, agent_id, group, at, fields}`, newest first.
+    evidence: Mapping[str, tuple[Mapping[str, JsonValue], ...]] = field(default_factory=dict)
     # The kernel's content gate (ADR-037 decision 4), bound for in-process installed
     # operations: call `check_content(operation=..., diff=..., texts=...)` before
     # sending anything off the host; it raises `OperationRejected` on a finding.
@@ -185,6 +189,34 @@ class ResourceGrant(Record):
     argument: Pointer
 
 
+# A value recorded in a receipt: `arguments/<key>/...` (the call's arguments) or
+# `output/<key>/...` (its result's output). Keys are plain names, so a path maps to SQLite
+# JSON without quoting issues.
+EvidencePath = Annotated[
+    str, Field(strict=True, pattern=r"^(arguments|output)(/[A-Za-z0-9_]{1,64}){1,4}$")
+]
+MAX_EVIDENCE = 20
+
+
+class EvidenceQuery(Record):
+    """Earlier receipts a call needs as evidence (ADR-037 amendment 2026-11-17).
+
+    The kernel finds the successful calls of `operation` in the caller's namespace whose
+    recorded `match` paths equal this call's arguments at the given pointers, and whose
+    `equals` paths hold the given values. The handler receives, for the newest
+    `MAX_EVIDENCE`, the receipt ID, the recorded caller (`agent_id`, `group`), the time and
+    the values at `fields`. Only the kernel writes receipts, so a caller cannot forge one.
+    """
+
+    name: Annotated[str, Field(strict=True, pattern=r"^[a-z][a-z0-9_]{0,31}$")]
+    operation: OperationName
+    match: Annotated[dict[EvidencePath, Pointer], Field(min_length=1, max_length=8)]
+    equals: Annotated[dict[EvidencePath, str | int | bool], Field(max_length=8)] = Field(
+        default_factory=dict
+    )
+    fields: Annotated[tuple[EvidencePath, ...], Field(max_length=8)] = ()
+
+
 class Binding(Record):
     version: Annotated[int, Field(strict=True, ge=1)]
     effect: Literal["read", "effect"]
@@ -213,6 +245,8 @@ class Binding(Record):
     # Arguments that name kernel objects (`{namespace, resource_id, version, content_digest}`)
     # the handler receives as verified bytes in `OperationContext.inputs` (ADR-037).
     inputs: Annotated[tuple[Pointer, ...], Field(min_length=1, max_length=4)] | None = None
+    # Earlier receipts the handler receives in `OperationContext.evidence` (ADR-037).
+    evidence: Annotated[tuple[EvidenceQuery, ...], Field(min_length=1, max_length=4)] | None = None
     # Confined operations only: bytes of named artifacts the worker may return beside its
     # output, stored as task-owned kernel objects in parts of at most 1 MiB (ADR-037). 0
     # means none. The output then carries the objects' references, not the bytes.
@@ -290,6 +324,7 @@ class OperationDescriptor(Record):
                 ("approval", self.cardea.approval),
                 ("resource", self.cardea.resource),
                 ("inputs", self.cardea.inputs),
+                ("evidence", self.cardea.evidence),
             )
             if value is None
         }
