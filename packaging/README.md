@@ -10,13 +10,24 @@ Stage only source, package metadata and hash-locked production dependencies:
 make m5-stage M5_STAGE=/tmp/cardea-build
 ```
 
-Copy that directory to a Debian 13 amd64 builder. Install `debhelper`, `dh-virtualenv=1.2.2-1.7`, `python3-venv`, `python3-pip` and `build-essential`, then run `dpkg-buildpackage -us -uc -b` inside it. The build downloads only binary Python wheels and checks the exported lock hashes. The resulting `.deb` contains its private dependency environment; installation does not invoke pip. An isolated/reproducible builder and byte-identical output remain future hardening; keep the lock, source manifest, package hash and build environment inventory together.
+Copy that directory to a Debian 13 builder of the target architecture (amd64 or arm64). Install `debhelper`, `dh-virtualenv=1.2.2-1.7`, `python3-venv`, `python3-pip` and `build-essential`, then run `dpkg-buildpackage -us -uc -b` inside it. The build downloads only binary Python wheels and checks the exported lock hashes. The resulting `.deb` contains its private dependency environment; installation does not invoke pip. An isolated/reproducible builder and byte-identical output remain future hardening; keep the lock, source manifest, package hash and build environment inventory together.
+
+`sh packaging/container_build.sh STAGE OUT` does the same in a fresh `debian:13` container of the machine's architecture, then installs the result in a second fresh container and checks `dpkg -V`, `pip check`, the accounts, the sudoers mode and the installed imports. CI runs it on amd64 and arm64 runners. A container is not a host: that job proves the package builds and installs, not that confinement works.
+
+### Architectures
+
+The package is built for **amd64** and **arm64** (`Architecture: amd64 arm64`). The exported lock already carries `manylinux` aarch64 wheels for CPython 3.13 for every binary dependency; the build's `--only-binary=:all:` and hash checks apply unchanged. `packaging/fetch_gitleaks.py` and `fetch_opencode.py` pin Linux aarch64 artifacts too.
+
+| Architecture | Status |
+|---|---|
+| amd64 | The supported profile. The M2–M5 host fits and acceptance ran on it (an emulated Debian 13 amd64 guest). |
+| arm64 | **Development profile.** The package builds and installs on Debian 13 arm64 and the helper accepts Debian's arm64 6.12 kernels. No host fit has passed on arm64, so confinement on arm64 is **not verified**: do not treat an arm64 host as enforcing the M2 profile until `make m2-host-fit` on an arm64 guest (`vm.py start --guest arm64`) and the package acceptance have passed and their evidence is recorded. |
 
 ## Install and enroll
 
-The supported execution profile is deliberately narrow: Debian 13 amd64, a Debian 13 6.12 LTS kernel (`6.12.N+deb13-amd64` or `-cloud-amd64`; acceptance ran on `6.12.107+deb13-cloud-amd64`), systemd `257.13-1~deb13u1`, bubblewrap `0.12.0-1~deb13u1`, cgroup v2 CPU/memory/pids controllers and the non-setuid bubblewrap launcher. Updated versions require another host fit; installation alone does not certify enforcement.
+The supported execution profile is deliberately narrow: Debian 13 amd64, a Debian 13 6.12 LTS kernel (`6.12.N+deb13-amd64` or `-cloud-amd64`, with or without a point-release suffix such as `+deb13.1`; acceptance ran on `6.12.107+deb13-cloud-amd64`; on the arm64 development profile the helper accepts `6.12.N+deb13(.N)-arm64` or `-cloud-arm64`, for example `6.12.115+deb13.1-cloud-arm64`, and refuses a kernel of the other architecture), systemd `257.13-1~deb13u1`, bubblewrap `0.12.0-1~deb13u1`, cgroup v2 CPU/memory/pids controllers and the non-setuid bubblewrap launcher. Updated versions require another host fit; installation alone does not certify enforcement.
 
-1. As host owner, install with `apt install ./cardea-kernel_0.1.0-2_amd64.deb`. It creates separate `cardea-kernel` and `cardea-worker` system accounts, a private store and the fixed helper. It neither enables nor starts the service.
+1. As host owner, install with `apt install ./cardea-kernel_0.1.0-2_amd64.deb` (`_arm64.deb` on arm64). It creates separate `cardea-kernel` and `cardea-worker` system accounts, a private store and the fixed helper. It neither enables nor starts the service.
 2. Enroll the machine with your existing SPIRE deployment. Its Workload API socket must be reachable by `cardea-kernel`; register the runtime identity against that account. Enroll supervisors through the existing SPIFFE/OIDC contracts. No test provider or authority document ships in this package.
 3. Adapt `/usr/share/doc/cardea-kernel/config.example.json` into `/etc/cardea/config.json`. Keep `data_dir` at `/var/lib/cardea`. Set the real trust domain, socket and runtime ID. The configuration must be owned by `cardea-kernel:cardea-kernel`, mode `0600`; `/etc/cardea` is root-owned and not service-writable. Optional broker/identity secret files have the same private ownership requirement. Do not place secrets in command arguments or unit environment text.
 4. Initialize with `runuser -u cardea-kernel -- cardea init --config /etc/cardea/config.json`. Explicitly provision your reviewed private policy with `runuser -u cardea-kernel -- cardea provision /path/to/private-policy.json --config /etc/cardea/config.json`. The policy must also be readable and privately owned by that account. Installing a service grants no task authority.

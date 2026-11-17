@@ -34,3 +34,7 @@ The [observed fit](../../experiments/m5/PACKAGING-REPORT.md) uses debhelper 13.2
 ## Subsequent completion
 
 2026-09-25: [ADR-019](019-m5-operational-recovery.md) and the [M5 report](../../experiments/m5/M5-REPORT.md) close the remaining operational gates. The revision 1 observations above remain historical evidence.
+
+## Amendment 2026-11-16: arm64 builds
+
+The package is now built for amd64 and arm64 (`Architecture: amd64 arm64`). Nothing else in the package is architecture-specific: dh-virtualenv installs the same hash-locked export, whose binary dependencies all have CPython 3.13 `manylinux` aarch64 wheels, and the helper selects the Debian 6.12 kernel pattern of the machine it runs on (`-amd64` on x86_64, `-arm64` on aarch64, generic or cloud, with an optional `+deb13.N` point-release suffix). CI builds the package in a `debian:13` container on native amd64 and arm64 runners and installs it in a fresh one (`packaging/container_build.sh`). That is build and install evidence, not a host fit. **arm64 is a development profile:** no M2 host fit or package acceptance has run on arm64, so confinement there is unverified. The amd64 evidence above is unchanged.

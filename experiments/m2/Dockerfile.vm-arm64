@@ -1,0 +1,5 @@
+# The container hosts an emulator, not the worker confinement boundary. arm64 guest variant of
+# Dockerfile.vm (development profile; see packaging/README.md).
+FROM debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a
+RUN apt-get update && apt-get install -y --no-install-recommends qemu-system-arm=1:10.0.13+ds-0+deb13u1 qemu-efi-aarch64=2025.02-8+deb13u1 qemu-utils=1:10.0.13+ds-0+deb13u1 genisoimage=9:1.1.11-4 ca-certificates=20250419 && rm -rf /var/lib/apt/lists/*
+ENTRYPOINT ["qemu-system-aarch64"]
