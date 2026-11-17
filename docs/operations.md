@@ -194,6 +194,27 @@ The gate fails closed. A finding fails the call with `content_refused`. A missin
 
 [Error codes](error-codes.md) lists every code an API request can answer with, and every failure code a receipt or task can record, with its HTTP status and meaning. It is generated from the source (`make error-codes`), and a test keeps it current.
 
+## Throwaway test environments
+
+The `cardea-env-ops` package installs `env.try` ([ADR-038](decisions/038-throwaway-test-environments.md), the process tier).
+
+- **The call.** `{repo, commit, scenarios, rerun?, record_id?}`:
+  - `repo` is a repository alias;
+  - `commit` is a full 40-hex object ID; branches and short IDs are refused;
+  - `scenarios` are names from the alias's `environment` catalog in the repository registry. Callers never send a command, a path or a URL.
+- **Authority.** The call needs `env.try` and `repo:<alias>` in the caller's live ceiling.
+- **Confined.** It runs in the `try` worker profile, so it needs host execution and the root helper. See [deploy/small-host/README.md](../deploy/small-host/README.md), section 4, step 10. The commit's code is untrusted: the profile reaches only the listed package indexes and holds no credential.
+- **Evidence.** The result carries:
+  - `passed`;
+  - each scenario's `outcome`, exit code, duration and scrubbed log tail of at most 4 KiB;
+  - artifacts, up to 1 MiB, stored as objects.
+- **Gating records.** Require a passing run on a transition with `requires_receipt: {operation: env.try, in: same_task, result: "result.passed == true"}`. Pass the record's ID as `record_id` so the receipt names the record.
+- **Reuse.** The same commit and scenarios within 24 hours return the first result (`cached: true`, `cached_receipt_id`), and nothing runs. The comparison also covers the worker profile, the catalog and the toolchain image.
+  - `rerun: true` runs again, at most 3 times per commit per day (`429 env_rerun_limit`).
+  - An identical call while one runs is refused with `409 env_run_in_progress`; retry later.
+- **Toolchain.** `make try-toolchain` builds and pins the image; `cardea-try-toolchain.timer` refreshes it weekly.
+
+
 ## Retention and deletion
 
 Task, object, event, provenance, budget, receipt and idempotency history is retained for the lifetime of a store. Host payload cleanup is recoverable and retains reconciliation tombstones. Partial history or tombstone garbage collection is unsupported because deleting it could destroy evidence or permit duplicate effects.

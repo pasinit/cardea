@@ -1,7 +1,7 @@
 # ADR-038: Throwaway Test Environments for Agent Teams
 
 - **Date / owner / milestones:** 2026-11-16; kernel/host execution and runtime maintainers. Roadmap gap T9. Builds on ADR-012 and ADR-028 (host confinement and worker profiles), ADR-023 (installed operations), ADR-026 (receipts, scopes and reconciliation), ADR-029 (run evidence), ADR-031 (context operations), ADR-034 (records, state machines and receipt evidence), ADR-030 (the small-host profile) and [ADR-037](037-coding-and-vcs-operations.md) (coding and version-control operations, proposed in parallel), whose repository aliases this record reuses.
-- **Status:** accepted, 2026-11-16. The owner answered every open question as recommended (see [Decisions](#decisions-owner-2026-11-16)). The process tier is selected as the default. Nothing is implemented in this record's text yet beyond the ADR-034 receipt-result guard; implementation status is recorded below as it lands. Nothing is verified on Debian, and no fit test below has run.
+- **Status:** accepted, 2026-11-16. The owner answered every open question as recommended (see [Decisions](#decisions-owner-2026-11-16)). The process tier is selected as the default. Implemented with portable tests only (2026-11-16): the ADR-034 receipt-result guard, and `env.try` in the process tier with the run table, the window, the rerun limit and the toolchain image make target; see [Implementation status](#implementation-status). Nothing is verified on Debian, and no fit test below has run. The Debian acceptance script is written and unrun.
 - **Requirement:** an agent team, typically a developer, a reviewer and a product-manager agent, needs evidence that a given commit actually works before it is accepted. Evidence from reading the diff is not enough. One installed operation, `env.try`:
   1. builds or installs a given commit of a given repository into a throwaway, confined instance;
   2. runs named scenarios against it, such as the repository's `make try`, getting-started use cases, end-to-end checks and `make teams`;
@@ -161,6 +161,71 @@ Both are confined workers under ADR-028 with the same repository aliases; they s
   - an instance killed at a cap reports `timeout` or `error` for the running scenario, and the remaining scenarios are reported as not run.
 - **Compatibility:** new descriptor, profile, catalog and helper action only. No v0.1 record changes. The helper's hash changes, so hosts reinstall it (ADR-028's probe enforces this).
 - **Operational cost:** one build at a time per host by default. Disk use is the workspace image while a run lasts, plus artifacts; logs and artifacts follow normal object retention.
+
+## Implementation status
+
+### `env.try`, process tier (implemented 2026-11-16, portable tests only)
+
+- **Package** `packages/cardea-env-ops`: the `env.try` descriptor and its worker entry point.
+  - **Descriptor:** `effect: read`, confined profile `try`, worker `env-try`, a one-hour timeout, `repo:<alias>` on `/repo`, artifacts up to 1 MiB, and the run window below.
+  - **Worker** (`cardea_env_ops/try_.py`): clones the alias's read-only `source` from the shared repository registry, with git hooks and global configuration off, and checks out exactly the 40-hex `commit`. A missing commit is `env_commit_unknown`. It then runs each named scenario's fixed argv in the checkout under the call's deadline. Each scenario's environment is built from nothing:
+    - the pinned toolchain first on `PATH`;
+    - a scratch `HOME`;
+    - the profile's proxy;
+    - the catalog's fixed variables, never credential-shaped names.
+  - **Each scenario reports** `pass`, `fail`, `timeout`, `error` or `not_run`, with:
+    - its exit code and duration;
+    - a log tail of at most 4 KiB, scrubbed of credential shapes;
+    - its artifact paths, at most 256 KiB each, 1 MiB and 8 files in all, returned as artifacts the kernel stores as objects.
+
+    Anything over a limit is dropped and counted.
+  - **The output** carries `passed` (every scenario passed), `cached`, the catalog and toolchain digests, and the scenarios.
+  - **Refusals:** a scenario that needs the `init` tier is `env_tier_unavailable`, and a name outside the catalog is `env_scenario_unknown`.
+- **Catalog.** Each repository-registry alias may carry `environment`, which holds:
+  - `tiers`;
+  - `toolchain` (`path` under `/opt/`, ending with its `sha256`);
+  - `scenarios`, each with `argv`, `timeout_seconds`, `tier` and `artifacts`, the artifact paths relative to the checkout and refused if they leave it;
+  - fixed `env`.
+
+  Its digest joins the run key.
+- **Run window** (decisions 4 and 5). A generic descriptor binding `run_window`, allowed on read operations only, implemented in `cardea.service.env_runs` and migration `m18_env_runs`:
+  - **Tables.** `env_runs` holds one row per run key. `env_reruns` holds one row per forced rerun.
+  - **Run key.** The SHA-256 of `{namespace, operation, repo, commit, sorted scenarios, environment}`. The environment digest covers the confined worker's profile digest and the alias's catalog digest, toolchain included.
+  - **In the intent's transaction:**
+    - a running row refuses an identical call (`409 env_run_in_progress`);
+    - a settled row inside 24 hours answers with its output, `cached: true` and `cached_receipt_id`, recorded as a deduplicated receipt without starting a worker;
+    - `rerun: true` skips the window, at most 3 times per namespace, repository and commit in 24 hours (`429 env_rerun_limit`), and the new receipt records `rerun_of`.
+  - **At settlement.** Success keeps the row. A failure or an interrupted call deletes it, so the call can be made again. A running row past its call's deadline plus five minutes is ignored.
+- **Toolchain image** (decision 6). `make try-toolchain` runs `packaging/try_toolchain.py`:
+  - `build` runs `mmdebstrap` for a Debian 13 minbase root with `SOURCE_DATE_EPOCH` set to the ISO week's start, and unpacks it read-only under its SHA-256. It keeps the last two images and any pinned one.
+  - `pin` writes the path and digest into every registry `environment`, atomically.
+  - The kit's `cardea-try-toolchain.timer` refreshes the image weekly.
+- **Kit** (`deploy/small-host/cardea`):
+  - the `try` profile: `allow_list` through squid port `127.0.10.7` to `pypi.org` and `files.pythonhosted.org`, no credential, concurrency 1, 4 GiB of memory, 6 GiB of scratch and one hour of wall time;
+  - the `env-try` worker, which binds read-only the kernel environment, the registry, the mirrors and the toolchain directory;
+  - an example catalog in `repositories.json`.
+- **Tests:**
+  - `test_env_try.py` (19 tests) runs the real worker command locally against a fixture with a good and a bad commit. It covers:
+    - pass and fail;
+    - log scrubbing and artifacts, including dropped ones;
+    - no planted credential reaching a scenario;
+    - the window, including reordered scenarios, other inputs, a changed catalog and a forced rerun linked to the first;
+    - the rerun limit per commit;
+    - an identical call in progress, and a stale row;
+    - failed runs that are not reused;
+    - unknown scenarios and unavailable tiers;
+    - refs, short IDs, argv and URLs refused before anything starts;
+    - the repository grant;
+    - registry path checks;
+    - a passing receipt satisfying `result.passed == true` while a failing one does not.
+  - `test_try_toolchain.py` covers the image script without running `mmdebstrap`, and the kit's profile, worker and timer.
+  - The acceptance-script tests cover `env_try.py`.
+- **Not done:**
+  - **A disk-backed, fixed-size workspace image** (decision 2.2). The checkout and builds use the profile's `scratch_mb` tmpfs, so the disk cap is the scratch size and lives in memory. A helper action to create, mount and delete a per-job image is the next slice.
+  - **Staging by the helper** with a deploy credential. The worker clones from the registry's read-only mirror, so a repository that needs a credential to fetch is not supported yet.
+  - **The `init` tier.**
+  - **`env.result`** as a context operation.
+  - **Any Debian run.** `experiments/debian-acceptance/env_try.sh` is written and unrun.
 
 ## Out of scope
 

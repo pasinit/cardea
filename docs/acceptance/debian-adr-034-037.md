@@ -70,6 +70,17 @@ ADR-036 slice 6 defines the host acceptance: a real OIDC human approver and a SP
 
 Slice 5 (per-grant rules) is not implemented, so it has nothing to verify.
 
+## ADR-038: throwaway test environments (`env.try`)
+
+None of these has run. **Script:** `sudo sh experiments/debian-acceptance/env_try.sh`, on a host with the small-host kit's `try` profile, `env-try` worker and squid `try` port (deploy/small-host/README.md, section 4, step 10).
+
+- [ ] **Pass and fail** (acceptance test 1). A good commit passes `try` and `teams`. A bad one fails `try` with its exit status, a bounded log tail and its artifact stored as an object. No `cardea-host-*` unit is left. Phase 1.
+- [ ] **Same receipt and reruns** (test 2). The same commit and scenarios, in any order, return the first receipt (`cached: true`) without starting a unit. Three forced reruns run, and a fourth in a day is refused with `env_rerun_limit`. Phase 2.
+- [ ] **Confinement** (test 3). A hostile commit's scenario reaches none of: the store, the helper spool, the credentials directory, the kernel on 127.0.0.1, DNS, the metadata address, a host the proxy does not list. Filling the disk fails the scenario, not the host. Phase 3.
+- [ ] **Caps** (test 4). A scenario past its time limit reports `timeout`, and the next scenario still runs. Phase 4. Memory and task caps are the profile's systemd properties; a memory cap kill fails the call as `worker_memory_limit` (ADR-028 probes).
+- [ ] **Concurrency** (test 6). An identical call while the first runs is refused with `env_run_in_progress` and starts nothing. Phase 5.
+- [ ] **The toolchain image.** `make try-toolchain` on the host builds a Debian 13 minbase image with `mmdebstrap`, unpacks it read-only under its SHA-256 in `/opt/cardea-try/toolchain/` and pins it in the repository registry. The next call has a new run key. Enable `cardea-try-toolchain.timer` for the weekly refresh.
+
 ## Recording the result
 
 - [ ] Commit the evidence (commands, package and dependency versions, kernel version, results) under `experiments/`, as the M2 and M5 reports do.

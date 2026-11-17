@@ -193,6 +193,19 @@ python3 /opt/cardea/packaging/fetch_opencode.py /opt/cardea/opencode
    - `curl -s -o /dev/null -w '%{http_connect}\n' -x http://127.0.10.6:3128 https://api.github.com/` prints 200, and `https://api.anthropic.com/` prints 403.
    - A supervisor's `vcs.check_repository` on each repository reports `ready: true`. Otherwise its `missing` list names the rule to add on the host.
 
+10. Optional: throwaway test environments (`env.try`, [ADR-038](../../docs/decisions/038-throwaway-test-environments.md)), in the `try` profile. Reviewers and product-manager agents use it to run a commit's scenarios before accepting it.
+   1. `cardea/cardea-host-workers.json` holds the `try` profile and the `env-try` worker.
+      - The profile allows only `pypi.org` and `files.pythonhosted.org`, through proxy port `127.0.10.7`. It has no credential and a concurrency of 1.
+      - The worker binds the registry, the repository mirrors and `/opt/cardea-try/toolchain` read-only.
+   2. Add an `environment` catalog to each repository that offers `env.try` in `/opt/cardea-code/repositories.json`. The catalog holds the scenarios' fixed argv, time limits and artifact paths; see `cardea/repositories.json`.
+   3. Build and pin the toolchain image as root, from a checkout of the same commit as `/opt/cardea`: `make try-toolchain`. Then install `cardea/cardea-try-toolchain.service` and `.timer` under `/etc/systemd/system/` and run `systemctl enable --now cardea-try-toolchain.timer` for the weekly refresh. A refresh changes the image digest, and so every run key.
+   4. Install `packages/cardea-env-ops` into `/opt/cardea/apps/api/.venv` and copy its `descriptors/` into `operations_dir`. Provision `env.try` and `repo:<alias>` for the supervisors that may use it, and restart.
+
+   Checks:
+   - `curl -s -o /dev/null -w '%{http_connect}\n' -x http://127.0.10.7:3128 https://pypi.org/` prints 200, and `https://example.com/` prints 403.
+   - `sudo sh experiments/debian-acceptance/env_try.sh` passes (see its README).
+
+
 ## 5. Telos host
 
 1. Run a SPIRE agent with `spire/agent-telos.conf` (replace `CARDEA_PRIVATE_IP`), using the second join token. Its socket must be at `/run/spire/agent.sock`.
