@@ -70,6 +70,15 @@ ADR-036 slice 6 defines the host acceptance: a real OIDC human approver and a SP
 
 Slice 5 (per-grant rules) is not implemented, so it has nothing to verify.
 
+## ADR-039: external email
+
+Portable tests: `test_email_ops.py` (both adapters against in-process fakes) and the dev-team rehearsal. None of the steps below has run.
+
+- [ ] **A live send and reply.** On a host with the private `/etc/cardea/email.json` and its key or password file (mode `0600`, owned by `cardea-kernel`), one email reaches the alias's address, a human reply from that address is accepted by `email.poll_replies`, and the reconciler finds the send by its effect key. With AgentMail, a repeated send with the same idempotency key sends nothing more. **Script:** `runuser -u cardea-kernel -- /opt/venvs/cardea-kernel/bin/python experiments/debian-acceptance/email_live.py --alias client`. It sends one real email and waits up to 15 minutes for the reply. Its evidence holds no address or text.
+- [ ] **Through the daemon.** The `email.send` descriptor installed under `operations_dir` and the package in the service's environment. A product-manager run sends one question. The reply reaches that member's mailbox within one poll interval plus the 30-second loop, and the member's next run receives it as an untrusted `mailbox.inbox` block. A reply from another address is dropped and counted (`operation.reply_dropped`), and its text appears nowhere in the store or the journal. **Gap:** no script yet.
+- [ ] **Credentials stay in the operation.** After the run above, the API key or password appears in no table, no journald line of `cardea-kernel`, no receipt and no agent prompt (`grep -r` over a `cardea backup` and `journalctl -u cardea-kernel`).
+- [ ] **No inbound endpoint.** The host has no listener for mail: replies come only from polling (`ss -ltnp` shows only the kernel's configured listeners).
+
 ## Recording the result
 
 - [ ] Commit the evidence (commands, package and dependency versions, kernel version, results) under `experiments/`, as the M2 and M5 reports do.

@@ -35,6 +35,7 @@ Everything else is the production path: DBOS dispatch and schedules, the SQLite 
 | `sudo sh long_call.sh` | The ADR-023 amendment with `code.session` under the real helper and `coding` profile. Checks lease renewal over a 20-minute call; a SIGKILLed service whose worker outlives it and is then reaped, leaving `outcome_unknown` and no process; a 9 MiB artifact read back by digest and kept across backup and restore; an oversized artifact; and the timeout limits. | root, then `cardea-kernel` | about 45 min |
 | `groups.py` | ADR-034 acceptance tests 3, 4, 5 and 10 with real daemon kills and restarts. `--tests` picks some of them. | any non-root user | about 40 min |
 | `teams.py` | The two worked examples (`examples/teams`) against the daemon. Each agent step is a queued run. It also restructures the software team by manifest. The desk approver is an OIDC human at a test issuer, so its approval exercises the kernel's OIDC validation, and bad tokens are refused. | any non-root user | minutes |
+| `email_live.py --alias client` | ADR-039 against the host's real email provider: one real send, the idempotent retry (AgentMail), the reconciler's lookup, and a human reply accepted by the operation's reply filter. The evidence holds no address or text. | the account that owns `/etc/cardea/email.json` | up to 15 min (waits for a human reply) |
 | `events_tls.py` | ADR-035 through the live TLS 1.3 listener with `curl` as the sender: admission, duplicates across a restart, refusals, no plaintext and no TLS 1.2. With `--external-wait`, it also checks a delivery sent by `curl` from another machine. | any non-root user | minutes |
 
 Examples:
@@ -44,6 +45,7 @@ $PY experiments/debian-acceptance/upgrade.py --source /private/m5-backup.sqlite3
 sudo sh experiments/debian-acceptance/long_call.sh
 $PY experiments/debian-acceptance/groups.py
 $PY experiments/debian-acceptance/teams.py
+runuser -u cardea-kernel -- $PY experiments/debian-acceptance/email_live.py --alias client
 $PY experiments/debian-acceptance/events_tls.py --listen-host 0.0.0.0 --server-name dev-host.example --external-wait 600
 ```
 

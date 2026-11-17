@@ -24,7 +24,15 @@ from cardea.service.admin import initialize
 from cardea.service.repositories import Registry
 
 SCRIPTS = Path(__file__).resolve().parents[4] / "experiments" / "debian-acceptance"
-PROGRAMS = ("upgrade.py", "long_call.py", "groups.py", "teams.py", "events_tls.py", "launcher.py")
+PROGRAMS = (
+    "upgrade.py",
+    "long_call.py",
+    "groups.py",
+    "teams.py",
+    "events_tls.py",
+    "launcher.py",
+    "email_live.py",
+)
 
 
 @pytest.fixture
@@ -45,6 +53,7 @@ def scripts() -> Iterator[None]:
             "oidc_issuer",
             "launcher",
             "devauth",
+            "email_live",
         ):
             sys.modules.pop(name, None)
 
