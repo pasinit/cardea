@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import os
+import platform
 import subprocess
 import sys
 import time
@@ -347,20 +348,62 @@ def test_profiles_report_a_configured_queue_timeout(
 
 
 @pytest.mark.parametrize(
-    ("release", "supported"),
+    ("machine", "release", "supported"),
     [
-        ("6.12.107+deb13-cloud-amd64", True),
-        ("6.12.111+deb13-amd64", True),
-        ("6.12.48+deb13-amd64", True),
-        ("6.12.111+deb13-arm64", False),
-        ("6.13.1+deb13-amd64", False),
-        ("6.1.0-40-cloud-amd64", False),
-        ("6.12.111+deb13-rt-amd64", False),
-        ("6.12.111+deb13-amd64 ", False),
+        ("x86_64", "6.12.107+deb13-cloud-amd64", True),
+        ("x86_64", "6.12.111+deb13-amd64", True),
+        ("x86_64", "6.12.48+deb13-amd64", True),
+        ("x86_64", "6.12.111+deb13-arm64", False),
+        ("x86_64", "6.13.1+deb13-amd64", False),
+        ("x86_64", "6.1.0-40-cloud-amd64", False),
+        ("x86_64", "6.12.111+deb13-rt-amd64", False),
+        ("x86_64", "6.12.111+deb13-amd64 ", False),
+        ("aarch64", "6.12.111+deb13-arm64", True),
+        ("aarch64", "6.12.111+deb13-cloud-arm64", True),
+        ("aarch64", "6.12.111+deb13-amd64", False),
+        ("aarch64", "6.12.111+deb13-arm64-16k", False),
+        ("aarch64", "6.12.111+deb13-rt-arm64", False),
+        ("aarch64", "6.13.1+deb13-arm64", False),
+        # Point releases: `+deb13.N`.
+        ("aarch64", "6.12.115+deb13.1-cloud-arm64", True),
+        ("aarch64", "6.12.115+deb13.1-arm64", True),
+        ("x86_64", "6.12.115+deb13.1-amd64", True),
+        ("x86_64", "6.12.115+deb13.1-cloud-amd64", True),
+        ("x86_64", "6.12.115+deb13.1-cloud-arm64", False),
+        ("aarch64", "6.12.115+deb13.1-cloud-amd64", False),
+        ("x86_64", "6.12.115+deb13.1a-amd64", False),
+        ("x86_64", "6.12.115+deb13.-amd64", False),
+        ("x86_64", "6.12.115+deb13.1234-amd64", False),
+        ("x86_64", "6.12.115+deb14-amd64", False),
+        ("aarch64", "6.12.115+deb14.1-arm64", False),
     ],
 )
-def test_preflight_accepts_debian_13_6_12_kernels(release: str, supported: bool) -> None:
-    assert launcher.supported_kernel(release) is supported
+def test_preflight_accepts_debian_13_6_12_kernels(
+    machine: str, release: str, supported: bool
+) -> None:
+    assert launcher.supported_kernel(release, launcher.KERNEL_RELEASES[machine]) is supported
+
+
+@pytest.mark.parametrize(
+    ("machine", "release"),
+    [("aarch64", "6.12.111+deb13-amd64"), ("x86_64", "6.12.111+deb13-arm64"), ("riscv64", "x")],
+)
+def test_preflight_refuses_a_kernel_for_another_architecture(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, machine: str, release: str
+) -> None:
+    path = tmp_path / "cardea-host.json"
+    path.write_text(json.dumps({"kernel_uid": 990}))
+    monkeypatch.setattr(launcher, "HOST_CONFIG", path)
+    root_owned(monkeypatch, path)
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    real = Path.read_text
+    monkeypatch.setattr(  # only /proc/1/comm is read before the architecture check
+        Path, "read_text", lambda self, *a, **k: real(self) if self == path else "systemd"
+    )
+    monkeypatch.setattr(platform, "machine", lambda: machine)
+    monkeypatch.setattr(platform, "release", lambda: release)
+    with pytest.raises(ValueError, match="unsupported_kernel"):
+        launcher.preflight()
 
 
 def root_owned(monkeypatch: pytest.MonkeyPatch, path: Path) -> None:

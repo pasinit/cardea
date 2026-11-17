@@ -17,7 +17,7 @@ uv run --locked --project apps/api python experiments/m2/vm.py stop --state /tmp
 make m2-host-check
 ```
 
-`start --image /absolute/path/to/base.qcow2` can reuse a cached image; the same pinned SHA-512 is required. The versioned Debian cloud image URL identifies build `20260914-2601`; its frozen digest is checked independently. The runner pins the emulator base image and direct Debian package versions, installs bubblewrap 0.12.0-1~deb13u1 in the guest, and creates a dedicated locked system account. The accepted result records the guest package inventory; the environment manifest records source and image identities.
+`start --guest arm64` boots the Debian 13 arm64 cloud image of the same build (pinned SHA-512) under `qemu-system-aarch64` with UEFI firmware, from `Dockerfile.vm-arm64`. arm64 is a development profile: no fit has passed on it yet, and every recorded result below is from the amd64 guest. `start --image /absolute/path/to/base.qcow2` can reuse a cached image; the same pinned SHA-512 is required. The versioned Debian cloud image URL identifies build `20260914-2601`; its frozen digest is checked independently. The runner pins the emulator base image and direct Debian package versions, installs bubblewrap 0.12.0-1~deb13u1 in the guest, and creates a dedicated locked system account. The accepted result records the guest package inventory; the environment manifest records source and image identities.
 
 On this Mac the Docker environment was explicitly selected per command:
 
