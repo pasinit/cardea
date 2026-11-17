@@ -37,3 +37,21 @@ jobs:
       - run: make try-test
       - run: make teams-test
       - run: make incident-demo-check incident-demo-test
+
+  # Build the Debian package natively on each architecture it targets and install it in a fresh
+  # debian:13 container (ADR-018). This is build and install evidence only: a container is not a
+  # host fit, and arm64 stays a development profile until one passes (packaging/README.md).
+  debian-package:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: make m5-stage M5_STAGE="$RUNNER_TEMP/stage"
+      - run: sh packaging/container_build.sh "$RUNNER_TEMP/stage" "$RUNNER_TEMP/deb"
+      - run: sha256sum "$RUNNER_TEMP"/deb/*.deb
