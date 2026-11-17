@@ -103,7 +103,14 @@ def provisioning(lease: int) -> dict[str, Any]:
     base = [*RIGHTS, "groups.manage", *RUN]
     rows_: list[Any] = []
     rows_ += rights(
-        SUP, "t3", [*RIGHTS, *(f"record:race/{a}" for a in ("create", "read", "claim", "update"))]
+        SUP,
+        "t3",
+        # groups.manage: applying the race collection needs it (authority_denied otherwise).
+        [
+            *RIGHTS,
+            "groups.manage",
+            *(f"record:race/{a}" for a in ("create", "read", "claim", "update")),
+        ],
     )
     rows_ += rights(
         SUP, "t4", [*base, *(f"record:work/{a}" for a in ("create", "read", "claim", "update"))]
@@ -303,7 +310,9 @@ class Run:
             "lease_seconds": self.lease,
             "max_per_holder": 1,
             "max_followups": 2,
-            "standalone": False,
+            # The members take their records with records.claim, which only a collection
+            # with standalone claims accepts (claims_not_standalone otherwise).
+            "standalone": True,
         }
         st.request(SUP, "PUT", "/collections/work", json=collection("t4", "work", claims=claims))
         grants = ["record:work/read", "record:work/claim"]
@@ -393,10 +402,12 @@ class Run:
             "'cardea.record.claim_expired' AND payload LIKE ?",
             f"%{records[idle]}%",
         )
+        # The lapse is a kernel message to the supervisor (claims.py), not a dead-letter
+        # `notice`; its data part carries the reason.
         notices = rows(
             self.db,
-            "SELECT kind, to_address FROM mailbox_messages "
-            "WHERE namespace='t4' AND kind='notice' AND to_address=?",
+            "SELECT kind, to_address FROM mailbox_messages WHERE namespace='t4' "
+            "AND to_address=? AND parts_json LIKE '%followups_exhausted%'",
             SUP,
         )
         ev.check(
