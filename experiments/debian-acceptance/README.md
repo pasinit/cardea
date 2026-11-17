@@ -1,6 +1,6 @@
 # Debian acceptance scripts (ADR-034, ADR-035, ADR-023 amendment)
 
-These scripts close the "no script yet" gaps of the [Debian acceptance checklist](../../docs/acceptance/debian-adr-034-037.md). An operator runs them on a Debian 13 dev host. **None of them has been run yet.** Until one has passed on the host and its evidence is committed, the records it covers stay "portable tests only". A first run may well show bugs in a script itself; fix the script, and record what changed next to the evidence.
+These scripts close the "no script yet" gaps (and the ADR-037 question 8 registry check) of the [Debian acceptance checklist](../../docs/acceptance/debian-adr-034-037.md). An operator runs them on a Debian 13 dev host. **None of them has been run yet.** Until one has passed on the host and its evidence is committed, the records it covers stay "portable tests only". A first run may well show bugs in a script itself; fix the script, and record what changed next to the evidence.
 
 `make acceptance-check` lints and type-checks them, and `apps/api/tests/service/test_debian_acceptance_scripts.py` checks that each one parses and answers `--help`. Neither of those runs them.
 
@@ -36,6 +36,7 @@ Everything else is the production path: DBOS dispatch and schedules, the SQLite 
 | `sudo sh env_try.sh` | ADR-038 `env.try` under the real helper and `try` profile, on a fixture with a good, a bad and a hostile commit. Checks pass and fail with exit status, log tail and an artifact object; nothing left on the host; the same inputs returning the first receipt; three forced reruns and a refused fourth; every hostile attempt (store, helper spool, credentials, kernel loopback, DNS, metadata address, unlisted host, filling the disk) failing; a scenario time limit; and an identical call in progress refused. | root, then `cardea-kernel` | minutes |
 | `groups.py` | ADR-034 acceptance tests 3, 4, 5 and 10 with real daemon kills and restarts. `--tests` picks some of them. | any non-root user | about 40 min |
 | `teams.py` | The two worked examples (`examples/teams`) against the daemon. Each agent step is a queued run. It also restructures the software team by manifest. The desk approver is an OIDC human at a test issuer, so its approval exercises the kernel's OIDC validation, and bad tokens are refused. | any non-root user | minutes |
+| `registry_egress.py` | ADR-037 question 8: the `coding` profile's package registries are reachable over TLS through its proxy; an arbitrary host, plain HTTP, other ports and 127.0.0.1 are refused; and the installed squid rules match the helper's rendering of the profile. | any user that can read the helper and squid configuration | seconds |
 | `events_tls.py` | ADR-035 through the live TLS 1.3 listener with `curl` as the sender: admission, duplicates across a restart, refusals, no plaintext and no TLS 1.2. With `--external-wait`, it also checks a delivery sent by `curl` from another machine. | any non-root user | minutes |
 
 Examples:

@@ -1,0 +1,7 @@
+{
+  "policy": "model_api_only",
+  "proxy": "127.0.10.5:3128",
+  "hosts": [
+    "api.anthropic.com"
+  ]
+}
