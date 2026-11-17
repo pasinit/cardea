@@ -413,9 +413,44 @@ def test_approve_reviews_are_refused_unless_allowed(
     _, _, (refused,) = run_calls(kernel, session, [("vcs-review", approve)])
     assert refused.is_error and "approve_refused" in text(refused)
     assert untouched(host, before)
+    # Allowed for another pool only: the caller (`eng.dev.0`) is still refused.
+    vcs.config = vcs.config.model_copy(update={"allow_approve": ("eng.principal",)})
+    _, _, (other,) = run_calls(kernel, session, [("vcs-review", {**approve, "client_key": "a2"})])
+    assert other.is_error and "approve_refused" in text(other)
+    assert untouched(host, before)
+    # Allowed for the caller's pool (ADR-037 question 2: the dev team's principal role).
+    vcs.config = vcs.config.model_copy(update={"allow_approve": ("eng.dev",)})
+    _, _, (pooled,) = run_calls(kernel, session, [("vcs-review", {**approve, "client_key": "a3"})])
+    assert not pooled.is_error and pooled.structured_content["state"] == "APPROVED"
     vcs.config = vcs.config.model_copy(update={"allow_approve": True})
-    _, _, (allowed,) = run_calls(kernel, session, [("vcs-review", {**approve, "client_key": "a2"})])
+    _, _, (allowed,) = run_calls(kernel, session, [("vcs-review", {**approve, "client_key": "a4"})])
     assert not allowed.is_error and allowed.structured_content["state"] == "APPROVED"
+
+
+def test_approve_pools_match_the_kernel_member_id(vcs: Vcs) -> None:
+    from dataclasses import replace as with_fields
+
+    from pydantic import ValidationError
+
+    vcs.config = vcs.config.model_copy(update={"allow_approve": ("dev-team.principal",)})
+    principal = with_fields(caller("dev-team"), agent_id="dev-team.principal.0")
+    assert vcs.may_approve(principal)
+    refused = [
+        with_fields(caller("dev-team"), agent_id="dev-team.security.0"),  # another pool
+        with_fields(caller("dev-team"), agent_id="dev-team.principal-x.0"),  # a longer name
+        with_fields(caller("other"), agent_id="dev-team.principal.0"),  # not its member
+        with_fields(caller("dev-team"), agent_id=None),
+        with_fields(caller("dev-team"), agent_id="dev-team.principal.0", group=None),
+    ]
+    assert not any(vcs.may_approve(c) for c in refused)
+    default = VcsConfig(credentials=FixedTokenConfig(kind="test", token=SecretStr(TOKEN)))
+    assert default.allow_approve is False
+    assert not Vcs(default, registry=vcs.registry).may_approve(principal)
+    for bad in (["dev-team"], ["dev-team.principal.0"], ["Dev.x"]):
+        with pytest.raises(ValidationError):
+            VcsConfig.model_validate(
+                {"allow_approve": bad, "credentials": {"kind": "profile_credential"}}
+            )
 
 
 def test_repository_authority_is_the_repo_grant(

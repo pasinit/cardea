@@ -1,6 +1,7 @@
 {
   "allow_approve": false,
   "credentials": {
-    "kind": "profile_credential"
+    "kind": "personal_access_token",
+    "expires_on": "2027-02-01"
   }
 }
