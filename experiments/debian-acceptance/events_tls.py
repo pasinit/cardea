@@ -119,7 +119,9 @@ def certificates(directory: Path, names: list[str]) -> dict[str, Path]:
         "-extfile",
         str(extensions),
     )
-    for path in (ca_key, key):
+    # The kernel reads its certificate and key only from private files (`unsafe_file`
+    # otherwise); openssl writes them with the caller's umask (0664 under Debian's sudo).
+    for path in (ca_key, key, cert):
         path.chmod(0o600)
     return {"ca": ca, "certificate": cert, "key": key}
 
