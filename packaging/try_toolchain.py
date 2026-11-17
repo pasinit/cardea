@@ -51,7 +51,17 @@ def week_start(now: float) -> int:
 
 
 def mmdebstrap_argv(target: Path) -> list[str]:
+    # mmdebstrap's root mode makes every mount of the namespace it runs in private. Run in
+    # the host's namespace, it left `/` private, and systemd then silently stopped giving
+    # units their LoadCredential files: every credentialed confined worker (session,
+    # coding, vcs) failed until a reboot. A mount namespace of its own keeps the change
+    # there (found on the first Debian acceptance run).
     return [
+        "/usr/bin/unshare",
+        "--mount",
+        "--propagation",
+        "private",
+        "--",
         "/usr/bin/mmdebstrap",
         "--variant=minbase",
         "--mode=root",
