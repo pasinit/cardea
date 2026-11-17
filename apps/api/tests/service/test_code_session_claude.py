@@ -22,6 +22,8 @@ task = json.loads(sys.stdin.read())
 for path, content in task.get("write", {{}}).items():
     pathlib.Path(path).parent.mkdir(parents=True, exist_ok=True)
     pathlib.Path(path).write_text(content)
+for path, data in task.get("binary", {{}}).items():
+    pathlib.Path(path).write_bytes(bytes.fromhex(data))
 env = dict(os.environ)
 # The record names which credential it saw; a test below shows a leaked value is refused.
 for name in ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"):
@@ -201,3 +203,31 @@ def test_a_change_that_carries_the_model_credential_is_refused(
         run(tmp_path, config(source, worker_env), leak=True)
     assert refused.value.code == "credential_in_change"
     assert TOKEN not in str(refused.value)
+
+
+# Bytes that are not UTF-8, with and without a NUL (git treats the former as text).
+NOT_UTF8 = bytes(range(128, 256)) * 64
+
+
+@pytest.mark.parametrize("data", [NOT_UTF8, b"\x00" + NOT_UTF8], ids=["latin1-text", "binary"])
+def test_a_change_with_bytes_that_are_not_utf8_is_returned(
+    tmp_path: Path, source: Path, worker_env: Path, data: bytes
+) -> None:
+    # With a model credential, the whole change is scanned with `git diff --text`. Decoding
+    # its raw bytes strictly raised UnicodeDecodeError, and the worker reported a handler
+    # error instead of the change (found on the first Debian long_call run).
+    output, _ = run(tmp_path, config(source, worker_env), binary={"blob.bin": data.hex()})
+    assert output["changed"] is True
+    shown = subprocess.run(
+        ["git", "show", "c:blob.bin"], cwd=tmp_path / "check", capture_output=True, check=True
+    ).stdout
+    assert shown == data
+
+
+def test_a_credential_inside_bytes_that_are_not_utf8_is_still_refused(
+    tmp_path: Path, source: Path, worker_env: Path
+) -> None:
+    blob = NOT_UTF8 + TOKEN.encode() + NOT_UTF8
+    with pytest.raises(OperationRejected) as refused:
+        run(tmp_path, config(source, worker_env), binary={"blob.bin": blob.hex()})
+    assert refused.value.code == "credential_in_change"
