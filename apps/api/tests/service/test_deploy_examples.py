@@ -310,7 +310,7 @@ def test_vcs_profile_and_workers_fit_the_vcs_operations() -> None:
     """The `vcs` profile (ADR-037): the repository host only, the gate callback, a staged
     change bundle, and one worker per operation that runs its handler, then reconciler."""
     import cardea_vcs_ops
-    from cardea_vcs_ops.config import ProfileCredentialConfig, VcsConfig
+    from cardea_vcs_ops.config import PersonalAccessTokenConfig, VcsConfig
 
     workers = json.loads((KIT / "cardea" / "cardea-host-workers.json").read_text())
     profile = workers["profiles"]["vcs"]
@@ -334,4 +334,5 @@ def test_vcs_profile_and_workers_fit_the_vcs_operations() -> None:
         assert registry in worker["read_only"]
     # The worker's configuration holds no secret: the token is the profile's credential.
     config = VcsConfig.model_validate_json((KIT / "cardea" / "cardea-vcs.json").read_text())
-    assert isinstance(config.credentials, ProfileCredentialConfig)
+    assert isinstance(config.credentials, PersonalAccessTokenConfig)
+    assert config.allow_approve is False  # the generic default: refused (question 2)

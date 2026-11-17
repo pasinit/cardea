@@ -17,6 +17,7 @@ def test_the_dev_team_runs_on_the_real_operation_packages(
     spend = {a["account"]: a for a in outcome["overview"]["spend"]["accounts"]}
     assert spend["group"]["used_usd"] > 0
     printed = capsys.readouterr().out
-    assert "was refused APPROVE" in printed and "the gate refused the push" in printed
+    assert "approved it on the host" in printed and "the gate refused the push" in printed
+    assert "security.0 was refused APPROVE" in printed
     assert "pools principal, product, lead, dev, security" in printed
     assert "security.0 review -> principal: done" in printed
