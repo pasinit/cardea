@@ -23,6 +23,7 @@ from cardea.service import (
     context_sources,
     host_budget,
     loopback,
+    replies,
     spend,
 )
 from cardea.service.approval_requests import waiting_for, withdraw
@@ -551,7 +552,7 @@ class Kernel:
         descriptor = self.operations.get(name)
         executor = descriptor.cardea.executor
         if executor is None:
-            return self._gated(self.operations.handler(name))
+            return self._gated(self.operations.handler(name), name)
         self.executor_record(name)
         assert self.workers is not None
         return confined_handler(
@@ -580,14 +581,18 @@ class Kernel:
 
         return keep
 
-    def _gated(self, handler: Handler) -> Handler:
-        """Hand an in-process installed operation the kernel's content gate."""
+    def _gated(self, handler: Handler, name: str) -> Handler:
+        """Hand an in-process installed operation the kernel's content gate and its role's
+        call count (ADR-039)."""
 
         async def gated(
             arguments: dict[str, JsonValue], context: OperationContext
         ) -> dict[str, JsonValue]:
             check = partial(content_gate.enforce, self.database, self.content_gate, context)
-            return await handler(arguments, replace(context, check_content=check))
+            count = partial(replies.count_calls, self.database, context, name)
+            return await handler(
+                arguments, replace(context, check_content=check, count_calls=count)
+            )
 
         return gated
 

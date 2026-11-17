@@ -32,6 +32,7 @@ from cardea.service.logs import configure_logging
 from cardea.service.models import NetworkListener, ServiceConfig, now
 from cardea.service.operation_runtime import OperationRuntime
 from cardea.service.operations import Registry
+from cardea.service.replies import ReplyPoller
 from cardea.service.runtime import Runtime
 
 log = logging.getLogger(__name__)
@@ -305,6 +306,21 @@ def serve(
                         timer.wait(30)
 
                 threading.Thread(target=reconcile, name="cardea-reconcile", daemon=True).start()
+            poller = ReplyPoller(kernel)
+            if poller.names():
+
+                def poll_replies() -> None:
+                    # Replies to effects, polled from their destination (ADR-039); each
+                    # operation keeps its own interval, so this only wakes to check.
+                    timer = threading.Event()
+                    while True:
+                        try:
+                            poller.poll()
+                        except Exception:
+                            log.exception("periodic reply poll failed")
+                        timer.wait(30)
+
+                threading.Thread(target=poll_replies, name="cardea-replies", daemon=True).start()
             with database.engine.begin() as conn:
                 conn.exec_driver_sql(
                     "INSERT OR IGNORE INTO service_meta(name,value) VALUES('runtime_version',?)",

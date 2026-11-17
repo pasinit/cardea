@@ -264,7 +264,15 @@ def test_in_process_digest_is_unchanged_by_executors() -> None:
     described = OperationDescriptor.model_validate(document)
     dumped = described.model_dump(mode="json")
     assert "executor" in dumped["cardea"]
-    for unset in ("executor", "approval", "resource", "inputs", "max_artifact_bytes", "run_window"):
+    for unset in (
+        "executor",
+        "approval",
+        "resource",
+        "inputs",
+        "max_artifact_bytes",
+        "run_window",
+        "replies",
+    ):
         del dumped["cardea"][unset]
     assert described.digest == hashlib.sha256(rfc8785.dumps(dumped)).hexdigest()
     assert Registry((described,), None).entry_points() == {"test.handler"}

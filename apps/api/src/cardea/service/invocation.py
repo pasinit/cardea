@@ -214,10 +214,11 @@ def admit(
         policy.ceiling(task.task_id, f"{resource.grant}:{value}")
     inputs = _stage_inputs(conn, tx, policy, task, namespace, descriptor, arguments)
     member = conn.exec_driver_sql(
-        "SELECT group_name FROM group_members WHERE principal_id=? AND namespace=?",
+        "SELECT group_name,pool FROM group_members WHERE principal_id=? AND namespace=?",
         (agent_id, namespace),
     ).first()
     group = str(member[0]) if agent_id is not None and member is not None else None
+    pool = str(member[1]) if group is not None and member is not None else None
     key = registry.scope_key(name, namespace, idempotency_context or task.task_id, arguments)
     provenance: dict[str, JsonValue] = {
         k: v
@@ -326,6 +327,7 @@ def admit(
         idempotency_context=idempotency_context,
         slot_time=slot_time,
         group=group,
+        pool=pool,
         inputs=inputs,
     )
     if prior is not None:

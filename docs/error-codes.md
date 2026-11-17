@@ -55,6 +55,7 @@ errors answer 409. A request that fails schema validation answers
 | `delegation_binding` | 403 | Caller is not the bound coordinator runtime; Only the bound coordinator runtime may delegate; Message does not match the admitted objective (and 6 more) | `cardea.runtime.a2a`, `cardea.service.delegation`, `cardea.service.kernel` |
 | `demo_not_ready` | 409 | Demo needs a saved checkpoint before resumption. | `cardea.kernel.demo` |
 | `effect_in_doubt` | 409 | An earlier invocation of this effect is unresolved | `cardea.service.invocation` |
+| `email_config_invalid` | 500 | The email configuration is invalid | `cardea_email_ops.config` |
 | `env_rerun_limit` | 429 | At most {…} forced reruns per day for this subject | `cardea.service.env_runs` |
 | `env_run_in_progress` | 409 | An identical run is in progress; retry when it settles | `cardea.service.env_runs` |
 | `event_mode_unsupported` | 415 | Send the event in CloudEvents structured JSON mode; Content-Type must be {…} | `cardea.service.events` |
@@ -132,8 +133,8 @@ errors answer 409. A request that fails schema validation answers
 | `object_version_conflict` | 409 | Object version has changed. | `cardea.kernel.store` |
 | `operation_changed` | 403 | Operation was reinstalled | `cardea.service.agent_run_runtime` |
 | `operation_duplicate` | 500 | Operation is installed twice | `cardea.service.operations` |
-| `operation_handler_missing` | 500, 503 | Operation handler is not installed; Operation handler is not loaded; Reconciler is not loaded | `cardea.service.operations` |
-| `operation_invalid` | 500 | Invalid operation descriptor {…}: {…} | `cardea.service.operations` |
+| `operation_handler_missing` | 500, 503 | Operation handler is not installed; Operation handler is not loaded; Reconciler is not loaded (and 1 more) | `cardea.service.operations` |
+| `operation_invalid` | 500 | Operation declares no reply poller; Invalid operation descriptor {…}: {…} | `cardea.service.operations` |
 | `operation_not_found` | 409 | Operation does not exist. | `cardea.kernel.store` |
 | `operation_not_installed` | 403, 409 | Approval rules name an operation that is not installed; Policy names an operation that is not installed; Operation is not installed | `cardea.service.kernel`, `cardea.service.operations` |
 | `operation_timeout_exceeds_profile` | 409 | The operation's {…} s timeout exceeds its profile's {…} s wall time | `cardea.service.confined` |
@@ -232,7 +233,7 @@ used by the examples.
 | `claims_disabled` | This collection has no claims | `cardea.service.records` |
 | `claims_not_standalone` | Claims on this collection are taken by state transitions, not records.claim | `cardea.service.records` |
 | `collection_not_found` | No such collection in this namespace | `cardea.service.records` |
-| `content_gate_unavailable` | The content gate is unreachable; The content gate is not available to this call | `cardea.service.content_gate`, `cardea_vcs_ops.ops` |
+| `content_gate_unavailable` | The content gate is unreachable; The content gate is not available to this call | `cardea.service.content_gate`, `cardea_email_ops.ops`, `cardea_vcs_ops.ops` |
 | `content_refusal_ignored` | the worker continued after the content gate refused | `cardea.service.confined` |
 | `content_refused` | The content gate refused a call (ADR-037 decision 4). | `cardea.service.operations` |
 | `credential_in_change` | the change or a command's output contains the model credential; nothing is returned | `cardea_coding_ops.session` |
@@ -263,9 +264,12 @@ used by the examples.
 | `operation_outcome_unknown` | Interrupted operation; no replay | `cardea.service.invocation` |
 | `operation_rejected` | — | `cardea.service.invocation` |
 | `push_rejected` | — | `cardea_vcs_ops.ops` |
+| `rate_limit_unavailable` | The rate limit is not available | `cardea_email_ops.ops` |
+| `rate_limited` | This role may send {…} emails per {…} days | `cardea_email_ops.ops` |
 | `receipt_invalid` | Cite a receipt of {…}; The cited call did not succeed; The cited call was not made for this record (and 3 more) | `cardea.service.records` |
 | `receipt_required` | This transition needs receipt_id of a {…} call | `cardea.service.records` |
 | `receipt_result_refused` | The cited call has no result to check; The receipt result guard failed to evaluate: {…}; The cited call's result does not satisfy this transition | `cardea.service.records` |
+| `recipient_not_allowed` | This role may not email that recipient | `cardea_email_ops.ops` |
 | `reconciliation_required` | An interrupted effect has unknown outcome. | `cardea.kernel.store` |
 | `record_claimed` | Another principal holds this record | `cardea.service.records` |
 | `record_invalid` | labels must be distinct; data must be an object; data does not match the collection schema at {…} ({…}) (and 2 more) | `cardea.service.records` |
