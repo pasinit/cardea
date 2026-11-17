@@ -530,7 +530,26 @@ def client(host: dict[str, Any]) -> Any:
     )
 
 
+def placeholders(value: Any, path: str = "") -> list[str]:
+    """Host-file values still holding the example's placeholders: any string ending in
+    `.invalid` or `example` (for example `reviewer.example`, `issuer.example.invalid`)."""
+    if isinstance(value, dict):
+        return [p for k, v in value.items() for p in placeholders(v, f"{path}/{k}")]
+    if isinstance(value, list):
+        return [p for i, v in enumerate(value) for p in placeholders(v, f"{path}/{i}")]
+    if isinstance(value, str) and value.rstrip("/").endswith((".invalid", "example")):
+        return [path or "/"]
+    return []
+
+
+def check_placeholders(host: dict[str, Any]) -> None:
+    found = placeholders(host)
+    if found:
+        raise HostError("the host file still holds placeholder values at " + ", ".join(found))
+
+
 def provision(host: dict[str, Any], *, paused: bool) -> Path:
+    check_placeholders(host)
     namespace = str(host["namespace"])
     settings = host.get("provisioning") or {}
     base = Path(settings.get("base", "/etc/cardea/provision.base.json"))
@@ -550,6 +569,7 @@ def provision(host: dict[str, Any], *, paused: bool) -> Path:
 
 
 def apply(host: dict[str, Any]) -> list[str]:
+    check_placeholders(host)
     namespace, group, _, _ = _names(host)
     done = []
     kernel = client(host)

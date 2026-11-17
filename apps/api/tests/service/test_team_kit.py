@@ -389,3 +389,17 @@ def test_status_summarises_the_overview(team: tuple[Kernel, FakeSession]) -> Non
     assert any(line.strip().startswith("dev-team.dev.0: idle") for line in lines), lines
     assert any("spend group" in line and "runs 0/30" in line for line in lines), lines
     assert any("spend pool:pm" in line and "runs 0/4" in line for line in lines), lines
+
+
+def test_provision_and_apply_refuse_placeholder_values(tmp_path: Path) -> None:
+    module = kit()
+    document = example()
+    with pytest.raises(module.HostError, match="credentials/reviewer_login"):
+        module.provision(document, paused=False)
+    with pytest.raises(module.HostError, match="placeholder"):
+        module.apply(document)
+    document["credentials"]["reviewer_login"] = "real-login"
+    document["supervisor"]["issuer"] = "https://issuer.example.invalid"
+    assert module.placeholders(document) == ["/supervisor/issuer"]
+    document["supervisor"]["issuer"] = "cardea.internal"
+    assert module.placeholders(document) == []

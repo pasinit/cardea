@@ -80,6 +80,8 @@ $KIT status --host $H
 
 Grants expire after `grant_days` (14 by default). Run `provision` again before then.
 
+`provision` and `apply` refuse a host file that still holds a placeholder from the example: any value ending in `.invalid` or `example`.
+
 ## Observe
 
 - **Status.** `teamkit.py status` prints each member's active or last run, the work items by state, and each spend account's runs and dollars against its ceiling.

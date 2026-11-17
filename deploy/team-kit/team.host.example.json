@@ -17,7 +17,7 @@
     "author": "github",
     "reviewer": "github-reviewer",
     "expires_on": "2027-01-31",
-    "reviewer_login": "reviewer-account"
+    "reviewer_login": "reviewer-login.example"
   },
   "email": {
     "alias": "owner",
