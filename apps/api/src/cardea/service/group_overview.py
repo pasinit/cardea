@@ -250,6 +250,16 @@ def _spend(
                 "window": span.key,
                 "window_ends_at": span.end.isoformat(),
                 "used_usd": round(spend.used(conn, namespace, group, key=span.key, pool=pool), 6),
+                **(
+                    {
+                        "runs": account.runs,
+                        "used_runs": spend.runs_used(
+                            conn, namespace, group, key=span.key, pool=pool
+                        ),
+                    }
+                    if account.runs is not None
+                    else {}
+                ),
             }
         )
     rows = (

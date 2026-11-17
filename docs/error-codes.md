@@ -34,7 +34,7 @@ errors answer 409. A request that fails schema validation answers
 | `backup_failed` | 500 | Backup integrity check failed | `cardea.service.database` |
 | `backup_has_sidecars` | 400 | Use a standalone completed SQLite snapshot | `cardea.service.admin` |
 | `body_too_large` | 413 | A message body is at most {…} bytes | `cardea.service.mailbox` |
-| `budget_exhausted` | 429 | The {…} spend ceiling ({…} USD per {…}) would be exceeded: {…} USD used or reserved, this run reserves {…} USD | `cardea.service.agent_run_runtime`, `cardea.service.spend` |
+| `budget_exhausted` | 429 | The {…} run ceiling ({…} runs per {…}) is spent: {…} runs admitted; The {…} spend ceiling ({…} USD per {…}) would be exceeded: {…} USD used or reserved, this run reserves {…} USD | `cardea.service.agent_run_runtime`, `cardea.service.spend` |
 | `builtin_operation` | 422 | Built-in mailbox operations run in agent runs | `cardea.service.kernel` |
 | `cancel_requested` | 403 | Cancellation requested; Task or ancestor was cancelled | `cardea.service.agent_run_runtime`, `cardea.service.delegation`, `cardea.service.host_runtime`, `cardea.service.operation_runtime` |
 | `capacity_exceeded` | 429 | M1 profile permits at most 100 active tasks | `cardea.service.kernel` |
@@ -225,6 +225,7 @@ used by the examples.
 | `bad_cursor` | cursor is not one this operation returned | `cardea.service.records` |
 | `branch_moved` | The branch moved since the caller read it | `cardea_vcs_ops.ops` |
 | `branch_not_allowed` | Only agent-group members push branches or open changes; Branches must be named {…}<name> | `cardea_vcs_ops.ops` |
+| `branch_unknown` | No branch {…} | `cardea_vcs_ops.ops` |
 | `call_abandoned` | — | `cardea.service.invocation` |
 | `change_invalid` | The change bundle was not staged | `cardea_vcs_ops.ops` |
 | `checkpoint_missing` | Completed work has no resumable checkpoint. | `cardea.kernel.store` |
@@ -259,7 +260,7 @@ used by the examples.
 | `input_digest_mismatch` | Staged input {…} does not match its digest | `cardea.hosts.operation_worker` |
 | `input_too_large` | The call's inputs exceed what a worker may take | `cardea.service.confined` |
 | `input_unavailable` | The job's inputs were not staged; A staged input is missing | `cardea.hosts.operation_worker` |
-| `invalid_arguments` | Invalid decision; commit must be a full 40-hex object ID | `cardea.service.approval_requests`, `cardea_env_ops.try_` |
+| `invalid_arguments` | Invalid decision; commit must be a full 40-hex object ID; Not a branch name | `cardea.service.approval_requests`, `cardea_env_ops.try_`, `cardea_vcs_ops.ops` |
 | `isolation_failed` | untrusted steps not contained: {…} | `cardea_coding_ops.session` |
 | `member_draining` | A draining group member takes no new claims | `cardea.service.records` |
 | `merge_already_merged` | The pull request is already merged | `cardea_vcs_ops.ops` |

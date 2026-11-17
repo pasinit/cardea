@@ -1,0 +1,85 @@
+{
+  "namespace": "dev",
+  "group": "dev-team",
+  "supervisor": {
+    "principal_id": "sup-dev",
+    "kind": "human",
+    "auth_kind": "spiffe",
+    "issuer": "cardea.internal",
+    "subject": "spiffe://cardea.internal/supervisor/dev-team"
+  },
+  "timezone": "UTC",
+  "repository": "cardea",
+  "harness": "claude",
+  "model": "claude-sonnet-4-5",
+  "developers": 2,
+  "credentials": {
+    "author": "github",
+    "reviewer": "github-reviewer",
+    "expires_on": "2027-01-31",
+    "reviewer_login": "reviewer-login.example"
+  },
+  "email": {
+    "alias": "owner",
+    "rate_limit": {
+      "count": 3,
+      "window_days": 7
+    }
+  },
+  "env_try": {
+    "scenarios": [
+      "try",
+      "teams"
+    ]
+  },
+  "budgets": {
+    "team": {
+      "runs": 30,
+      "usd": 20.0
+    },
+    "roles": {
+      "pm": {
+        "runs": 4
+      },
+      "tl": {
+        "runs": 6
+      },
+      "dev": {
+        "runs": 14
+      },
+      "pe": {
+        "runs": 8
+      }
+    },
+    "max_cost_usd_per_run": 1.0
+  },
+  "schedules": {
+    "pm": [
+      "0 9 * * 1-5",
+      "0 15 * * 1-5"
+    ],
+    "tl": [
+      "30 8 * * 1-5"
+    ]
+  },
+  "grant_days": 14,
+  "kernel": {
+    "socket": "/var/lib/cardea/kernel.sock",
+    "spiffe": {
+      "socket": "unix:///run/spire/agent.sock",
+      "id": "spiffe://cardea.internal/supervisor/dev-team",
+      "audience": "cardea-kernel"
+    }
+  },
+  "provisioning": {
+    "cardea": [
+      "/opt/cardea/apps/api/.venv/bin/python",
+      "-I",
+      "-m",
+      "cardea.service"
+    ],
+    "config": "/etc/cardea/config.json",
+    "base": "/etc/cardea/provision.base.json",
+    "out": "/etc/cardea/provision.json"
+  }
+}

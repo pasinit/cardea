@@ -3098,7 +3098,7 @@
           "spend": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/GroupSpend"
+                "$ref": "#/components/schemas/GroupSpend-Input"
               },
               {
                 "type": "null"
@@ -3214,7 +3214,7 @@
           "spend": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/GroupSpend"
+                "$ref": "#/components/schemas/GroupSpend-Output"
               },
               {
                 "type": "null"
@@ -3312,7 +3312,7 @@
           "spend": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/GroupSpend"
+                "$ref": "#/components/schemas/GroupSpend-Input"
               },
               {
                 "type": "null"
@@ -3357,7 +3357,7 @@
           "spend": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/GroupSpend"
+                "$ref": "#/components/schemas/GroupSpend-Output"
               },
               {
                 "type": "null"
@@ -3377,10 +3377,23 @@
         "title": "GroupSpec",
         "type": "object"
       },
-      "GroupSpend": {
+      "GroupSpend-Input": {
         "additionalProperties": false,
-        "description": "A spend account (ADR-034 decision 5.3): a ceiling in USD per calendar day or ISO\nweek on the wall clock of `timezone`, metered from the runs' reported cost.",
+        "description": "A spend account (ADR-034 decision 5.3): a ceiling per calendar day or ISO week on\nthe wall clock of `timezone`, in USD metered from the runs' reported cost, in admitted\nruns (`runs`, amendment 2026-11-17), or both. A subscription-billed model reports an\nestimated cost, so a run count is the bound that does not depend on it.",
         "properties": {
+          "runs": {
+            "anyOf": [
+              {
+                "maximum": 100000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runs"
+          },
           "timezone": {
             "default": "UTC",
             "maxLength": 64,
@@ -3389,10 +3402,17 @@
             "type": "string"
           },
           "usd": {
-            "exclusiveMinimum": 0.0,
-            "maximum": 100000.0,
-            "title": "Usd",
-            "type": "number"
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 100000.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usd"
           },
           "window": {
             "enum": [
@@ -3404,12 +3424,12 @@
           }
         },
         "required": [
-          "usd",
           "window"
         ],
         "title": "GroupSpend",
         "type": "object"
       },
+      "GroupSpend-Output": {},
       "GroupStatus": {
         "additionalProperties": false,
         "properties": {
@@ -4918,9 +4938,41 @@
             "title": "Account",
             "type": "string"
           },
+          "runs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The run ceiling, when the account has one.",
+            "title": "Runs"
+          },
           "usd": {
-            "title": "Usd",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The USD ceiling; null for a run-only account.",
+            "title": "Usd"
+          },
+          "used_runs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Runs admitted in this window.",
+            "title": "Used Runs"
           },
           "used_usd": {
             "description": "Settled costs plus open and unknown reservations.",

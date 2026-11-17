@@ -30,6 +30,7 @@ from pydantic import JsonValue, ValidationError
 
 from cardea.kernel.lifecycle import ContractError
 from cardea.kernel.store import StoreError
+from cardea.service import spend
 from cardea.service.database import Fault, borrow
 from cardea.service.events import request_id
 from cardea.service.models import InboundEvent, TriggerSpec, now
@@ -103,8 +104,23 @@ def adapt(
         "actor": actor,
         **({"subject": event.subject} if event.subject is not None else {}),
         **({"time": event.time} if event.time else {}),
+        **_record_extensions(kind, data),
     }
     return event, attributes
+
+
+def _record_extensions(kind: object, data: object) -> dict[str, str]:
+    """CloudEvents extension attributes of record events, so a trigger can filter on them
+    (amendment 2026-11-17): `recordstate`, the record's state after the change, and
+    `transition`, the transition that made it."""
+    if not str(kind).startswith("cardea.record.") or not isinstance(data, dict):
+        return {}
+    found: dict[str, str] = {}
+    if isinstance(data.get("state"), str):
+        found["recordstate"] = data["state"]
+    if isinstance(data.get("transition"), str):
+        found["transition"] = data["transition"]
+    return found
 
 
 def _record(
@@ -254,6 +270,16 @@ class Dispatcher:
                 # A journal event has no sender to retry it: the refusal is history.
                 _record(conn, trigger_id, decided[1], code=code)
                 self._advance(conn, trigger_id, cursor, pending)
+                if code == "budget_exhausted" and isinstance(error, Fault):
+                    with borrow(conn) as tx:
+                        spend.notify_refused(
+                            conn,
+                            tx,
+                            kernel.runtime_id,
+                            decided[0].template.get("agent_id"),
+                            error.message,
+                            now(),
+                        )
             log.warning("journal admission refused", extra={"code": code, "reason": trigger_id})
             return "refused"
         kernel.fault("journal.after_commit")

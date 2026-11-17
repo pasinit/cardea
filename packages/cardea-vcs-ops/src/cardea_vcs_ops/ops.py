@@ -486,6 +486,23 @@ class Vcs:
 
     # vcs.read_change
 
+    async def read_branch(
+        self, arguments: dict[str, JsonValue], context: OperationContext
+    ) -> dict[str, JsonValue]:
+        """A branch's head commit, for example `main` before `env.try` (ADR-038)."""
+        repository = self.repository(arguments["repository"])
+        branch = str(arguments["branch"])
+        if not BRANCH.fullmatch(branch) or ".." in branch:
+            raise OperationRejected("Not a branch name", "invalid_arguments")
+        async with await self.client(repository, context, "metadata:read") as host:
+            try:
+                head = await host.branch_head(branch)
+            except HostRefused as refused:
+                raise OperationRejected(str(refused), "host_refused") from None
+        if head is None:
+            raise OperationRejected(f"No branch {branch}", "branch_unknown")
+        return {"repository": str(arguments["repository"]), "branch": branch, "head": head}
+
     async def read_change(
         self, arguments: dict[str, JsonValue], context: OperationContext
     ) -> dict[str, JsonValue]:
@@ -568,6 +585,7 @@ class Vcs:
             "vcs.review": self.review,
             "vcs.find_review": self.find_review,
             "vcs.read_change": self.read_change,
+            "vcs.read_branch": self.read_branch,
             "vcs.check_repository": self.check_repository,
             "vcs.merge": self.merge,
             "vcs.find_merge": self.find_merge,

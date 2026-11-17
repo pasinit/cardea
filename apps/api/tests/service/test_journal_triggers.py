@@ -403,3 +403,43 @@ def test_a_supervisor_installs_a_journal_trigger(kernel: Kernel) -> None:
     tick(kernel)
     assert len(admitted(kernel, "bob")) == 1
     assert deliveries(kernel, "bob-mail") == [("admitted", None)]
+
+
+def test_record_events_carry_their_state_and_transition_for_filters(kernel: Kernel) -> None:
+    """A trigger can wake only on a transition into one state (amendment 2026-11-17)."""
+    from cardea.service.models import JournalMatch
+
+    with kernel.database.engine.begin() as conn, borrow(conn) as tx:
+        for version, state, transition in ((1, "open", None), (2, "ready", "triage")):
+            data: dict[str, Any] = {"collection": "work", "record_id": "r1", "state": state}
+            if transition:
+                data["transition"] = transition
+            tx.append_event(
+                namespace="test",
+                event_type="cardea.record.transitioned",
+                producer_id="supervisor",
+                correlation_id="r1",
+                at=now(),
+                payload={
+                    "specversion": "1.0",
+                    "id": f"work/r1.{version}",
+                    "source": "cardea://test",
+                    "type": "cardea.record.transitioned",
+                    "subject": "work/r1",
+                    "data": data,
+                },
+            )
+        rows = conn.exec_driver_sql(
+            "SELECT * FROM events WHERE namespace='test' ORDER BY cursor"
+        ).mappings()
+        adapted = [a for a in (journal.adapt(conn, row, "runtime") for row in rows) if a]
+    (first, opened), (event, readied) = adapted
+    assert opened["recordstate"] == "open" and "transition" not in opened
+    assert (readied["recordstate"], readied["transition"]) == ("ready", "triage")
+    wake = JournalMatch.model_validate(
+        {
+            "types": ["cardea.record.transitioned"],
+            "filters": [{"exact": {"recordstate": "ready"}}, {"prefix": {"subject": "work/"}}],
+        }
+    )
+    assert wake.matches(event, readied, "dev") and not wake.matches(first, opened, "dev")

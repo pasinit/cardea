@@ -23,6 +23,7 @@ dependencies = []
 "vcs.read_change" = "cardea_vcs_ops:read_change"
 "vcs.check_repository" = "cardea_vcs_ops:check_repository"
 "vcs.merge" = "cardea_vcs_ops:merge"
+"vcs.read_branch" = "cardea_vcs_ops:read_branch"
 "vcs.find_merge" = "cardea_vcs_ops:find_merge"
 
 [tool.hatch.build.targets.wheel]

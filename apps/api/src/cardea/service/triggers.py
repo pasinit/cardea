@@ -24,6 +24,7 @@ from pydantic import ValidationError
 
 from cardea.kernel.lifecycle import ContractError
 from cardea.kernel.store import StoreError
+from cardea.service import spend
 from cardea.service.database import Fault, borrow
 from cardea.service.harnesses import Catalog, check_harness_grants, check_selection
 from cardea.service.models import (
@@ -357,6 +358,16 @@ class Scheduler:
                 self._record_missed(conn, trigger_id, decision, at)
                 _event(conn, trigger_id, "failed", at, slot=decision.slot, code=code)
                 self._advance(conn, trigger_id, decision.slot)
+                if code == "budget_exhausted" and isinstance(error, Fault):
+                    with borrow(conn) as tx:
+                        spend.notify_refused(
+                            conn,
+                            tx,
+                            self.kernel.runtime_id,
+                            spec.template.get("agent_id"),
+                            error.message,
+                            at,
+                        )
             log.warning("trigger admission refused", extra={"code": code, "reason": trigger_id})
             return "failed"
         self.kernel.fault("trigger.after_commit")

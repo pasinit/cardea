@@ -284,10 +284,12 @@ class OverviewApprovals(Record):
 
 class OverviewAccount(Record):
     account: str = Field(description="`group` or `pool:<name>`.")
-    usd: float
+    usd: float | None = Field(description="The USD ceiling; null for a run-only account.")
     window: str
     window_ends_at: str
     used_usd: float = Field(description="Settled costs plus open and unknown reservations.")
+    runs: int | None = Field(None, description="The run ceiling, when the account has one.")
+    used_runs: int | None = Field(None, description="Runs admitted in this window.")
 
 
 class OverviewExpectation(Record):

@@ -24,7 +24,7 @@ from cardea.service.database import Fault
 from cardea.service.kernel import Kernel, provision
 from cardea.service.models import AgentRunRequest, Provisioning
 
-kernel, session = groups.kernel, groups.session
+kernel, session, anchored = groups.kernel, groups.session, groups.anchored
 REQUESTS = count()
 
 
@@ -347,3 +347,63 @@ def test_windowed_any_of_is_met_by_one_alternative(
     data = parts[1]["data"]
     assert data["code"] == "expectation_unmet" and data["observed"] == [0, 0]
     assert "one of:" in parts[0]["text"]
+
+
+# Run ceilings and the supervisor notice on a refused trigger (amendment 2026-11-17)
+
+
+def test_a_run_ceiling_counts_admissions(kernel: Kernel) -> None:
+    put(kernel, spending({"runs": 2, "window": "day"}))
+    admit(kernel, "desk.worker.0")
+    admit(kernel, "desk.worker.1")
+    with pytest.raises(Fault) as refused:
+        admit(kernel, "desk.worker.2")
+    assert refused.value.code == "budget_exhausted"
+    assert "run ceiling (2 runs" in refused.value.message
+    with kernel.database.read() as conn:
+        key = spend.window("day", "UTC", datetime.now(UTC)).key
+        assert spend.runs_used(conn, "test", "desk", key=key) == 2
+
+
+def test_usd_and_runs_together_and_per_pool(kernel: Kernel) -> None:
+    put(
+        kernel,
+        spending({"usd": 100.0, "runs": 5, "window": "day"}, spend={"runs": 1, "window": "day"}),
+    )
+    admit(kernel, "desk.worker.0")
+    with pytest.raises(Fault) as refused:
+        admit(kernel, "desk.worker.1")
+    assert "pool worker run ceiling" in refused.value.message
+
+
+def test_an_account_needs_usd_or_runs(kernel: Kernel) -> None:
+    from pydantic import ValidationError
+
+    from cardea.service.models import GroupSpend
+
+    with pytest.raises(ValidationError):
+        GroupSpend.model_validate({"window": "day"})
+    # An account without runs keeps its stored form.
+    assert "runs" not in GroupSpend.model_validate({"usd": 1, "window": "day"}).model_dump()
+
+
+def budget_notices(kernel: Kernel) -> list[list[dict[str, Any]]]:
+    return [
+        m
+        for m in supervisor_mail(kernel)
+        if any(p.get("data", {}).get("code") == "budget_exhausted" for p in m)
+    ]
+
+
+def test_a_refused_trigger_mails_the_supervisor_once_per_window(
+    kernel: Kernel, anchored: None
+) -> None:
+    put(kernel, spending({"runs": 1, "window": "day"}))
+    first = groups.tick(kernel, "2026-10-01T07:00:10")
+    assert sorted(first.values()) == ["admitted", "failed", "failed"]
+    notices = budget_notices(kernel)
+    assert len(notices) == 1
+    assert "Runs resume when the window turns" in notices[0][0]["text"]
+    groups.tick(kernel, "2026-10-01T08:00:10")
+    again = budget_notices(kernel)
+    assert len(again) == 1

@@ -442,3 +442,15 @@ def test_the_strict_cache_option_is_a_matching_set(monkeypatch: pytest.MonkeyPat
             with pytest.raises(OperationRejected) as error:
                 dependency_env(config)
             assert error.value.code == refused
+
+
+def test_the_kit_json_files_have_no_duplicate_keys() -> None:
+    """A duplicated worker name would silently keep only the last definition."""
+
+    def unique(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        keys = [k for k, _ in pairs]
+        assert len(keys) == len(set(keys)), sorted(k for k in keys if keys.count(k) > 1)
+        return dict(pairs)
+
+    for path in sorted((KIT / "cardea").glob("*.json")):
+        json.loads(path.read_text(), object_pairs_hook=unique)
