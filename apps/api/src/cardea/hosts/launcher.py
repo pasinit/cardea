@@ -22,13 +22,15 @@ from typing import Any
 
 PROFILE = "debian-local-v1"
 # Debian 13's 6.12 LTS kernel, generic or cloud flavour, for each architecture the package is
-# built for. Point releases only bring fixes; the enforcement checks below (cgroup controllers,
-# seccomp, bwrap) still run on every request. amd64 is the verified profile; arm64 is a
-# development profile until a host fit passes on it (packaging/README.md).
+# built for, with or without a point-release suffix (`+deb13` or `+deb13.N`). Point
+# releases only bring fixes; the enforcement checks below (cgroup controllers, seccomp,
+# bwrap) still run on every request. amd64 is the verified profile; arm64 is a development
+# profile until a host fit passes on it (packaging/README.md).
 # A host owner may replace the pattern with `kernel_release_pattern` in HOST_CONFIG.
 ARCHITECTURES = {"x86_64": "amd64", "aarch64": "arm64"}
 KERNEL_RELEASES = {
-    machine: rf"6\.12\.\d{{1,4}}\+deb13(-cloud)?-{arch}" for machine, arch in ARCHITECTURES.items()
+    machine: rf"6\.12\.\d{{1,4}}\+deb13(\.\d{{1,3}})?(-cloud)?-{arch}"
+    for machine, arch in ARCHITECTURES.items()
 }
 KERNEL_RELEASE = KERNEL_RELEASES["x86_64"]
 # Root-owned host-owner configuration: the kernel's uid and optional overrides.

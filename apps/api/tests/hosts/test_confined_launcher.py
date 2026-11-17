@@ -364,6 +364,18 @@ def test_profiles_report_a_configured_queue_timeout(
         ("aarch64", "6.12.111+deb13-arm64-16k", False),
         ("aarch64", "6.12.111+deb13-rt-arm64", False),
         ("aarch64", "6.13.1+deb13-arm64", False),
+        # Point releases: `+deb13.N`.
+        ("aarch64", "6.12.115+deb13.1-cloud-arm64", True),
+        ("aarch64", "6.12.115+deb13.1-arm64", True),
+        ("x86_64", "6.12.115+deb13.1-amd64", True),
+        ("x86_64", "6.12.115+deb13.1-cloud-amd64", True),
+        ("x86_64", "6.12.115+deb13.1-cloud-arm64", False),
+        ("aarch64", "6.12.115+deb13.1-cloud-amd64", False),
+        ("x86_64", "6.12.115+deb13.1a-amd64", False),
+        ("x86_64", "6.12.115+deb13.-amd64", False),
+        ("x86_64", "6.12.115+deb13.1234-amd64", False),
+        ("x86_64", "6.12.115+deb14-amd64", False),
+        ("aarch64", "6.12.115+deb14.1-arm64", False),
     ],
 )
 def test_preflight_accepts_debian_13_6_12_kernels(
