@@ -58,7 +58,12 @@ $S entry create $A -parentID spiffe://cardea.internal/node/telos \
 
 ## 3. Cardea (Cardea host)
 
-1. Create a `cardea-kernel` system user. Clone the repository to `/opt/cardea` at a reviewed commit, then run `uv sync --locked --python /usr/bin/python3` in `apps/api`. A system Python keeps the venv usable inside confined workers, which see only `/usr` and their read-only binds.
+1. Create a `cardea-kernel` system user. Clone the repository to `/opt/cardea` at a reviewed commit, then run `uv sync --locked --python /usr/bin/python3` in `apps/api`. A system Python keeps the venv usable inside confined workers, which see only `/usr` and their read-only binds. `uv sync` does not install the kernel itself (`apps/api` is not a built package). The service finds it through `PYTHONPATH`, but confined workers start with `python -I`, which ignores `PYTHONPATH`. So put the source on the venv's own path, or every worker fails with `No module named 'cardea'`:
+
+```sh
+echo /opt/cardea/apps/api/src > /opt/cardea/apps/api/.venv/lib/python3.13/site-packages/cardea-api-src.pth
+/opt/cardea/apps/api/.venv/bin/python -I -c 'import cardea.hosts.operation_worker'
+```
 2. Create the store directory. It must be owned by `cardea-kernel` with mode `0700`; otherwise `init` fails with `unsafe_directory`:
 
 ```sh
