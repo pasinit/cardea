@@ -47,6 +47,7 @@ from typing import Any
 
 # `python -I` leaves the script's own directory off the path; the shared modules are there.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from coding_fixture import FIXTURE, merged_registry  # noqa: E402
 from common import (  # noqa: E402
     HERE,
     Evidence,
@@ -571,20 +572,26 @@ def main(argv: list[str]) -> int:
         default=None,
         help="a listener on 127.0.0.1 the worker must not reach, e.g. the daemon's port",
     )
-    config = commands.add_parser("config", help="print the code.session configuration")
-    config.add_argument("source", help="the fixture repository's path")
-    registry = commands.add_parser("repositories", help="print the repository registry")
-    registry.add_argument("source", help="the fixture repository's path")
+    commands.add_parser("config", help="print the code.session configuration")
+    registry = commands.add_parser(
+        "registry", help="print the host registry with this test's alias added"
+    )
+    registry.add_argument("existing", type=Path, help="the host's registry (may be absent)")
+    gates = commands.add_parser("gates", help="write this test's gate files (none)")
+    gates.add_argument("directory", type=Path)
     serving = commands.add_parser("serve", help="(internal) the service child")
     serving.add_argument("--work", type=Path, required=True)
     serving.add_argument("--task", required=True)
     serving.add_argument("--cardea-lib", type=Path, default=None)
     args = parser.parse_args(argv)
     if args.command == "config":
-        print(json.dumps(coding_config(args.source), indent=2))
+        print(json.dumps(coding_config(FIXTURE), indent=2))
         return 0
-    if args.command == "repositories":
-        print(json.dumps(repositories(args.source), indent=2))
+    if args.command == "registry":
+        added = repositories(FIXTURE)["repositories"]
+        print(json.dumps(merged_registry(args.existing, added), indent=2))
+        return 0
+    if args.command == "gates":
         return 0
     if args.command == "serve":
         use_kernel(args.cardea_lib)

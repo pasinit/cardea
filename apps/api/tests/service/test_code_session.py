@@ -683,3 +683,137 @@ def test_dependency_settings_are_checked(monkeypatch: pytest.MonkeyPatch) -> Non
     for name in ("HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY"):
         with pytest.raises(OperationRejected):
             fixed_env({name: "http://127.0.10.9:3128"})
+
+
+# Gates run agent-written code: they must not forge results or change the change
+
+LINUX = pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="needs /proc, PR_SET_DUMPABLE and PR_SET_CHILD_SUBREAPER (Linux)",
+)
+
+# Tries to write a forged result into the worker's standard output through /proc.
+FORGE = """
+import json, os
+forged = json.dumps({"output": {"gates_passed": True, "forged": True}})
+try:
+    with open(f"/proc/{os.getppid()}/fd/1", "w") as stream:
+        stream.write(forged)
+    print("forge: written")
+except OSError as error:
+    print("forge: denied", type(error).__name__)
+"""
+
+# Leaves a detached grandchild that, unless it is killed, edits the change after its gate.
+DETACH = """
+import os, sys, time
+if os.fork() == 0:
+    os.setsid()
+    if os.fork() == 0:
+        time.sleep(1.5)
+        with open("a.txt", "a") as stream:
+            stream.write("tampered by a stray process\\n")
+        time.sleep(5)
+        os._exit(0)
+    os._exit(0)
+os.wait()
+print("detached a child")
+"""
+
+PAUSE = "import time; time.sleep(3); print('second gate')"
+KILL_WORKER = "import os, signal; os.kill(os.getppid(), signal.SIGKILL)"
+EDIT = "open('a.txt', 'w').write('rewritten by a gate\\n'); print('edited')"
+
+
+def with_gates(tmp_path: Path, *scripts: str) -> None:
+    """Replace the fixture repository's gates with these Python scripts, in order."""
+    folder = tmp_path / "scripts"
+    gates = []
+    for n, script in enumerate(scripts):
+        path = folder / f"hostile-{n}.py"
+        path.write_text(script)
+        gates.append({"name": f"g{n}", "argv": [sys.executable, str(path)], "timeout_seconds": 30})
+    registry = tmp_path / "repositories.json"
+    document = json.loads(registry.read_text())
+    document["repositories"]["app"]["gates"] = gates
+    registry.write_text(json.dumps(document))
+
+
+def stored_objects(kernel: Kernel, task_id: str) -> int:
+    """Objects the call stored: its artifacts and output are named after its receipt."""
+    prefix = receipt(kernel, task_id).receipt_id
+    with kernel.database.read() as conn:
+        return int(
+            conn.exec_driver_sql(
+                "SELECT COUNT(*) FROM objects WHERE resource_id LIKE ?", (f"{prefix}.%",)
+            ).scalar_one()
+        )
+
+
+@LINUX
+def test_a_gate_cannot_write_the_workers_result_through_proc(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: Path
+) -> None:
+    kernel, _ = coding_kernel(tmp_path, monkeypatch, source)
+    with_gates(tmp_path, FORGE)
+    task_id = submit(kernel, "code.session", change({"a.txt": "a\n"}), key="forge")
+    assert OperationRuntime(kernel).execute(task_id) == "succeeded"
+    output = receipt(kernel, task_id).result["output"]
+    assert "forge: denied PermissionError" in output["gates"][0]["output_tail"]
+    assert "forged" not in json.dumps(output)
+
+
+@LINUX
+def test_a_detached_gate_child_is_killed_before_it_can_change_anything(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: Path
+) -> None:
+    kernel, _ = coding_kernel(tmp_path, monkeypatch, source)
+    with_gates(tmp_path, DETACH, PAUSE)
+    task_id = submit(kernel, "code.session", change({"a.txt": "a\n"}), key="detach")
+    assert OperationRuntime(kernel).execute(task_id) == "succeeded"
+    output = receipt(kernel, task_id).result["output"]
+    assert output["gates"][0]["stray_processes_killed"] >= 1
+    assert [g["passed"] for g in output["gates"]] == [True, True]
+    content = artifacts.read(kernel.database, output["artifacts"][0])
+    (tmp_path / "d.bundle").write_bytes(content)
+    check = tmp_path / "check"
+    git(tmp_path, "clone", "--quiet", str(source), str(check))
+    git(check, "fetch", "--quiet", str(tmp_path / "d.bundle"), "HEAD:refs/heads/d")
+    assert git(check, "show", "d:a.txt") == "a\n"
+
+
+def test_a_gate_that_kills_the_worker_reports_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: Path
+) -> None:
+    kernel, _ = coding_kernel(tmp_path, monkeypatch, source)
+    with_gates(tmp_path, KILL_WORKER)
+    task_id = submit(kernel, "code.session", change({"a.txt": "a\n"}), key="kill")
+    assert OperationRuntime(kernel).execute(task_id) != "succeeded"
+    settled = receipt(kernel, task_id)
+    # No result at all, so nothing forged: no output, no gate record, no stored change.
+    assert settled.state is not OperationState.SUCCEEDED
+    assert not (settled.result or {}).get("output")
+    assert stored_objects(kernel, task_id) == 0
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        EDIT,
+        # Committing moves HEAD: the change is no longer the one bundled before the gates.
+        "import subprocess; open('b.txt', 'w').write('b'); "
+        "subprocess.run(['git', 'add', 'b.txt']); "
+        "subprocess.run(['git', '-c', 'user.name=g', '-c', 'user.email=g@example.invalid', "
+        "'commit', '-qm', 'gate commit'])",
+    ],
+)
+def test_a_gate_that_changes_the_checkout_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: Path, script: str
+) -> None:
+    kernel, _ = coding_kernel(tmp_path, monkeypatch, source)
+    with_gates(tmp_path, script)
+    task_id = submit(kernel, "code.session", change({"a.txt": "a\n"}), key=str(hash(script)))
+    assert OperationRuntime(kernel).execute(task_id) == "failed"
+    settled = receipt(kernel, task_id)
+    assert settled.failure is not None and settled.failure.code == "gate_changed_checkout"
+    assert stored_objects(kernel, task_id) == 0

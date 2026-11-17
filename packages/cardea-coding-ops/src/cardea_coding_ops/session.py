@@ -23,18 +23,19 @@ credential cannot be passed through, so no such credential exists in the worker'
 even when the worker's own environment had one.
 """
 
+import hashlib
 import json
 import os
 import re
 import shutil
 import subprocess
 import tempfile
-import time
 from pathlib import Path
 from typing import Any
 
 from pydantic import JsonValue
 
+from cardea.hosts import isolation
 from cardea.service import repositories
 from cardea.service.database import Fault
 from cardea.service.operations import OperationContext, OperationRejected, WithArtifacts
@@ -176,7 +177,7 @@ def _tail(text: str) -> str:
 
 def _git(repo: Path, env: dict[str, str], *args: str) -> str:
     result = subprocess.run(
-        ["git", "-c", "core.hooksPath=" + os.devnull, *args],
+        ["git", "-c", "core.hooksPath=" + os.devnull, "-c", "core.fsmonitor=false", *args],
         cwd=repo,
         env=env,
         capture_output=True,
@@ -189,38 +190,32 @@ def _git(repo: Path, env: dict[str, str], *args: str) -> str:
     return result.stdout
 
 
+def _uncontained(error: isolation.IsolationFailed) -> OperationRejected:
+    """A step's process survived, or the worker could not be hardened: report nothing."""
+    return OperationRejected(f"untrusted steps not contained: {error}", "isolation_failed")
+
+
+def _step(
+    argv: list[str], cwd: Path, env: dict[str, str], timeout: float, stdin: str | None = None
+) -> isolation.Step:
+    """One untrusted command (the harness or a gate) in its own session; whatever it leaves
+    behind is killed before the next step, and a survivor refuses the call."""
+    try:
+        return isolation.run_step(argv, cwd, env, timeout, stdin)
+    except isolation.IsolationFailed as error:
+        raise _uncontained(error) from None
+
+
 def _command(
     argv: list[str], cwd: Path, env: dict[str, str], timeout: float, stdin: str | None = None
 ) -> dict[str, JsonValue]:
-    started = time.monotonic()
-    try:
-        done = subprocess.run(
-            argv,
-            cwd=cwd,
-            env=env,
-            input=stdin,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-        exit_code: int | None = done.returncode
-        output = done.stdout + done.stderr
-        timed_out = False
-    except subprocess.TimeoutExpired as expired:
-        exit_code, timed_out = None, True
-        output = (
-            (expired.stdout or b"").decode(errors="replace")
-            if isinstance(expired.stdout, bytes)
-            else str(expired.stdout or "")
-        )
-    except OSError as error:
-        exit_code, timed_out, output = None, False, f"could not start: {type(error).__name__}"
+    done = _step(argv, cwd, env, timeout, stdin)
     return {
-        "exit_code": exit_code,
-        "timed_out": timed_out,
-        "duration_ms": int((time.monotonic() - started) * 1000),
-        "output_tail": _tail(output),
+        "exit_code": done.returncode,
+        "timed_out": done.timed_out,
+        "duration_ms": done.duration_ms,
+        "output_tail": _tail(done.stdout + done.stderr),
+        "stray_processes_killed": done.killed,
     }
 
 
@@ -229,31 +224,29 @@ def _claude(
 ) -> dict[str, JsonValue]:
     """Run Claude Code headless on the task; its JSON result becomes the harness record."""
     env = claude_code.environment(environment(scratch), scratch, settings)
-    started = time.monotonic()
-    try:
-        done = subprocess.run(
-            claude_code.argv(settings),
-            cwd=repo,
-            env=env,
-            input=task,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-        exit_code: int | None = done.returncode
-        timed_out, stdout = False, done.stdout
-    except subprocess.TimeoutExpired:
-        exit_code, timed_out, stdout = None, True, ""
-    except OSError:
-        exit_code, timed_out, stdout = None, False, ""
+    done = _step(claude_code.argv(settings), repo, env, timeout, task)
     # Only the parsed result is kept: stdout and stderr are not copied into the receipt.
     return {
         "kind": "claude-code",
-        "exit_code": exit_code,
-        "timed_out": timed_out,
-        "duration_ms": int((time.monotonic() - started) * 1000),
-        **claude_code.result(stdout),
+        "exit_code": done.returncode,
+        "timed_out": done.timed_out,
+        "duration_ms": done.duration_ms,
+        "stray_processes_killed": done.killed,
+        **claude_code.result(done.stdout if not done.timed_out else ""),
+    }
+
+
+def checkout_state(repo: Path, env: dict[str, str]) -> dict[str, str]:
+    """What the change is, as far as the gates could touch it: the commit and its refs, the
+    tracked files and the repository's configuration."""
+    config = repo / ".git" / "config"
+    return {
+        "head": _git(repo, env, "rev-parse", "HEAD").strip(),
+        "refs": _git(repo, env, "for-each-ref", "--format=%(refname) %(objectname)"),
+        "tracked_changes": _git(repo, env, "status", "--porcelain", "--untracked-files=no"),
+        "config_sha256": hashlib.sha256(config.read_bytes()).hexdigest()
+        if config.is_file()
+        else "",
     }
 
 
@@ -274,7 +267,12 @@ def repository_entry(alias: str, config: dict[str, Any]) -> dict[str, Any] | Non
     return {"source": entry.source, "gates": entry.gate_documents()}
 
 
-def session(arguments: dict[str, JsonValue], config: dict[str, Any], scratch: Path) -> Any:
+def session(
+    arguments: dict[str, JsonValue],
+    config: dict[str, Any],
+    scratch: Path,
+    isolation_mode: str = "unknown",
+) -> Any:
     """The whole call in `scratch`; returns the output and, if anything changed, the bundle."""
     alias = str(arguments["repository"])
     repository = repository_entry(alias, config)
@@ -342,6 +340,14 @@ def session(arguments: dict[str, JsonValue], config: dict[str, Any], scratch: Pa
         target = scratch / BUNDLE
         _git(repo, env, "bundle", "create", "--quiet", str(target), f"{base_sha}..HEAD")
         bundle = target.read_bytes()
+    # Fixed before any gate runs: the gates check the change, they must not change it.
+    # Nothing the harness (or a program its checkout made git run) left may outlive this.
+    try:
+        isolation.clear()
+    except isolation.IsolationFailed as error:
+        raise _uncontained(error) from None
+    before = checkout_state(repo, env)
+    bundle_sha256 = hashlib.sha256(bundle).hexdigest()
 
     gates: list[JsonValue] = []
     passed: list[bool] = []
@@ -355,6 +361,24 @@ def session(arguments: dict[str, JsonValue], config: dict[str, Any], scratch: Pa
         )
         passed.append(result["exit_code"] == 0)
         gates.append({"name": str(gate["name"]), "passed": passed[-1], **result})
+
+    # Before reporting: nothing the harness or a gate started is still running, and the
+    # checkout and the bundle are what they were before the gates.
+    try:
+        isolation.clear()
+    except isolation.IsolationFailed as error:
+        raise _uncontained(error) from None
+    try:
+        after = checkout_state(repo, env)
+    except (RuntimeError, OSError):
+        after = {}
+    if after != before or hashlib.sha256(bundle).hexdigest() != bundle_sha256:
+        changed_keys = sorted(k for k in before if after.get(k) != before[k])
+        detail = ", ".join(changed_keys) or "bundle"
+        raise OperationRejected(
+            f"a gate changed the checkout ({detail}); gates may check the change, not alter it",
+            "gate_changed_checkout",
+        )
 
     # The model credential must not leave the worker in the change or any result text. The
     # whole change is checked as text (`--text`), so binary files cannot hide it.
@@ -384,6 +408,8 @@ def session(arguments: dict[str, JsonValue], config: dict[str, Any], scratch: Pa
         "harness": ran,
         "gates": gates,
         "gates_passed": all(passed),
+        # How untrusted steps were contained: `subreaper` on Linux (cardea.hosts.isolation).
+        "isolation": isolation_mode,
     }
     if not changed:
         return output
@@ -392,11 +418,17 @@ def session(arguments: dict[str, JsonValue], config: dict[str, Any], scratch: Pa
 
 async def run(arguments: dict[str, JsonValue], context: OperationContext) -> Any:
     """The confined worker's entry point (`coding.code.session`)."""
+    # Before anything untrusted runs: same-uid code must not reach this process through
+    # /proc, and a descendant that detaches must stay findable (cardea.hosts.isolation).
+    try:
+        mode = isolation.harden()
+    except isolation.IsolationFailed as error:
+        raise _uncontained(error) from None
     config = _config()
     # Before anything runs: the dependencies setting must agree with the profile's network.
     dependency_env(config)
     scratch = Path(tempfile.mkdtemp(prefix="code-session-"))
     try:
-        return session(arguments, config, scratch)
+        return session(arguments, config, scratch, mode)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
