@@ -36,6 +36,7 @@ import random
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +61,8 @@ RUN = ["objects.read", "objects.write", "models.invoke"]
 SCHEMA = {"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]}
 WEEKLY = {"schedule": {"cron": "0 3 * * 1", "timezone": "UTC", "misfire": "skip"}}
 TICK = 60
+# One pool attempt's lease: its 30 s timeout plus the kernel's 30 s settle margin.
+ATTEMPT_LEASE = 30 + 30
 
 
 def collection(namespace: str, name: str, **spec: Any) -> dict[str, Any]:
@@ -352,22 +355,42 @@ class Run:
             )
             self.done(run)
         claimed = {m: self.record("t4", r) for m, r in records.items()}
+        # The failing holder's last progress was its claiming run: its expiry from then on.
+        progress_expiry = datetime.fromisoformat(str(claimed[failing]["lease_expires_at"]))
         ev.check(
             "t4_both_members_hold_a_record",
             all(claimed[m]["holder"] == m for m in records),
             records=claimed,
         )
         st.restart_after_kill()
-        started = time.monotonic()
-        # The failing holder: its follow-ups fail and renew nothing.
-        wait_for(
-            lambda: self.record("t4", records[failing])["holder"] is None, self.lease + 3 * TICK, 5
+        # The failing holder: only the first attempt after its last progress may extend the
+        # claim; no attempt after a failed one does (ADR-034 amendment, 2026-11-17).
+        expiries: list[str] = []
+
+        def released() -> bool:
+            current = self.record("t4", records[failing])
+            if current["holder"] is None:
+                return True
+            if not expiries or expiries[-1] != current["lease_expires_at"]:
+                expiries.append(str(current["lease_expires_at"]))
+            return False
+
+        wait_for(released, self.lease + ATTEMPT_LEASE + 120 + 4 * TICK, 2)
+        lapsed_at = datetime.now(UTC)
+        bound = progress_expiry + timedelta(seconds=ATTEMPT_LEASE + 120 + TICK)
+        failures = [t for t in self.played(failing) if t["outcome"] == "fail"]
+        ev.check(
+            "t4_failed_holder_loses_claim_within_the_amended_bound",
+            lapsed_at <= bound + timedelta(seconds=5),
+            seconds_after_progress_expiry=round((lapsed_at - progress_expiry).total_seconds()),
+            bound_seconds=ATTEMPT_LEASE + 120 + TICK,
+            history=self.history(records[failing]),
         )
         ev.check(
-            "t4_failed_holder_loses_claim_within_lease_and_tick",
-            time.monotonic() - started <= self.lease + 2 * TICK,
-            seconds=round(time.monotonic() - started),
-            history=self.history(records[failing]),
+            "t4_no_attempt_after_a_failed_one_extends_the_claim",
+            len(expiries) <= 2,
+            expiries=expiries,
+            failed_attempts=len(failures),
         )
         # The idle holder: follow-ups succeed and keep the epoch, until they run out.
         epochs: list[int] = []

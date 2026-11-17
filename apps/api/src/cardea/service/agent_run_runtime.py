@@ -1366,6 +1366,10 @@ class AgentRunRuntime:
             self.kernel.runtime_id,
             at,
         )
+        if session_succeeded:
+            # A successful session is progress: the continuation attempt may renew the
+            # holder's claims again (ADR-034 2.4, amended 2026-11-17).
+            claims.mark_progress(conn, task.agent_id, at)
         log.info("run parked for approval", extra={"task_id": task.task_id, "code": request_id})
         return "waiting"
 

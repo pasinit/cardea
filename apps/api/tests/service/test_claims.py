@@ -568,3 +568,97 @@ def test_an_event_only_holder_keeps_its_claim_through_follow_ups(
     stored = row(kernel, record_id)
     assert stored["holder"] == MEMBER and stored["claim_epoch"] == 1
     assert lease(kernel, record_id) > now() + timedelta(seconds=3500)
+
+
+# Only progress renews a claim (ADR-034 2.4, amended 2026-11-17)
+
+
+def renewal_allowed(kernel: Kernel, record_id: str) -> bool:
+    return bool(row(kernel, record_id)["attempt_renewal"])
+
+
+def test_an_attempt_after_a_failed_one_does_not_extend_the_claim(items: Kernel) -> None:
+    record = created(items)
+    claim(items, record)
+    record_id = record["record_id"]
+    with items.database.engine.begin() as conn:
+        conn.exec_driver_sql(
+            "UPDATE records SET lease_expires_at=? WHERE record_id=?",
+            (stamp(now() + timedelta(seconds=30)), record_id),
+        )
+        deadline = now() + timedelta(seconds=600)
+        # The first attempt after the claim (a successful call) renews it.
+        assert claims.renew_for_attempt(conn, "a1", deadline) == 1
+    renewed = lease(items, record_id)
+    assert renewed == deadline + timedelta(seconds=120) and not renewal_allowed(items, record_id)
+    with items.database.engine.begin() as conn:
+        # That attempt failed (nothing marked progress): the next attempt is not renewed.
+        assert claims.renew_for_attempt(conn, "a1", deadline + timedelta(seconds=900)) == 0
+    assert lease(items, record_id) == renewed
+    # Progress restores it: a successful run, a successful parked session, a re-claim.
+    for progress in ("success", "parked", "reclaim"):
+        with items.database.engine.begin() as conn:
+            claims.renew_for_attempt(conn, "a1", deadline)  # an attempt starts and fails
+        assert not renewal_allowed(items, record_id)
+        if progress == "reclaim":
+            claim(items, record)
+        else:
+            with items.database.engine.begin() as conn:
+                if progress == "success":
+                    claims.renew_for_success(conn, "a1", now())
+                else:
+                    claims.mark_progress(conn, "a1", now())
+        assert renewal_allowed(items, record_id), progress
+
+
+def test_a_holder_whose_attempts_all_fail_loses_the_claim_within_the_bound(
+    desk: tuple[Kernel, Any],
+) -> None:
+    """The ADR-034 bound, amended: after its last progress, a holder whose attempts all fail
+    loses the claim within its lease, plus one attempt timeout and the 120 s margin, plus a
+    minute tick, and no attempt after a failed one extends it (on a fake scheduler clock)."""
+    from cardea.runtime.agent_session import SessionResult
+    from cardea.service import agent_run_runtime
+    from cardea.service.agent_run_runtime import AgentRunRuntime
+
+    kernel, session = desk
+    apply_items(kernel)
+    timeout = 60
+    apply_desk(kernel, attempts=2, timeout=timeout)
+    # The holder's last progress left 30 s of its lease.
+    ends = now() + timedelta(seconds=30)
+    record_id = held_record(kernel, ends)
+
+    async def broken(client: Any, request: Any) -> SessionResult:
+        return SessionResult(text="", is_error=True, cost_usd=0.0, turns=1)
+
+    leases: list[datetime] = []
+    for _ in range(2):
+        # Under half the lease left and the member idle: a follow-up run, two attempts.
+        Scheduler(kernel, now).tick()
+        with kernel.database.read() as conn:
+            task_id = conn.exec_driver_sql(
+                "SELECT task_id FROM task_bindings WHERE agent_id=? ORDER BY rowid DESC LIMIT 1",
+                (MEMBER,),
+            ).scalar_one()
+        session.scripts = [broken, broken]
+        assert AgentRunRuntime(kernel).execute(task_id) == "failed"
+        leases.append(lease(kernel, record_id))
+    # Only the first attempt after the progress extended the claim; the three after it, each
+    # following a failed attempt, did not.
+    assert leases[0] == leases[1] and leases[0] > ends
+    # The bound: the attempt's lease (its timeout plus the settle margin) plus 120 s.
+    with kernel.database.read() as conn:
+        request = json.loads(
+            conn.exec_driver_sql(
+                "SELECT request_json FROM task_bindings WHERE task_id=?", (task_id,)
+            ).scalar_one()
+        )
+    attempt = request["attempt_timeout_seconds"] + agent_run_runtime.LEASE_MARGIN
+    assert leases[0] <= ends + timedelta(seconds=attempt + 120)
+    # The sweep releases it within one tick of that expiry.
+    Scheduler(kernel, lambda: leases[0] - timedelta(seconds=1)).tick()
+    assert row(kernel, record_id)["holder"] == MEMBER
+    Scheduler(kernel, lambda: leases[0] + timedelta(seconds=60)).tick()
+    stored = row(kernel, record_id)
+    assert stored["holder"] is None and stored["claim_epoch"] == 2
