@@ -387,19 +387,23 @@ def test_an_account_needs_usd_or_runs(kernel: Kernel) -> None:
     assert "runs" not in GroupSpend.model_validate({"usd": 1, "window": "day"}).model_dump()
 
 
+def budget_notices(kernel: Kernel) -> list[list[dict[str, Any]]]:
+    return [
+        m
+        for m in supervisor_mail(kernel)
+        if any(p.get("data", {}).get("code") == "budget_exhausted" for p in m)
+    ]
+
+
 def test_a_refused_trigger_mails_the_supervisor_once_per_window(
     kernel: Kernel, anchored: None
 ) -> None:
     put(kernel, spending({"runs": 1, "window": "day"}))
     first = groups.tick(kernel, "2026-10-01T07:00:10")
     assert sorted(first.values()) == ["admitted", "failed", "failed"]
-    notices = [
-        m for m in supervisor_mail(kernel) if any(p.get("data", {}).get("code") == "budget_exhausted" for p in m)
-    ]
+    notices = budget_notices(kernel)
     assert len(notices) == 1
     assert "Runs resume when the window turns" in notices[0][0]["text"]
     groups.tick(kernel, "2026-10-01T08:00:10")
-    again = [
-        m for m in supervisor_mail(kernel) if any(p.get("data", {}).get("code") == "budget_exhausted" for p in m)
-    ]
+    again = budget_notices(kernel)
     assert len(again) == 1
