@@ -28,6 +28,7 @@ from cardea.kernel.models import (
     canonical_json,
 )
 from cardea.kernel.store import KernelTransaction, StoreError
+from cardea.service import env_runs
 from cardea.service.confined import CallAbandoned, ExecutorBusy, WorkerFailed, WorkerNotStarted
 from cardea.service.database import Fault
 from cardea.service.models import now
@@ -249,6 +250,20 @@ def admit(
             raise Fault(
                 "effect_in_doubt", "An earlier invocation of this effect is unresolved", 409
             )
+    window = descriptor.cardea.run_window
+    run = None
+    if window is not None and prior is None:
+        # ADR-038: the same inputs within the window return the earlier run's result.
+        run = env_runs.decide(
+            conn,
+            tx,
+            name=name,
+            namespace=namespace,
+            window=window,
+            arguments=arguments,
+            executor=executor,
+        )
+        prior = run.cached
     recorded: dict[str, JsonValue] = {
         "arguments": arguments,
         "operation_version": descriptor.cardea.version,
@@ -260,6 +275,17 @@ def admit(
         **({"executor": executor} if executor is not None else {}),
         # Recorded so a reconciler sees the context the handler saw.
         **({"context": provenance} if provenance else {}),
+        **(
+            {
+                "run": {
+                    "run_key": run.run_key,
+                    "environment_sha256": run.environment_sha256,
+                    **({"rerun_of": run.rerun_of} if run.rerun_of else {}),
+                }
+            }
+            if run is not None
+            else {}
+        ),
     }
     if len(canonical_json(recorded)) > MAX_DOCUMENT_BYTES:
         # A receipt document holds at most 64 KiB; refuse before any intent exists.
@@ -316,6 +342,17 @@ def admit(
             usage=ResourceUsage(steps=1),
         )
         return Admitted(context, prior)
+    if run is not None:
+        env_runs.start(
+            conn,
+            run,
+            name=name,
+            namespace=namespace,
+            task_id=task.task_id,
+            operation_id=operation_id,
+            receipt_id=receipt.receipt_id,
+            deadline=deadline,
+        )
     if key is not None:
         conn.exec_driver_sql(
             "INSERT INTO effect_scopes VALUES (?,?,?,?,?,'running',?) ON CONFLICT(scope_key) "
@@ -393,6 +430,7 @@ def settle(
         usage=ResourceUsage(steps=1, tool_milliseconds=elapsed_ms, output_bytes=len(content)),
     )
     _scope(conn, task.task_id, operation_id, "succeeded" if not error else "failed")
+    env_runs.finish(conn, task.task_id, operation_id, not error)
     if failure is not None and failure.code == "content_refused" and failure.redact:
         redact(conn, tx, task.task_id, operation_id, failure.redact)
     return failure, content
@@ -501,6 +539,7 @@ def uncertain(
             usage=ResourceUsage(steps=1),
         )
     _scope(conn, task.task_id, operation_id, "unknown")
+    env_runs.finish(conn, task.task_id, operation_id, False)
 
 
 def timeout_for(

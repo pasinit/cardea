@@ -208,6 +208,32 @@ class ReplyPolling(Record):
     window_days: Annotated[int, Field(strict=True, ge=1, le=90)] = 14
 
 
+class RunWindow(Record):
+    """A read operation's run window (ADR-038 decisions 4 and 5).
+
+    A call whose run key (the namespace, the operation, the `key` arguments and the
+    environment digest) settled successfully within `seconds` returns that result, marked
+    `cached`, and nothing runs. An identical call while one runs is refused
+    (`env_run_in_progress`). `rerun` names a boolean argument that skips the window; forced
+    reruns are limited to `reruns_per_day` per `rerun_subject` (for example a repository and
+    commit). `environment` names the argument whose repository-registry `environment`
+    catalog joins the digest, with the confined worker's profile digest.
+    """
+
+    key: Annotated[tuple[Pointer, ...], Field(min_length=1, max_length=8)]
+    seconds: Annotated[int, Field(strict=True, ge=60, le=7 * 24 * 3600)] = 24 * 3600
+    rerun: Pointer | None = None
+    rerun_subject: Annotated[tuple[Pointer, ...], Field(min_length=1, max_length=8)] | None = None
+    reruns_per_day: Annotated[int, Field(strict=True, ge=0, le=100)] = 3
+    environment: Pointer | None = None
+
+    @model_validator(mode="after")
+    def subject(self) -> Self:
+        if self.rerun is not None and self.rerun_subject is None:
+            raise ValueError("A run window with rerun needs rerun_subject")
+        return self
+
+
 class Binding(Record):
     version: Annotated[int, Field(strict=True, ge=1)]
     effect: Literal["read", "effect"]
@@ -242,6 +268,8 @@ class Binding(Record):
     max_artifact_bytes: Annotated[int, Field(strict=True, ge=0, le=MAX_ARTIFACT_BYTES)] = 0
     # Replies to this effect that come back from its destination (ADR-039).
     replies: ReplyPolling | None = None
+    # Read operations only: reuse a settled run of the same inputs (ADR-038).
+    run_window: RunWindow | None = None
 
     @model_validator(mode="after")
     def effect_only(self) -> Self:
@@ -258,6 +286,8 @@ class Binding(Record):
                 f"timeout_seconds {self.timeout_seconds} exceeds "
                 f"{MAX_IN_PROCESS_TIMEOUT_SECONDS}; only confined operations may run longer"
             )
+        if self.run_window is not None and self.effect != "read":
+            raise ValueError("Only read operations have a run window")
         if self.executor is None and self.max_artifact_bytes:
             raise ValueError("Only confined operations return artifacts")
         if self.max_output_bytes > MAX_DOCUMENT_BYTES:
@@ -320,6 +350,7 @@ class OperationDescriptor(Record):
                 ("resource", self.cardea.resource),
                 ("inputs", self.cardea.inputs),
                 ("replies", self.cardea.replies),
+                ("run_window", self.cardea.run_window),
             )
             if value is None
         }

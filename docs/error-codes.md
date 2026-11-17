@@ -56,6 +56,8 @@ errors answer 409. A request that fails schema validation answers
 | `demo_not_ready` | 409 | Demo needs a saved checkpoint before resumption. | `cardea.kernel.demo` |
 | `effect_in_doubt` | 409 | An earlier invocation of this effect is unresolved | `cardea.service.invocation` |
 | `email_config_invalid` | 500 | The email configuration is invalid | `cardea_email_ops.config` |
+| `env_rerun_limit` | 429 | At most {…} forced reruns per day for this subject | `cardea.service.env_runs` |
+| `env_run_in_progress` | 409 | An identical run is in progress; retry when it settles | `cardea.service.env_runs` |
 | `event_mode_unsupported` | 415 | Send the event in CloudEvents structured JSON mode; Content-Type must be {…} | `cardea.service.events` |
 | `event_secret_unavailable` | 503 | The trigger's signing secret cannot be used | `cardea.service.events` |
 | `event_too_large` | 413 | Event exceeds {…} bytes | `cardea.service.events` |
@@ -239,6 +241,13 @@ used by the examples.
 | `deadline_exceeded` | Task deadline elapsed. | `cardea.kernel.store` |
 | `dependencies_mismatch` | dependencies is registries, but this worker's profile allows no package registry; dependencies is cache, but this worker's profile allows package registries ({…}); remove them from the profile and the proxy, or set dependencies to registries | `cardea_coding_ops.session` |
 | `effect_not_applied` | Destination shows no effect | `cardea.service.operation_runtime` |
+| `env_commit_unknown` | the commit is not in the repository; the checkout is not the named commit | `cardea_env_ops.try_` |
+| `env_invalid` | the scenario environment may not set {…} | `cardea_env_ops.try_` |
+| `env_scenario_unknown` | Unknown scenarios: {…} | `cardea_env_ops.try_` |
+| `env_source_unavailable` | the repository source could not be read | `cardea_env_ops.try_` |
+| `env_tier_unavailable` | Scenario {…} needs the {…} tier, which this host does not offer | `cardea_env_ops.try_` |
+| `env_toolchain_missing` | The pinned toolchain image is missing | `cardea_env_ops.try_` |
+| `env_unavailable` | env.try is not configured for this repository | `cardea_env_ops.try_` |
 | `executor_busy` | — | `cardea.service.invocation` |
 | `expectation_exceeded` | — | `cardea.service.agent_run_runtime` |
 | `gate_changed_checkout` | a gate changed the checkout ({…}); gates may check the change, not alter it | `cardea_coding_ops.session` |
@@ -248,7 +257,7 @@ used by the examples.
 | `input_digest_mismatch` | Staged input {…} does not match its digest | `cardea.hosts.operation_worker` |
 | `input_too_large` | The call's inputs exceed what a worker may take | `cardea.service.confined` |
 | `input_unavailable` | The job's inputs were not staged; A staged input is missing | `cardea.hosts.operation_worker` |
-| `invalid_arguments` | Invalid decision | `cardea.service.approval_requests` |
+| `invalid_arguments` | Invalid decision; commit must be a full 40-hex object ID | `cardea.service.approval_requests`, `cardea_env_ops.try_` |
 | `isolation_failed` | untrusted steps not contained: {…} | `cardea_coding_ops.session` |
 | `member_draining` | A draining group member takes no new claims | `cardea.service.records` |
 | `operation_failed` | no result within {…} s; {…} (HTTP {…}) | `cardea.service.invocation` |
@@ -266,7 +275,7 @@ used by the examples.
 | `record_invalid` | labels must be distinct; data must be an object; data does not match the collection schema at {…} ({…}) (and 2 more) | `cardea.service.records` |
 | `record_not_found` | No such record | `cardea.service.records` |
 | `record_too_large` | data is {…} bytes; the collection allows {…} | `cardea.service.records` |
-| `repository_unknown` | No such repository alias on this host | `cardea_vcs_ops.ops` |
+| `repository_unknown` | No such repository alias on this host | `cardea_env_ops.try_`, `cardea_vcs_ops.ops` |
 | `risk_limit` | The order would breach the desk limit | `cardea_reference_ops.__init__` |
 | `snapshot_restored` | Historical execution sealed by snapshot recovery. | `cardea.service.admin` |
 | `stale_call` | This call is no longer running | `cardea.service.approval_requests`, `cardea.service.records` |

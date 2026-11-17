@@ -43,6 +43,7 @@ SCHEMAS = {
     "m15_spend",
     "m16_member_disable",
     "m17_content_redaction",
+    "m18_env_runs",
 }
 RUNTIME = "dbos=3.0.0;workflow=cardea-m1-v1"
 HOST_INPUT_RUNTIMES = runtime_ids(lambda p: p.host_inputs)

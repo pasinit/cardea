@@ -307,6 +307,8 @@ def test_m1_restore_migrates_charges_without_rewriting_receipt(
         ).scalar_one()
         conn.exec_driver_sql("DROP INDEX task_bindings_by_agent")
         for table in (
+            "env_reruns",
+            "env_runs",
             "expect_window_reports",
             "spend_reservations",
             "run_attempt_costs",
@@ -367,6 +369,8 @@ def test_failed_m2_migration_is_atomic(kernel: Kernel) -> None:
     with kernel.database.engine.begin() as conn:
         conn.exec_driver_sql("DROP INDEX task_bindings_by_agent")
         for table in (
+            "env_reruns",
+            "env_runs",
             "expect_window_reports",
             "spend_reservations",
             "run_attempt_costs",
