@@ -240,6 +240,7 @@ used by the examples.
 | `effect_not_applied` | Destination shows no effect | `cardea.service.operation_runtime` |
 | `executor_busy` | — | `cardea.service.invocation` |
 | `expectation_exceeded` | — | `cardea.service.agent_run_runtime` |
+| `gate_changed_checkout` | a gate changed the checkout ({…}); gates may check the change, not alter it | `cardea_coding_ops.session` |
 | `guard_refused` | {…} guard failed to evaluate: {…}; {…} guard refused this call | `cardea.service.records` |
 | `host_outcome_unknown` | Interrupted host intent; no replay | `cardea.service.host_runtime` |
 | `host_refused` | The host reports a duplicate it does not list | `cardea_vcs_ops.ops` |
@@ -247,6 +248,7 @@ used by the examples.
 | `input_too_large` | The call's inputs exceed what a worker may take | `cardea.service.confined` |
 | `input_unavailable` | The job's inputs were not staged; A staged input is missing | `cardea.hosts.operation_worker` |
 | `invalid_arguments` | Invalid decision | `cardea.service.approval_requests` |
+| `isolation_failed` | untrusted steps not contained: {…} | `cardea_coding_ops.session` |
 | `member_draining` | A draining group member takes no new claims | `cardea.service.records` |
 | `merge_already_merged` | The pull request is already merged | `cardea_vcs_ops.ops` |
 | `merge_approval_stale` | An allowed reviewer approved an earlier head; a new approval is needed | `cardea_vcs_ops.ops` |
