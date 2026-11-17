@@ -185,18 +185,23 @@ python3 /opt/cardea/packaging/fetch_opencode.py /opt/cardea/opencode
       - `kernel_callback` lets the worker reach the content gate's loopback endpoint;
       - `input_kb` admits a 10 MiB change bundle as a staged, read-only input;
       - each worker runs `cardea.hosts.operation_worker` with the operation's handler, then its reconciler.
-   2. The credential is a fine-grained personal access token (ADR-037 question 7). Create it on the repository host:
-      - repository access: only the repositories in the registry;
-      - permissions: Contents read and write, Pull requests read and write, Issues read and write and Metadata read;
-      - an expiry, which you then copy into the configuration below.
+   2. The profile loads two named credentials, fine-grained personal access tokens for two accounts on the repository host (ADR-037 question 7 and the amendment of 2026-11-17). Every pull request an agent opens is authored by the first account, and the host refuses an author's approval of its own pull request, so approving needs the second:
+      - `github-author`, for the team's bot account: repository access only to the registry's repositories; permissions Contents read and write, Pull requests read and write, Issues read and write and Metadata read; an expiry.
+      - `github-reviewer`, for the reviewing account (for example the owner's): repository access to the one repository; permissions Pull requests read and write only; an expiry.
 
-      Store it as a root-only file, `/etc/cardea/credentials/github` (`0600 root`), which systemd hands to each unit. The kernel never reads it, and agents never see it.
-   3. Install `cardea/cardea-vcs.json` as `/opt/cardea-vcs/vcs.json` (root, `0644`) and set `expires_on` to the token's expiry. From that day on, calls are refused with `credential_unavailable` and nothing is sent. Rotate the token before then: replace the file and update `expires_on`. The file holds no secret. `allow_approve` stays `false` unless you allow `APPROVE` reviews, either for everyone (`true`) or for named pools (`["<group>.<pool>"]`). Repositories, their hosts and branch prefixes come from the registry `/opt/cardea-code/repositories.json`: each vcs worker binds it read-only and names it in `CARDEA_REPOSITORIES`.
+      Store them as root-only files, `/etc/cardea/credentials/github-author` and `/etc/cardea/credentials/github-reviewer` (`0600 root`). systemd loads both into each unit (`LoadCredential`). The worker picks one per call from the kernel-resolved caller, so no argument can choose it. The kernel never reads either, and agents never see them.
+   3. Install `cardea/cardea-vcs.json` as `/opt/cardea-vcs/vcs.json` (root, `0644`) and set each token's `expires_on` to its expiry. From that day on, calls that would use it are refused with `credential_unavailable` and nothing is sent. Rotate each token before then: replace its file and update `expires_on`. The file holds no secret. As installed, every caller uses `github-author`, `APPROVE` is refused and `vcs.merge` is refused. To let a team's reviewers approve and its developers merge their own approved, green pull requests:
+      - `"allow_approve": ["<group>.<reviewer pool>"]`;
+      - `"pools": {"<group>.<reviewer pool>": "github-reviewer"}` under `credentials`;
+      - `"merge": {"reviewer_login": "<the reviewing account's login>"}`;
+      - grant `vcs.merge` (with `repo:<alias>`) to the developers' pool only.
+
+      Repositories, their hosts and branch prefixes come from the registry `/opt/cardea-code/repositories.json`: each vcs worker binds it read-only and names it in `CARDEA_REPOSITORIES`.
    4. Install `packages/cardea-vcs-ops` into `/opt/cardea/apps/api/.venv`, copy its `descriptors/` into the kernel's `operations_dir`, and configure the content gate. Provision `vcs.*` and `repo:<alias>` for the supervisors that may use them, and restart.
 
    Checks:
    - `curl -s -o /dev/null -w '%{http_connect}\n' -x http://127.0.10.6:3128 https://api.github.com/` prints 200, and `https://api.anthropic.com/` prints 403.
-   - A supervisor's `vcs.check_repository` on each repository reports `ready: true`. Otherwise its `missing` list names the rule to add on the host.
+   - A supervisor's `vcs.check_repository` on each repository reports `ready: true`. Otherwise its `missing` list names the rule to add on the host. The default branch's ruleset must require one approving review and approval of the most recent push, and block force pushes and deletion. Keep update restrictions off the default branch, or `vcs.merge` is refused by the host.
 
 ## 5. Telos host
 
