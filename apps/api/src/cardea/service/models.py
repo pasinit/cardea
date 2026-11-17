@@ -1007,17 +1007,27 @@ class RunTemplate(Record):
 
 
 class GroupSpend(Record):
-    """A spend account (ADR-034 decision 5.3): a ceiling in USD per calendar day or ISO
-    week on the wall clock of `timezone`, metered from the runs' reported cost."""
+    """A spend account (ADR-034 decision 5.3): a ceiling per calendar day or ISO week on
+    the wall clock of `timezone`, in USD metered from the runs' reported cost, in admitted
+    runs (`runs`, amendment 2026-11-17), or both. A subscription-billed model reports an
+    estimated cost, so a run count is the bound that does not depend on it."""
 
-    usd: Annotated[float, Field(strict=True, gt=0, le=100000)]
+    usd: Annotated[float, Field(strict=True, gt=0, le=100000)] | None = None
+    runs: Annotated[int, Field(strict=True, ge=1, le=100000)] | None = None
     window: Literal["day", "week"]
     timezone: Annotated[str, Field(strict=True, min_length=1, max_length=64)] = "UTC"
 
     @model_validator(mode="after")
     def known_zone(self) -> Self:
         zone(self.timezone)
+        if self.usd is None and self.runs is None:
+            raise ValueError("A spend account needs usd, runs or both")
         return self
+
+    @model_serializer(mode="wrap")
+    def _dump(self, handler: SerializerFunctionWrapHandler) -> Any:
+        # An account applied before `runs` existed keeps its stored form and digest.
+        return omit_unset(handler(self), "runs", "usd")
 
 
 WindowCount = Annotated[int, Field(strict=True, ge=0, le=100000)]

@@ -30,6 +30,7 @@ from pydantic import JsonValue, ValidationError
 
 from cardea.kernel.lifecycle import ContractError
 from cardea.kernel.store import StoreError
+from cardea.service import spend
 from cardea.service.database import Fault, borrow
 from cardea.service.events import request_id
 from cardea.service.models import InboundEvent, TriggerSpec, now
@@ -254,6 +255,16 @@ class Dispatcher:
                 # A journal event has no sender to retry it: the refusal is history.
                 _record(conn, trigger_id, decided[1], code=code)
                 self._advance(conn, trigger_id, cursor, pending)
+                if code == "budget_exhausted" and isinstance(error, Fault):
+                    with borrow(conn) as tx:
+                        spend.notify_refused(
+                            conn,
+                            tx,
+                            kernel.runtime_id,
+                            decided[0].template.get("agent_id"),
+                            error.message,
+                            now(),
+                        )
             log.warning("journal admission refused", extra={"code": code, "reason": trigger_id})
             return "refused"
         kernel.fault("journal.after_commit")
