@@ -68,7 +68,6 @@ def test_tokens_are_bound_to_key_audience_domain_and_expiry(tmp_path: Path) -> N
         auth.validate(issue(settings, subject), kind="oidc")
 
 
-
 @pytest.fixture
 def short_store() -> Iterator[Path]:
     """A store with a short path: it holds the daemon's Unix socket (104 bytes on macOS)."""
