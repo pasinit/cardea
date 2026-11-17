@@ -1,0 +1,470 @@
+"""`vcs.merge` and per-caller repository credentials (ADR-037 amendment 2026-11-17).
+
+A group with two developers and a principal reviewer. The developers act on the host as
+one bot account, so they cannot approve each other's pull requests (the host refuses an
+author's approval of its own pull request); the principal acts as a second account,
+through its own token. A developer merges its own pull request once the kernel holds its
+`vcs.open_change` receipt and an allowed `vcs.review` APPROVE receipt at the current head,
+the host shows the reviewer's approval of that head, every check passed, and the host can
+merge. In-process handlers against the fake host; the confined path is in
+test_vcs_confined.py.
+"""
+
+import subprocess
+from collections.abc import Iterator
+from dataclasses import replace
+from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
+from typing import Any, cast
+
+import pytest
+from cardea_vcs_ops import Vcs, in_process_descriptors
+from cardea_vcs_ops.config import MergeConfig, PersonalAccessTokensConfig, VcsConfig
+from cardea_vcs_ops.credentials import CredentialUnavailable, PersonalAccessTokens
+from cardea_vcs_ops.fake import FakeGitHub
+from test_agent_runs import FakeSession
+from test_vcs_ops import (
+    STEPS,
+    Auth,
+    FakeClient,
+    gate_config,
+    make_change,
+    member_run,
+    text,
+)
+
+from cardea.kernel.models import OperationState
+from cardea.runtime.agent_session import SessionRequest, SessionResult
+from cardea.service import agent_run_runtime
+from cardea.service import kernel as handlers
+from cardea.service.agent_run_runtime import AgentRunRuntime
+from cardea.service.auth import Authentication
+from cardea.service.database import Database, borrow
+from cardea.service.groups import apply
+from cardea.service.harnesses import IMPLICIT_ID, Catalog, Harnesses, ModelEntry, implicit_entry
+from cardea.service.kernel import Kernel, provision
+from cardea.service.models import RIGHTS, AgentGroup, Provisioning
+from cardea.service.operation_runtime import OperationRuntime
+from cardea.service.operations import OperationContext, Registry
+
+# Planted for these tests; shaped so no secret scanner mistakes them for real tokens.
+AUTHOR = "planted-author-token-not-real-0123456789abcdef"
+REVIEWER = "planted-reviewer-token-not-real-0123456789abcd"
+BOT, OWNER = "team-bot", "owner-reviewer"
+DEV_OPS = ("vcs.push_branch", "vcs.open_change", "vcs.read_change", "vcs.merge")
+PRINCIPAL_OPS = ("vcs.read_change", "vcs.review", "vcs.comment")
+BASE = (*RIGHTS, "models.invoke", "repo:cardea")
+
+
+def tokens_config() -> PersonalAccessTokensConfig:
+    later = date(2999, 1, 1)
+    return PersonalAccessTokensConfig(
+        kind="personal_access_tokens",
+        tokens={"github-author": {"expires_on": later}, "github-reviewer": {"expires_on": later}},
+        default="github-author",
+        pools={"eng.principal": "github-reviewer"},
+    )
+
+
+def write_tokens(directory: Path) -> Path:
+    directory.mkdir()
+    for name, token in (("github-author", AUTHOR), ("github-reviewer", REVIEWER)):
+        (directory / name).write_text(token + "\n")
+        (directory / name).chmod(0o600)
+    return directory
+
+
+@pytest.fixture
+def host(tmp_path: Path) -> FakeGitHub:
+    fake = FakeGitHub(tmp_path / "host", logins={AUTHOR: BOT, REVIEWER: OWNER})
+    fake.root.mkdir()
+    fake.add("acme", "cardea")
+    return fake
+
+
+@pytest.fixture
+def vcs(host: FakeGitHub, tmp_path: Path) -> Vcs:
+    config = VcsConfig(
+        credentials=tokens_config(),
+        allow_approve=("eng.principal",),
+        merge=MergeConfig(reviewer_login=OWNER),
+    )
+    tokens = PersonalAccessTokens(tokens_config(), directory=write_tokens(tmp_path / "creds"))
+    return Vcs(config, tokens, transport=host.transport(), registry=host.registry())
+
+
+def pool(name: str, replicas: int, operations: tuple[str, ...]) -> dict[str, Any]:
+    return {
+        "name": name,
+        "replicas": replicas,
+        "grants": [*BASE, *operations],
+        "run": {
+            "instructions": "Work.",
+            "operations": list(operations),
+            "model": "model-a",
+            "bounds": {"timeout_seconds": 60, "attempts": 1},
+        },
+        "triggers": [{"schedule": {"cron": "0 9 29 2 *", "timezone": "UTC", "misfire": "skip"}}],
+    }
+
+
+def provisioning() -> Provisioning:
+    expires = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+    rights = sorted({*BASE, *DEV_OPS, *PRINCIPAL_OPS, "groups.manage"})
+    permissions = [
+        {
+            "principal_id": "supervisor",
+            "namespace": "eng",
+            "operation": r,
+            "delegate": True,
+            "expires_at": expires,
+        }
+        for r in rights
+    ]
+    return Provisioning.model_validate(
+        {
+            "principals": [
+                {
+                    "principal_id": p,
+                    "kind": "service" if p == "runtime" else "human",
+                    "auth_kind": "spiffe",
+                    "issuer": "test",
+                    "subject": p,
+                }
+                for p in ("runtime", "supervisor")
+            ],
+            "permissions": permissions,
+            "platform": [{**p, "principal_id": "platform", "delegate": False} for p in permissions],
+        }
+    )
+
+
+@pytest.fixture
+def kernel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, session: FakeSession, vcs: Vcs
+) -> Iterator[Kernel]:
+    monkeypatch.setattr(handlers, "DBOSClient", FakeClient)
+    monkeypatch.setattr(agent_run_runtime, "POLL_SECONDS", 0.05)
+    registry = Registry(in_process_descriptors(), vcs.handlers())
+    db = Database(tmp_path / "data")
+    db.migrate()
+    provision(db, provisioning(), registry)
+    entry = implicit_entry("model-a").model_copy(update={"models": {"model-a": ModelEntry()}})
+    harnesses = Harnesses(
+        {IMPLICIT_ID: session}, Catalog({IMPLICIT_ID: entry}, IMPLICIT_ID, implicit=IMPLICIT_ID)
+    )
+    instance = Kernel(db, cast(Authentication, Auth()), operations=registry, harnesses=harnesses)
+    instance.content_gate = gate_config(tmp_path)
+    group = {
+        "apiVersion": "cardea/v1alpha1",
+        "kind": "AgentGroup",
+        "metadata": {"name": "eng", "namespace": "eng"},
+        "spec": {
+            "supervisor": "supervisor",
+            "pools": [pool("dev", 2, DEV_OPS), pool("principal", 1, PRINCIPAL_OPS)],
+        },
+    }
+    apply(
+        instance,
+        instance.auth.validate("supervisor"),
+        "eng",
+        AgentGroup.model_validate(group),
+        False,
+    )
+    try:
+        yield instance
+    finally:
+        db.close()
+
+
+@pytest.fixture
+def session() -> FakeSession:
+    return FakeSession()
+
+
+def act(
+    kernel: Kernel, session: FakeSession, member: str, steps: list[tuple[str, dict[str, Any]]]
+) -> tuple[str, list[Any]]:
+    """One run of `member` making these tool calls."""
+    from test_agent_runs import call
+
+    results: list[Any] = []
+
+    async def script(client: Any, request: SessionRequest) -> SessionResult:
+        for tool, arguments in steps:
+            results.append(await call(client, tool, **arguments))
+        return SessionResult(text="Done.", is_error=False)
+
+    session.scripts = [script]
+    task_id = member_run(kernel, member)
+    AgentRunRuntime(kernel).execute(task_id)
+    return task_id, results
+
+
+def open_pull(kernel: Kernel, session: FakeSession, tmp_path: Path, member: str) -> int:
+    change = make_change(kernel, tmp_path, message=f"Change {next(STEPS)}")
+    branch = f"agent/eng/{member.split('.')[-1]}-{next(STEPS)}"
+    _, results = act(
+        kernel,
+        session,
+        member,
+        [
+            ("vcs-push_branch", {"repository": "cardea", "branch": branch, **change}),
+            (
+                "vcs-open_change",
+                {"repository": "cardea", "head": branch, "base": "main", "title": "Change"},
+            ),
+        ],
+    )
+    assert not any(r.is_error for r in results), [text(r) for r in results]
+    return int(results[1].structured_content["number"])
+
+
+def approve(kernel: Kernel, session: FakeSession, number: int) -> Any:
+    _, (review,) = act(
+        kernel,
+        session,
+        "eng.principal.0",
+        [
+            (
+                "vcs-review",
+                {
+                    "repository": "cardea",
+                    "number": number,
+                    "event": "APPROVE",
+                    "body": "Approved.",
+                    "client_key": f"approve-{next(STEPS)}",
+                },
+            )
+        ],
+    )
+    return review
+
+
+def merge(kernel: Kernel, session: FakeSession, member: str, number: int) -> Any:
+    _, results = act(
+        kernel, session, member, [("vcs-merge", {"repository": "cardea", "number": number})]
+    )
+    return results[0]
+
+
+def head_of(host: FakeGitHub, number: int) -> str:
+    pull = host.repositories["acme/cardea"].pull(number)
+    assert pull is not None
+    return str(pull["head"]["sha"])
+
+
+def push_directly(host: FakeGitHub, number: int, tmp_path: Path) -> str:
+    """A new commit on the pull request's branch, as a later push would add."""
+    repo = host.repositories["acme/cardea"]
+    pull = repo.pull(number)
+    assert pull is not None
+    branch = pull["head"]["ref"]
+    work = tmp_path / f"later-{next(STEPS)}"
+    git = ["git", "-c", "user.name=agent", "-c", "user.email=agent@example.invalid"]
+    subprocess.run(["git", "clone", "-q", "-b", branch, str(repo.path), str(work)], check=True)
+    (work / "later.txt").write_text("later\n")
+    subprocess.run([*git, "-C", str(work), "add", "later.txt"], check=True)
+    subprocess.run([*git, "-C", str(work), "commit", "-q", "-m", "Later"], check=True)
+    subprocess.run(["git", "-C", str(work), "push", "-q", "origin", branch], check=True)
+    return head_of(host, number)
+
+
+def approved_and_green(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path
+) -> int:
+    number = open_pull(kernel, session, tmp_path, "eng.dev.0")
+    review = approve(kernel, session, number)
+    assert not review.is_error, text(review)
+    host.repositories["acme/cardea"].pass_checks(head_of(host, number), "lint", "test")
+    return number
+
+
+def refused(result: Any, code: str) -> None:
+    assert result.is_error and code in text(result), text(result)
+
+
+# The merge itself
+
+
+def test_the_opener_merges_an_approved_green_pull_request(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path
+) -> None:
+    number = approved_and_green(kernel, session, host, tmp_path)
+    head = head_of(host, number)
+    merged = merge(kernel, session, "eng.dev.0", number)
+    assert not merged.is_error, text(merged)
+    output = merged.structured_content
+    assert output["merged"] is True and output["head_sha"] == head
+    assert output["opened_receipt"] and output["approval_receipt"]
+    repo = host.repositories["acme/cardea"]
+    assert repo.head("main") == head and host.calls.count("merge") == 1
+    pull = repo.pull(number)
+    assert pull is not None and pull["merged_by"] == {"login": BOT}
+    # The reviewer's approval came from its own identity; the author's from the bot.
+    (review,) = repo.reviews[number]
+    assert review["user"]["login"] == OWNER and review["commit_id"] == head
+    assert pull["user"]["login"] == BOT
+
+
+@pytest.mark.parametrize(
+    ("case", "code"),
+    [
+        ("unapproved", "merge_not_approved"),
+        ("stale", "merge_approval_stale"),
+        ("red", "merge_checks_failed"),
+        ("pending", "merge_checks_pending"),
+        ("no_checks", "merge_checks_missing"),
+        ("other_developer", "merge_not_opener"),
+        ("not_mergeable", "merge_not_mergeable"),
+    ],
+)
+def test_merging_is_refused_with_nothing_sent(
+    kernel: Kernel,
+    session: FakeSession,
+    host: FakeGitHub,
+    tmp_path: Path,
+    case: str,
+    code: str,
+) -> None:
+    repo = host.repositories["acme/cardea"]
+    number = open_pull(kernel, session, tmp_path, "eng.dev.0")
+    member = "eng.dev.1" if case == "other_developer" else "eng.dev.0"
+    if case != "unapproved":
+        assert not approve(kernel, session, number).is_error
+    head = head_of(host, number)
+    repo.pass_checks(head, "lint", "test")
+    if case == "stale":
+        head = push_directly(host, number, tmp_path)
+        repo.pass_checks(head, "lint", "test")
+    elif case == "red":
+        repo.checks[head][1]["conclusion"] = "failure"
+    elif case == "pending":
+        repo.checks[head][0].update(status="in_progress", conclusion=None)
+    elif case == "no_checks":
+        del repo.checks[head]
+    elif case == "not_mergeable":
+        pull = repo.pull(number)
+        assert pull is not None
+        pull["mergeable"] = False
+    result = merge(kernel, session, member, number)
+    refused(result, code)
+    assert "merge" not in host.calls and repo.head("main") is None
+
+
+def test_the_principal_cannot_merge(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path
+) -> None:
+    number = approved_and_green(kernel, session, host, tmp_path)
+    result = merge(kernel, session, "eng.principal.0", number)
+    assert result.is_error and "merge" not in host.calls
+
+
+def test_the_host_approval_must_be_the_configured_reviewers(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path, vcs: Vcs
+) -> None:
+    number = approved_and_green(kernel, session, host, tmp_path)
+    vcs.config = vcs.config.model_copy(update={"merge": MergeConfig(reviewer_login="someone")})
+    refused(merge(kernel, session, "eng.dev.0", number), "merge_host_not_approved")
+    vcs.config = vcs.config.model_copy(update={"merge": None})
+    refused(merge(kernel, session, "eng.dev.0", number), "merge_not_configured")
+    assert "merge" not in host.calls
+
+
+def test_an_approval_from_a_pool_not_allowed_does_not_count(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path, vcs: Vcs
+) -> None:
+    number = approved_and_green(kernel, session, host, tmp_path)
+    # The host owner withdraws the principal pool's approval right after the fact.
+    vcs.config = vcs.config.model_copy(update={"allow_approve": ("eng.other",)})
+    refused(merge(kernel, session, "eng.dev.0", number), "merge_not_approved")
+
+
+def test_an_interrupted_merge_is_reconciled_against_the_host(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path
+) -> None:
+    number = approved_and_green(kernel, session, host, tmp_path)
+    host.fail_after.add("merge")
+    task_id, (result,) = act(
+        kernel, session, "eng.dev.0", [("vcs-merge", {"repository": "cardea", "number": number})]
+    )
+    assert result.is_error
+    with kernel.database.read() as conn, borrow(conn) as tx:
+        (receipt,) = [r for r in tx.list_operations(task_id) if r.request.name == "vcs.merge"]
+    assert receipt.state is OperationState.OUTCOME_UNKNOWN
+    settled = OperationRuntime(kernel).reconcile(task_id, receipt.request.operation_id)
+    assert settled == "succeeded" and host.calls.count("merge") == 1
+    with kernel.database.read() as conn, borrow(conn) as tx:
+        (receipt,) = [r for r in tx.list_operations(task_id) if r.request.name == "vcs.merge"]
+    assert cast(Any, receipt.result)["output"]["merged"] is True
+
+
+# Per-caller credentials
+
+
+def caller(agent_id: str | None, group: str | None) -> OperationContext:
+    return OperationContext(
+        task_id="t",
+        namespace="eng",
+        receipt_id="r",
+        deadline=datetime.now(UTC) + timedelta(minutes=1),
+        effect_key="e",
+        agent_id=agent_id,
+        group=group,
+    )
+
+
+def test_only_the_reviewer_pool_gets_the_reviewer_token(tmp_path: Path) -> None:
+    import asyncio
+
+    from cardea_vcs_ops.config import Repository
+
+    tokens = PersonalAccessTokens(tokens_config(), directory=write_tokens(tmp_path / "creds"))
+    repository = Repository(owner="acme", name="cardea", api_url="https://x.test", git_url="g")
+
+    def token(context: OperationContext | None) -> str:
+        return asyncio.run(tokens.credential(repository, ("contents:write",), context)).token
+
+    assert token(caller("eng.principal.0", "eng")) == REVIEWER
+    for other in (
+        caller("eng.dev.0", "eng"),
+        caller("eng.principal.0", None),  # not resolved as a member: the default
+        caller("eng.principal.0", "other"),
+        caller("eng.principals.0", "eng"),
+        caller("eng.principal", "eng"),
+        caller(None, "eng"),
+        None,
+    ):
+        assert token(other) == AUTHOR, other
+    # An expired token refuses its own callers only.
+    lapsed = replace(tokens, today=lambda: date(2999, 1, 1))
+    with pytest.raises(CredentialUnavailable, match="github-reviewer"):
+        token_of = lapsed.credential(repository, (), caller("eng.principal.0", "eng"))
+        asyncio.run(token_of)
+    with pytest.raises(CredentialUnavailable, match="github-author"):
+        asyncio.run(lapsed.credential(repository, (), caller("eng.dev.0", "eng")))
+
+
+def test_each_caller_reaches_the_host_with_its_own_token(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path
+) -> None:
+    open_pull(kernel, session, tmp_path, "eng.dev.0")
+    developer = list(host.authorizations)
+    assert developer and set(developer) == {f"Bearer {AUTHOR}"}
+    approve(kernel, session, 1)
+    assert set(host.authorizations[len(developer) :]) == {f"Bearer {REVIEWER}"}
+
+
+def test_the_host_refuses_an_authors_approval_of_its_own_pull_request(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path, vcs: Vcs
+) -> None:
+    """Why two identities: one bot account authors every pull request."""
+    number = open_pull(kernel, session, tmp_path, "eng.dev.0")
+    vcs.config = vcs.config.model_copy(
+        update={"credentials": tokens_config().model_copy(update={"pools": {}})}
+    )
+    vcs.credentials = PersonalAccessTokens(
+        tokens_config().model_copy(update={"pools": {}}), directory=tmp_path / "creds"
+    )
+    refused(approve(kernel, session, number), "host_refused")
+    assert number not in host.repositories["acme/cardea"].reviews
