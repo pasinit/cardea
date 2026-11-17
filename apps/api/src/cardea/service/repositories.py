@@ -6,7 +6,9 @@ holds everything about one repository:
 - `source`: the read-only mirror `code.session` clones from;
 - `owner`, `name`, `api_url`, `git_url`: where `vcs.*` pushes and opens changes;
 - `gates`: the targets `code.session` runs, each `{name, argv, timeout_seconds?}`;
-- `branch_prefix`: where agent branches may go (default `agent/{group}/`).
+- `branch_prefix`: where agent branches may go (default `agent/{group}/`);
+- `environment`: what `env.try` may run on a commit (ADR-038): the tier, the pinned
+  toolchain image and the scenario catalog. Its digest is part of `env.try`'s run key.
 
 A call names only an alias, authorized by the `repo:<alias>` grant. The file holds no
 secret; it must still be a regular file that no one but its owner can change.
@@ -17,6 +19,7 @@ registry is set, with a deprecation warning, and a host where both are set and d
 refuses to start (`check`) and refuses the call (`resolve`).
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -25,9 +28,10 @@ import stat
 import warnings
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Annotated, Any, Self
+from typing import Annotated, Any, Literal, Self
 
-from pydantic import Field, JsonValue, ValidationError, model_validator
+import rfc8785
+from pydantic import AfterValidator, Field, JsonValue, ValidationError, model_validator
 
 from cardea.service.database import Fault
 from cardea.service.models import Record
@@ -48,6 +52,62 @@ class Gate(Record):
     timeout_seconds: Annotated[int, Field(strict=True, ge=1, le=7200)] | None = None
 
 
+ScenarioName = Annotated[str, Field(strict=True, pattern=r"^[a-z][a-z0-9-]{0,31}$")]
+
+
+def _relative(path: str) -> str:
+    if path.startswith("/") or ".." in path.split("/") or not path.strip("/"):
+        raise ValueError("an artifact path is relative to the checkout and stays inside it")
+    return path
+
+
+RelativePath = Annotated[
+    str,
+    Field(strict=True, pattern=r"^[A-Za-z0-9._/-]{1,200}$"),
+    AfterValidator(_relative),
+]
+
+
+class Scenario(Record):
+    """One `env.try` scenario: a fixed command run in the checkout (ADR-038)."""
+
+    argv: Annotated[tuple[Annotated[str, Field(min_length=1)], ...], Field(min_length=1)]
+    timeout_seconds: Annotated[int, Field(strict=True, ge=1, le=7200)] = 900
+    # `init` scenarios need their own init or cgroups; no host offers that tier yet.
+    tier: Literal["process", "init"] = "process"
+    # Paths in the checkout kept as artifacts after the scenario, each at most 256 KiB.
+    artifacts: Annotated[tuple[RelativePath, ...], Field(max_length=16)] = ()
+
+
+class Toolchain(Record):
+    """The host owner's pinned toolchain image, unpacked read-only under its digest."""
+
+    path: Annotated[str, Field(strict=True, pattern=r"^/opt/[A-Za-z0-9._/-]{1,200}$")]
+    sha256: Annotated[str, Field(strict=True, pattern=r"^[0-9a-f]{64}$")]
+
+    @model_validator(mode="after")
+    def path_names_the_digest(self) -> Self:
+        if not self.path.rstrip("/").endswith(self.sha256):
+            raise ValueError("the toolchain path must end with its sha256")
+        return self
+
+
+class Environment(Record):
+    """What `env.try` may run on this repository's commits (ADR-038)."""
+
+    tiers: Annotated[tuple[Literal["process", "init"], ...], Field(min_length=1)] = ("process",)
+    toolchain: Toolchain | None = None
+    scenarios: Annotated[dict[ScenarioName, Scenario], Field(min_length=1, max_length=32)]
+    # Fixed variables for every scenario, such as an offline package cache; never a
+    # credential-shaped name (the worker refuses them).
+    env: dict[Annotated[str, Field(pattern=r"^[A-Z][A-Z0-9_]{0,63}$")], str] = Field(
+        default_factory=dict
+    )
+
+    def digest(self) -> str:
+        return hashlib.sha256(rfc8785.dumps(self.model_dump(mode="json"))).hexdigest()
+
+
 class Repository(Record):
     source: Annotated[str, Field(strict=True, min_length=1, max_length=512)]
     # Where `vcs.*` acts: all four, or none for a repository `code.session` only reads.
@@ -59,6 +119,7 @@ class Repository(Record):
     git_url: Annotated[str, Field(strict=True, min_length=1, max_length=512)] | None = None
     gates: Annotated[tuple[Gate, ...], Field(max_length=16)] = ()
     branch_prefix: Annotated[str, Field(strict=True, min_length=1, max_length=64)] = DEFAULT_PREFIX
+    environment: Environment | None = None
 
     @model_validator(mode="after")
     def prefix_names_the_group(self) -> Self:

@@ -195,6 +195,7 @@ dependencies = [
 dev = [
     { name = "authlib" },
     { name = "cardea-coding-ops" },
+    { name = "cardea-env-ops" },
     { name = "cardea-reference-ops" },
     { name = "cardea-vcs-ops" },
     { name = "cryptography" },
@@ -236,6 +237,7 @@ requires-dist = [
 dev = [
     { name = "authlib", specifier = "==1.8.0" },
     { name = "cardea-coding-ops", editable = "../../packages/cardea-coding-ops" },
+    { name = "cardea-env-ops", editable = "../../packages/cardea-env-ops" },
     { name = "cardea-reference-ops", editable = "../../packages/cardea-reference-ops" },
     { name = "cardea-vcs-ops", editable = "../../packages/cardea-vcs-ops" },
     { name = "cryptography", specifier = "==50.0.1" },
@@ -254,6 +256,11 @@ dev = [
 name = "cardea-coding-ops"
 version = "0.1.0"
 source = { editable = "../../packages/cardea-coding-ops" }
+
+[[package]]
+name = "cardea-env-ops"
+version = "0.1.0"
+source = { editable = "../../packages/cardea-env-ops" }
 
 [[package]]
 name = "cardea-reference-ops"

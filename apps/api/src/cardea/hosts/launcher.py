@@ -188,6 +188,10 @@ def validate_profile(entry: object) -> dict[str, Any]:
         value = entry[key]
         if type(value) is not int or not low <= value <= high:
             raise ValueError("invalid_profile")
+    # Scratch is a tmpfs, whose pages are charged to the unit's memory: a scratch larger
+    # than the memory cap could never be filled, and would mislead the host owner.
+    if entry["scratch_mb"] > entry["memory_mb"]:
+        raise ValueError("invalid_profile")
     if type(entry.get("jit", False)) is not bool:
         raise ValueError("invalid_profile")
     inputs = entry.get("input_kb", 0)
