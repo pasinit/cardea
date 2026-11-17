@@ -830,3 +830,19 @@ def test_registries_reach_the_proxy_rules_and_open_nothing_else(
     assert props["IPAddressAllow"].split() == ["127.0.10.5/32", f"{launcher.ENDPOINT_ADDRESS}/32"]
     assert "127.0.0.1" not in props["IPAddressAllow"]
     assert environment(configured[-1])["HTTPS_PROXY"] == "http://127.0.10.5:3128"
+
+
+def test_the_helper_tells_the_worker_which_registries_its_proxy_allows(
+    with_registries: None, configured: list[list[str]]
+) -> None:
+    """`code.session` refuses `dependencies: cache` on a profile with registries; the helper,
+    not the host owner's worker entry, is what tells it."""
+    launcher.handle(start("c2" * 16, "coding", "code-session"))
+    assert environment(configured[-1])["CARDEA_REGISTRIES"] == "pypi.org,files.pythonhosted.org"
+    # A networked profile without registries says so explicitly, with an empty list.
+    launcher.handle(start("c3" * 16, "session", "agent"))
+    assert environment(configured[-1])["CARDEA_REGISTRIES"] == ""
+    # A worker entry cannot set it.
+    worker = {"argv": ["/usr/bin/true"], "profiles": ["coding"], "env": {"CARDEA_REGISTRIES": ""}}
+    with pytest.raises(ValueError, match="invalid_worker"):
+        launcher.validate_worker(worker, {"coding": REGISTRY_CODING})

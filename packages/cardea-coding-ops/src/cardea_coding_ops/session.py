@@ -94,7 +94,7 @@ def model_credential() -> str | None:
 
 
 def fixed_env(values: object) -> dict[str, str]:
-    """Host-owner values for the gates, such as a read-only package cache with no network
+    """Host-owner values for the gates, such as a read-only package cache used offline
     (`UV_CACHE_DIR`, `UV_OFFLINE=1`, `PIP_NO_INDEX=1`); never a credential-shaped name."""
     if not isinstance(values, dict):
         raise OperationRejected("gate_env must be an object")
@@ -112,25 +112,57 @@ def fixed_env(values: object) -> dict[str, str]:
 
 
 # How the gates get dependencies (ADR-037 question 8), chosen by `dependencies` in the
-# configuration:
-# - `cache` (the default, and the stricter option): no network at all for the gates; they
-#   use the read-only, pre-provisioned cache that `gate_env` points at;
-# - `registries`: the gates receive the worker's egress proxy variables, so they may reach
-#   the package registries the `coding` profile allows (its `registries`, port 443 only).
-#   The proxy, not this setting, decides which hosts that is.
+# configuration. The proxy, not this setting, decides which hosts can be reached. The
+# consequence: whatever the profile's `registries` allow, every process in the unit can
+# reach, whatever this says. The harness (Claude Code) runs with the proxy variables in
+# either mode, and code in the checkout can name the proxy address itself. So:
+# - `registries`: the profile lists registries, and the gates get the proxy variables;
+# - `cache`: the profile lists none (its proxy allows only the model API), and the gates
+#   use the read-only, pre-provisioned cache that `gate_env` points at. This is the
+#   stricter option only together with that profile.
+# The helper tells the worker what its profile allows (`CARDEA_REGISTRIES`, launcher), and
+# a setting that disagrees is refused with `dependencies_mismatch` before anything runs.
 DEPENDENCIES = ("cache", "registries")
 PROXY_NAMES = ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy", "NO_PROXY", "no_proxy")
 # The helper's egress proxies listen on 127.0.10.0/24 (ADR-028); nothing else is accepted.
 PROXY_URL = re.compile(r"http://127\.0\.10\.\d{1,3}:\d{1,5}")
+REGISTRIES_ENV = "CARDEA_REGISTRIES"
+
+
+def profile_registries() -> list[str] | None:
+    """The registries the worker's profile allows, as the helper set them; None if not told
+    (a unit without network, or a worker not started by the helper)."""
+    value = os.environ.get(REGISTRIES_ENV)
+    if value is None:
+        return None
+    return [host for host in value.split(",") if host]
 
 
 def dependency_env(config: dict[str, Any]) -> dict[str, str]:
-    """The proxy variables the gates get: none for `cache`, the worker's for `registries`."""
+    """The proxy variables the gates get: none for `cache`, the worker's for `registries`.
+
+    Refuses, as `dependencies_mismatch`, a `cache` setting on a profile whose proxy allows
+    registries (the cache would not be the stricter option it claims), and a `registries`
+    setting on a profile that allows none.
+    """
     mode = config.get("dependencies", "cache")
     if mode not in DEPENDENCIES:
         raise OperationRejected(f"dependencies must be one of {', '.join(DEPENDENCIES)}")
+    allowed = profile_registries()
     if mode == "cache":
+        if allowed:
+            raise OperationRejected(
+                "dependencies is cache, but this worker's profile allows package registries "
+                f"({', '.join(allowed)}); remove them from the profile and the proxy, or set "
+                "dependencies to registries",
+                code="dependencies_mismatch",
+            )
         return {}
+    if not allowed:
+        raise OperationRejected(
+            "dependencies is registries, but this worker's profile allows no package registry",
+            code="dependencies_mismatch",
+        )
     env = {name: os.environ[name] for name in PROXY_NAMES if name in os.environ}
     proxies = [v for k, v in env.items() if k.lower() in {"https_proxy", "http_proxy"}]
     if not proxies or not all(PROXY_URL.fullmatch(v) for v in proxies):
@@ -361,6 +393,8 @@ def session(arguments: dict[str, JsonValue], config: dict[str, Any], scratch: Pa
 async def run(arguments: dict[str, JsonValue], context: OperationContext) -> Any:
     """The confined worker's entry point (`coding.code.session`)."""
     config = _config()
+    # Before anything runs: the dependencies setting must agree with the profile's network.
+    dependency_env(config)
     scratch = Path(tempfile.mkdtemp(prefix="code-session-"))
     try:
         return session(arguments, config, scratch)

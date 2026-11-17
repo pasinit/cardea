@@ -1,6 +1,7 @@
 """ADR-037 question 8 on the host: the `coding` profile reaches its registries, nothing else.
 
     python3 registry_egress.py [--profile coding] [--arbitrary example.com] [--work DIR]
+    python3 registry_egress.py --strict [--registry pypi.org]
 
 Reads the installed helper configuration (`/etc/cardea-host-workers.json`, validated by the
 installed helper code) and the egress proxy's `/etc/squid/squid.conf`. Then, through the
@@ -12,6 +13,9 @@ profile's own proxy port and with `curl`, it checks:
 - an arbitrary host, by default `example.com`, is refused (CONNECT 403);
 - a registry over plain HTTP, or on any other port, is refused;
 - the host's own loopback, 127.0.0.1, is refused through the proxy.
+
+With `--strict` (the kit's `strict-cache/` option) it checks the opposite for the
+registries: the profile lists none, and `--registry` (default `pypi.org`) is refused.
 
 The unit's own fence (it may reach only its proxy address, ADR-028) is covered by the
 ADR-028 probes, `apps/api/tests/hosts/test_confined_debian.py`. This script starts no
@@ -87,6 +91,16 @@ def main(argv: list[str]) -> int:
         default="example.com",
         help="a host the profile must not reach (default: %(default)s)",
     )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="expect the strict cache option: no registries in the profile or the proxy",
+    )
+    parser.add_argument(
+        "--registry",
+        default="pypi.org",
+        help="with --strict, a registry that must be refused (default: %(default)s)",
+    )
     args = parser.parse_args(argv)
     use_kernel(args.cardea_lib)
     work = claim(args.work, NAME)
@@ -102,8 +116,13 @@ def main(argv: list[str]) -> int:
         network = profile["network"]
         registries = list(network.get("registries", []))
         evidence.observe("network", network)
-        evidence.check("profile_lists_registries", bool(registries), registries=registries)
         proxy = network["proxy"]
+        if args.strict:
+            evidence.check("profile_lists_no_registries", not registries, registries=registries)
+            blocked = through(proxy, f"https://{args.registry}/")
+            evidence.check("registry_refused_in_strict_mode", refused(blocked), result=blocked)
+        else:
+            evidence.check("profile_lists_registries", bool(registries), registries=registries)
 
         installed = [
             line.strip()
@@ -114,12 +133,13 @@ def main(argv: list[str]) -> int:
         missing = [rule for rule in rules if rule not in installed]
         evidence.check("proxy_carries_the_profiles_egress_rules", not missing, missing=missing)
 
-        reached = {host: through(proxy, f"https://{host}/") for host in registries}
-        evidence.check(
-            "registries_reachable_over_tls",
-            bool(reached) and all(r["connect"] == "200" for r in reached.values()),
-            results=reached,
-        )
+        if not args.strict:
+            reached = {host: through(proxy, f"https://{host}/") for host in registries}
+            evidence.check(
+                "registries_reachable_over_tls",
+                bool(reached) and all(r["connect"] == "200" for r in reached.values()),
+                results=reached,
+            )
         arbitrary = through(proxy, f"https://{args.arbitrary}/")
         evidence.check("arbitrary_host_refused", refused(arbitrary), result=arbitrary)
         if registries:

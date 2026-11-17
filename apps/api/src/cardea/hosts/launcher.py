@@ -132,7 +132,18 @@ NETWORK_KEYS = {"policy", "proxy", "hosts"}
 # Read-only binds may expose installed software and public trust roots, never service state.
 READ_ONLY_PREFIXES = ("/usr/", "/opt/", "/etc/ssl/", "/etc/fonts/")
 ENV_NAME = r"[A-Z][A-Z0-9_]{0,63}"
-RESERVED_ENV = {"PATH", "HOME", "CARDEA_DEADLINE", "CARDEA_CREDENTIAL", "CARDEA_INPUTS", "NO_PROXY"}
+RESERVED_ENV = {
+    "PATH",
+    "HOME",
+    "CARDEA_DEADLINE",
+    "CARDEA_CREDENTIAL",
+    "CARDEA_INPUTS",
+    "CARDEA_REGISTRIES",
+    "NO_PROXY",
+}
+# Tells a worker which package registries its profile's proxy allows (ADR-037 question 8),
+# so `code.session` can refuse a configuration that claims fewer than the network allows.
+REGISTRIES_ENV = "CARDEA_REGISTRIES"
 CREDENTIAL = "/run/cardea/credential"
 # The one loopback address a confined worker may reach (ADR-028): the kernel's per-attempt
 # tool endpoint and content-gate callback listen there, never on 127.0.0.1, so a worker
@@ -389,6 +400,9 @@ def confined_command(
         for key in ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"):
             environment[key] = url
         environment["NO_PROXY"] = environment["no_proxy"] = f"{ENDPOINT_ADDRESS},localhost"
+        # Always set for a networked unit, empty when the proxy allows no registry: the
+        # worker can tell "no registries" from "not told".
+        environment[REGISTRIES_ENV] = ",".join(network.get("registries", []))
     binds: list[str] = []
     if profile.get("credential"):
         # systemd reads the root-only file; only this unit's user sees its copy.
