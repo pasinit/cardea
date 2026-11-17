@@ -74,6 +74,7 @@ class WorkerHost:
         self.cleaned: list[str] = []
         self.outcome = finished({"output": {"text": "page text"}})
         self.reject = False
+        self.rejection = "spool_capacity"
         self.running = 0  # polls reporting "running" before the outcome; -1 forever
         self.on_status: Callable[[], None] | None = None
 
@@ -84,7 +85,7 @@ class WorkerHost:
         self, job: str, content: bytes, deadline: float, profile: str, worker: str
     ) -> None:
         if self.reject:
-            raise Fault("host_rejected", "Host refused the job: spool_capacity", 409)
+            raise Fault("host_rejected", f"Host refused the job: {self.rejection}", 409)
         self.starts.append(
             {
                 "job": job,
@@ -387,6 +388,33 @@ def test_worker_that_never_started_is_a_definite_failure(kernel: Kernel, host: W
     assert receipt(kernel, task_id).state is OperationState.FAILED
     assert failure(kernel, task_id) == "operation_rejected"
     assert host.stops == []
+
+
+def test_a_host_whose_mounts_are_not_shared_is_named_as_the_cause(
+    kernel: Kernel, host: WorkerHost
+) -> None:
+    # The helper refuses to start when / or /run lost shared propagation: systemd would
+    # then give the unit no credential (found on the first Debian acceptance run).
+    host.reject, host.rejection = True, "host_mount_propagation"
+    task_id = submit(kernel, "pages.post")
+    assert OperationRuntime(kernel).execute(task_id) == "failed"
+    assert failure(kernel, task_id) == "host_mount_propagation"
+    assert "mount --make-rshared /" in receipt(kernel, task_id).failure.model_dump_json()
+
+
+def test_a_credential_systemd_did_not_load_is_named_as_the_cause(
+    kernel: Kernel, host: WorkerHost
+) -> None:
+    missing = b"bwrap: Can't find source path /run/credentials/cardea-host-x.service/cardea: "
+    host.outcome = {
+        "state": "finished",
+        "result": "exit-code",
+        "exit_status": "1",
+        "output": base64.b64encode(missing + b"No such file or directory\n").decode(),
+    }
+    task_id = submit(kernel)
+    assert OperationRuntime(kernel).execute(task_id) == "failed"
+    assert failure(kernel, task_id) == "credential_not_loaded"
 
 
 def test_worker_reported_rejection_is_a_definite_failure(kernel: Kernel, host: WorkerHost) -> None:

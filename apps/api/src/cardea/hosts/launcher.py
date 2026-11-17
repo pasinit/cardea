@@ -813,6 +813,26 @@ def admit_inputs(listed: object, profile: dict[str, Any]) -> list[bytes]:
     return decoded
 
 
+MOUNTINFO = Path("/proc/self/mountinfo")
+# systemd sets up a unit's LoadCredential files through mount propagation. Once these are
+# private (for example after a tool ran `mount --make-rprivate /` in the host's namespace),
+# no unit gets its credential and bwrap fails on the missing source: refuse first instead.
+PROPAGATED = ("/", "/run")
+
+
+def shared_propagation(mountinfo: Path = MOUNTINFO) -> bool:
+    """Whether every mount in `PROPAGATED` is shared (a `shared:N` tag, proc(5))."""
+    tags: dict[str, list[str]] = {}
+    for line in mountinfo.read_text().splitlines():
+        fields = line.split()
+        if len(fields) < 7 or "-" not in fields[6:]:
+            continue
+        # Field 5 is the mount point; optional fields run from 7 up to the "-" separator.
+        # A later line for the same mount point is the mount on top, the one in effect.
+        tags[fields[4]] = fields[6 : fields.index("-", 6)]
+    return all(any(t.startswith("shared:") for t in tags.get(p, [])) for p in PROPAGATED)
+
+
 def admit_confined(
     job: str, request: dict[str, Any]
 ) -> tuple[bytes, dict[str, Any], dict[str, Any], list[bytes]]:
@@ -822,6 +842,8 @@ def admit_confined(
     worker = config["workers"].get(request["worker"])
     if profile is None or worker is None or request["profile"] not in worker["profiles"]:
         raise ValueError("profile_not_installed")
+    if not shared_propagation():
+        raise ValueError("host_mount_propagation")
     if not isinstance(request["input"], str):
         raise ValueError("invalid_request")
     deadline = request["deadline"]

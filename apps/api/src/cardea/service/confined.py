@@ -106,6 +106,15 @@ def _result(status: dict[str, Any]) -> dict[str, Any]:
     return output
 
 
+def _credential_not_loaded(status: dict[str, Any]) -> bool:
+    """bwrap could not bind the unit's LoadCredential file: systemd never created it."""
+    try:
+        output = base64.b64decode(str(status.get("output", "")), validate=True)
+    except (ValueError, binascii.Error):
+        return False
+    return b"bwrap: Can't find source path /run/credentials/" in output[:4096]
+
+
 def _document(status: dict[str, Any]) -> tuple[dict[str, Any], object | None]:
     """The worker's output and, if it returned any, its raw artifacts (ADR-037)."""
     result = status.get("result")
@@ -117,6 +126,13 @@ def _document(status: dict[str, Any]) -> tuple[dict[str, Any], object | None]:
             f"stopped by its profile limit (systemd result {_word(result)})",
         )
     if result != "success" or str(status.get("exit_status")) != "0":
+        if _credential_not_loaded(status):
+            raise WorkerFailed(
+                "credential_not_loaded",
+                "worker_exit",
+                "systemd did not load the profile's credential: check that the credential "
+                "file exists and that / is shared (findmnt -o PROPAGATION /)",
+            )
         raise WorkerFailed(
             "worker_failed",
             "worker_exit",
@@ -312,6 +328,12 @@ class Workers:
                 partial(self.host.start_confined, **extra), job, content, deadline, profile, worker
             )
         except Fault as error:
+            if error.code == "host_rejected" and error.message.endswith(": host_mount_propagation"):
+                raise WorkerNotStarted(
+                    "the host's / or /run mount is not shared, so systemd cannot give the "
+                    "worker its credential; run `mount --make-rshared /` or reboot the host",
+                    "host_mount_propagation",
+                ) from None
             if error.code == "host_rejected":
                 raise WorkerNotStarted(f"helper refused the job: {error.message}") from None
             # The helper may have passed its fence before failing: treat as started.
