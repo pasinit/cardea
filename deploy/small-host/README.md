@@ -185,8 +185,13 @@ python3 /opt/cardea/packaging/fetch_opencode.py /opt/cardea/opencode
       - `kernel_callback` lets the worker reach the content gate's loopback endpoint;
       - `input_kb` admits a 10 MiB change bundle as a staged, read-only input;
       - each worker runs `cardea.hosts.operation_worker` with the operation's handler, then its reconciler.
-   2. The credential is a root-only file, `/etc/cardea/credentials/github` (`0600 root`), which systemd hands to each unit. The kernel never reads it.
-   3. Install `cardea/cardea-vcs.json` as `/opt/cardea-vcs/vcs.json` (root, `0644`). It holds no secret. Repositories, their hosts and branch prefixes come from the registry `/opt/cardea-code/repositories.json`: each vcs worker binds it read-only and names it in `CARDEA_REPOSITORIES`.
+   2. The credential is a fine-grained personal access token (ADR-037 question 7). Create it on the repository host:
+      - repository access: only the repositories in the registry;
+      - permissions: Contents read and write, Pull requests read and write, Issues read and write and Metadata read;
+      - an expiry, which you then copy into the configuration below.
+
+      Store it as a root-only file, `/etc/cardea/credentials/github` (`0600 root`), which systemd hands to each unit. The kernel never reads it, and agents never see it.
+   3. Install `cardea/cardea-vcs.json` as `/opt/cardea-vcs/vcs.json` (root, `0644`) and set `expires_on` to the token's expiry. From that day on, calls are refused with `credential_unavailable` and nothing is sent. Rotate the token before then: replace the file and update `expires_on`. The file holds no secret. `allow_approve` stays `false` unless you allow `APPROVE` reviews, either for everyone (`true`) or for named pools (`["<group>.<pool>"]`). Repositories, their hosts and branch prefixes come from the registry `/opt/cardea-code/repositories.json`: each vcs worker binds it read-only and names it in `CARDEA_REPOSITORIES`.
    4. Install `packages/cardea-vcs-ops` into `/opt/cardea/apps/api/.venv`, copy its `descriptors/` into the kernel's `operations_dir`, and configure the content gate. Provision `vcs.*` and `repo:<alias>` for the supervisors that may use them, and restart.
 
    Checks:
