@@ -236,6 +236,7 @@ used by the examples.
 | `credential_in_change` | the change or a command's output contains the model credential; nothing is returned | `cardea_coding_ops.session` |
 | `credential_unavailable` | — | `cardea_vcs_ops.ops` |
 | `deadline_exceeded` | Task deadline elapsed. | `cardea.kernel.store` |
+| `dependencies_mismatch` | dependencies is registries, but this worker's profile allows no package registry; dependencies is cache, but this worker's profile allows package registries ({…}); remove them from the profile and the proxy, or set dependencies to registries | `cardea_coding_ops.session` |
 | `effect_not_applied` | Destination shows no effect | `cardea.service.operation_runtime` |
 | `executor_busy` | — | `cardea.service.invocation` |
 | `expectation_exceeded` | — | `cardea.service.agent_run_runtime` |
