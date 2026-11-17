@@ -8,5 +8,8 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+# The build's mount changes stay out of the host's namespace (try_toolchain.py runs
+# mmdebstrap under `unshare --mount` too).
+PrivateMounts=yes
 ExecStart=/usr/bin/python3 -I /opt/cardea/packaging/try_toolchain.py build --registry /opt/cardea-code/repositories.json
 ExecStart=/usr/bin/python3 -I /opt/cardea/packaging/try_toolchain.py pin /opt/cardea-code/repositories.json

@@ -41,7 +41,10 @@ def tarball(path: Path) -> Path:
 def test_the_build_is_minbase_debian_13_and_dated_to_the_week() -> None:
     module = script()
     argv = module.mmdebstrap_argv(Path("/tmp/x.tar"))
-    assert argv[0] == "/usr/bin/mmdebstrap" and "trixie" in argv and "--variant=minbase" in argv
+    # In a mount namespace of its own: root mode would otherwise leave the host's `/`
+    # private, and systemd then hands no LoadCredential file to any later unit.
+    assert argv[:5] == ["/usr/bin/unshare", "--mount", "--propagation", "private", "--"]
+    assert argv[5] == "/usr/bin/mmdebstrap" and "trixie" in argv and "--variant=minbase" in argv
     monday = datetime(2026, 11, 16, tzinfo=UTC).timestamp()
     for day in range(7):
         assert module.week_start(monday + day * 86400 + 3600) == int(monday)
