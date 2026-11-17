@@ -19,7 +19,7 @@ from typing import Any, cast
 
 import pytest
 from cardea_vcs_ops import Vcs, in_process_descriptors
-from cardea_vcs_ops.config import MergeConfig, PersonalAccessTokensConfig, VcsConfig
+from cardea_vcs_ops.config import MergeConfig, NamedToken, PersonalAccessTokensConfig, VcsConfig
 from cardea_vcs_ops.credentials import CredentialUnavailable, PersonalAccessTokens
 from cardea_vcs_ops.fake import FakeGitHub
 from test_agent_runs import FakeSession
@@ -57,10 +57,10 @@ BASE = (*RIGHTS, "models.invoke", "repo:cardea")
 
 
 def tokens_config() -> PersonalAccessTokensConfig:
-    later = date(2999, 1, 1)
+    later = NamedToken(expires_on=date(2999, 1, 1))
     return PersonalAccessTokensConfig(
         kind="personal_access_tokens",
-        tokens={"github-author": {"expires_on": later}, "github-reviewer": {"expires_on": later}},
+        tokens={"github-author": later, "github-reviewer": later},
         default="github-author",
         pools={"eng.principal": "github-reviewer"},
     )
