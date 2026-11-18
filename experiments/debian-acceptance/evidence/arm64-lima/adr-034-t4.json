@@ -1,14 +1,15 @@
 {
   "checks": {
     "t4_both_members_hold_a_record": true,
-    "t4_failed_holder_loses_claim_within_lease_and_tick": false,
+    "t4_failed_holder_loses_claim_within_the_amended_bound": true,
     "t4_follow_ups_stop_at_max_followups": true,
     "t4_idle_holder_kept_epoch_through_follow_ups": true,
     "t4_lapse_is_followups_exhausted_with_supervisor_mail": true,
+    "t4_no_attempt_after_a_failed_one_extends_the_claim": true,
     "t4_short_lease_refused_at_apply": true
   },
   "commit": null,
-  "finished_at": "2026-11-17T03:56:07.095611+00:00",
+  "finished_at": "2026-11-17T04:55:14.569999+00:00",
   "host": {
     "machine": "aarch64",
     "os_release": "Debian GNU/Linux 13 (trixie)",
@@ -22,57 +23,65 @@
           "claim_epoch": 1,
           "followups": 0,
           "holder": "hold.w.0",
-          "lease_expires_at": "2026-11-17T03:49:47.722473+00:00",
+          "lease_expires_at": "2026-11-17T04:47:59.729126+00:00",
           "version": 2
         },
         "hold.w.1": {
           "claim_epoch": 1,
           "followups": 0,
           "holder": "hold.w.1",
-          "lease_expires_at": "2026-11-17T03:49:49.250022+00:00",
+          "lease_expires_at": "2026-11-17T04:48:00.698451+00:00",
           "version": 2
         }
       }
     },
-    "t4_failed_holder_loses_claim_within_lease_and_tick": {
+    "t4_failed_holder_loses_claim_within_the_amended_bound": {
+      "bound_seconds": 240,
       "history": [
         {
           "actor": "filer",
-          "at": "2026-11-17T03:44:46.466270+00:00",
+          "at": "2026-11-17T04:42:58.054457+00:00",
           "kind": "created",
           "version": 1
         },
         {
           "actor": "hold.w.1",
-          "at": "2026-11-17T03:44:49.068584+00:00",
+          "at": "2026-11-17T04:43:00.521326+00:00",
           "kind": "claimed",
           "version": 2
         },
         {
           "actor": "runtime",
-          "at": "2026-11-17T03:52:05.270653+00:00",
+          "at": "2026-11-17T04:49:03.085114+00:00",
           "kind": "claim_expired",
           "version": 3
         }
       ],
-      "seconds": 436
+      "seconds_after_progress_expiry": 63
     },
     "t4_follow_ups_stop_at_max_followups": {
       "followups": [
-        "hold.w.0.claim.rec-0e7ac51d829942c487ad9a9170899081.1.1",
-        "hold.w.0.claim.rec-0e7ac51d829942c487ad9a9170899081.1.2"
+        "hold.w.0.claim.rec-bf313d5bb8504b52b5f1aad4a0a5d027.1.1",
+        "hold.w.0.claim.rec-bf313d5bb8504b52b5f1aad4a0a5d027.1.2"
       ]
     },
     "t4_idle_holder_kept_epoch_through_follow_ups": {
       "followups": [
-        "hold.w.0.claim.rec-0e7ac51d829942c487ad9a9170899081.1.1",
-        "hold.w.0.claim.rec-0e7ac51d829942c487ad9a9170899081.1.2"
+        "hold.w.0.claim.rec-bf313d5bb8504b52b5f1aad4a0a5d027.1.1",
+        "hold.w.0.claim.rec-bf313d5bb8504b52b5f1aad4a0a5d027.1.2"
       ]
     },
     "t4_lapse_is_followups_exhausted_with_supervisor_mail": {
       "notices": 2
     },
-    "t4_seconds": 682,
+    "t4_no_attempt_after_a_failed_one_extends_the_claim": {
+      "expiries": [
+        "2026-11-17T04:48:00.698451+00:00",
+        "2026-11-17T04:49:01.571003+00:00"
+      ],
+      "failed_attempts": 2
+    },
+    "t4_seconds": 737,
     "t4_short_lease_refused_at_apply": {
       "result": {
         "code": "claim_lease_too_short",
@@ -81,7 +90,7 @@
       }
     }
   },
-  "passed": false,
+  "passed": true,
   "script": "adr-034",
-  "started_at": "2026-11-17T03:44:42.598620+00:00"
+  "started_at": "2026-11-17T04:42:53.820285+00:00"
 }
