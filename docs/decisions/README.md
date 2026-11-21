@@ -42,7 +42,7 @@ Each record states the requirement, the open-source candidates considered, fit e
 | [037](037-coding-and-vcs-operations.md) | Coding and Version-Control Operations for an Agent Team (proposed; implemented: the content gate with redaction, long confined calls, `code.session` with the Claude Code harness entry and `coding` profile, the `vcs.*` operations without credential minting; portable tests only, Debian fit test written but not run) |
 | [038](038-throwaway-test-environments.md) | Throwaway Test Environments for Agent Teams (accepted; process tier) |
 | [039](039-external-email-operations.md) | External Email Operations: `email.send` with AgentMail and SMTP/IMAP adapters, and kernel reply polling (implemented; portable tests only, live smoke step written but not run) |
-| [040](040-team-setup-command.md) | One Setup Command from a Fresh Debian Host to a Running Team (implemented; portable tests only) |
+| [040](040-team-setup-command.md) | One Setup Command from a Fresh Debian Host to a Running Team (implemented; portable tests only; reuse evaluation provisional) |
 
 **Verified on Debian** means a run on the supported Debian host, recorded as evidence in the ADR. The milestone ADRs up to ADR-019 record their own Debian evidence. From ADR-023 on, nothing is verified on Debian yet: "portable tests only" above means the tests pass on the development platforms and in CI, and nothing more. The [Debian acceptance checklist](../acceptance/debian-adr-034-037.md) lists what must run to verify ADR-034, ADR-035, ADR-036 and the ADR-023 amendment.
 

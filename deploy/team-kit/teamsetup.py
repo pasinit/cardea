@@ -4,7 +4,9 @@
     python3 -I deploy/team-kit/teamsetup.py apply --host HOST.json
 
 `plan` is a dry run: it runs every step's check and verify, which only read, and prints what
-`apply` would change. It exits 0 when nothing is left to do and 2 when something is.
+`apply` would change and each step's verify result, done or not. A step whose verify is not
+read-only (`repository-ready` submits a kernel task) reports its last recorded result instead.
+It exits 0 when nothing is left to do and 2 when something is.
 `apply` walks the same steps in order, as root.
 
 Every step has the same three parts (`Step`):
@@ -426,6 +428,14 @@ class Step(ABC):
     @abstractmethod
     def verify(self, ctx: Context) -> Verdict:
         """Observe the result. Read-only."""
+
+    def planned_check(self, ctx: Context) -> bool:
+        """`check` as `plan` runs it; override when `check` has an effect."""
+        return self.check(ctx)
+
+    def planned_verify(self, ctx: Context) -> Verdict:
+        """`verify` as `plan` runs it; override when `verify` has an effect."""
+        return self.verify(ctx)
 
     def fingerprint(self, ctx: Context) -> str | None:
         """Inputs whose change makes a done step stale; recorded when the step completes."""
@@ -1339,6 +1349,16 @@ class RepositoryReady(Step):
     def verify(self, ctx: Context) -> Verdict:
         return ctx.probe.check(str(ctx.host["repository"]))
 
+    def planned_check(self, ctx: Context) -> bool:
+        return self.planned_verify(ctx).ok
+
+    def planned_verify(self, ctx: Context) -> Verdict:
+        # The probe submits a kernel task, which a dry run must not do.
+        recorded = ctx.state.get(self.name)
+        if recorded.get("status") not in ("done", "failed"):
+            return Verdict(False, "not probed yet")
+        return Verdict(recorded["status"] == "done", f"last recorded: {recorded.get('detail', '')}")
+
 
 class Apply(Step):
     name = "apply"
@@ -1388,19 +1408,18 @@ def steps() -> list[Step]:
 
 
 def plan(ctx: Context, out: Callable[[str], None] = print) -> bool:
-    """Prints each step's check and, for done steps, verify. Changes nothing. True when
+    """Prints each step's check and verify result, done or not. Changes nothing. True when
     every step is done."""
     converged = True
     for number, step in enumerate(steps(), 1):
-        if step.check(ctx):
-            verdict = step.verify(ctx)
-            out(
-                f"{number:02d} {step.name}: done; "
-                f"verify {'ok' if verdict.ok else 'FAILED'}: {verdict.detail}"
-            )
+        done = step.planned_check(ctx)
+        verdict = step.planned_verify(ctx)
+        result = f"verify {'ok' if verdict.ok else 'FAILED'}: {verdict.detail}"
+        if done:
+            out(f"{number:02d} {step.name}: done; {result}")
             converged &= verdict.ok
         else:
-            out(f"{number:02d} {step.name}: would run: {step.title}")
+            out(f"{number:02d} {step.name}: would run: {step.title}; {result}")
             converged = False
     return converged
 
