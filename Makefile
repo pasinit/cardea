@@ -35,7 +35,10 @@ help:
 
 check-uv:
 	@test -x "$(UV)" || { \
-		printf "uv is required. Install it with: python3 -m pip install --user uv\n" >&2; \
+		printf "uv is required but was not found (looked for: %s).\n" "$(UV)" >&2; \
+		printf "  Install it:   python3 -m pip install --user uv\n" >&2; \
+		printf "  Then either put ~/.local/bin on PATH, or rerun make as it is (it also looks in the Python user base).\n" >&2; \
+		printf "  Or point at an existing uv:   make UV=/path/to/uv try\n" >&2; \
 		exit 1; \
 	}
 
