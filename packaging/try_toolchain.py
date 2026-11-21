@@ -6,7 +6,10 @@ Usage, as root on the Debian host (`make try-toolchain`):
     python3 packaging/try_toolchain.py pin REGISTRY [--root ...] [--sha256 DIGEST]
 
 `build` runs `mmdebstrap` (Debian's reproducible bootstrapper) for a minimal Debian 13
-root with the packages the scenarios need, writes it as a tarball, takes its SHA-256 and
+root with the packages the scenarios need, plus the pinned `uv` release binary at
+`/usr/local/bin/uv` (Debian 13 does not package uv; the archive is downloaded from the
+release, checked against the SHA-256 pinned below before anything is built, and copied in
+with a customize hook). It writes the root as a tarball, takes its SHA-256 and
 unpacks it read-only at `<root>/<sha256>/`. It prints the digest. Older images beyond
 `--keep` are removed, never the one a registry pins. `SOURCE_DATE_EPOCH` is set to the
 start of the current ISO week, so a rebuild in the same week of the same package set gives
@@ -19,14 +22,18 @@ owner refreshes weekly, for example with the kit's `cardea-try-toolchain.timer`.
 
 import argparse
 import hashlib
+import io
 import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
 import tarfile
 import tempfile
 import time
+import urllib.request
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +47,21 @@ PACKAGES = (
     "curl",
     "xz-utils",
 )
+# uv for repositories whose scenarios run through it (Cardea's own `make try`, `make teams`).
+UV_VERSION = "0.13.7"  # released 2026-11-03; Apache-2.0 OR MIT
+# SHA-256 of each release archive, as in the release's `<archive>.sha256` files.
+UV_ARCHIVES = {
+    "x86_64": (
+        "x86_64-unknown-linux-gnu",
+        "c5221ff41b7892bfc223543883600125f6a47fe845093e0f5bdff4f359196d83",
+    ),
+    "aarch64": (
+        "aarch64-unknown-linux-gnu",
+        "71279f8d3c67241e807b9d8db872d1bf541579fb9f08b7d1eb1682196d1e57dc",
+    ),
+}
+UV_RELEASES = "https://github.com/astral-sh/uv/releases/download"
+UV_PATH = "/usr/local/bin/uv"
 DEFAULT_ROOT = Path("/opt/cardea-try/toolchain")
 WEEK = 7 * 24 * 3600
 # The ISO week starts on Monday; the Unix epoch was a Thursday.
@@ -50,12 +72,58 @@ def week_start(now: float) -> int:
     return int((now + MONDAY_OFFSET) // WEEK * WEEK - MONDAY_OFFSET)
 
 
-def mmdebstrap_argv(target: Path) -> list[str]:
+def uv_archive(machine: str) -> tuple[str, str, str]:
+    """The release archive's URL, its member path for the `uv` binary, and its pinned SHA-256."""
+    if machine not in UV_ARCHIVES:
+        raise SystemExit(f"no pinned uv archive for {machine}")
+    triple, expected = UV_ARCHIVES[machine]
+    name = f"uv-{triple}.tar.gz"
+    return f"{UV_RELEASES}/{UV_VERSION}/{name}", f"uv-{triple}/uv", expected
+
+
+def _download(url: str) -> bytes:
+    with urllib.request.urlopen(url, timeout=300) as response:  # noqa: S310 - fixed https URL
+        data: bytes = response.read()
+    return data
+
+
+def fetch_uv(
+    destination: Path,
+    epoch: int,
+    machine: str | None = None,
+    download: Callable[[str], bytes] | None = None,
+) -> Path:
+    """Download the pinned uv archive for the build architecture, verify it, extract `uv`."""
+    url, member, expected = uv_archive(machine or platform.machine())
+    archive = (download or _download)(url)
+    digest = hashlib.sha256(archive).hexdigest()
+    if digest != expected:
+        raise SystemExit(f"{url} has SHA-256 {digest}, expected {expected}")
+    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as bundle:
+        try:
+            info = bundle.getmember(member)
+        except KeyError:
+            raise SystemExit(f"{url} has no {member}") from None
+        extracted = bundle.extractfile(info) if info.isfile() else None
+        if extracted is None:
+            raise SystemExit(f"{member} in {url} is not a regular file")
+        binary = extracted.read()
+    destination.mkdir(parents=True, exist_ok=True)
+    path = destination / "uv"
+    path.write_bytes(binary)
+    path.chmod(0o755)
+    # The copy keeps its metadata: date it like the rest of the image.
+    os.utime(path, (epoch, epoch))
+    return path
+
+
+def mmdebstrap_argv(target: Path, uv: Path) -> list[str]:
     # mmdebstrap's root mode makes every mount of the namespace it runs in private. Run in
     # the host's namespace, it left `/` private, and systemd then silently stopped giving
     # units their LoadCredential files: every credentialed confined worker (session,
     # coding, vcs) failed until a reboot. A mount namespace of its own keeps the change
     # there (found on the first Debian acceptance run).
+    bindir = Path(UV_PATH).parent
     return [
         "/usr/bin/unshare",
         "--mount",
@@ -67,6 +135,12 @@ def mmdebstrap_argv(target: Path) -> list[str]:
         "--mode=root",
         "--format=tar",
         f"--include={','.join(PACKAGES)}",
+        # The verified uv binary, keeping its mode and date; then the directory's date, which
+        # the copy changed, so the tarball stays the same for the same week; then a check that
+        # the binary runs.
+        f"--customize-hook=copy-in {uv} {bindir}",
+        f'--customize-hook=touch --no-dereference --date="@$SOURCE_DATE_EPOCH" "$1{bindir}"',
+        f'--customize-hook="$1{UV_PATH}" --version',
         SUITE,
         str(target),
     ]
@@ -127,10 +201,12 @@ def build(root: Path, keep: int, registry: Path | None) -> str:
     if os.geteuid() != 0:
         raise SystemExit("build the toolchain as root")
     root.mkdir(parents=True, exist_ok=True)
-    env = {**os.environ, "SOURCE_DATE_EPOCH": str(week_start(time.time()))}
+    epoch = week_start(time.time())
+    env = {**os.environ, "SOURCE_DATE_EPOCH": str(epoch)}
     with tempfile.TemporaryDirectory(dir=root, prefix=".build-") as scratch:
         tarball = Path(scratch) / "toolchain.tar"
-        subprocess.run(mmdebstrap_argv(tarball), env=env, check=True)
+        uv = fetch_uv(Path(scratch) / "uv", epoch)
+        subprocess.run(mmdebstrap_argv(tarball, uv), env=env, check=True)
         digest = sha256_file(tarball)
         unpack(tarball, root, digest)
     prune(root, keep, digest, pinned(registry) if registry else set())

@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
 
+import pytest
 from cardea_env_ops import descriptors
 
 from cardea.hosts import launcher
@@ -40,7 +41,7 @@ def tarball(path: Path) -> Path:
 
 def test_the_build_is_minbase_debian_13_and_dated_to_the_week() -> None:
     module = script()
-    argv = module.mmdebstrap_argv(Path("/tmp/x.tar"))
+    argv = module.mmdebstrap_argv(Path("/tmp/x.tar"), Path("/tmp/b/uv"))
     # In a mount namespace of its own: root mode would otherwise leave the host's `/`
     # private, and systemd then hands no LoadCredential file to any later unit.
     assert argv[:5] == ["/usr/bin/unshare", "--mount", "--propagation", "private", "--"]
@@ -49,6 +50,117 @@ def test_the_build_is_minbase_debian_13_and_dated_to_the_week() -> None:
     for day in range(7):
         assert module.week_start(monday + day * 86400 + 3600) == int(monday)
     assert module.week_start(monday - 1) == int(monday) - 7 * 86400
+
+
+def uv_archive(member: str, data: bytes = b"\x7fELF uv", *, link: bool = False) -> bytes:
+    stream = io.BytesIO()
+    with tarfile.open(fileobj=stream, mode="w:gz") as archive:
+        info = tarfile.TarInfo(member)
+        if link:
+            info.type, info.linkname = tarfile.SYMTYPE, "/etc/shadow"
+            archive.addfile(info)
+        else:
+            info.size, info.mode = len(data), 0o755
+            archive.addfile(info, io.BytesIO(data))
+    return stream.getvalue()
+
+
+def test_uv_is_pinned_by_version_and_digest_for_both_build_architectures() -> None:
+    module = script()
+    for machine in ("aarch64", "x86_64"):
+        triple = f"{machine}-unknown-linux-gnu"
+        url, member, digest = module.uv_archive(machine)
+        releases = "https://github.com/astral-sh/uv/releases/download"
+        assert url == f"{releases}/{module.UV_VERSION}/uv-{triple}.tar.gz"
+        assert member == f"uv-{triple}/uv"
+        assert len(digest) == 64 and set(digest) <= set("0123456789abcdef")
+    with pytest.raises(SystemExit, match="no pinned uv archive"):
+        module.uv_archive("riscv64")
+
+
+def test_uv_is_verified_before_it_is_extracted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = script()
+    triple = "aarch64-unknown-linux-gnu"
+    member = f"uv-{triple}/uv"
+    archive = uv_archive(member)
+    urls: list[str] = []
+
+    def download(url: str) -> bytes:
+        urls.append(url)
+        return archive
+
+    # The real pin does not match this archive: refused, nothing written.
+    with pytest.raises(SystemExit, match="expected"):
+        module.fetch_uv(tmp_path / "bad", 1, "aarch64", download)
+    assert not (tmp_path / "bad").exists()
+    pins = module.UV_ARCHIVES
+    monkeypatch.setitem(pins, "aarch64", (triple, hashlib.sha256(archive).hexdigest()))
+    epoch = 1_763_337_600
+    path = module.fetch_uv(tmp_path / "good", epoch, "aarch64", download)
+    assert path == tmp_path / "good" / "uv" and path.read_bytes() == b"\x7fELF uv"
+    assert path.stat().st_mode & 0o777 == 0o755 and int(path.stat().st_mtime) == epoch
+    assert urls[-1].endswith(f"/{module.UV_VERSION}/uv-{triple}.tar.gz")
+    # A verified archive without the binary, or with a link in its place, is refused too.
+    for wrong in (uv_archive(f"uv-{triple}/uvx"), uv_archive(member, link=True)):
+        monkeypatch.setitem(pins, "aarch64", (triple, hashlib.sha256(wrong).hexdigest()))
+        with pytest.raises(SystemExit):
+            module.fetch_uv(tmp_path / "wrong", 1, "aarch64", lambda url, data=wrong: data)
+        assert not (tmp_path / "wrong" / "uv").exists()
+
+
+def test_the_build_copies_the_verified_uv_onto_path() -> None:
+    module = script()
+    argv = module.mmdebstrap_argv(Path("/tmp/x.tar"), Path("/tmp/b/uv"))
+    hooks = [a.removeprefix("--customize-hook=") for a in argv if a.startswith("--customize-hook=")]
+    assert hooks[0] == "copy-in /tmp/b/uv /usr/local/bin"
+    # The copy changes the directory's date; it is reset to SOURCE_DATE_EPOCH.
+    assert hooks[1] == 'touch --no-dereference --date="@$SOURCE_DATE_EPOCH" "$1/usr/local/bin"'
+    assert hooks[2] == '"$1/usr/local/bin/uv" --version'
+    assert argv[-2:] == ["trixie", "/tmp/x.tar"]
+    # env.try puts the image's /usr/local/bin first on PATH, so `make` finds this uv.
+    assert module.UV_PATH == "/usr/local/bin/uv"
+
+
+def test_build_verifies_uv_before_running_mmdebstrap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = script()
+    calls: list[str] = []
+    monkeypatch.setattr(module.os, "geteuid", lambda: 0)
+
+    def refuse(destination: Path, epoch: int) -> Path:
+        calls.append("fetch_uv")
+        raise SystemExit("bad digest")
+
+    monkeypatch.setattr(module, "fetch_uv", refuse)
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: calls.append("mmdebstrap"))
+    with pytest.raises(SystemExit, match="bad digest"):
+        module.build(tmp_path / "toolchain", 2, None)
+    assert calls == ["fetch_uv"]
+
+    def fetched(destination: Path, epoch: int) -> Path:
+        calls.append(f"fetch_uv@{epoch}")
+        destination.mkdir(parents=True)
+        (destination / "uv").write_bytes(b"uv")
+        return destination / "uv"
+
+    def mmdebstrap(argv: list[str], env: dict[str, str], check: bool) -> None:
+        calls.append(f"mmdebstrap@{env['SOURCE_DATE_EPOCH']}")
+        assert f"--customize-hook=copy-in {destination(argv)} /usr/local/bin" in argv
+        tarball(Path(argv[-1]))
+
+    def destination(argv: list[str]) -> str:
+        return str(Path(argv[-1]).parent / "uv" / "uv")
+
+    calls.clear()
+    monkeypatch.setattr(module, "fetch_uv", fetched)
+    monkeypatch.setattr(module.subprocess, "run", mmdebstrap)
+    digest = module.build(tmp_path / "toolchain", 2, None)
+    epoch = calls[0].partition("@")[2]
+    assert calls == [f"fetch_uv@{epoch}", f"mmdebstrap@{epoch}"]
+    assert (tmp_path / "toolchain" / digest / "usr/bin/tool").exists()
 
 
 def test_an_image_unpacks_read_only_under_its_digest_and_pins(tmp_path: Path) -> None:
