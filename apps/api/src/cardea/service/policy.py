@@ -44,6 +44,10 @@ def recovery_prefix(conn: sa.Connection) -> str | None:
     return f"r{row[0]}." if row else None
 
 
+# What a supervisor may do to the tasks it supervises without the task holding the right.
+SUPERVISOR_OVERSIGHT = frozenset({"tasks.inspect", "tasks.cancel", "events.read"})
+
+
 def _missing(grant: str, holder: str) -> dict[str, str]:
     """The grant a ceiling check lacked (bounded: a resource grant carries call input)."""
     return {"grant": grant[:160], "holder": holder}
@@ -149,6 +153,14 @@ class Policy:
         binding = self.binding(task_id)
         if principal not in {binding["supervisor_id"], binding["agent_id"], binding["runtime_id"]}:
             raise Fault("task_not_found", "No accessible authenticated task", 404)
+        if principal == binding["supervisor_id"] and operation in SUPERVISOR_OVERSIGHT:
+            # The supervisor oversees its own tasks under its own live authority: inspecting,
+            # reading events or cancelling is not something the task does, so the task's
+            # grants (which need not include these rights) do not limit it.
+            namespace = str(binding["namespace"])
+            self.require(principal, namespace, operation)
+            self.require("platform", namespace, operation)
+            return binding
         return self.ceiling(task_id, operation)
 
     def admission(self, supervisor: str, request: TaskRequest, runtime: str) -> None:

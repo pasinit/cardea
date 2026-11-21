@@ -170,6 +170,7 @@ def provision(
                 "operation_not_installed", "Approval rules name an operation that is not installed"
             )
     client: DBOSClient | None = None
+    disabled: list[str] = []
     try:
         with database.engine.begin() as conn, borrow(conn) as tx:
             # Services/humans first, then logical agents whose runtime FK must exist.
@@ -193,6 +194,8 @@ def provision(
                         "identity_immutable",
                         "Provision a new principal instead of reassigning identity",
                     )
+                if principal.disabled and (old is None or not old["disabled"]):
+                    disabled.append(principal.principal_id)
                 conn.exec_driver_sql(
                     "INSERT INTO principals VALUES (?,?,?,?,?,?,?) ON CONFLICT(principal_id) "
                     "DO UPDATE SET disabled=excluded.disabled",
@@ -299,6 +302,25 @@ def provision(
             ).fetchall()
             if pending:
                 client = DBOSClient(system_database_url=database.url, use_listen_notify=False)
+                # Disabling a supervisor is a kill switch: its unfinished tasks are cancelled
+                # now, by the host owner, not left to fail at their next authority check.
+                for name in disabled:
+                    for task_id, namespace in conn.exec_driver_sql(
+                        "SELECT b.task_id,b.namespace FROM task_bindings b JOIN tasks t "
+                        "USING(task_id) WHERE b.supervisor_id=? "
+                        "AND t.state NOT IN ('succeeded','failed','cancelled')",
+                        (name,),
+                    ).fetchall():
+                        record_signal(
+                            conn,
+                            tx,
+                            client,
+                            str(task_id),
+                            str(namespace),
+                            "host-admin",
+                            f"disabled.{revision}",
+                            "cancel",
+                        )
                 for row in pending:
                     client.send_in_transaction(
                         conn,
@@ -310,6 +332,79 @@ def provision(
     finally:
         if client:
             client.destroy()
+
+
+def record_signal(
+    conn: sa.Connection,
+    tx: KernelTransaction,
+    client: DBOSClient,
+    task_id: str,
+    namespace: str,
+    principal: str,
+    request_id: str,
+    kind: str,
+    *,
+    children: Callable[[str], None] | None = None,
+) -> None:
+    """Record a cancel or resume in the caller's transaction (see `Kernel.signal`).
+
+    `children` cancels a coordinator's children; provisioning, which has no kernel,
+    passes none (the coordinator's own runtime then cancels them)."""
+    task = tx.get_task(task_id)
+    previous = conn.exec_driver_sql(
+        "SELECT kind FROM control_requests WHERE task_id=? AND request_id=?",
+        (task_id, request_id),
+    ).first()
+    if previous:
+        if previous[0] != kind:
+            raise Fault("request_conflict", "Control request ID was used for another action", 409)
+        return
+    if task.state in TERMINAL:
+        if kind == "cancel":
+            return
+        raise Fault("task_terminal", "A terminal task cannot be resumed", 409)
+    at = now()
+    profile = for_runtime(task.runtime_id)
+    # An agent run waiting for approval has no attempt to stop (ADR-036 slice 4).
+    parked = profile.workflow == AGENT_RUN_WORKFLOW and task.state is TaskState.WAITING
+    if kind == "cancel" and (
+        parked
+        or (
+            not profile.runtime_cancels
+            and not (profile.runtime_cancels_running and task.state is TaskState.RUNNING)
+        )
+    ):
+        tx.change_task(
+            task_id,
+            TaskState.CANCELLED,
+            expected_revision=task.revision,
+            lease_id=task.lease.lease_id if task.lease else None,
+            at=at,
+        )
+    event = tx.append_event(
+        namespace=namespace,
+        event_type=f"{kind}.{task_id}",
+        producer_id=principal,
+        correlation_id=request_id,
+        task_id=task_id,
+        at=at,
+    )
+    conn.exec_driver_sql(
+        "INSERT INTO control_requests VALUES (?,?,?,?)",
+        (task_id, request_id, kind, event.cursor),
+    )
+    client.send_in_transaction(
+        conn,
+        workflow_id(task_id),
+        kind,
+        topic="control",
+        idempotency_key=f"control:{task_id}:{request_id}",
+    )
+    if kind == "cancel":
+        # ADR-036: a cancelled task's pending approval request is withdrawn.
+        withdraw(conn, tx, task_id, principal, at)
+    if kind == "cancel" and profile.owns_children and children is not None:
+        children(task_id)
 
 
 class Kernel:
@@ -861,65 +956,19 @@ class Kernel:
         """Record a cancel or resume in the caller's transaction, exactly as
         `tasks.cancel`/`tasks.resume` do. Authority is the caller's to check; the kernel
         also uses it to cancel a draining group member's run (ADR-034 decision 1.5)."""
-        task = tx.get_task(task_id)
-        previous = conn.exec_driver_sql(
-            "SELECT kind FROM control_requests WHERE task_id=? AND request_id=?",
-            (task_id, request_id),
-        ).first()
-        if previous:
-            if previous[0] != kind:
-                raise Fault(
-                    "request_conflict", "Control request ID was used for another action", 409
-                )
-            return
-        if task.state in TERMINAL:
-            if kind == "cancel":
-                return
-            raise Fault("task_terminal", "A terminal task cannot be resumed", 409)
-        at = now()
-        profile = for_runtime(task.runtime_id)
-        # An agent run waiting for approval has no attempt to stop (ADR-036 slice 4).
-        parked = profile.workflow == AGENT_RUN_WORKFLOW and task.state is TaskState.WAITING
-        if kind == "cancel" and (
-            parked
-            or (
-                not profile.runtime_cancels
-                and not (profile.runtime_cancels_running and task.state is TaskState.RUNNING)
-            )
-        ):
-            tx.change_task(
-                task_id,
-                TaskState.CANCELLED,
-                expected_revision=task.revision,
-                lease_id=task.lease.lease_id if task.lease else None,
-                at=at,
-            )
-        event = tx.append_event(
-            namespace=namespace,
-            event_type=f"{kind}.{task_id}",
-            producer_id=principal,
-            correlation_id=request_id,
-            task_id=task_id,
-            at=at,
-        )
-        conn.exec_driver_sql(
-            "INSERT INTO control_requests VALUES (?,?,?,?)",
-            (task_id, request_id, kind, event.cursor),
-        )
-        self.client.send_in_transaction(
-            conn,
-            workflow_id(task_id),
-            kind,
-            topic="control",
-            idempotency_key=f"control:{task_id}:{request_id}",
-        )
-        if kind == "cancel":
-            # ADR-036: a cancelled task's pending approval request is withdrawn.
-            withdraw(conn, tx, task_id, principal, at)
-        if kind == "cancel" and profile.owns_children:
-            from cardea.service.delegation import cancel_children
+        from cardea.service.delegation import cancel_children
 
-            cancel_children(self, conn, task_id)
+        record_signal(
+            conn,
+            tx,
+            self.client,
+            task_id,
+            namespace,
+            principal,
+            request_id,
+            kind,
+            children=lambda parent: cancel_children(self, conn, parent),
+        )
 
     def close(self) -> None:
         self.client.destroy()

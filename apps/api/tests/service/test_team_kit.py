@@ -26,8 +26,9 @@ from cardea.service.database import Database, Fault, borrow
 from cardea.service.groups import apply
 from cardea.service.harnesses import IMPLICIT_ID, Catalog, Harnesses, ModelEntry, implicit_entry
 from cardea.service.kernel import Kernel, provision
-from cardea.service.models import AgentGroup, AgentRunRequest, Provisioning
+from cardea.service.models import AgentGroup, AgentRunRequest, Provisioning, Signal
 from cardea.service.operations import OperationDescriptor, Registry
+from cardea.service.policy import Policy
 from cardea.service.records import CollectionDocument, apply_collection
 
 KIT = Path(__file__).resolve().parents[4] / "deploy" / "team-kit"
@@ -445,3 +446,138 @@ def test_a_refused_repository_call_records_the_missing_grant(
     (event,) = [r for r in logs.records if r.getMessage() == "tool call refused"]
     assert event.__dict__["code"] == "task_grant_denied"
     assert event.__dict__["grant"] == "repo:guessed" and event.__dict__["holder"] == "task"
+
+
+# Kill switch, oversight, wall time, mail addresses
+
+
+def provision_team(kernel: Kernel, *, paused: bool) -> None:
+    module = kit()
+    base = {
+        "principals": [
+            {
+                "principal_id": "runtime",
+                "kind": "service",
+                "auth_kind": "spiffe",
+                "issuer": "test",
+                "subject": "runtime",
+            }
+        ],
+        "permissions": [],
+        "platform": [],
+    }
+    fragment = module.provisioning_fragment(host(), paused=paused)
+    document = module.merge_provisioning(base, fragment, "dev")
+    provision(kernel.database, Provisioning.model_validate(document), kernel.operations)
+
+
+def test_disabling_the_supervisor_cancels_its_unfinished_runs(
+    team: tuple[Kernel, FakeSession],
+) -> None:
+    kernel, session = team
+    queued = member_run(kernel, "dev-team.tl.0")
+    provision_team(kernel, paused=True)
+    with kernel.database.read() as conn:
+        requests = conn.exec_driver_sql(
+            "SELECT kind,request_id FROM control_requests WHERE task_id=?", (queued,)
+        ).all()
+    assert [(kind, rid.split(".")[0]) for kind, rid in requests] == [("cancel", "disabled")]
+    # The run never starts a session, and pausing again does not signal again.
+    assert AgentRunRuntime(kernel).execute(queued) in {"cancelled", "failed"}
+    assert session.requests == []
+    provision_team(kernel, paused=True)
+    with kernel.database.read() as conn:
+        assert (
+            conn.exec_driver_sql(
+                "SELECT COUNT(*) FROM control_requests WHERE task_id=?", (queued,)
+            ).scalar_one()
+            == 1
+        )
+
+
+def test_the_supervisor_oversees_its_members_runs(team: tuple[Kernel, FakeSession]) -> None:
+    """A member run's grants hold no task rights; its supervisor still inspects, reads
+    events and cancels it under its own authority, and nothing more."""
+    kernel, _ = team
+    task_id = member_run(kernel, "dev-team.dev.0")
+    supervisor = kernel.auth.validate("sup-dev")
+    assert kernel.inspect(supervisor, task_id).task.task_id == task_id
+    with kernel.database.read() as conn:
+        Policy(conn).access("sup-dev", task_id, "events.read")
+        with pytest.raises(Fault) as resume:
+            Policy(conn).access("sup-dev", task_id, "tasks.resume")
+        assert resume.value.code == "task_grant_denied"
+        with pytest.raises(Fault) as member:
+            Policy(conn).access("dev-team.dev.0", task_id, "tasks.cancel")
+        assert member.value.code == "task_grant_denied"  # the member cannot cancel itself
+    cancelled = kernel.control(supervisor, task_id, Signal(request_id="stop-1"), "cancel")
+    assert cancelled.task.task_id == task_id
+    with kernel.database.read() as conn, pytest.raises(Fault) as outsider:
+        # Another member of the group is not this run's supervisor.
+        Policy(conn).access("dev-team.pe.0", task_id, "tasks.inspect")
+    assert outsider.value.code == "task_not_found"
+
+
+def test_pause_disables_first_even_when_the_kernel_cannot_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = kit()
+    calls: list[bool] = []
+
+    def unreachable(host: dict[str, Any]) -> dict[str, Any]:
+        raise OSError("kernel socket unavailable")
+
+    monkeypatch.setattr(module, "overview", unreachable)
+    monkeypatch.setattr(module, "provision", lambda host, paused: calls.append(paused))
+    assert module.pause(example()) == [] and calls == [True]
+    monkeypatch.setattr(module, "client", lambda host: (_ for _ in ()).throw(OSError("down")))
+    runs, problem = module.stop(example())
+    assert runs == [] and problem is not None and calls == [True, True]
+
+
+def test_status_shows_a_paused_team(monkeypatch: pytest.MonkeyPatch) -> None:
+    from cardea.service.client import ClientError
+
+    module = kit()
+
+    def disabled(host: dict[str, Any]) -> dict[str, Any]:
+        raise ClientError("principal_disabled", 403)
+
+    monkeypatch.setattr(module, "overview", disabled)
+    assert module.status(example())[0].startswith("team paused")
+    monkeypatch.setattr(
+        module, "overview", lambda host: (_ for _ in ()).throw(ClientError("x", 500))
+    )
+    with pytest.raises(ClientError):
+        module.status(example())
+
+
+def test_run_timeouts_must_fit_the_session_wall_time(tmp_path: Path) -> None:
+    module = kit()
+    workers = tmp_path / "workers.json"
+    workers.write_text(json.dumps({"profiles": {"session": {"wall_seconds": 1800}}}))
+    document = {**example(), "workers_config": str(workers)}
+    problems = module.wall_problems(document)
+    assert [p.split(":")[0] for p in problems] == ["dev", "pm"]
+    with pytest.raises(module.HostError, match="session wall time"):
+        module.check_walls(document)
+    fitted = {**document, "run_timeouts": {"dev": 1700, "pm": 1800}}
+    assert module.wall_problems(fitted) == []
+    group = module.group_document(fitted)
+    bounds = {p["name"]: p["run"]["bounds"]["timeout_seconds"] for p in group["spec"]["pools"]}
+    assert bounds == {"pm": 1800, "tl": 900, "dev": 1700, "pe": 1800}
+    # Without a readable workers file the check cannot run and refuses nothing.
+    assert module.wall_problems({**example(), "workers_config": str(tmp_path / "none")}) == []
+
+
+def test_roles_are_told_the_pool_addresses_they_may_mail() -> None:
+    group = kit().group_document(example())
+    for pool in group["spec"]["pools"]:
+        granted = sorted(g.removeprefix("mail:") for g in pool["grants"] if g.startswith("mail:"))
+        named = sorted(
+            part.split('"')[3]
+            for part in pool["run"]["instructions"].split("`")
+            if part.startswith('{"pool"')
+        )
+        assert named == granted, pool["name"]
+        assert "never to a member" in pool["run"]["instructions"]

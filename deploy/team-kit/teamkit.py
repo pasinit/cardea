@@ -38,7 +38,6 @@ import os
 import re
 import subprocess
 import sys
-import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -109,6 +108,24 @@ def repository_note(host: dict[str, Any], operations: list[str]) -> str:
 def _names(host: dict[str, Any]) -> tuple[str, str, str, str]:
     group = str(host.get("group", "dev-team"))
     return str(host["namespace"]), group, str(host["supervisor"]["principal_id"]), group
+
+
+ROLE_NAMES = {
+    "pm": "product manager",
+    "tl": "team lead",
+    "dev": "developers",
+    "pe": "principal engineer",
+}
+# Run timeouts per role (seconds); a host file may override them with `run_timeouts`.
+DEFAULT_TIMEOUTS = {"pm": 3600, "tl": 900, "dev": 3600, "pe": 1800}
+
+
+def mail_note(group: str, pools: tuple[str, ...]) -> str:
+    """The exact addresses a role may mail: its grants are pool addresses, not members."""
+    if not pools:
+        return ""
+    targets = ", ".join(f'`{{"pool": "{group}.{pool}"}}` ({ROLE_NAMES[pool]})' for pool in pools)
+    return f" Send mail only to these pool addresses, never to a member: {targets}."
 
 
 def _mail(group: str, *pools: str) -> list[str]:
@@ -254,9 +271,19 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
     if harness:
         base.append(f"harness:{harness}")
 
-    def run(instructions: str, operations: list[str], timeout: int, **extra: Any) -> dict[str, Any]:
+    timeouts = {**DEFAULT_TIMEOUTS, **(host.get("run_timeouts") or {})}
+
+    def run(
+        instructions: str,
+        operations: list[str],
+        timeout: int,
+        mail_to: tuple[str, ...] = (),
+        **extra: Any,
+    ) -> dict[str, Any]:
         template: dict[str, Any] = {
-            "instructions": instructions + repository_note(host, operations),
+            "instructions": instructions
+            + repository_note(host, operations)
+            + mail_note(group, mail_to),
             "operations": [*operations, "mailbox.send"],
             "context": [
                 {"operation": "mailbox.inbox"},
@@ -309,7 +336,8 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
                 "file every failure or rough edge you find as a work item with what you saw. "
                 "Do not file duplicates of open items. Tell the team lead what you filed.",
                 pm_ops,
-                3600,
+                int(timeouts["pm"]),
+                ("tl",),
             ),
             "triggers": [*(schedule(c) for c in schedules["pm"]), _mail_trigger()],
             "spend": spend("pm"),
@@ -333,7 +361,8 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
                 "too large, cancel what is not worth doing, and triage the next item for the "
                 "developers when they have nothing ready. Record decisions. Answer mail.",
                 ["records.query", "records.create", "records.update", "records.transition"],
-                900,
+                int(timeouts["tl"]),
+                ("dev", "pm", "pe"),
             ),
             "triggers": [
                 *(schedule(c) for c in schedules["tl"]),
@@ -381,7 +410,8 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
                     "vcs.read_change",
                     "vcs.merge",
                 ],
-                3600,
+                int(timeouts["dev"]),
+                ("tl", "pe"),
                 context=[{"operation": "records.claimed", "arguments": {"collection": "work"}}],
             ),
             "triggers": [
@@ -421,7 +451,8 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
                     "vcs.review",
                     "vcs.comment",
                 ],
-                1800,
+                int(timeouts["pe"]),
+                ("dev", "tl"),
             ),
             "triggers": [_state_trigger(state="in_review"), _mail_trigger()],
             "spend": spend("pe"),
@@ -516,6 +547,41 @@ def email_fragment(host: dict[str, Any]) -> dict[str, Any]:
     return {"roles": {f"{group}.pm": {"recipients": [email["alias"]], "rate_limit": limit}}}
 
 
+def session_wall(host: dict[str, Any]) -> int | None:
+    """The installed session profile's `wall_seconds`, if the workers file is readable.
+
+    `workers_config` (default `/etc/cardea-host-workers.json`) and `session_profile`
+    (default `session`) name the confined profile the team's sessions run under."""
+    path = Path(host.get("workers_config", "/etc/cardea-host-workers.json"))
+    try:
+        profiles = json.loads(path.read_text())["profiles"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    wall = (profiles.get(str(host.get("session_profile", "session"))) or {}).get("wall_seconds")
+    return wall if type(wall) is int else None
+
+
+def wall_problems(host: dict[str, Any]) -> list[str]:
+    """Roles whose run timeout exceeds the session profile's wall time: the confined worker
+    would be killed mid-run (for example during a coding session)."""
+    wall = session_wall(host)
+    if wall is None:
+        return []
+    timeouts = {**DEFAULT_TIMEOUTS, **(host.get("run_timeouts") or {})}
+    return [
+        f"{role}: run timeout {int(seconds)} s exceeds the session profile's wall_seconds "
+        f"{wall} s; lower run_timeouts.{role} or raise the profile's wall_seconds"
+        for role, seconds in sorted(timeouts.items())
+        if int(seconds) > wall
+    ]
+
+
+def check_walls(host: dict[str, Any]) -> None:
+    problems = wall_problems(host)
+    if problems:
+        raise HostError("run timeouts exceed the session wall time: " + "; ".join(problems))
+
+
 def render(host: dict[str, Any], out: Path) -> list[Path]:
     out.mkdir(parents=True, exist_ok=True)
     documents = {
@@ -579,6 +645,8 @@ def check_placeholders(host: dict[str, Any]) -> None:
 
 def provision(host: dict[str, Any], *, paused: bool) -> Path:
     check_placeholders(host)
+    if not paused:
+        check_walls(host)
     namespace = str(host["namespace"])
     settings = host.get("provisioning") or {}
     base = Path(settings.get("base", "/etc/cardea/provision.base.json"))
@@ -599,6 +667,7 @@ def provision(host: dict[str, Any], *, paused: bool) -> Path:
 
 def apply(host: dict[str, Any]) -> list[str]:
     check_placeholders(host)
+    check_walls(host)
     namespace, group, _, _ = _names(host)
     done = []
     kernel = client(host)
@@ -647,44 +716,65 @@ def summarise(view: dict[str, Any]) -> list[str]:
     return lines
 
 
-def pause(host: dict[str, Any]) -> list[str]:
-    """Cancel every unfinished member run, then disable the supervisor (the kill switch)."""
-    cancelled = cancel_runs(host)
-    provision(host, paused=True)
-    return cancelled
-
-
-def cancel_runs(host: dict[str, Any]) -> list[str]:
-    """Cancel every member's unfinished run, while the supervisor still has authority."""
-    cancelled = []
-    view = overview(host)
-    kernel = client(host)
+def active_runs(host: dict[str, Any]) -> list[str]:
+    """Member runs that are unfinished, as far as the supervisor can still see. Never
+    raises: the kill switch must not depend on the kernel answering."""
     try:
-        for pool in view.get("pools", []):
-            for member in pool.get("members", []):
-                task = member.get("active_task_id")
-                if task:
-                    kernel.request(
-                        "POST", f"/tasks/{task}/cancel", json={"request_id": str(uuid.uuid4())}
-                    )
-                    cancelled.append(str(task))
-    finally:
-        kernel.close()
-    return cancelled
+        view = overview(host)
+    except Exception:
+        return []
+    return [
+        str(member["active_task_id"])
+        for pool in view.get("pools", [])
+        for member in pool.get("members", [])
+        if member.get("active_task_id")
+    ]
 
 
-def stop(host: dict[str, Any]) -> list[str]:
-    """Cancel the runs, delete the group (its members drain), then disable the supervisor."""
+def pause(host: dict[str, Any]) -> list[str]:
+    """The kill switch: disable the supervisor. Provisioning a disabled supervisor makes the
+    kernel cancel every unfinished task it supervises, so running sessions stop and no
+    trigger admits again. Returns the runs that were active (read beforehand, best effort)."""
+    runs = active_runs(host)
+    provision(host, paused=True)
+    return runs
+
+
+def stop(host: dict[str, Any]) -> tuple[list[str], str | None]:
+    """Delete the group (its members drain), then disable the supervisor even if the
+    deletion failed. Deleting needs the supervisor's authority, so it comes first; the
+    supervisor always ends disabled, which cancels whatever is still running."""
     _, group, _, _ = _names(host)
     namespace = str(host["namespace"])
-    cancelled = cancel_runs(host)
-    kernel = client(host)
+    runs = active_runs(host)
+    problem: str | None = None
     try:
-        kernel.request("DELETE", f"/groups/{group}", params={"namespace": namespace})
+        kernel = client(host)
+        try:
+            kernel.request("DELETE", f"/groups/{group}", params={"namespace": namespace})
+        finally:
+            kernel.close()
+    except Exception as error:
+        problem = f"{type(error).__name__}: {error}"
     finally:
-        kernel.close()
-    provision(host, paused=True)
-    return cancelled
+        provision(host, paused=True)
+    return runs, problem
+
+
+def status(host: dict[str, Any]) -> list[str]:
+    """The team's overview, or a clear paused view when the supervisor is disabled."""
+    from cardea.service.client import ClientError
+
+    try:
+        return summarise(overview(host))
+    except ClientError as error:
+        if error.code != "principal_disabled":
+            raise
+        return [
+            "team paused: the supervisor is disabled, so no run is admitted and the kernel "
+            "cancelled the runs that were unfinished when it was paused",
+            "resume with `teamkit.py resume --host <host file>`",
+        ]
 
 
 def main(argv: list[str]) -> int:
@@ -700,6 +790,10 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
     host = load_host(args.host)
     if args.command == "render":
+        for warning in wall_problems(host):
+            print(f"WARNING: {warning}", file=sys.stderr)
+        if session_wall(host) is None:
+            print("note: the session profile's wall time is unknown; check it", file=sys.stderr)
         for path in render(host, args.out):
             print(path)
     elif args.command == "provision":
@@ -707,14 +801,23 @@ def main(argv: list[str]) -> int:
     elif args.command == "apply":
         print("\n".join(apply(host)))
     elif args.command == "status":
-        print("\n".join(summarise(overview(host))))
+        print("\n".join(status(host)))
     elif args.command == "pause":
-        print(f"cancelled {len(pause(host))} run(s); the supervisor is disabled")
+        runs = pause(host)
+        print(f"the supervisor is disabled; the kernel cancelled its {len(runs)} active run(s)")
+        print("\n".join(f"  {run}" for run in runs))
     elif args.command == "resume":
         provision(host, paused=False)
         print("the supervisor is enabled; triggers admit again")
     elif args.command == "stop":
-        print(f"group deleted; cancelled {len(stop(host))} run(s); the supervisor is disabled")
+        runs, problem = stop(host)
+        if problem:
+            message = f"the group was not deleted ({problem}); delete it after `resume`"
+            print(message, file=sys.stderr)
+        else:
+            print("group deleted")
+        print(f"the supervisor is disabled; the kernel cancelled its {len(runs)} active run(s)")
+        return 1 if problem else 0
     return 0
 
 

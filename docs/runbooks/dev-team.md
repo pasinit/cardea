@@ -114,12 +114,15 @@ To change a ceiling, edit `budgets` in the host file and `apply` again. The doll
 $KIT pause --host $H
 ```
 
-1. **Cancel.** It cancels every member's unfinished run.
-2. **Disable.** It provisions the supervisor disabled. Every member's authority is checked live against its supervisor, so no new run is admitted, no trigger fires, and any tool call still in flight is refused at its next check.
+It provisions the supervisor disabled, and nothing else; this is the first and only step, so nothing can stop it.
 
-Nothing else is changed. Collections, records, claims and mail stay as they were.
+- Provisioning a newly disabled supervisor makes the kernel cancel every unfinished task that supervisor oversees, in the same transaction. A running session stops within seconds.
+- Every member's authority is checked live against its supervisor, so no new run is admitted and no trigger fires.
+- The kit lists the runs that were active, read beforehand on a best-effort basis. A kernel that cannot answer does not stop the pause.
 
-If the kit's client cannot reach the kernel, the second step alone is the kill switch: set the supervisor's `disabled: true` in the provisioning document and run `cardea provision`.
+Nothing else is changed. Collections, records, claims and mail stay as they were. While paused, `status` prints "team paused" instead of an overview, because the disabled supervisor cannot read it.
+
+If the kit itself cannot run, the same kill switch is to set the supervisor's `disabled: true` in the provisioning document and run `cardea provision`.
 
 ## Resume
 
@@ -135,9 +138,8 @@ This provisions the supervisor enabled. Triggers admit again from their next slo
 $KIT stop --host $H
 ```
 
-1. **Cancel.** It cancels the runs.
-2. **Delete.** It deletes the group, so its members drain and are removed.
-3. **Disable.** It disables the supervisor.
+1. **Delete.** It deletes the group, so its members drain and are removed. This needs the supervisor's authority, so it comes first.
+2. **Disable.** It always disables the supervisor, even if the deletion failed, and that cancels whatever is still running. If the deletion failed, `stop` says so and exits 1: `resume`, then delete the group.
 
 The `work` and `decisions` collections stay, for the record. Delete them with `DELETE /v0.2/collections/<name>` if wanted.
 
