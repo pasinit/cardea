@@ -66,7 +66,7 @@ def test_the_example_renders_valid_documents(tmp_path: Path) -> None:
     assert vcs["credentials"]["pools"] == {"dev-team.pe": "github-reviewer"}
     assert vcs["allow_approve"] == ["dev-team.pe"]
     email = json.loads((tmp_path / "email.team.json").read_text())
-    assert email["roles"]["dev-team.pm"]["recipients"] == ["owner"]
+    assert email["roles"]["dev-team.pm"]["recipients"] == ["client"]
 
 
 def test_the_triggers_are_the_planned_ones() -> None:
@@ -176,6 +176,92 @@ def test_role_instructions_name_the_repository_and_branch_from_the_host_file() -
     plain = kit().group_document({**example(), "repository": "widgets"})
     pm = next(p for p in plain["spec"]["pools"] if p["name"] == "pm")
     assert "default branch is `main`" in pm["run"]["instructions"]
+
+
+def pools_of(document: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {p["name"]: p for p in kit().group_document(document)["spec"]["pools"]}
+
+
+def test_the_product_goals_reach_the_product_manager_and_in_short_the_team_lead() -> None:
+    module = kit()
+    document = example()
+    goals = "Serve small teams.\n" + "\n".join(f"- Outcome {i}: measurable." for i in range(80))
+    document["product"] = {"goals": goals, "non_goals": "- No mobile app."}
+    pools = pools_of(document)
+    pm, tl = pools["pm"]["run"]["instructions"], pools["tl"]["run"]["instructions"]
+    assert pm.endswith("Non-goals (never build these):\n- No mobile app.")
+    assert "Product goals (from the host owner):\n" + goals in pm
+    # It designs and decides features itself, filed with problem, behaviour and criteria.
+    assert "without waiting for approval" in pm
+    assert all(w in pm for w in ("user problem", "proposed behaviour", "acceptance criteria"))
+    # The team lead gets the first lines only, within the summary bound.
+    assert "Serve small teams." in tl and "Outcome 79" not in tl and "No mobile app" not in tl
+    summary = tl.split("Product goals, in short (prioritise by them):\n", 1)[1]
+    assert len(summary.encode()) <= module.MAX_GOALS_SUMMARY
+    assert summary.endswith("(shortened; the product manager has the full goals)")
+    # Without goals, the product manager only tests, and nothing about goals is rendered.
+    del document["product"]
+    plain = pools_of(document)
+    assert "Product goals" not in plain["pm"]["run"]["instructions"]
+    assert "Product goals" not in plain["tl"]["run"]["instructions"]
+    assert "without waiting for approval" not in plain["pm"]["run"]["instructions"]
+
+
+def test_goals_can_come_from_a_file_beside_the_host_file(tmp_path: Path) -> None:
+    module = kit()
+    document = example()
+    document["product"] = {"goals_file": "goals.md"}
+    (tmp_path / "goals.md").write_text("# Goals\nShip the importer.\n")
+    host = tmp_path / "team.host.json"
+    host.write_text(json.dumps(document))
+    loaded = module.load_host(host)
+    assert loaded["product"]["goals_file"] == str(tmp_path / "goals.md")
+    pm = pools_of(loaded)["pm"]["run"]["instructions"]
+    assert pm.endswith("Product goals (from the host owner):\n# Goals\nShip the importer.")
+
+
+@pytest.mark.parametrize(
+    ("section", "message"),
+    [
+        ({"goals": "x" * 8193}, "over 8192 bytes"),
+        ({"goals": "x" * 6000, "non_goals": "y" * 3000}, "over 8192 bytes"),
+        ({"goals_file": "big.md"}, "over 8192 bytes"),
+        ({"goals_file": "missing.md"}, "cannot be read"),
+        ({"goals": "a", "goals_file": "goals.md"}, "exactly one"),
+        ({"non_goals": "a"}, "exactly one"),
+        ({"goals": "   "}, "non-empty"),
+        ({"goals": "ok\x1b[31m"}, "control characters"),
+        ({"goals": "ok", "owner": "me"}, "takes goals or goals_file"),
+        ("ship it", "takes goals or goals_file"),
+    ],
+)
+def test_oversize_or_malformed_goals_are_refused(
+    tmp_path: Path, section: object, message: str
+) -> None:
+    module = kit()
+    (tmp_path / "big.md").write_text("g" * 9000)
+    document = {**example(), "product": section}
+    host = tmp_path / "team.host.json"
+    host.write_text(json.dumps(document))
+    with pytest.raises(module.HostError, match=message):
+        module.load_host(host)
+
+
+def test_the_email_policy_is_rendered_only_when_the_pm_may_email() -> None:
+    document = example()
+    pm = pools_of(document)["pm"]
+    assert "email.send" in pm["grants"] and "email.send" in pm["run"]["operations"]
+    text = pm["run"]["instructions"]
+    assert "email.send to `client`" in text and '"X or Y?"' in text
+    assert "never wait for it and never let it block work" in text
+    assert "Never email status reports" in text and "at most 3 emails every 7 days" in text
+    del document["email"]
+    plain = pools_of(document)["pm"]
+    assert "email.send" not in plain["grants"] and "email.send" not in plain["run"]["operations"]
+    assert "email" not in plain["run"]["instructions"].lower()
+    # Nobody but the product manager is told to email the client.
+    others = pools_of(example())
+    assert all("email.send" not in others[n]["run"]["instructions"] for n in ("tl", "dev", "pe"))
 
 
 def test_the_host_file_refuses_an_invalid_default_branch(tmp_path: Path) -> None:

@@ -11,6 +11,10 @@
   "timezone": "UTC",
   "repository": "cardea",
   "default_branch": "main",
+  "product": {
+    "goals": "Replace these placeholder goals with your product's own.\n- Who the product is for, and the problem it solves for them.\n- The outcomes that matter most this quarter, in priority order.\n- What a first-time user must be able to do without help.",
+    "non_goals": "- Features the team must not build, even if asked.\n- Platforms, integrations or audiences out of scope for now."
+  },
   "harness": "claude",
   "model": "claude-sonnet-4-5",
   "developers": 2,
@@ -21,7 +25,7 @@
     "reviewer_login": "reviewer-login.example"
   },
   "email": {
-    "alias": "owner",
+    "alias": "client",
     "rate_limit": {
       "count": 3,
       "window_days": 7
