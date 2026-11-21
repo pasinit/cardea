@@ -23,6 +23,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from types import TracebackType
 
+from cardea.runtime.harness import PROXY_VARIABLES
 from cardea_vcs_ops.credentials import Credential
 
 # Answers git's username and password prompts from the child's environment.
@@ -97,6 +98,8 @@ class Workspace:
             "GIT_TERMINAL_PROMPT": "0",
             "GIT_CONFIG_NOSYSTEM": "1",
             "CARDEA_GIT_TOKEN": self._credential.token,
+            # Inside a confined worker the profile's egress proxy is the only route out.
+            **{name: os.environ[name] for name in PROXY_VARIABLES if name in os.environ},
         }
 
     def prepare(self) -> None:

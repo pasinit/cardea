@@ -28,6 +28,7 @@ from importlib.metadata import entry_points
 from pathlib import Path
 from typing import Any
 
+from cardea.runtime.activity import scrub
 from cardea.service.content_gate import remote_check
 from cardea.service.operations import (
     ENTRY_POINT_GROUP,
@@ -39,6 +40,8 @@ from cardea.service.operations import (
 )
 
 MAX_INPUT = 131072
+# A failed handler's message, scrubbed, for the kernel log only (never a receipt).
+MAX_MESSAGE = 512
 
 
 def main(argv: list[str]) -> int:
@@ -126,8 +129,15 @@ def run(handler: Any, document: dict[str, Any]) -> dict[str, Any]:
     except OperationRejected as rejected:
         return {"rejected": str(rejected)[:256], "code": rejected.code}
     except Exception as error:
-        # Describe the failure without its message, which may carry URLs or secrets.
-        return {"error": {"type": type(error).__name__, "status": http_status(error)}}
+        # The receipt gets the type and status only; the message, which may carry URLs or
+        # secrets, is scrubbed and bounded here and again by the kernel, and only logged.
+        return {
+            "error": {
+                "type": type(error).__name__,
+                "status": http_status(error),
+                "message": scrub(str(error))[:MAX_MESSAGE],
+            }
+        }
     if isinstance(output, Reconciliation):
         # A reconciler's observation (ADR-026): read-only, so it carries no artifacts.
         return {"output": {"applied": output.applied, "output": output.output}}

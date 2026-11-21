@@ -5,6 +5,7 @@ import importlib.util
 import json
 import time
 from collections.abc import Iterator
+from datetime import timedelta
 from pathlib import Path
 from types import ModuleType
 from typing import Any, cast
@@ -16,6 +17,7 @@ from cardea_vcs_ops import in_process_descriptors
 from mcp.client.session import ClientSession
 from test_agent_runs import FakeSession, call
 
+from cardea.kernel.models import DispatchLease, TaskState
 from cardea.runtime.agent_session import SessionRequest, SessionResult
 from cardea.service import agent_run_runtime, journal
 from cardea.service import kernel as handlers
@@ -26,7 +28,7 @@ from cardea.service.database import Database, Fault, borrow
 from cardea.service.groups import apply
 from cardea.service.harnesses import IMPLICIT_ID, Catalog, Harnesses, ModelEntry, implicit_entry
 from cardea.service.kernel import Kernel, provision
-from cardea.service.models import AgentGroup, AgentRunRequest, Provisioning, Signal
+from cardea.service.models import AgentGroup, AgentRunRequest, Provisioning, Signal, now
 from cardea.service.operations import OperationDescriptor, Registry
 from cardea.service.policy import Policy
 from cardea.service.records import CollectionDocument, apply_collection
@@ -476,14 +478,38 @@ def test_disabling_the_supervisor_cancels_its_unfinished_runs(
 ) -> None:
     kernel, session = team
     queued = member_run(kernel, "dev-team.tl.0")
+    second = member_run(kernel, "dev-team.dev.0")
+    # An attempt that lost its worker: running, with a lease that has expired.
+    interrupted = member_run(kernel, "dev-team.dev.1")
+    with kernel.database.engine.begin() as conn, borrow(conn) as tx:
+        task = tx.get_task(interrupted)
+        start = now()
+        tx.change_task(
+            interrupted,
+            TaskState.RUNNING,
+            expected_revision=task.revision,
+            at=start,
+            lease=DispatchLease(
+                lease_id="lease-lost",
+                worker_id="runtime",
+                acquired_at=start,
+                expires_at=start + timedelta(milliseconds=50),
+            ),
+        )
+    time.sleep(0.1)
     provision_team(kernel, paused=True)
     with kernel.database.read() as conn:
         requests = conn.exec_driver_sql(
             "SELECT kind,request_id FROM control_requests WHERE task_id=?", (queued,)
         ).all()
     assert [(kind, rid.split(".")[0]) for kind, rid in requests] == [("cancel", "disabled")]
-    # The run never starts a session, and pausing again does not signal again.
-    assert AgentRunRuntime(kernel).execute(queued) in {"cancelled", "failed"}
+    # Nothing has to run for the status to be true: no runtime picks these up while the
+    # supervisor is disabled, so the cancel itself makes them terminal.
+    with kernel.database.engine.begin() as conn, borrow(conn) as tx:
+        states = [tx.get_task(t).state for t in (queued, second, interrupted)]
+    assert states == [TaskState.CANCELLED] * 3
+    # A runtime that reaches a run later finds it settled and starts no session.
+    assert AgentRunRuntime(kernel).execute(queued) == "cancelled"
     assert session.requests == []
     provision_team(kernel, paused=True)
     with kernel.database.read() as conn:

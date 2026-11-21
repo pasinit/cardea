@@ -580,16 +580,20 @@ def test_operation_worker_speaks_json_on_stdin_and_stdout(
     async def missing(arguments: dict[str, Any], context: OperationContext) -> dict[str, Any]:
         raise HTTPStatusError()
 
-    # Class name and status only: the message may carry URLs or secrets.
+    # The message may carry URLs or secrets: it is scrubbed here, and only ever logged.
     assert run_worker(monkeypatch, capsys, missing) == {
-        "error": {"type": "HTTPStatusError", "status": 404}
+        "error": {
+            "type": "HTTPStatusError",
+            "status": 404,
+            "message": "GET https://api.invalid/?token=[redacted] 404",
+        }
     }
 
     async def broken(arguments: dict[str, Any], context: OperationContext) -> dict[str, Any]:
-        raise KeyError("s3cret")
+        raise KeyError("url")
 
     assert run_worker(monkeypatch, capsys, broken) == {
-        "error": {"type": "KeyError", "status": None}
+        "error": {"type": "KeyError", "status": None, "message": "'url'"}
     }
 
 

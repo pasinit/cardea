@@ -35,7 +35,7 @@ from cardea.kernel.models import (
 from cardea.kernel.store import KernelTransaction, StoreError
 from cardea.service import approval_requests, invocation, mailbox
 from cardea.service.approvals import ApprovalRequirement
-from cardea.service.confined import WorkerFailed
+from cardea.service.confined import WorkerFailed, log_failure
 from cardea.service.database import Fault, borrow
 from cardea.service.kernel import TERMINAL, Kernel
 from cardea.service.models import RECORD_OPERATIONS, OperationTaskRequest, now
@@ -400,9 +400,9 @@ class OperationRuntime:
             )
         except WorkerFailed as failed:
             # The confined worker started: an effect may have happened (ADR-028).
-            log.warning("confined worker failed: %s", failed.code, extra={"task_id": task_id})
+            log_failure(failed, task_id=task_id)
             if effect:
-                return self.uncertain(task_id, operation_id)
+                return self.uncertain(task_id, operation_id, invocation.classify(failed, timeout))
             return self.settle(
                 task_id, None, invocation.classify(failed, timeout), started, operation_id
             )
@@ -456,7 +456,12 @@ class OperationRuntime:
         except (StoreError, ContractError):
             return False
 
-    def uncertain(self, task_id: str, operation_id: str = EXECUTE) -> str:
+    def uncertain(
+        self,
+        task_id: str,
+        operation_id: str = EXECUTE,
+        failure: invocation.Failure | None = None,
+    ) -> str:
         # Never infer a result: fence the lease, then let recovery require reconciliation.
         while True:
             with self.kernel.database.engine.begin() as conn, borrow(conn) as tx:
@@ -474,7 +479,12 @@ class OperationRuntime:
                         task_id, expected_revision=task.revision, at=now()
                     ).state.value
                 invocation.uncertain(
-                    conn, tx, task, lease_id=task.lease.lease_id, operation_id=operation_id
+                    conn,
+                    tx,
+                    task,
+                    lease_id=task.lease.lease_id,
+                    operation_id=operation_id,
+                    failure=failure,
                 )
             time.sleep(0.1)
 
@@ -697,7 +707,10 @@ class OperationRuntime:
                 failure=None
                 if observed.applied
                 else KernelFailure(
-                    code="effect_not_applied", message="Destination shows no effect"
+                    code="effect_not_applied",
+                    message="Destination shows no effect",
+                    # What the interrupted call reported (ADR-026), kept after reconciliation.
+                    details=receipt.failure.details if receipt.failure else {},
                 ),
             )
             conn.exec_driver_sql(
