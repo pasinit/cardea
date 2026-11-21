@@ -120,16 +120,36 @@ ROLE_NAMES = {
 DEFAULT_TIMEOUTS = {"pm": 3600, "tl": 900, "dev": 3600, "pe": 1800}
 
 
-def mail_note(group: str, pools: tuple[str, ...]) -> str:
-    """The exact addresses a role may mail: its grants are pool addresses, not members."""
-    if not pools:
+def mail_note(group: str, pools: tuple[str, ...], holders: tuple[str, ...] = ()) -> str:
+    """The exact addresses a role may mail: pool addresses, and for a role that answers
+    developers, each developer's own address. Pool mail wakes every member of the pool, so
+    an answer about one item goes only to the developer holding it."""
+    if not pools and not holders:
         return ""
-    targets = ", ".join(f'`{{"pool": "{group}.{pool}"}}` ({ROLE_NAMES[pool]})' for pool in pools)
-    return f" Send mail only to these pool addresses, never to a member: {targets}."
+    note = ""
+    if pools:
+        targets = ", ".join(
+            f'`{{"pool": "{group}.{pool}"}}` ({ROLE_NAMES[pool]})' for pool in pools
+        )
+        note = f" Send mail only to these pool addresses, never to a member: {targets}."
+    if holders:
+        own = ", ".join(f'`{{"instance": "{member}"}}`' for member in holders)
+        note += (
+            " About an item, mail only the developer holding it (the item's holder), at its "
+            f"own address: one of {own}. Never mail all the developers about one item; if "
+            "nobody holds it, write the answer into the item instead."
+        )
+    return note
 
 
 def _mail(group: str, *pools: str) -> list[str]:
     return [f"mail:{group}.{pool}" for pool in pools]
+
+
+def developers(host: dict[str, Any]) -> tuple[str, ...]:
+    """Each developer's own principal ID, `<group>.dev.<n>`, as the group names members."""
+    group = str(host.get("group", "dev-team"))
+    return tuple(f"{group}.dev.{n}" for n in range(int(host.get("developers", 2))))
 
 
 def work_collection(host: dict[str, Any]) -> dict[str, Any]:
@@ -277,6 +297,7 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
     schedules = {**DEFAULT_SCHEDULES, **(host.get("schedules") or {})}
     scenarios = list((host.get("env_try") or {}).get("scenarios", ["try"]))
     email = bool((host.get("email") or {}).get("alias"))
+    devs = developers(host)
     base = ["objects.read", "objects.write", "models.invoke", "mailbox.send", "mailbox.inbox"]
     harness = host.get("harness")
     if harness:
@@ -289,12 +310,13 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
         operations: list[str],
         timeout: int,
         mail_to: tuple[str, ...] = (),
+        holders: tuple[str, ...] = (),
         **extra: Any,
     ) -> dict[str, Any]:
         template: dict[str, Any] = {
             "instructions": instructions
             + repository_note(host, operations)
-            + mail_note(group, mail_to),
+            + mail_note(group, mail_to, holders),
             "operations": [*operations, "mailbox.send"],
             "context": [
                 {"operation": "mailbox.inbox"},
@@ -365,15 +387,18 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
                 "record:work/cancel",
                 "record:decisions/create",
                 "record:decisions/read",
-                *_mail(group, "dev", "pm", "pe"),
+                *_mail(group, "pm", "pe"),
+                *(f"mail:{member}" for member in devs),
             ],
             "run": run(
                 "You are the team lead. Plan: keep the open work prioritised, split work that is "
                 "too large, cancel what is not worth doing, and triage the next item for the "
-                "developers when they have nothing ready. Record decisions. Answer mail.",
+                "developers when they have nothing ready. Record decisions. Answer mail. A "
+                "developer with nothing to do needs no answer: triage an item instead.",
                 ["records.query", "records.create", "records.update", "records.transition"],
                 int(timeouts["tl"]),
-                ("dev", "pm", "pe"),
+                ("pm", "pe"),
+                devs,
             ),
             "triggers": [
                 *(schedule(c) for c in schedules["tl"]),
@@ -389,7 +414,7 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
         },
         {
             "name": "dev",
-            "replicas": int(host.get("developers", 2)),
+            "replicas": len(devs),
             "grants": [
                 *base,
                 "record:work/read",
@@ -413,7 +438,9 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
                 "coding session, push the change, open a pull request and submit the item. "
                 "Pass the item's record_id to vcs.push_branch, vcs.open_change and vcs.merge: "
                 "submit records the pull request number on the item (data.change) from your "
-                "vcs.open_change call. If you are blocked, tell the team lead.",
+                "vcs.open_change call. If you hold no item and none is ready, stop at once and "
+                "send no mail: there is nothing to report, and the team lead triages work on "
+                "its own. If you are blocked on an item you hold, tell the team lead once.",
                 [
                     "records.query",
                     "records.transition",
@@ -449,7 +476,8 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
                 "vcs.review",
                 "vcs.comment",
                 f"repo:{repo}",
-                *_mail(group, "dev", "tl"),
+                *_mail(group, "tl"),
+                *(f"mail:{member}" for member in devs),
             ],
             "run": run(
                 "You are the principal engineer. Review each item in review: its pull request "
@@ -473,7 +501,8 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
                     "vcs.comment",
                 ],
                 int(timeouts["pe"]),
-                ("dev", "tl"),
+                ("tl",),
+                devs,
             ),
             "triggers": [_state_trigger(state="in_review"), _mail_trigger()],
             "spend": spend("pe"),

@@ -212,7 +212,13 @@ def open_pull(kernel: Kernel, session: FakeSession, tmp_path: Path, member: str)
             ("vcs-push_branch", {"repository": "cardea", "branch": branch, **change}),
             (
                 "vcs-open_change",
-                {"repository": "cardea", "head": branch, "base": "main", "title": "Change"},
+                {
+                    "repository": "cardea",
+                    "head": branch,
+                    "base": "main",
+                    "title": "Change",
+                    "body": "What changed and why.",
+                },
             ),
         ],
     )
@@ -305,6 +311,29 @@ def test_the_opener_merges_an_approved_green_pull_request(
     (review,) = repo.reviews[number]
     assert review["user"]["login"] == OWNER and review["commit_id"] == head
     assert pull["user"]["login"] == BOT
+    # The squash commit is the pull request's title and number, and its description.
+    assert pull["commit_title"] == f"Change (#{number})"
+    assert pull["commit_message"] == "What changed and why."
+    # The merged agent branch is deleted.
+    assert output["head_deleted"] is True and repo.head(pull["head"]["ref"]) is None
+
+
+def test_a_merged_branch_outside_the_agent_prefix_is_kept(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path
+) -> None:
+    number = approved_and_green(kernel, session, host, tmp_path)
+    repo = host.repositories["acme/cardea"]
+    pull = repo.pull(number)
+    assert pull is not None
+    # As if a person had opened it from their own branch.
+    subprocess.run(
+        ["git", "-C", str(repo.path), "branch", "people/fix", pull["head"]["sha"]], check=True
+    )
+    pull["head"]["ref"] = "people/fix"
+    merged = merge(kernel, session, "eng.dev.0", number)
+    assert not merged.is_error, text(merged)
+    assert merged.structured_content["head_deleted"] is False
+    assert repo.head("people/fix") is not None and "delete_branch" not in host.calls
 
 
 @pytest.mark.parametrize(
@@ -396,7 +425,9 @@ def test_an_interrupted_merge_is_reconciled_against_the_host(
     assert settled == "succeeded" and host.calls.count("merge") == 1
     with kernel.database.read() as conn, borrow(conn) as tx:
         (receipt,) = [r for r in tx.list_operations(task_id) if r.request.name == "vcs.merge"]
-    assert cast(Any, receipt.result)["output"]["merged"] is True
+    output = cast(Any, receipt.result)["output"]
+    # The interrupted call never reached the deletion; the reconciler reports the branch.
+    assert output["merged"] is True and output["head_deleted"] is False
 
 
 # Per-caller credentials

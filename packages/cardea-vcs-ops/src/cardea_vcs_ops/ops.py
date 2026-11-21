@@ -565,13 +565,16 @@ class Vcs:
                         "The host does not report the pull request as mergeable",
                         "merge_not_mergeable",
                     )
-                merged = await host.merge(number, head)
+                # The squash commit says what changed, not how the bot committed it.
+                title = f"{str(pull.get('title') or '').strip() or 'Change'} (#{number})"
+                merged = await host.merge(number, head, title, str(pull.get("body") or ""))
             except HostRefused as refused:
                 if refused.status == 409:
                     raise OperationRejected(
                         "The head moved before the merge", "merge_head_moved"
                     ) from None
                 raise OperationRejected(str(refused), "host_refused") from None
+            deleted = await self._delete_head(host, pull, context, arguments["repository"])
         return {
             "number": number,
             "merged": True,
@@ -579,7 +582,25 @@ class Vcs:
             "head_sha": head,
             "opened_receipt": str(opener.get("receipt_id")),
             "approval_receipt": str(at_head[0].get("receipt_id")),
+            "head_deleted": deleted,
         }
+
+    async def _delete_head(
+        self, host: GitHub, pull: dict[str, Any], context: OperationContext, alias: object
+    ) -> bool:
+        """After a merge, delete its head branch if it is an agent branch of the caller's
+        group (the only branches agents push), so merged agent branches do not pile up.
+        Best effort: the merge already happened, so a refusal shows only as
+        `head_deleted: false`."""
+        branch = str(pull["head"]["ref"])
+        try:
+            self.check_branch(branch, context, alias)
+        except OperationRejected:
+            return False  # not an agent branch: left alone
+        try:
+            return await host.delete_branch(branch)
+        except (HostRefused, httpx.HTTPError):
+            return False
 
     async def find_merge(
         self, arguments: dict[str, JsonValue], context: OperationContext
@@ -589,13 +610,16 @@ class Vcs:
         number = int(str(arguments["number"]))
         async with await self.client(repository, context, "contents:write") as host:
             pull = await host.pull(number)
-        if not pull.get("merged"):
-            return Reconciliation(applied=False)
+            if not pull.get("merged"):
+                return Reconciliation(applied=False)
+            # Whether the head branch is gone: an interrupted merge may have left it.
+            gone = await host.branch_head(str(pull["head"]["ref"])) is None
         output: dict[str, JsonValue] = {
             "number": number,
             "merged": True,
             "sha": str(pull.get("merge_commit_sha") or ""),
             "head_sha": str(pull["head"]["sha"]),
+            "head_deleted": gone,
         }
         return Reconciliation(applied=True, output=output)
 

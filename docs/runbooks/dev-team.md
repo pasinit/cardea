@@ -14,6 +14,8 @@ Every trigger refuses double work:
 - **Members.** A member runs one run at a time. Events that arrive meanwhile coalesce into one follow-up.
 - **Events and slots.** One event or schedule slot admits at most one run per member.
 
+Mail to a pool wakes every member of that pool. So the team lead and the PE hold no grant to mail the whole developer pool. They answer about an item by mailing its holder at the holder's own address (`<group>.dev.<n>`); the kit grants one address per developer. A developer that holds no item and finds none ready stops without sending mail.
+
 A transition that needs evidence cites a receipt. `submit` needs the run's `vcs.open_change`, and it copies the pull request number from that call onto the item as `data.change`, where the PE finds it. `approve` needs the PE's `vcs.review` with `state == APPROVED`, and `request_changes` needs one with `state == CHANGES_REQUESTED`. `merge` needs the developer's `vcs.merge`. Each of these calls passes the item's `record_id`.
 
 ## What the host needs first

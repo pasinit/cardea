@@ -2,7 +2,7 @@
   "tool": {
     "name": "vcs.merge",
     "title": "Merge your pull request",
-    "description": "Squash-merge a pull request you opened, once an allowed reviewer approved its current head and every check passed. Refused, with nothing sent, otherwise. Needs repo:<alias>.",
+    "description": "Squash-merge a pull request you opened, once an allowed reviewer approved its current head and every check passed. The squash commit takes the pull request's title (with its number) and description; an agent head branch is deleted after the merge. Refused, with nothing sent, otherwise. Needs repo:<alias>.",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
@@ -22,7 +22,7 @@
         "sha": {"type": "string"},
         "head_sha": {"type": "string"},
         "opened_receipt": {"type": "string"},
-        "approval_receipt": {"type": "string"}
+        "approval_receipt": {"type": "string"}, "head_deleted": {"type": "boolean"}
       },
       "required": ["number", "merged", "sha", "head_sha"]
     }

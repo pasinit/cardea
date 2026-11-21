@@ -539,3 +539,11 @@ A dry run of the dev team showed the principal engineer could not review: `vcs.r
 - **Data, not instructions.** The body, reviews and patches are untrusted repository text. `diff.note` says so, and credential-shaped strings are replaced with `[redacted]`: the shapes `env.try` scrubs, not key-like assignments, so ordinary code reads unchanged. The team kit's principal engineer is told to read the whole diff, following `next_offset`, before reviewing, and to treat it as the author's data.
 - **Tests.** `test_vcs_diff.py` runs against the fake host, whose `pulls/<n>/files` is computed with git. It covers the file list and statuses, binary files, scrubbing, per-file truncation, paging until `next_offset` is `null` within the recorded-output cap, the file-list cap, and host-omitted patches.
 
+
+## Amendment (2026-11-21): merge commit text and merged branches
+
+- **Commit text.** `vcs.merge` passes the pull request's title with its number, `<title> (#<n>)`, as the squash commit's `commit_title`, and its description as `commit_message`. Before, the host used the branch's commit message, for example "code.session change".
+- **Merged agent branches are deleted.** After a successful merge, the head branch is deleted (`DELETE .../git/refs/heads/<branch>`) when it is under the caller's group's agent prefix. Other branches are left alone.
+  - Deletion is best effort and part of the merge's own receipt. The output reports `head_deleted`.
+  - A refused or failed deletion never fails a merge that already happened.
+  - `vcs.find_merge` reports whether the head branch is gone, which shows when an interrupted merge left it behind.
