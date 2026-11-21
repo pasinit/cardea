@@ -17,6 +17,11 @@ approve its own pull request. `checks` holds each commit's check runs. `PUT
 mergeable, and the base's `pull_request` rule holds: enough approvals of the current head
 by accounts other than the author.
 
+`pulls/<n>/files` lists a pull request's changed files as GitHub does, computed with git
+from the base and head branches (`patch` holds only the hunks and is omitted for binary
+files); `files` overrides it per pull request, for shapes git cannot produce cheaply, such
+as a file too large for the host to show.
+
 `fail_after` makes the fake apply a request and then drop the connection, the case that
 leaves an effect in doubt: for example `{"create_pull"}` creates the pull request and then
 raises `httpx.ConnectError`, as a crash after the host acted would look to the kernel.
@@ -54,6 +59,8 @@ class FakeRepository:
     rulesets: list[dict[str, Any]] = field(default_factory=list)
     # Commit SHA to its check runs: `{"name", "status", "conclusion"}`.
     checks: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    # Pull request number to its changed files, overriding the git-computed list.
+    files: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
 
     def pass_checks(self, sha: str, *names: str) -> None:
         self.checks[sha] = [
@@ -82,6 +89,36 @@ class FakeRepository:
                 map(matches, ruleset.get("exclude", ()))
             ):
                 found += [{**rule, "ruleset_id": number} for rule in ruleset["rules"]]
+        return found
+
+    def changed_files(self, number: int) -> list[dict[str, Any]]:
+        if number in self.files:
+            return self.files[number]
+        pull = self.pull(number)
+        assert pull is not None
+        span = f"refs/heads/{pull['base']['ref']}...{pull['head']['sha']}"
+
+        def git(*args: str) -> str:
+            return subprocess.run(
+                ["git", "-C", str(self.path), *args], capture_output=True, text=True, check=True
+            ).stdout
+
+        statuses = {"A": "added", "M": "modified", "D": "removed", "R": "renamed"}
+        found = []
+        for line in git("diff", "--no-renames", "--numstat", span).splitlines():
+            added, deleted, path = line.split("\t", 2)
+            status = git("diff", "--no-renames", "--name-status", span, "--", path).split("\t")[0]
+            entry: dict[str, Any] = {
+                "filename": path,
+                "status": statuses.get(status[:1], "modified"),
+                "additions": 0 if added == "-" else int(added),
+                "deletions": 0 if deleted == "-" else int(deleted),
+            }
+            entry["changes"] = entry["additions"] + entry["deletions"]
+            if added != "-":
+                text = git("diff", "--no-renames", span, "--", path)
+                entry["patch"] = text[text.index("@@") :].rstrip("\n") if "@@" in text else ""
+            found.append(entry)
         return found
 
     def head(self, branch: str) -> str | None:
@@ -181,6 +218,14 @@ class FakeGitHub:
             if pull is None:
                 return httpx.Response(404, json={"message": "Not Found"})
             return httpx.Response(200, json=pull)
+        if len(rest) == 3 and rest[0] == "pulls" and rest[2] == "files" and method == "GET":
+            number = int(rest[1])
+            if repo.pull(number) is None:
+                return httpx.Response(404, json={"message": "Not Found"})
+            page = int(request.url.params.get("page", "1"))
+            per = int(request.url.params.get("per_page", "30"))
+            items = repo.changed_files(number)
+            return httpx.Response(200, json=items[(page - 1) * per : page * per])
         if len(rest) == 3 and rest[0] == "commits" and rest[2] == "check-runs" and method == "GET":
             page = int(request.url.params.get("page", "1"))
             runs = repo.checks.get(rest[1], []) if page == 1 else []
