@@ -12,15 +12,42 @@ import tempfile
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from cardea.runtime import activity as activities
 from cardea.runtime.activity import AttemptActivity
-from cardea.runtime.harness import Harness, HarnessRequest, HarnessResult, tool_timeout_ms
+from cardea.runtime.harness import (
+    PROXY_VARIABLES,
+    Harness,
+    HarnessRequest,
+    HarnessResult,
+    tool_timeout_ms,
+)
 
-# Inherited variables a session may keep; all others are blanked (secrets included).
-INHERITED = frozenset({"PATH", "LANG", "LC_ALL", "TZ", "SSL_CERT_FILE", "SSL_CERT_DIR"})
+# Inherited variables a session may keep; all others are blanked (secrets included). Inside
+# a confined worker the proxy variables are the only route to the model API.
+INHERITED = frozenset(
+    {"PATH", "LANG", "LC_ALL", "TZ", "SSL_CERT_FILE", "SSL_CERT_DIR", *PROXY_VARIABLES}
+)
 # Name of the MCP server entry; Claude Code exposes its tools as mcp__cardea__<tool>.
 SERVER_NAME = "cardea"
+
+
+def direct_endpoint(mcp_url: str) -> dict[str, str]:
+    """NO_PROXY values that keep the tool endpoint off the proxy, when a proxy is set.
+
+    The worker's profile already lists the endpoint address in NO_PROXY; this only adds the
+    endpoint's host if a proxy is configured without it, and adds nothing otherwise.
+    """
+    if not any(os.environ.get(name) for name in PROXY_VARIABLES[:4]):
+        return {}
+    host = urlsplit(mcp_url).hostname or ""
+    values = {}
+    for name in ("NO_PROXY", "no_proxy"):
+        listed = [part.strip() for part in os.environ.get(name, "").split(",") if part.strip()]
+        if host and host not in listed:
+            values[name] = ",".join([*listed, host])
+    return values
 
 
 # The first harness predates the harness contract; its names remain as aliases.
@@ -107,6 +134,9 @@ class ClaudeAgentSession:
                 "DISABLE_AUTOUPDATER": "1",
                 "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
                 **({"MCP_TOOL_TIMEOUT": str(timeout)} if timeout is not None else {}),
+                # Explicit rather than left to the SDK's merge of the parent environment.
+                **{name: os.environ[name] for name in PROXY_VARIABLES if name in os.environ},
+                **direct_endpoint(request.mcp_url),
             },
         }
 

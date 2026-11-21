@@ -34,7 +34,7 @@ import httpx
 
 from cardea.runtime import activity as activities
 from cardea.runtime.activity import AttemptActivity
-from cardea.runtime.harness import HarnessRequest, HarnessResult, tool_timeout_ms
+from cardea.runtime.harness import PROXY_VARIABLES, HarnessRequest, HarnessResult, tool_timeout_ms
 
 log = logging.getLogger(__name__)
 
@@ -45,20 +45,7 @@ KEY_VARIABLE = "CARDEA_PROVIDER_KEY"
 TOKEN_VARIABLE = "CARDEA_MCP_TOKEN"
 # Locale, certificates and, inside a confined worker, the profile's egress proxy (ADR-028
 # sets these; NO_PROXY keeps the loopback tool endpoint direct).
-INHERITED = (
-    "PATH",
-    "LANG",
-    "LC_ALL",
-    "TZ",
-    "SSL_CERT_FILE",
-    "SSL_CERT_DIR",
-    "HTTPS_PROXY",
-    "HTTP_PROXY",
-    "https_proxy",
-    "http_proxy",
-    "NO_PROXY",
-    "no_proxy",
-)
+INHERITED = ("PATH", "LANG", "LC_ALL", "TZ", "SSL_CERT_FILE", "SSL_CERT_DIR", *PROXY_VARIABLES)
 DISABLED = (
     "AUTOUPDATE",
     "MODELS_FETCH",

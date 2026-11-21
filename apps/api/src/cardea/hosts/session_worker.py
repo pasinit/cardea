@@ -22,14 +22,19 @@ import json
 import logging
 import os
 import sys
+from collections import deque
 from pathlib import Path
 from typing import Any
 
+from cardea.runtime import activity as activities
 from cardea.runtime.agent_session import ClaudeAgentSession
 from cardea.runtime.harness import Harness, HarnessRequest, HarnessResult
 from cardea.runtime.opencode import OpenCodeHarness, Price
 
 MAX_INPUT = 262144
+# A failed session reports this much of the harness's own output (already scrubbed).
+TAIL_LINES = 20
+TAIL_LINE_BYTES = 512
 
 
 class Refused(Exception):
@@ -77,35 +82,71 @@ def opencode(document: dict[str, Any]) -> Harness:
 KINDS = {"claude-agent-sdk": claude, "opencode": opencode}
 
 
-def quiet_logging() -> None:
-    """Drop the harness adapters' log records inside the worker.
+class Tail(logging.Handler):
+    """Keeps the last few log records of the harness adapters, for a failed session.
+
+    Harness output reaches the log through `AttemptActivity.harness_output`, which scrubs
+    registered and credential-shaped secrets before logging.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.lines: deque[str] = deque(maxlen=TAIL_LINES)
+
+    def emit(self, record: logging.LogRecord) -> None:
+        text = record.getMessage()
+        # Numeric outcome fields of attempt events (e.g. a process's return code).
+        for name in ("returncode", "signal"):
+            value = record.__dict__.get(name)
+            if isinstance(value, int):
+                text += f" {name}={value}"
+        self.lines.append(text.encode()[:TAIL_LINE_BYTES].decode(errors="ignore"))
+
+
+def quiet_logging() -> Tail:
+    """Keep the harness adapters' log records off stderr inside the worker.
 
     The unit duplicates stdout (the JSON result file) onto stderr, so anything written to
     stderr would corrupt the result; Python's last-resort handler would otherwise print
-    warnings there.
+    warnings there. The records go to a bounded tail that a failed result carries.
     """
+    tail = Tail()
     root = logging.getLogger("cardea")
-    root.handlers[:] = [logging.NullHandler()]
+    root.handlers[:] = [tail]
+    root.setLevel(logging.INFO)
     root.propagate = False
+    return tail
+
+
+def run(document: dict[str, Any], kind: str, attempt: activities.AttemptActivity) -> HarnessResult:
+    try:
+        harness = KINDS[kind](document)
+    except Refused as refused:
+        return HarnessResult.failed(str(refused))
+    request = HarnessRequest.model_validate({**document["request"], "model": document.get("model")})
+    attempt.redact(credential(), request.mcp_token)
+    try:
+        return asyncio.run(harness.run(request))
+    except Exception as error:
+        # Reported, not raised: an uncaught exception leaves only "exit status 1".
+        attempt.event(f"harness error: {type(error).__name__}: {error}", logging.ERROR)
+        return HarnessResult.failed("harness_error")
 
 
 def main() -> int:
-    quiet_logging()
+    tail = quiet_logging()
     document = json.loads(sys.stdin.buffer.read(MAX_INPUT + 1)[:MAX_INPUT])
     kind = os.environ.get("CARDEA_HARNESS_KIND", "claude-agent-sdk")
     if kind not in KINDS:
         print("unknown harness kind", file=sys.stderr)
         return 2
-    try:
-        harness = KINDS[kind](document)
-    except Refused as refused:
-        result = HarnessResult.failed(str(refused))
-    else:
-        request = HarnessRequest.model_validate(
-            {**document["request"], "model": document.get("model")}
-        )
-        result = asyncio.run(harness.run(request))
-    print(json.dumps({"output": result.model_dump(mode="json")}))
+    with activities.bind(activities.AttemptActivity("worker", 0)) as attempt:
+        result = run(document, kind, attempt)
+        output: dict[str, Any] = result.model_dump(mode="json")
+        if not result.success:
+            # Scrubbed again with every secret this worker knows (credential, tool token).
+            output["diagnostics"] = [attempt.scrub(line) for line in tail.lines]
+    print(json.dumps({"output": output}))
     return 0
 
 

@@ -119,6 +119,12 @@ class AttemptActivity:
             # Longest first, so a secret containing another is replaced whole.
             self._secrets = tuple(sorted(known, key=len, reverse=True))
 
+    def scrub(self, text: str) -> str:
+        """`text` with every registered secret and credential-shaped substring replaced."""
+        with self._lock:
+            secrets = self._secrets
+        return scrub(text, secrets)
+
     # Harness process
 
     def process_started(self, pid: int | None, argv: list[str] | None = None) -> None:

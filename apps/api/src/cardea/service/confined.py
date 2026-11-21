@@ -62,11 +62,19 @@ class WorkerFailed(Exception):
     """The worker started, or may have started, and produced no result.
 
     ``reason`` and ``summary`` are bounded, sanitized descriptions for receipts and agents.
+    ``tail`` is the end of what the worker printed, scrubbed, for the kernel log only.
     """
 
-    def __init__(self, code: str, reason: str = "worker_exit", summary: str = "") -> None:
+    def __init__(
+        self,
+        code: str,
+        reason: str = "worker_exit",
+        summary: str = "",
+        tail: tuple[str, ...] = (),
+    ) -> None:
         super().__init__(code)
         self.code, self.reason, self.summary = code, reason, summary or code
+        self.tail = tail
 
 
 class WorkerNotStarted(OperationRejected):
@@ -106,6 +114,21 @@ def _result(status: dict[str, Any]) -> dict[str, Any]:
     return output
 
 
+TAIL_LINES = 20
+TAIL_BYTES = 4096
+
+
+def _tail(status: dict[str, Any]) -> tuple[str, ...]:
+    """The last lines a failed worker printed (its stderr shares the output file), scrubbed."""
+    try:
+        output = base64.b64decode(str(status.get("output", "")), validate=True)
+    except (ValueError, binascii.Error):
+        return ()
+    text = output[-TAIL_BYTES:].decode(errors="replace")
+    lines = [line for line in text.splitlines() if line.strip()][-TAIL_LINES:]
+    return tuple(activities.scrub(line) for line in lines)
+
+
 def _credential_not_loaded(status: dict[str, Any]) -> bool:
     """bwrap could not bind the unit's LoadCredential file: systemd never created it."""
     try:
@@ -137,6 +160,7 @@ def _document(status: dict[str, Any]) -> tuple[dict[str, Any], object | None]:
             "worker_failed",
             "worker_exit",
             f"exit status {_word(status.get('exit_status'))}, systemd result {_word(result)}",
+            tail=_tail(status),
         )
     try:
         document = json.loads(base64.b64decode(str(status.get("output", "")), validate=True))
@@ -590,8 +614,15 @@ class ConfinedAgentSession:
                 reason=failed.summary,
                 job=job,
             )
+            for line in failed.tail:
+                activity.harness_output(line, stream="worker", level=logging.WARNING)
             return HarnessResult.failed(failed.code)
         activity.event("confined session finished", job=job)
+        diagnostics = output.get("diagnostics") if isinstance(output, dict) else None
+        if isinstance(diagnostics, list):
+            # A failed session's own scrubbed log tail; harness_output bounds and scrubs again.
+            for line in diagnostics[:TAIL_LINES]:
+                activity.harness_output(str(line), stream="worker", level=logging.WARNING)
         try:
             fields = {
                 key: output[key]
