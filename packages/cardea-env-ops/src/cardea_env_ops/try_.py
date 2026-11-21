@@ -42,6 +42,7 @@ from typing import Any
 from pydantic import JsonValue
 
 from cardea.hosts import isolation
+from cardea.runtime.harness import PROXY_VARIABLES
 from cardea.service import repositories
 from cardea.service.operations import OperationContext, OperationRejected, WithArtifacts
 
@@ -54,7 +55,7 @@ MAX_ARTIFACTS_TOTAL = 1024 * 1024
 MAX_ARTIFACT_FILES = 8
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
 BASE_PATH = "/usr/local/bin:/usr/bin:/bin"
-PROXY = ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy", "NO_PROXY", "no_proxy")
+PROXY = PROXY_VARIABLES
 # Never set for a scenario: anything that could carry a credential.
 CREDENTIAL_NAMES = re.compile(
     r"^(GH_|GITHUB_|GIT_|GITLAB_|GITEA_|AWS_|GOOGLE_|AZURE_)|TOKEN|SECRET|PASSWORD|"

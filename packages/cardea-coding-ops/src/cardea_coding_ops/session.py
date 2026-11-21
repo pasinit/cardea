@@ -36,6 +36,7 @@ from typing import Any
 from pydantic import JsonValue
 
 from cardea.hosts import isolation
+from cardea.runtime.harness import PROXY_VARIABLES
 from cardea.service import repositories
 from cardea.service.database import Fault
 from cardea.service.operations import OperationContext, OperationRejected, WithArtifacts
@@ -124,7 +125,7 @@ def fixed_env(values: object) -> dict[str, str]:
 # The helper tells the worker what its profile allows (`CARDEA_REGISTRIES`, launcher), and
 # a setting that disagrees is refused with `dependencies_mismatch` before anything runs.
 DEPENDENCIES = ("cache", "registries")
-PROXY_NAMES = ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy", "NO_PROXY", "no_proxy")
+PROXY_NAMES = PROXY_VARIABLES
 # The helper's egress proxies listen on 127.0.10.0/24 (ADR-028); nothing else is accepted.
 PROXY_URL = re.compile(r"http://127\.0\.10\.\d{1,3}:\d{1,5}")
 REGISTRIES_ENV = "CARDEA_REGISTRIES"

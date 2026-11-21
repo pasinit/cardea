@@ -77,6 +77,19 @@ class WorkerFailed(Exception):
         self.tail = tail
 
 
+def log_failure(failed: WorkerFailed, **extra: Any) -> None:
+    """Log a failed worker's code, reason and summary, then its scrubbed tail (kernel log only)."""
+    log.warning(
+        "confined worker failed: %s (%s: %s)",
+        failed.code,
+        failed.reason,
+        failed.summary,
+        extra={**extra, "code": failed.code, "reason": failed.reason},
+    )
+    for line in failed.tail:
+        log.warning("confined worker output: %s", line, extra={**extra, "stream": "worker"})
+
+
 class WorkerNotStarted(OperationRejected):
     """The helper refused the job, or it was stopped before it started: nothing ran."""
 
@@ -116,6 +129,8 @@ def _result(status: dict[str, Any]) -> dict[str, Any]:
 
 TAIL_LINES = 20
 TAIL_BYTES = 4096
+# A worker-reported handler message (operation_worker), logged, never put on a receipt.
+MESSAGE_CHARS = 512
 
 
 def _tail(status: dict[str, Any]) -> tuple[str, ...]:
@@ -179,9 +194,17 @@ def _document(status: dict[str, Any]) -> tuple[dict[str, Any], object | None]:
         kind = error.get("type")
         kind = kind if isinstance(kind, str) and re.fullmatch(r"[A-Za-z_][\w.]{0,63}", kind) else ""
         http = error.get("status")
+        message = error.get("message")
+        tail = (
+            (activities.scrub(" ".join(message[:MESSAGE_CHARS].split())),)
+            if isinstance(message, str) and message.strip()
+            else ()
+        )
         if type(http) is int and 100 <= http <= 599:
-            raise WorkerFailed("worker_error", "upstream_http_error", f"{kind} (HTTP {http})")
-        raise WorkerFailed("worker_error", "error", kind or "handler error")
+            raise WorkerFailed(
+                "worker_error", "upstream_http_error", f"{kind} (HTTP {http})", tail=tail
+            )
+        raise WorkerFailed("worker_error", "error", kind or "handler error", tail=tail)
     if (
         isinstance(document, dict)
         and set(document) in ({"output"}, {"output", "artifacts"})

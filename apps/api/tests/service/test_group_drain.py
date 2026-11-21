@@ -132,10 +132,11 @@ def test_a_busy_member_finishes_its_run_until_the_drain_timeout(
     assert rows(
         kernel, "SELECT kind,request_id FROM control_requests WHERE task_id=?", task_id
     ) == [("cancel", "drain.desk.worker.1.2")]
-    assert members(kernel)["desk.worker.1"] == ("draining", 0)
+    # The run had not started, so the cancel settled it: a runtime that reaches it later
+    # starts no session.
+    assert task_state(kernel, task_id) == "cancelled"
     session.scripts = [done]
-    AgentRunRuntime(kernel).execute(task_id)
-    assert task_state(kernel, task_id) in {"cancelled", "failed"}
+    assert AgentRunRuntime(kernel).execute(task_id) == "cancelled"
     # The next tick removes the member and observes the generation.
     at = datetime.now(UTC) + timedelta(seconds=720)
     Scheduler(kernel, lambda: at).tick()

@@ -43,7 +43,13 @@ from cardea.service.models import (
     now,
 )
 from cardea.service.operation_runtime import OperationRuntime
-from cardea.service.operations import OperationDescriptor, OperationRejected, Registry
+from cardea.service.operations import (
+    OperationContext,
+    OperationDescriptor,
+    OperationRejected,
+    Reconciliation,
+    Registry,
+)
 
 INSTALLED = {
     "profiles": {
@@ -836,7 +842,7 @@ def test_queue_expiry_is_a_distinct_retryable_failure(kernel: Kernel, host: Work
             "KeyError",
         ),
         (
-            finished({"error": {"type": "Bad\nType token=abc", "status": 99}}),
+            finished({"error": {"type": "Bad\nType token=abc", "status": 99, "message": "m"}}),
             "worker_error",
             "error",
             "handler error",
@@ -862,6 +868,44 @@ def test_failed_read_receipt_records_the_reason(kernel: Kernel, host: WorkerHost
         "reason": "upstream_http_error",
         "summary": "HTTPStatusError (HTTP 503)",
     }
+
+
+def test_a_worker_error_is_logged_and_its_reason_survives_reconciliation(
+    kernel: Kernel,
+    host: WorkerHost,
+    monkeypatch: pytest.MonkeyPatch,
+    logs: pytest.LogCaptureFixture,
+) -> None:
+    secret = "z" * 16
+    host.outcome = finished(
+        {
+            "error": {
+                "type": "RuntimeError",
+                "status": None,
+                "message": f"git fetch from the host failed\nwith status 128 token={secret}",
+            }
+        }
+    )
+    task_id = submit(kernel, "pages.post")
+    assert OperationRuntime(kernel).execute(task_id) == "failed"
+    uncertain = receipt(kernel, task_id)
+    assert uncertain.state is OperationState.OUTCOME_UNKNOWN
+    reason = {"reason": "error", "summary": "RuntimeError"}
+    assert uncertain.failure.details == reason
+    # The kernel log says what failed; the message is scrubbed and stays off the receipt.
+    text = logs.text
+    assert "confined worker failed: worker_error (error: RuntimeError)" in text
+    assert "git fetch from the host failed with status 128" in text
+    assert secret not in text and "git fetch" not in json.dumps(uncertain.failure.details)
+
+    async def absent(arguments: dict[str, Any], context: OperationContext) -> Reconciliation:
+        return Reconciliation(applied=False)
+
+    monkeypatch.setattr(kernel, "reconciler", lambda name: absent)
+    assert OperationRuntime(kernel).reconcile(task_id, "execute") == "failed"
+    settled = receipt(kernel, task_id)
+    assert settled.failure.code == "effect_not_applied"
+    assert settled.failure.details == reason
 
 
 # Abandoned calls: the agent's MCP client gave up on a call
