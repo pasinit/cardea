@@ -683,6 +683,34 @@ def test_submit_records_the_pull_request_and_reviews_drive_the_item(
     assert "data.change" in pe["run"]["instructions"]
 
 
+def test_events_refused_while_paused_wake_the_members_on_resume(
+    team: tuple[Kernel, FakeSession],
+) -> None:
+    kernel, session = team
+    ready_item(kernel, session)
+    provision_team(kernel, paused=True)
+    # The item became ready, but the team is paused: refused, not consumed.
+    journal.Dispatcher(kernel).tick()
+    journal.Dispatcher(kernel).tick()
+    developers = ("dev-team.dev.0", "dev-team.dev.1")
+    assert [admitted(kernel, d) for d in developers] == [[], []]
+    with kernel.database.read() as conn:
+        refusals = conn.exec_driver_sql(
+            "SELECT trigger_id, code FROM trigger_deliveries WHERE outcome='refused' "
+            "AND trigger_id LIKE 'dev-team.dev.%' ORDER BY trigger_id"
+        ).all()
+    # One refusal each, however many ticks pass while paused.
+    assert [tuple(r) for r in refusals] == [
+        ("dev-team.dev.0.t0", "principal_disabled"),
+        ("dev-team.dev.1.t0", "principal_disabled"),
+    ]
+    provision_team(kernel, paused=False)
+    journal.Dispatcher(kernel).tick()
+    assert [len(admitted(kernel, d)) for d in developers] == [1, 1]
+    journal.Dispatcher(kernel).tick()  # each kept event wakes its member once
+    assert [len(admitted(kernel, d)) for d in developers] == [1, 1]
+
+
 def test_the_supervisor_oversees_its_members_runs(team: tuple[Kernel, FakeSession]) -> None:
     """A member run's grants hold no task rights; its supervisor still inspects, reads
     events and cancels it under its own authority, and nothing more."""
@@ -758,14 +786,82 @@ def test_run_timeouts_must_fit_the_session_wall_time(tmp_path: Path) -> None:
     assert module.wall_problems({**example(), "workers_config": str(tmp_path / "none")}) == []
 
 
-def test_roles_are_told_the_pool_addresses_they_may_mail() -> None:
+def test_roles_are_told_the_addresses_they_may_mail() -> None:
     group = kit().group_document(example())
     for pool in group["spec"]["pools"]:
         granted = sorted(g.removeprefix("mail:") for g in pool["grants"] if g.startswith("mail:"))
         named = sorted(
             part.split('"')[3]
             for part in pool["run"]["instructions"].split("`")
-            if part.startswith('{"pool"')
+            if part.startswith(('{"pool"', '{"instance"'))
         )
         assert named == granted, pool["name"]
         assert "never to a member" in pool["run"]["instructions"]
+    # Nobody mails the whole developer pool: one item's answer goes to its holder only.
+    pools = {p["name"]: p for p in group["spec"]["pools"]}
+    assert all("mail:dev-team.dev" not in p["grants"] for p in pools.values())
+    for name in ("tl", "pe"):
+        assert {"mail:dev-team.dev.0", "mail:dev-team.dev.1"} <= set(pools[name]["grants"])
+        assert "mail only the developer holding it" in pools[name]["run"]["instructions"]
+    assert "stop at once and send no mail" in pools["dev"]["run"]["instructions"]
+
+
+def test_a_team_lead_answer_about_an_item_wakes_only_its_holder(
+    team: tuple[Kernel, FakeSession],
+) -> None:
+    kernel, session = team
+    record_id = ready_item(kernel, session)
+
+    async def start(client: ClientSession, request: SessionRequest) -> SessionResult:
+        started = await call(
+            client,
+            "records-transition",
+            collection="work",
+            record_id=record_id,
+            transition="start",
+        )
+        assert not started.is_error, started.content
+        return SessionResult(text="Started.", is_error=False)
+
+    session.scripts = [start]
+    assert AgentRunRuntime(kernel).execute(member_run(kernel, "dev-team.dev.1")) == "succeeded"
+    # The item's earlier events wake the developers; let those runs finish first.
+    journal.Dispatcher(kernel).tick()
+
+    async def idle(client: ClientSession, request: SessionRequest) -> SessionResult:
+        return SessionResult(text="Nothing to do.", is_error=False)
+
+    woken = [*admitted(kernel, "dev-team.dev.0"), *admitted(kernel, "dev-team.dev.1")]
+    session.scripts = [idle] * len(woken)
+    for task_id in woken:
+        AgentRunRuntime(kernel).execute(task_id)
+    before = {d: len(admitted(kernel, d)) for d in ("dev-team.dev.0", "dev-team.dev.1")}
+
+    async def answer(client: ClientSession, request: SessionRequest) -> SessionResult:
+        to_pool = await call(
+            client,
+            "mailbox-send",
+            client_key="answer-pool",
+            to={"pool": "dev-team.dev"},
+            parts=[{"text": "Use the existing helper."}],
+        )
+        assert to_pool.is_error  # the lead holds no grant to mail every developer
+        to_holder = await call(
+            client,
+            "mailbox-send",
+            client_key="answer-holder",
+            to={"instance": "dev-team.dev.1"},
+            parts=[{"text": "Use the existing helper."}],
+            record={"collection": "work", "record_id": record_id},
+        )
+        assert not to_holder.is_error, to_holder.content
+        return SessionResult(text="Answered.", is_error=False)
+
+    session.scripts = [answer]
+    assert AgentRunRuntime(kernel).execute(member_run(kernel, "dev-team.tl.0")) == "succeeded"
+    journal.Dispatcher(kernel).tick()
+    after = {d: len(admitted(kernel, d)) for d in before}
+    assert after == {
+        "dev-team.dev.0": before["dev-team.dev.0"],
+        "dev-team.dev.1": before["dev-team.dev.1"] + 1,
+    }

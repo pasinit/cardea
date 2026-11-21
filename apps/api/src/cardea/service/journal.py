@@ -18,6 +18,11 @@ trigger's own namespace, `cardea://<namespace>`. An event whose `actor` is the t
 own agent is ignored unless the trigger says `include_own`, so a run cannot wake itself.
 A group member's events coalesce while its run is unfinished (ADR-034 decision 1.4); an
 event coalesced after that run started leaves one follow-up admission pending.
+
+An event refused because a principal is disabled (`principal_disabled`, for example while
+the kill switch has paused a team) is kept the same way: it stays pending and is admitted
+on the first tick after the principal is enabled again, instead of being consumed. Later
+refused events replace it, so a pause leaves at most one wake per trigger.
 """
 
 import json
@@ -49,6 +54,8 @@ APPROVALS = {
 # Event data larger than this reaches the run as a size note instead (bounded context).
 MAX_DATA_BYTES = 4096
 BATCH = 200
+# Refusals that end when an operator re-enables a principal: the event waits, pending.
+WAIT_CODES = frozenset({"principal_disabled"})
 
 
 def source(namespace: str) -> str:
@@ -263,13 +270,18 @@ class Dispatcher:
             return "coalesced"
         except (Fault, ValidationError, StoreError, ContractError) as error:
             code = _code(error)
+            waits = code in WAIT_CODES
             with kernel.database.engine.begin() as conn:
                 decided = self._decide(conn, trigger_id, cursor, pending)
                 if isinstance(decided, str):
                     return decided
-                # A journal event has no sender to retry it: the refusal is history.
+                if waits and pending:
+                    # Still disabled: the event keeps waiting, recorded once already.
+                    return "waiting"
+                # A journal event has no sender to retry it: the refusal is history, and
+                # only a disabled principal's event is kept for one later admission.
                 _record(conn, trigger_id, decided[1], code=code)
-                self._advance(conn, trigger_id, cursor, pending)
+                self._advance(conn, trigger_id, cursor, pending, keep=waits)
                 if code == "budget_exhausted" and isinstance(error, Fault):
                     with borrow(conn) as tx:
                         spend.notify_refused(

@@ -200,10 +200,25 @@ class GitHub:
                 break
         return found
 
-    async def merge(self, number: int, sha: str) -> dict[str, Any]:
-        """Squash-merge, only if the head is still `sha` (the host answers 409 if not)."""
+    async def merge(self, number: int, sha: str, title: str, message: str) -> dict[str, Any]:
+        """Squash-merge, only if the head is still `sha` (the host answers 409 if not), with
+        `title` and `message` as the squash commit's subject and body."""
         response = await self._request(
-            "PUT", f"/pulls/{number}/merge", json={"merge_method": "squash", "sha": sha}
+            "PUT",
+            f"/pulls/{number}/merge",
+            json={
+                "merge_method": "squash",
+                "sha": sha,
+                "commit_title": title,
+                "commit_message": message,
+            },
         )
         result: dict[str, Any] = response.json()
         return result
+
+    async def delete_branch(self, branch: str) -> bool:
+        """Delete a branch; False if the host has no such branch (already deleted)."""
+        response = await self._request(
+            "DELETE", f"/git/refs/heads/{quote(branch, safe='/')}", missing_ok=True
+        )
+        return response.status_code != 404

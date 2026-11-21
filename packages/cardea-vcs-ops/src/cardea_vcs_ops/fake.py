@@ -201,6 +201,15 @@ class FakeGitHub:
             rules = repo.rules_for("/".join(rest[2:])) if page == 1 else []
             return httpx.Response(200, json=rules)
         body = json.loads(request.content) if request.content else {}
+        if rest[:3] == ["git", "refs", "heads"] and method == "DELETE":
+            branch = "/".join(rest[3:])
+            if repo.head(branch) is None:
+                return httpx.Response(422, json={"message": "Reference does not exist"})
+            subprocess.run(
+                ["git", "-C", str(repo.path), "update-ref", "-d", f"refs/heads/{branch}"],
+                check=True,
+            )
+            return self._done("delete_branch", httpx.Response(204))
         if rest[:3] == ["git", "ref", "heads"] and method == "GET":
             sha = repo.head("/".join(rest[3:]))
             if sha is None:
@@ -300,7 +309,15 @@ class FakeGitHub:
             ["git", "-C", str(repo.path), "update-ref", f"refs/heads/{pull['base']['ref']}", head],
             check=True,
         )
-        pull.update(merged=True, state="closed", merge_commit_sha=head, merged_by={"login": login})
+        pull.update(
+            merged=True,
+            state="closed",
+            merge_commit_sha=head,
+            merged_by={"login": login},
+            # The squash commit's subject and body as the merge request named them.
+            commit_title=body.get("commit_title"),
+            commit_message=body.get("commit_message"),
+        )
         answer = {"sha": head, "merged": True, "message": "Pull Request successfully merged"}
         return self._done("merge", httpx.Response(200, json=answer))
 
