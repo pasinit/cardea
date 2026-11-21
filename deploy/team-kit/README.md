@@ -3,6 +3,7 @@
 This kit builds a generic, configuration-driven dev team from [`examples/teams/dev-team`](../../examples/teams/README.md). It has four roles: a product manager, a team lead, developers and a principal engineer. They work on one repository through `code.session`, `vcs.*`, `env.try` and the kernel's records, mail and spend ceilings.
 
 - `teamkit.py`: the `render`, `provision`, `apply`, `status`, `pause`, `resume` and `stop` commands.
+- `dashboard.py`, `dashboard.html`, `dashboard.js`: the read-only team dashboard, below.
 - `team.host.example.json`: the shape of the private host file. `repository` is the vcs alias the team is granted (`repo:<alias>`), and `default_branch` (default `main`) is its default branch. Both are written into the instructions of every role that uses `vcs.*`, `code.session` or `env.try`, so no role has to guess them. The repository holds no host-specific value. Copy the file outside the repository, for example to `/etc/cardea/team.host.json`, and fill it in.
 
 Further host-file fields:
@@ -21,6 +22,15 @@ Further host-file fields:
   Without `email`, neither the grant nor the policy is rendered.
 - **Mail:** each role's grants are pool addresses (`mail:<group>.<pool>`). The team lead and the PE are the exception for developers: they get each developer's own address (`mail:<group>.dev.<n>`) instead of the developer pool. Each role's instructions list exactly the addresses it holds, so no role mails an address it is not granted.
 - **`repositories_config`** (default `/opt/cardea-code/repositories.json`): the host's repository registry. `status` reads it only to report a waiver of the host's branch rules, described next.
+
+## Dashboard
+
+`teamkit.py dashboard --host HOST.json [--port 8765]` serves one page on `http://127.0.0.1:8765/`. It renders the group overview (`GET /v0.2/groups/{name}/overview`): members and their runs, work by state and claim, mail, approvals, spend and run ceilings and the latest events. It refreshes every 15 seconds. `dashboard.py --fixture dashboard.fixture.json` serves recorded data with no kernel, to look at the page.
+
+- **Authority:** the server calls the kernel with the supervisor's own credential, the one `teamkit.py` uses. It has no login or session of its own. It listens on the loopback interface only and refuses a Host or Origin that is not that address.
+- **One write:** the message box sends one text message (at most 4000 characters) to a role's pool address, `<group>.<role>`. The kernel checks that the supervisor holds `mail:<group>.<role>`; `provision` grants it for every role.
+- **Once:** the page sends one client key per message and reuses it on every resubmit of the same text, so a double click, a retry after a failure or a second tab delivers once. The same key with other text is refused with `request_conflict`.
+- **No build step:** plain HTML and browser JavaScript. Text from the kernel is only ever shown as text.
 
 How to run it day to day is in the [runbook](../../docs/runbooks/dev-team.md).
 
