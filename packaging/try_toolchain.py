@@ -13,9 +13,10 @@ with a customize hook). It writes the root as a tarball, takes its SHA-256 and
 unpacks it read-only at `<root>/<sha256>/`. It prints the digest. Older images beyond
 `--keep` are removed, never the one just built or one a registry pins.
 `SOURCE_DATE_EPOCH` is set to the start of the current ISO week, so a rebuild in the same
-week of the same package set gives the same tarball. Every unpacked image therefore carries the week's date, so build order is
-kept apart from it: `build` records each digest's build sequence in `<root>/.builds.json`,
-and `pin` (without `--sha256`) and pruning order images by it.
+week of the same package set gives the same tarball. Every unpacked image therefore
+carries the week's date, so build order is kept apart from it: `build` records each
+digest's build sequence in `<root>/.builds.json`, and `pin` (without `--sha256`) and
+pruning order images by it.
 
 `pin` writes the image's path and digest into every `environment.toolchain` of the
 repository registry, atomically, so the next `env.try` call has a new run key. The host
