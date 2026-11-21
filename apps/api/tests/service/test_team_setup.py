@@ -176,8 +176,10 @@ class Store:
 class Probe:
     def __init__(self, ready: bool = True) -> None:
         self.ready = ready
+        self.calls = 0
 
     def check(self, alias: str) -> Any:
+        self.calls += 1
         return setup.Verdict(self.ready, f"{alias}: ready" if self.ready else f"{alias}: not ready")
 
 
@@ -339,6 +341,10 @@ def test_plan_changes_nothing_and_reports_what_would_run(rig: Rig) -> None:
     assert rig.fake.changes == []
     assert snapshot(rig.base) == before
     assert any("would run" in line for line in rig.lines)
+    # Every step prints its verify, done or not, and the repository probe is not run.
+    for name in STEP_NAMES:
+        assert any(re.match(rf"\d\d {name}: .*verify (ok|FAILED):", line) for line in rig.lines)
+    assert rig.probe.calls == 0
     assert not (rig.base / "state").exists()
     # Plan after a full apply says everything is done, and still prints each verify.
     assert rig.apply()
