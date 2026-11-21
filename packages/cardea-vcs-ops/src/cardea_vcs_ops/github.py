@@ -1,8 +1,8 @@
 """The GitHub REST calls the vcs operations need, over the kernel's pinned `httpx`.
 
-Four resources are enough (ADR-037, "Client library"): git refs, pull requests, issue
-comments and pull-request reviews. Each request carries the call's credential in the
-`Authorization` header and nowhere else.
+Four resources are enough (ADR-037, "Client library"): git refs, pull requests (with
+their changed files, for reviewers), issue comments and pull-request reviews. Each request
+carries the call's credential in the `Authorization` header and nowhere else.
 
 Errors: a 4xx answer means the host refused the request and nothing changed, so it is a
 `HostRefused` the operations turn into a definite failure. A duplicate pull request (422)
@@ -157,6 +157,11 @@ class GitHub:
         response = await self._request("GET", f"/pulls/{number}")
         result: dict[str, Any] = response.json()
         return result
+
+    async def pull_files(self, number: int) -> list[dict[str, Any]]:
+        """The changed files with their patches. The host omits `patch` for binary files
+        and for very large diffs."""
+        return await self._list(f"/pulls/{number}/files")
 
     # Comments and reviews
 
