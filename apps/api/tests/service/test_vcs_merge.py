@@ -52,7 +52,7 @@ AUTHOR = "planted-author-token-not-real-0123456789abcdef"
 REVIEWER = "planted-reviewer-token-not-real-0123456789abcd"
 BOT, OWNER = "team-bot", "owner-reviewer"
 DEV_OPS = ("vcs.push_branch", "vcs.open_change", "vcs.read_change", "vcs.merge")
-PRINCIPAL_OPS = ("vcs.read_change", "vcs.review", "vcs.comment")
+PRINCIPAL_OPS = ("vcs.read_change", "vcs.review", "vcs.comment", "vcs.check_repository")
 BASE = (*RIGHTS, "models.invoke", "repo:cardea")
 
 
@@ -522,3 +522,92 @@ def test_evidence_queries_keep_old_digests_and_reject_bad_paths() -> None:
     for bad in ({"arguments/a.b": "/a"}, {"request/x": "/x"}, {"arguments/x": "x"}, {}):
         with pytest.raises(ValidationError):
             EvidenceQuery.model_validate({"name": "q", "operation": "vcs.review", "match": bad})
+
+
+# A repository whose host rules the host owner waived (ADR-037 amendment 2026-11-21)
+
+REASON = "The host plan has no rulesets for private repositories."
+
+
+def waive(vcs: Vcs) -> None:
+    assert vcs.registry is not None
+    entries = dict(vcs.registry.repositories)
+    entries["cardea"] = entries["cardea"].model_copy(
+        update={"host_rules": "waived", "waiver_reason": REASON}
+    )
+    vcs.registry = vcs.registry.model_copy(update={"repositories": entries})
+
+
+def check(kernel: Kernel, session: FakeSession) -> dict[str, Any]:
+    _, (result,) = act(
+        kernel, session, "eng.principal.0", [("vcs-check_repository", {"repository": "cardea"})]
+    )
+    assert not result.is_error, text(result)
+    return cast(dict[str, Any], result.structured_content)
+
+
+def test_without_host_rules_a_repository_is_not_ready_unless_waived(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, vcs: Vcs
+) -> None:
+    host.repositories["acme/cardea"].rules_unavailable = True
+    # The rules API's 403 "upgrade" answer is "unavailable", not an error.
+    required = check(kernel, session)
+    assert required["ready"] is False and required["missing"]
+    assert required["host_rules"] == "required" and required["rules_available"] is False
+    waive(vcs)
+    waived = check(kernel, session)
+    assert waived["ready"] is True and waived["missing"] == []
+    assert waived["host_rules"] == "waived" and waived["waiver_reason"] == REASON
+    assert waived["waived_checks"] == required["missing"]
+
+
+def test_a_waived_repository_keeps_every_cardea_guard(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, vcs: Vcs, tmp_path: Path
+) -> None:
+    waive(vcs)
+    repo = host.repositories["acme/cardea"]
+    repo.rules_unavailable = True
+    # The agent prefix still holds for pushes.
+    change = make_change(kernel, tmp_path, message="Outside the prefix")
+    _, (pushed,) = act(
+        kernel,
+        session,
+        "eng.dev.0",
+        [("vcs-push_branch", {"repository": "cardea", "branch": "main", **change})],
+    )
+    refused(pushed, "branch_not_allowed")
+    # A merge still needs the PE's approval at the head, then green checks.
+    number = open_pull(kernel, session, tmp_path, "eng.dev.0")
+    refused(merge(kernel, session, "eng.dev.0", number), "merge_not_approved")
+    review = approve(kernel, session, number)
+    assert not review.is_error, text(review)
+    refused(merge(kernel, session, "eng.dev.0", number), "merge_checks_missing")
+    refused(merge(kernel, session, "eng.dev.1", number), "merge_not_opener")
+    assert host.calls.count("merge") == 0
+    repo.pass_checks(head_of(host, number), "lint", "test")
+    merged = merge(kernel, session, "eng.dev.0", number)
+    assert not merged.is_error, text(merged)
+    # The waiver is on the receipt of every effect it concerns.
+    assert merged.structured_content["host_rules"] == "waived"
+    assert merged.structured_content["waiver_reason"] == REASON
+
+
+def test_a_waiver_needs_a_reason_and_a_hosted_repository() -> None:
+    from cardea.service.repositories import Repository as Entry
+
+    hosted = {
+        "source": "/srv/mirror",
+        "owner": "acme",
+        "name": "widgets",
+        "api_url": "https://api.github.test",
+        "git_url": "/srv/widgets.git",
+    }
+    with pytest.raises(ValueError, match="waiver_reason"):
+        Entry.model_validate({**hosted, "host_rules": "waived"})
+    with pytest.raises(ValueError, match="waiver_reason"):
+        Entry.model_validate({**hosted, "waiver_reason": REASON})
+    with pytest.raises(ValueError, match="only to a repository"):
+        Entry.model_validate(
+            {"source": "/srv/mirror", "host_rules": "waived", "waiver_reason": REASON}
+        )
+    assert Entry.model_validate(hosted).host_rules == "required"

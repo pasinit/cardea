@@ -547,3 +547,24 @@ A dry run of the dev team showed the principal engineer could not review: `vcs.r
   - Deletion is best effort and part of the merge's own receipt. The output reports `head_deleted`.
   - A refused or failed deletion never fails a merge that already happened.
   - `vcs.find_merge` reports whether the head branch is gone, which shows when an interrupted merge left it behind.
+
+## Amendment (2026-11-21): a host owner may waive the host's branch rules
+
+- **Requirement.** Some host plans offer no rulesets or branch protection. GitHub answers its rules API with 403 "Upgrade to GitHub Pro" for a private repository on a free plan. The owner decided that a team may develop such a repository on Cardea's own guards alone.
+- **Decision.** A repository registry entry may set `host_rules: "waived"` with a required `waiver_reason` (8–500 characters). The default is `required`. A waiver is accepted only on a repository `vcs.*` acts on, and a reason without a waiver is refused.
+- **What changes.**
+  - `vcs.check_repository` treats a 403 from the rules API as `rules_available: false`, not an error. That holds with or without a waiver.
+  - With a waiver, it reports `ready: true`, `host_rules: "waived"`, the reason, and the host-side checks that do not hold as `waived_checks` instead of `missing`. Without a waiver, those checks stay `missing` and the repository is not ready.
+  - The `vcs.push_branch` and `vcs.merge` receipts carry `host_rules: "waived"` and the reason.
+  - The team kit's `status` prints the waiver.
+  - Nothing is waived silently.
+- **What does not change.** Cardea enforces all of these itself, and each stays mandatory:
+  - the agent branch prefix `agent/<group>/` on every push and every pull request head;
+  - the content gate on every change and text that leaves the host;
+  - every condition of `vcs.merge`: the caller opened the pull request, an allowed pool's `APPROVE` receipt is at the current head, the configured reviewer login's approval of that head is on the host, every check run is green, and the host reports the pull request mergeable.
+- **What the waiver gives up.** The host no longer refuses a direct push to the default branch, a force push or a branch deletion made with the repository token. Only Cardea's workers stop those. The token must therefore stay kernel-only: in the vcs workers' credential, never in an agent's environment, a person's hands or a shared file. A leaked token is a direct write to the default branch.
+- **Tests** (`apps/api/tests/service/test_vcs_merge.py`):
+  - a 403 from the rules API leaves a required repository not ready and a waived one ready, with the reason and the waived checks;
+  - a waived repository still refuses a push outside the prefix, and a merge without approval, without green checks, or by someone other than the opener;
+  - the merge receipt records the waiver;
+  - the registry refuses a waiver without a reason, a reason without a waiver, and a waiver on a repository with no host.

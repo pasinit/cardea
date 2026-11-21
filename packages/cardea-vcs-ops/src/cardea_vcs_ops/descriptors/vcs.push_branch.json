@@ -140,6 +140,12 @@
         },
         "head": {
           "type": "string"
+        },
+        "host_rules": {
+          "enum": ["required", "waived"]
+        },
+        "waiver_reason": {
+          "type": "string"
         }
       },
       "required": [
