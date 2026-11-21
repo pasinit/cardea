@@ -3,7 +3,6 @@ to a kernel, wake the right roles, give one claim per task, and stop on the kill
 
 import importlib.util
 import json
-import logging
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -432,7 +431,7 @@ def test_provision_and_apply_refuse_placeholder_values(tmp_path: Path) -> None:
 
 
 def test_a_refused_repository_call_records_the_missing_grant(
-    team: tuple[Kernel, FakeSession], caplog: pytest.LogCaptureFixture
+    team: tuple[Kernel, FakeSession], logs: pytest.LogCaptureFixture
 ) -> None:
     kernel, session = team
 
@@ -442,8 +441,7 @@ def test_a_refused_repository_call_records_the_missing_grant(
         return SessionResult(text="Could not read.", is_error=False)
 
     session.scripts = [guesses]
-    caplog.set_level(logging.INFO, logger="cardea")
     assert AgentRunRuntime(kernel).execute(member_run(kernel, "dev-team.pm.0")) == "succeeded"
-    (event,) = [r for r in caplog.records if r.getMessage() == "tool call refused"]
+    (event,) = [r for r in logs.records if r.getMessage() == "tool call refused"]
     assert event.__dict__["code"] == "task_grant_denied"
     assert event.__dict__["grant"] == "repo:guessed" and event.__dict__["holder"] == "task"

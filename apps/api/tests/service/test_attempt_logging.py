@@ -8,7 +8,6 @@ import logging
 import stat
 import subprocess
 import sys
-from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -45,19 +44,6 @@ from cardea.service.tool_endpoint import ToolEndpoint
 
 # The agent-run fixtures: a provisioned kernel, scripted session and fake tools.
 kernel, session, tools = runs.kernel, runs.session, runs.tools
-
-
-@pytest.fixture
-def logs(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCaptureFixture]:
-    """Capture every `cardea.*` record, even after the service configured its handler."""
-    root = logging.getLogger("cardea")
-    propagate, handlers = root.propagate, root.handlers[:]
-    root.propagate, root.handlers[:] = True, []
-    caplog.set_level(logging.DEBUG, logger="cardea")
-    try:
-        yield caplog
-    finally:
-        root.propagate, root.handlers[:] = propagate, handlers
 
 
 def journal(caplog: pytest.LogCaptureFixture) -> str:

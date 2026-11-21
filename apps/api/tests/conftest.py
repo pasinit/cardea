@@ -1,12 +1,14 @@
-"""Suite-wide test settings.
+"""Suite-wide test settings and fixtures.
 
 Git runs hermetically: tests create scratch repositories and commit to them, and must not
 pick up the developer's global or system configuration (identity, signing, hooks). A global
 `core.hooksPath` hook once failed an unrelated test.
 """
 
+import logging
 import os
 import tempfile
+from collections.abc import Iterator
 
 import pytest
 
@@ -32,3 +34,16 @@ def pytest_configure(config: pytest.Config) -> None:
             **GIT_IDENTITY,
         }
     )
+
+
+@pytest.fixture
+def logs(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCaptureFixture]:
+    """Capture every `cardea.*` record, even after the service configured its handler."""
+    root = logging.getLogger("cardea")
+    propagate, handlers = root.propagate, root.handlers[:]
+    root.propagate, root.handlers[:] = True, []
+    caplog.set_level(logging.DEBUG, logger="cardea")
+    try:
+        yield caplog
+    finally:
+        root.propagate, root.handlers[:] = propagate, handlers
