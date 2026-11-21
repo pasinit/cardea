@@ -549,6 +549,25 @@ def supported_kernel(release: str, pattern: str = KERNEL_RELEASE) -> bool:
     return re.fullmatch(pattern, release) is not None
 
 
+# The accepted Debian 13 package lines: the fitted upstream and Debian revision, with any
+# later Debian stable or security update of that same line (`~deb13uN`). A new upstream or
+# Debian revision needs fresh acceptance evidence (ADR-018).
+ACCEPTED_PACKAGES = {
+    "systemd": r"257\.13-1~deb13u[1-9][0-9]{0,2}",
+    "bubblewrap": r"0\.12\.0-1~deb13u[1-9][0-9]{0,2}",
+}
+
+
+def accepted_packages(lines: list[str]) -> bool:
+    """Whether `dpkg-query` lines name exactly the accepted packages at accepted versions."""
+    found = dict(line.split("=", 1) for line in lines if "=" in line)
+    return (
+        len(lines) == len(ACCEPTED_PACKAGES)
+        and set(found) == set(ACCEPTED_PACKAGES)
+        and all(re.fullmatch(pattern, found[name]) for name, pattern in ACCEPTED_PACKAGES.items())
+    )
+
+
 def preflight() -> dict[str, Any]:
     if platform.system() != "Linux" or Path("/proc/1/comm").read_text().strip() != "systemd":
         raise ValueError("unsupported_host")
@@ -563,7 +582,7 @@ def preflight() -> dict[str, Any]:
     versions = run(
         ["/usr/bin/dpkg-query", "-W", "-f=${Package}=${Version}\n", "systemd", "bubblewrap"]
     ).stdout.splitlines()
-    if set(versions) != {"systemd=257.13-1~deb13u1", "bubblewrap=0.12.0-1~deb13u1"}:
+    if not accepted_packages(versions):
         raise ValueError("unsupported_host_versions")
     if not {"cpu", "memory", "pids"} <= set(
         Path("/sys/fs/cgroup/cgroup.controllers").read_text().split()
