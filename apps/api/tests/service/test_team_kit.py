@@ -3,6 +3,7 @@ to a kernel, wake the right roles, give one claim per task, and stop on the kill
 
 import importlib.util
 import json
+import logging
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -155,6 +156,31 @@ class Profiles:
             "workers": {"code-session": ["coding"], "env-try": ["try"]},
             "sha256": "config",
         }
+
+
+def test_role_instructions_name_the_repository_and_branch_from_the_host_file() -> None:
+    document = {**example(), "repository": "widgets", "default_branch": "trunk"}
+    group = kit().group_document(document)
+    instructions = {p["name"]: p["run"]["instructions"] for p in group["spec"]["pools"]}
+    # Every role with repository-scoped operations is told the exact alias it was granted.
+    for name in ("pm", "dev", "pe"):
+        assert "The repository is `widgets`: pass exactly that" in instructions[name], name
+        assert "default branch is `trunk`" in instructions[name], name
+    assert "(`repo` for env.try)" in instructions["pm"]
+    assert "the head of trunk" in instructions["pm"] and "main" not in instructions["pm"]
+    assert "widgets" not in instructions["tl"]  # no repository operations
+    # Without the field the default branch is main.
+    plain = kit().group_document({**example(), "repository": "widgets"})
+    pm = next(p for p in plain["spec"]["pools"] if p["name"] == "pm")
+    assert "default branch is `main`" in pm["run"]["instructions"]
+
+
+def test_the_host_file_refuses_an_invalid_default_branch(tmp_path: Path) -> None:
+    path = tmp_path / "team.host.json"
+    path.write_text(json.dumps({**example(), "default_branch": "no spaces"}))
+    module = kit()
+    with pytest.raises(module.HostError, match="default_branch"):
+        module.load_host(path)
 
 
 class Auth:
@@ -403,3 +429,21 @@ def test_provision_and_apply_refuse_placeholder_values(tmp_path: Path) -> None:
     assert module.placeholders(document) == ["/supervisor/issuer"]
     document["supervisor"]["issuer"] = "cardea.internal"
     assert module.placeholders(document) == []
+
+
+def test_a_refused_repository_call_records_the_missing_grant(
+    team: tuple[Kernel, FakeSession], caplog: pytest.LogCaptureFixture
+) -> None:
+    kernel, session = team
+
+    async def guesses(client: ClientSession, request: SessionRequest) -> SessionResult:
+        refused = await call(client, "vcs-read_branch", repository="guessed", branch="main")
+        assert refused.is_error and "task_grant_denied" in str(refused.content)
+        return SessionResult(text="Could not read.", is_error=False)
+
+    session.scripts = [guesses]
+    caplog.set_level(logging.INFO, logger="cardea")
+    assert AgentRunRuntime(kernel).execute(member_run(kernel, "dev-team.pm.0")) == "succeeded"
+    (event,) = [r for r in caplog.records if r.getMessage() == "tool call refused"]
+    assert event.__dict__["code"] == "task_grant_denied"
+    assert event.__dict__["grant"] == "repo:guessed" and event.__dict__["holder"] == "task"

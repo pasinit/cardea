@@ -9,8 +9,10 @@
     python3 -I deploy/team-kit/teamkit.py stop    --host HOST.json
 
 Everything host-specific comes from the private host file (`team.host.example.json`
-shows its shape): the namespace, the supervisor's identity, the repository alias, the
-credential names, the email alias, the model and the budgets. The kit itself is generic.
+shows its shape): the namespace, the supervisor's identity, the repository alias and its
+default branch (`default_branch`, default `main`), the credential names, the email alias, the
+model and the budgets. The kit itself is generic. Roles that use repository operations are
+told the alias and branch in their instructions, since they are granted that alias only.
 
 What each command does:
 - `render` writes the documents the team is made of, for review: the `work` and
@@ -33,6 +35,7 @@ What each command does:
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import uuid
@@ -62,6 +65,9 @@ DEFAULT_BUDGETS: dict[str, Any] = {
 }
 
 
+DEFAULT_BRANCH = "main"
+
+
 class HostError(ValueError):
     """The host file is missing something the kit needs."""
 
@@ -76,7 +82,28 @@ def load_host(path: Path) -> dict[str, Any]:
     supervisor = document["supervisor"]
     if not isinstance(supervisor, dict) or "principal_id" not in supervisor:
         raise HostError("supervisor needs principal_id and its identity")
+    branch = document.get("default_branch", DEFAULT_BRANCH)
+    if not isinstance(branch, str) or not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._/-]{0,127}", branch
+    ):
+        raise HostError("default_branch must be a branch name")
     return document
+
+
+def repository_note(host: dict[str, Any], operations: list[str]) -> str:
+    """Names the repository and its default branch for roles whose operations need them.
+
+    Repository-scoped operations are granted for one alias only (`repo:<alias>`), so a role
+    that guesses the name is refused; the instructions state it.
+    """
+    if not any(op.startswith("vcs.") or op in ("code.session", "env.try") for op in operations):
+        return ""
+    repo, branch = str(host["repository"]), str(host.get("default_branch", DEFAULT_BRANCH))
+    argument = "`repository`" + (" (`repo` for env.try)" if "env.try" in operations else "")
+    return (
+        f" The repository is `{repo}`: pass exactly that as {argument}. "
+        f"Its default branch is `{branch}`."
+    )
 
 
 def _names(host: dict[str, Any]) -> tuple[str, str, str, str]:
@@ -214,6 +241,7 @@ def _state_trigger(state: str | None = None, transition: str | None = None) -> d
 def group_document(host: dict[str, Any]) -> dict[str, Any]:
     namespace, group, supervisor, _ = _names(host)
     repo = str(host["repository"])
+    branch = str(host.get("default_branch", DEFAULT_BRANCH))
     zone = str(host.get("timezone", "UTC"))
     budgets = {**DEFAULT_BUDGETS, **(host.get("budgets") or {})}
     roles = {**DEFAULT_BUDGETS["roles"], **(budgets.get("roles") or {})}
@@ -228,7 +256,7 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
 
     def run(instructions: str, operations: list[str], timeout: int, **extra: Any) -> dict[str, Any]:
         template: dict[str, Any] = {
-            "instructions": instructions,
+            "instructions": instructions + repository_note(host, operations),
             "operations": [*operations, "mailbox.send"],
             "context": [
                 {"operation": "mailbox.inbox"},
@@ -275,7 +303,8 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
                 *(["email.send"] if email else []),
             ],
             "run": run(
-                "You are the product manager. Read main's head with vcs.read_branch, try it with "
+                f"You are the product manager. Read the head of {branch} with vcs.read_branch, "
+                "try it with "
                 f"env.try on the scenarios {', '.join(scenarios)} (pass the head commit), and "
                 "file every failure or rough edge you find as a work item with what you saw. "
                 "Do not file duplicates of open items. Tell the team lead what you filed.",

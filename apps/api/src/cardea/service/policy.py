@@ -44,6 +44,11 @@ def recovery_prefix(conn: sa.Connection) -> str | None:
     return f"r{row[0]}." if row else None
 
 
+def _missing(grant: str, holder: str) -> dict[str, str]:
+    """The grant a ceiling check lacked (bounded: a resource grant carries call input)."""
+    return {"grant": grant[:160], "holder": holder}
+
+
 class Policy:
     def __init__(self, conn: sa.Connection) -> None:
         self.conn = conn
@@ -108,11 +113,25 @@ class Policy:
             for name in ("agent_id", "runtime_id", "supervisor_id"):
                 self.principal(str(current[name]))
             if operation not in json.loads(current["grants_json"]):
-                raise Fault("task_grant_denied", "Operation is outside explicit task grants")
+                raise Fault(
+                    "task_grant_denied",
+                    "Operation is outside explicit task grants",
+                    details=_missing(operation, "task"),
+                )
             namespace = str(current["namespace"])
-            self.require("platform", namespace, operation)
-            self.require(str(current["supervisor_id"]), namespace, operation)
-            self.require(str(current["supervisor_id"]), namespace, operation, "delegate")
+            supervisor = str(current["supervisor_id"])
+            for holder, mode in (
+                ("platform", "allow"),
+                (supervisor, "allow"),
+                (supervisor, "delegate"),
+            ):
+                try:
+                    self.require(holder, namespace, operation, mode)
+                except Fault as denied:
+                    # Which grant the live ceiling lacked, so a refusal can be diagnosed.
+                    kind = "platform" if holder == "platform" else f"supervisor_{mode}"
+                    denied.details = denied.details or _missing(operation, kind)
+                    raise
             if identity != task_id and "tasks.delegate" in json.loads(current["grants_json"]):
                 # Historical descendant reads still check live delegation authority,
                 # without authorizing any new delegation in a sealed namespace.

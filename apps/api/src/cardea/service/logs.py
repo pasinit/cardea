@@ -31,6 +31,9 @@ LOG_FIELDS = (
     "stream",
     "operation",
     "operation_id",
+    # A refused call's missing grant and who lacked it (task, platform or supervisor).
+    "grant",
+    "holder",
     "kind",
     "outcome",
     "duration_ms",

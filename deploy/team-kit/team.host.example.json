@@ -10,6 +10,7 @@
   },
   "timezone": "UTC",
   "repository": "cardea",
+  "default_branch": "main",
   "harness": "claude",
   "model": "claude-sonnet-4-5",
   "developers": 2,
