@@ -7,7 +7,10 @@ holds:
   IMAP), and where its secret lives: a separate private file read for each call;
 - `recipients`: the allow-list, alias -> address. The model names an alias, never an
   address; replies are accepted only from the address of the alias a thread went to;
-- `roles`: per role (`<group>.<pool>`), the aliases it may write to and its rate limit.
+- `roles`: per role (`<group>.<pool>`), the aliases it may write to and its rate limit;
+- `inbound` (optional, off by default): new mail the listed aliases send to the team's
+  inbox without replying to a thread, delivered to one pool's mailbox (amendment
+  2026-11-21). The same sender authentication as replies applies.
 
 Real addresses, hosts and inbox ids live only in this private host file. Nothing here is
 a secret: API keys and passwords are in their own files, read inside the operation.
@@ -118,12 +121,40 @@ class RoleConfig(Record):
     rate_limit: RateLimit
 
 
+class InboundTarget(Record):
+    """The mailbox inbound mail goes to: a group pool, `<group>.<pool>`, in a namespace."""
+
+    namespace: Role
+    pool: Annotated[
+        str,
+        Field(
+            strict=True, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,62}\.[A-Za-z0-9][A-Za-z0-9_-]{0,62}$"
+        ),
+    ]
+
+
+class InboundConfig(Record):
+    """New messages to the inbox that are on no thread Cardea started (amendment
+    2026-11-21). Only mail from the addresses of `from` is read or accepted, only with an
+    authenticated sender (or `accept_unauthenticated`), at most `max_bytes` of text, at
+    most `rate_limit` deliveries per window, and none older than `window_days`."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
+
+    senders: Annotated[tuple[Alias, ...], Field(alias="from", min_length=1, max_length=16)]
+    deliver_to: InboundTarget
+    rate_limit: RateLimit
+    max_bytes: Annotated[int, Field(strict=True, ge=256, le=12288)] = 8192
+    window_days: Annotated[int, Field(strict=True, ge=1, le=30)] = 7
+
+
 class EmailConfig(Record):
     transport: Annotated[AgentMailTransport | SmtpImapTransport, Field(discriminator="kind")]
     recipients: Annotated[dict[Alias, Address], Field(min_length=1, max_length=64)]
     roles: dict[Role, RoleConfig]
     # Reply text kept for the agent; longer replies are shortened and marked.
     max_reply_bytes: Annotated[int, Field(strict=True, ge=256, le=12288)] = 8192
+    inbound: InboundConfig | None = None
 
     @model_validator(mode="after")
     def known_aliases(self) -> Self:
@@ -133,6 +164,8 @@ class EmailConfig(Record):
             unknown = set(entry.recipients) - set(self.recipients)
             if unknown:
                 raise ValueError(f"role {role} names unknown recipients {sorted(unknown)}")
+        if self.inbound is not None and set(self.inbound.senders) - set(self.recipients):
+            raise ValueError("inbound names unknown recipients")
         return self
 
     def address(self, alias: str) -> str | None:

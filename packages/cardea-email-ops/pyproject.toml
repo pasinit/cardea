@@ -16,6 +16,7 @@ dependencies = []
 "email.send" = "cardea_email_ops:send"
 "email.find_sent" = "cardea_email_ops:find_sent"
 "email.poll_replies" = "cardea_email_ops:poll_replies"
+"email.poll_inbound" = "cardea_email_ops:poll_inbound"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/cardea_email_ops"]

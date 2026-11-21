@@ -80,7 +80,7 @@ $KIT status --host $H
 
 `render` also writes two fragments, which the host owner merges by hand:
 - `vcs.team.json` into the vcs host file: which credential each pool uses, who may approve, and the reviewer login;
-- `email.team.json` into the email host file: the PM's recipient alias and rate limit.
+- `email.team.json` into the email host file: the PM's recipient alias and rate limit. With `email.inbound` set in the host file, the fragment also holds the `inbound` section: the client's new mail to the team's inbox goes to the PM pool and wakes it. To check what was rejected, run `SELECT json_extract(payload,'$.reason'), json_extract(payload,'$.sender_domain'), COUNT(*) FROM events WHERE event_type='operation.inbound_dropped' GROUP BY 1,2`.
 
 Grants expire after `grant_days` (14 by default). Run `provision` again before then.
 

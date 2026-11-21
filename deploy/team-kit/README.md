@@ -13,6 +13,8 @@ Further host-file fields:
 - **Mail:** each role's grants are pool addresses (`mail:<group>.<pool>`). The team lead and the PE are the exception for developers: they get each developer's own address (`mail:<group>.dev.<n>`) instead of the developer pool. Each role's instructions list exactly the addresses it holds, so no role mails an address it is not granted.
 - **`repositories_config`** (default `/opt/cardea-code/repositories.json`): the host's repository registry. `status` reads it only to report a waiver of the host's branch rules, described next.
 
+- **`email.inbound`** (optional, off by default): lets the client email the PM directly. The host file's `email` gains an `inbound` key, for example `"inbound": {"rate_limit": {"count": 10, "window_days": 1}}`. `render` then writes an `inbound` section into `email.team.json`, with the alias as the only sender and the PM pool as the destination. Merge it into the email host file. The PM's instructions also gain a line: such mail is the client's input, given as data, and the PM answers with `email.send`. The checks are those of [ADR-039](../../docs/decisions/039-external-email-operations.md): an authenticated sender, each message delivered once, a size and rate limit, and rejections recorded by sender domain and reason only.
+
 How to run it day to day is in the [runbook](../../docs/runbooks/dev-team.md).
 
 ## Repositories without host rules
