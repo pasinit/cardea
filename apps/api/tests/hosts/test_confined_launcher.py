@@ -997,3 +997,26 @@ def test_a_start_is_refused_before_staging_when_mounts_are_not_shared(
     with pytest.raises(launcher.Rejected, match="^host_mount_propagation$"):
         launcher.handle(start(job, "session", "agent"))
     assert configured == [] and not (helper / job).exists()
+
+
+@pytest.mark.parametrize(
+    ("lines", "accepted"),
+    [
+        (["systemd=257.13-1~deb13u1", "bubblewrap=0.12.0-1~deb13u1"], True),
+        # Later Debian stable or security updates of the same upstream and revision.
+        (["bubblewrap=0.12.0-1~deb13u3", "systemd=257.13-1~deb13u2"], True),
+        (["systemd=257.13-1~deb13u12", "bubblewrap=0.12.0-1~deb13u1"], True),
+        # A new upstream or Debian revision needs fresh acceptance (ADR-018).
+        (["systemd=257.14-1~deb13u1", "bubblewrap=0.12.0-1~deb13u1"], False),
+        (["systemd=257.13-2", "bubblewrap=0.12.0-1~deb13u1"], False),
+        (["systemd=257.13-1~deb13u1", "bubblewrap=0.12.0-2"], False),
+        (["systemd=257.13-1~deb13u1", "bubblewrap=0.12.0-1~deb13u1~bpo1"], False),
+        (["systemd=257.13-1~deb13u0", "bubblewrap=0.12.0-1~deb13u1"], False),
+        (["systemd=257.13-1~deb13u1"], False),
+        (["systemd=257.13-1~deb13u1", "bubblewrap=0.12.0-1~deb13u1", "bubblewrap=0.12.0"], False),
+    ],
+)
+def test_probe_accepts_security_updates_of_the_fitted_packages(
+    lines: list[str], accepted: bool
+) -> None:
+    assert launcher.accepted_packages(lines) is accepted
