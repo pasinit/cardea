@@ -854,3 +854,12 @@ Decided by the lead on 2026-11-09 in the review of slice 2 (claims); the owner m
 6. **Write fencing is the default.** While a record is held, a write succeeds only for the current holder presenting the current `claim_epoch`. The holder without it, or with a stale one, gets `claim_lost`; anyone else gets `record_claimed`. A collection opts out with `claims.fence_writes: false`, which leaves held records writable by whoever the grant and guards allow. Unheld records behave as without claims.
 7. **Follow-up wakes use the member's first trigger template of either kind** (time or journal) since slice 7, so a member with only event triggers keeps its claim through follow-ups.
 8. **Kernel mail to a supervisor is kernel-internal.** `mailbox.send(from_kernel=True)` is set only by the kernel itself (the claim escalation). Neither the `mailbox.send` operation nor `POST /v0.2/mailbox` accepts it; both refuse the field.
+
+## Amendment 2026-11-21: supervisor oversight and the kill switch
+
+- **Oversight.** A task's supervisor may inspect it (`tasks.inspect`), read its events (`events.read`) and cancel it (`tasks.cancel`) under the supervisor's own live authority in the task's namespace (supervisor and platform), whether or not the task's grants include those rights.
+  - Before, these checks went through the task's ceiling, so a group's supervisor could not read or cancel its members' runs, whose grants hold no task rights.
+  - The task itself, its agent and anyone else gain nothing: they keep the full ceiling check. `tasks.resume`, which lets a task act again, still needs the task's grant.
+- **Disabling a supervisor cancels its tasks.** When provisioning newly disables a principal, the kernel records a host-owner cancel (`disabled.<policy revision>`) for every unfinished task that principal supervises, in the provisioning transaction. Running sessions stop at once rather than continuing until their next authority check fails, and re-provisioning the same disabled principal signals nothing again.
+- The team kit's `pause` relies on this: it disables the supervisor and does nothing else.
+

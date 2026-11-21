@@ -155,7 +155,7 @@ errors answer 409. A request that fails schema validation answers
 | `recovery_clock_regressed` | 409 | Restore requires a non-regressing clock | `cardea.service.admin` |
 | `recovery_lease_live` | 409 | Wait for copied worker leases to expire | `cardea.service.admin` |
 | `repositories_disagree` | 403 | {…} and {…} disagree about: {…} | `cardea.service.repositories` |
-| `request_conflict` | 409 | A kernel contract rule refused the change; Request ID already has different arguments; Control request ID was used for another action (and 1 more) | `cardea.kernel.lifecycle`, `cardea.service.kernel`, `cardea.service.mailbox` |
+| `request_conflict` | 409 | A kernel contract rule refused the change; Control request ID was used for another action; Request ID already has different arguments (and 1 more) | `cardea.kernel.lifecycle`, `cardea.service.kernel`, `cardea.service.mailbox` |
 | `request_scope_mismatch` | 409 | Request identity or deadline exceeds task. | `cardea.kernel.store` |
 | `request_too_large` | 413 | Request exceeds {…} bytes; Task request exceeds {…} bytes | `cardea.service.app`, `cardea.service.triggers` |
 | `response_too_large` | — | Use a smaller page | `cardea.service.app` |
