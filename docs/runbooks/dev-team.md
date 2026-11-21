@@ -24,6 +24,8 @@ A transition that needs evidence cites a receipt. `submit` needs the run's `vcs.
   - The `vcs` and `try` profiles (steps 9 and 10) and `code.session` (step 8).
   - The repository alias in the registry, with its `environment` catalog.
   - The repository's rules ready: a supervisor's `vcs.check_repository` reports `ready: true`.
+    - On a host plan without rulesets (the rules API answers 403), the report says `rules_available: false` and the repository is not ready. The host owner can waive the host-side rules for that repository in the registry (`host_rules: "waived"` with a `waiver_reason`). The report is then `ready: true`, with `host_rules: "waived"`, the reason and the `waived_checks`. `teamkit.py status` prints the waiver on every call.
+    - Waiving gives up the host's own stop on a direct push to the default branch made with the repository token. Keep that token in the vcs worker's credential only. Cardea's guards, the agent prefix, the content gate and `vcs.merge`'s conditions, are unchanged. See [team kit](../../deploy/team-kit/README.md#repositories-without-host-rules).
 - `cardea-vcs-ops`, `cardea-coding-ops`, `cardea-env-ops` and, if the PM mails, `cardea-email-ops` installed, with their descriptors in `operations_dir`.
 - The private host file, from `deploy/team-kit/team.host.example.json`, at for example `/etc/cardea/team.host.json` (root, `0600`). It holds the namespace, the supervisor's identity, the repository alias, the credential names, the email alias, the model and the budgets.
 - The host owner's base provisioning document, without the team, at the host file's `provisioning.base`.

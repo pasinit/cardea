@@ -10,6 +10,20 @@ Further host-file fields:
   - `session_profile` (default `session`) names that profile.
   - `workers_config` (default `/etc/cardea-host-workers.json`) names the file that holds it.
   - `render` warns and `provision` and `apply` refuse when a timeout exceeds the wall. When the file is unreadable, the check cannot run and `render` says so.
-- **Mail:** each role's grants are pool addresses (`mail:<group>.<pool>`). Its instructions list exactly those addresses, as `{"pool": "<group>.<pool>"}`, so no role mails a member it is not granted.
+- **Mail:** each role's grants are pool addresses (`mail:<group>.<pool>`). The team lead and the PE are the exception for developers: they get each developer's own address (`mail:<group>.dev.<n>`) instead of the developer pool. Each role's instructions list exactly the addresses it holds, so no role mails an address it is not granted.
+- **`repositories_config`** (default `/opt/cardea-code/repositories.json`): the host's repository registry. `status` reads it only to report a waiver of the host's branch rules, described next.
 
 How to run it day to day is in the [runbook](../../docs/runbooks/dev-team.md).
+
+## Repositories without host rules
+
+On some host plans the host's rulesets and branch protection are unavailable; GitHub, for example, answers the rules API with 403 "Upgrade to GitHub Pro" for a private repository on a free plan. The host owner may then waive the host-side rules for that repository in the registry:
+
+```json
+"<alias>": {"...": "...", "host_rules": "waived", "waiver_reason": "<why, at least 8 characters>"}
+```
+
+- The default is `required`. A waiver needs a reason, and only a repository that `vcs.*` acts on can take one.
+- With the waiver, `vcs.check_repository` reports `ready: true` with `host_rules: "waived"`, the reason, and the host-side checks it gave up (`waived_checks`). The `vcs.push_branch` and `vcs.merge` receipts carry `host_rules` and the reason, and `status` prints a line saying so.
+- Cardea's own guards are unchanged: the agent branch prefix on every push, the content gate, and `vcs.merge`'s conditions (the opener, the PE's approval receipt at the head, the reviewer login's approval on the host, every check green, mergeable).
+- What the waiver gives up: the host no longer stops a direct push to the default branch made with the repository token. The token must therefore stay with the kernel's vcs workers, and no person or agent may hold it. See the [ADR-037 amendment](../../docs/decisions/037-coding-and-vcs-operations.md).

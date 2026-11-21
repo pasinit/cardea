@@ -811,12 +811,31 @@ def stop(host: dict[str, Any]) -> tuple[list[str], str | None]:
     return runs, problem
 
 
+def host_rules_note(host: dict[str, Any]) -> list[str]:
+    """A line when the host owner waived the host's branch rules for the team's repository
+    (registry `host_rules: waived`), so a waiver is never silent in `status`.
+
+    `repositories_config` (default `/opt/cardea-code/repositories.json`) names the host's
+    repository registry; when it is unreadable there is nothing to report."""
+    path = Path(host.get("repositories_config", "/opt/cardea-code/repositories.json"))
+    try:
+        entry = json.loads(path.read_text())["repositories"][str(host["repository"])]
+    except (OSError, ValueError, KeyError, TypeError):
+        return []
+    if not isinstance(entry, dict) or entry.get("host_rules") != "waived":
+        return []
+    return [
+        f"repository {host['repository']}: host rules WAIVED ({entry.get('waiver_reason')}); "
+        "only Cardea's own guards apply, so the host token must stay kernel-only"
+    ]
+
+
 def status(host: dict[str, Any]) -> list[str]:
     """The team's overview, or a clear paused view when the supervisor is disabled."""
     from cardea.service.client import ClientError
 
     try:
-        return summarise(overview(host))
+        return host_rules_note(host) + summarise(overview(host))
     except ClientError as error:
         if error.code != "principal_disabled":
             raise

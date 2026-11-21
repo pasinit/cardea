@@ -22,7 +22,8 @@
         "sha": {"type": "string"},
         "head_sha": {"type": "string"},
         "opened_receipt": {"type": "string"},
-        "approval_receipt": {"type": "string"}, "head_deleted": {"type": "boolean"}
+        "approval_receipt": {"type": "string"}, "head_deleted": {"type": "boolean"},
+        "host_rules": {"enum": ["required", "waived"]}, "waiver_reason": {"type": "string"}
       },
       "required": ["number", "merged", "sha", "head_sha"]
     }
