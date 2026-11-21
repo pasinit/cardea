@@ -207,6 +207,7 @@ Both are confined workers under ADR-028 with the same repository aliases; they s
 - **Profile sizing.** The scratch is a tmpfs, whose pages are charged to the unit's memory. The helper now refuses a profile whose `scratch_mb` exceeds its `memory_mb` (`invalid_profile`). The kit's `vcs` profile is resized to 1 GiB of memory and 512 MiB of scratch.
 - **Toolchain image** (decision 6). `make try-toolchain` runs `packaging/try_toolchain.py`:
   - `build` runs `mmdebstrap` for a Debian 13 minbase root with `SOURCE_DATE_EPOCH` set to the ISO week's start, and unpacks it read-only under its SHA-256. It keeps the last two images and any pinned one.
+  - Debian 13 does not package `uv`, which scenarios such as Cardea's own `make try` need. Before `mmdebstrap` runs, `build` downloads the release archive of a pinned uv version for the build architecture. It checks the archive against its pinned SHA-256 and stops on a mismatch. A customize hook then copies the binary to `/usr/local/bin/uv`, which `env.try` puts first on `PATH`. The binary and its directory carry the week's date, so a rebuild in the same week still gives the same tarball. A version bump changes the image digest, and so the run key.
   - `pin` writes the path and digest into every registry `environment`, atomically.
   - The kit's `cardea-try-toolchain.timer` refreshes the image weekly.
 - **Kit** (`deploy/small-host/cardea`):
