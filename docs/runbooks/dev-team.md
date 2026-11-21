@@ -25,7 +25,7 @@ A transition that needs evidence cites a receipt. `submit` needs the run's `vcs.
   - The repository alias in the registry, with its `environment` catalog.
   - The repository's rules ready: a supervisor's `vcs.check_repository` reports `ready: true`.
 - `cardea-vcs-ops`, `cardea-coding-ops`, `cardea-env-ops` and, if the PM mails, `cardea-email-ops` installed, with their descriptors in `operations_dir`.
-- The private host file, from `deploy/team-kit/team.host.example.json`, at for example `/etc/cardea/team.host.json` (root, `0600`). It holds the namespace, the supervisor's identity, the repository alias, the credential names, the email alias, the model and the budgets.
+- The private host file, from `deploy/team-kit/team.host.example.json`, at for example `/etc/cardea/team.host.json` (root, `0600`). It holds the namespace, the supervisor's identity, the repository alias, the credential names, the email alias, the model, the budgets and the product's goals (`product.goals` or `product.goals_file`, optional `non_goals`, at most 8 KiB together). Replace the example's placeholder goals: the PM decides features from them.
 - The host owner's base provisioning document, without the team, at the host file's `provisioning.base`.
 - The supervisor's identity for the kit's client: on one host, the SPIFFE ID below. A `cardea login --session <file>` OIDC session also works where a real OIDC provider exists.
 
@@ -153,7 +153,11 @@ The `work` and `decisions` collections stay, for the record. Delete them with `D
    - Each merged change has the PE's approval at its head, and passing checks.
    - Each open one is moving: reviewed, changed or merged within a day.
    - Nothing was pushed outside `agent/<group>/`.
-4. **The PM's runs.** Each slot made an `env.try` receipt for main's head, and each failure became a work item.
+4. **The PM's runs.**
+   - Each slot made an `env.try` receipt for main's head, and each failure became a work item.
+   - Each feature item states a user problem, the proposed behaviour and acceptance criteria within the goals.
+   - Any email to the client is one short preference question ("X or Y?"), never a status report. A reply arrives in the PM's mailbox and is optional; work never waited for it.
+   - To change direction, edit `product` in the host file and `apply` again.
 5. **Credentials.** No token expires within a week (`expires_on` in the vcs host file). No grant expires before the next `provision`.
 6. **The host.**
    - Memory, the swap, and disk under `/var/lib/cardea-host`.
