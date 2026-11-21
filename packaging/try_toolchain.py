@@ -123,6 +123,7 @@ def mmdebstrap_argv(target: Path, uv: Path) -> list[str]:
     # units their LoadCredential files: every credentialed confined worker (session,
     # coding, vcs) failed until a reboot. A mount namespace of its own keeps the change
     # there (found on the first Debian acceptance run).
+    bindir = Path(UV_PATH).parent
     return [
         "/usr/bin/unshare",
         "--mount",
@@ -137,8 +138,8 @@ def mmdebstrap_argv(target: Path, uv: Path) -> list[str]:
         # The verified uv binary, keeping its mode and date; then the directory's date, which
         # the copy changed, so the tarball stays the same for the same week; then a check that
         # the binary runs.
-        f"--customize-hook=copy-in {uv} {Path(UV_PATH).parent}",
-        f'--customize-hook=touch --no-dereference --date="@$SOURCE_DATE_EPOCH" "$1{Path(UV_PATH).parent}"',
+        f"--customize-hook=copy-in {uv} {bindir}",
+        f'--customize-hook=touch --no-dereference --date="@$SOURCE_DATE_EPOCH" "$1{bindir}"',
         f'--customize-hook="$1{UV_PATH}" --version',
         SUITE,
         str(target),
