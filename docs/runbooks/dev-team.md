@@ -90,6 +90,7 @@ Grants expire after `grant_days` (14 by default). Run `provision` again before t
 
 - **Status.** `teamkit.py status` prints each member's active or last run, the work items by state, and each spend account's runs and dollars against its ceiling.
 - **Full overview.** `GET /v0.2/groups/<group>/overview?namespace=<ns>` adds mail, approvals and the latest journal events.
+- **Status API.** Read-only, paged JSON for the supervisor: `GET /v0.2/groups/<group>/status/{work,runs,mail,changes,spend,standing}?namespace=<ns>` gives work by state and holder, runs with cost and outcome, mail between roles, pull requests with review state, spend against each ceiling, and what is paused or waived. `changes` is what the kernel's receipts record, not the host's live view.
 - **One run.** `cardea inspect <task>` and `cardea events <task>`.
 - **Supervisor mail.** The supervisor's inbox receives the kernel's notices:
   - a run stopped on a spend ceiling;

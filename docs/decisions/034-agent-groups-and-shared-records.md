@@ -507,6 +507,31 @@ Portable tests go in `apps/api/tests/service/`. Before the record is called veri
   - **No new storage.** It needs no migration, no index and no new state.
 - **No page.** The kernel serves no static pages, and adding a web UI is out of scope. The walkthrough (`make teams`) prints the software team's overview at the end of its run.
 
+## Amendment (2026-11-21): team status API
+
+- **Requirement.** A supervisor, or a tool acting as one, needs the team's state as JSON in answerable pieces: work by state and holder, active and recent runs with cost and outcome, mail between roles, pull requests with review state, spend against every ceiling, and what is paused or waived. The overview (above) is one bounded snapshot for people; it cannot be paged, and it has no runs, pull requests or host allocation. No write path, and no one but the supervisor.
+- **Candidates.**
+
+  | Candidate | Fit |
+  |---|---|
+  | The overview, extended | One snapshot must stay small; runs, mail and pull requests grow without bound, so it would need paging in every section and would break its fixed shape. Rejected for these sections; the overview stays as it is. |
+  | The existing reads (`GET /v0.2/mailbox`, the run view, `GET /v0.2/groups/{name}`) | They answer for one message or one task, and mail needs the caller to be a sender or recipient. They give no group-wide list, no counts and no ceilings. They stay the detail reads. |
+  | A metrics stack (Prometheus) or the host's own pull-request pages | Separate services; neither applies the supervisor's live authority, and pull requests there are the host's view, not what the kernel's receipts record. Revisit for history. |
+  | Paged JSON resource lists (the repository's own convention: `after` cursor, `limit`, `next`) | Fits. Reused. |
+- **Decision.** Add six read-only routes, `GET /v0.2/groups/{name}/status/{work,runs,mail,changes,spend,standing}?namespace=`, in `service/team_status.py`.
+  - **Who may read.** Exactly who may read the overview: the group's live supervisor holding `groups.manage`. No credential is `401`; anyone else is `404 group_not_found`. A supervisor disabled by the kill switch has no live authority, so it is refused with `principal_disabled`, as for every route.
+  - **Read-only.** Only `GET` is routed (other methods answer `405`); no table is written and none is added.
+  - **Bounds.** List sections take `limit` (1 to 100, default 25) and an opaque `after`, and return `next`. Counts (`by_state`, `by_holder`, `totals`) cover the whole group. The holder summary and a pull request's review list are capped. Titles are clipped to 200 characters; message bodies, record data and run output are not returned.
+  - **Sections.**
+    - `work`: records of the group's collections by state, live claims by holder, and a page of records (filters `collection`, `state`, `holder`).
+    - `runs`: the members' runs newest first, each with state, outcome (the terminal state, null while active), failure code, reported cost (null while unknown) and its spend reservation; filter `active`.
+    - `mail`: messages sent from or to the group's roles, with role (pool, `supervisor`, or none), delivery counts by state and size; no bodies.
+    - `changes`: pull requests from the kernel's own `vcs.open_change`, `vcs.review` and `vcs.merge` receipts: open or merged, the newest deciding review (`APPROVED` or `CHANGES_REQUESTED`, else `none`) and the latest reviews. The kernel does not ask the host, so a pull request closed on the host without a merge still shows open.
+    - `spend`: each account's usd and run ceiling against use, remaining and `at_ceiling` (group, then pools), and the supervisor's host allocation (tool time, output bytes, concurrency).
+    - `standing`: the group's state, disabled and draining members, `paused` (not active, or every active member disabled), and the registry's host-rule waivers (ADR-037 amendment 2026-11-21) for repositories the supervisor holds a `repo:` grant for. A waiver on another repository is not disclosed.
+  - **Consistency.** Each section is one read transaction. Sections are separate requests, so they are not one snapshot; use the overview when one is needed.
+- **Verification.** `tests/service/test_team_status.py` covers each section on fixtures, paging and bounds, refusal of unauthenticated, other and disabled callers, and that no other method is routed.
+
 ## Amendment (2026-11-16): guards over the cited receipt's result
 
 - **Requirement.** "Accept only after a passing run" must be enforced by the kernel, not left to the reviewer agent ([ADR-038](038-throwaway-test-environments.md), owner decision on question 3). Receipt evidence (decision 3) checks only that a successful call of the named operation exists. A call that ran and reported a failure is still a successful call.
