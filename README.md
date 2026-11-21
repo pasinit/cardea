@@ -69,7 +69,7 @@ The agent loop itself is pluggable. A **harness** (the Claude Agent SDK, or Open
 
 ## Try it in two minutes
 
-You need Python 3.12+ and [uv](https://docs.astral.sh/uv/).
+You need Python 3.12+ and [uv](https://docs.astral.sh/uv/). If you don't have uv, `python3 -m pip install --user uv` installs it. The Makefile finds it on `PATH` or in the Python user base (usually `~/.local/bin`). To use another copy, run `make UV=/path/to/uv try`.
 
 ```sh
 make install
