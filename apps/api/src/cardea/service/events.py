@@ -15,7 +15,7 @@ recorded and leaves the event open: the sender's retry is evaluated again.
 
 import logging
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
@@ -58,6 +58,10 @@ def load_secrets(path: Path) -> tuple[Webhook, ...]:
     return secrets
 
 
+# The clock the timestamp tolerance is checked against (tests fix it).
+clock: Callable[[], float] = time.time
+
+
 def verify(
     secrets: tuple[Webhook, ...], headers: Mapping[str, str], body: bytes, tolerance: int
 ) -> None:
@@ -66,7 +70,7 @@ def verify(
         stamp = int(headers.get("webhook-timestamp", ""))
     except ValueError:
         stamp = None
-    if stamp is None or abs(time.time() - stamp) > tolerance:
+    if stamp is None or abs(clock() - stamp) > tolerance:
         raise _unauthenticated()
     signed = {
         name: headers.get(name, "")

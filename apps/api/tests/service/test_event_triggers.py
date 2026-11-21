@@ -375,19 +375,36 @@ def test_a_lost_admission_race_answers_with_the_winner(
 # Authentication
 
 
-def test_signature_failures_are_rejected_before_parsing(kernel: Kernel) -> None:
+@pytest.fixture
+def frozen(monkeypatch: pytest.MonkeyPatch) -> int:
+    """A fixed verification clock (Cardea's tolerance check and the library's own), so a
+    slow run cannot move a timestamp across the tolerance boundary."""
+    stamp = floor(time.time())
+
+    class Frozen(datetime):
+        @classmethod
+        def now(cls, tz: Any = None) -> "Frozen":
+            return cls.fromtimestamp(stamp, tz=tz)
+
+    monkeypatch.setattr(events, "clock", lambda: float(stamp))
+    monkeypatch.setattr(webhooks, "datetime", Frozen)
+    return stamp
+
+
+def test_signature_failures_are_rejected_before_parsing(kernel: Kernel, frozen: int) -> None:
     client = TestClient(create_app(kernel))
     body = json.dumps(cloudevent()).encode()
     wrong = deliver(client, secret=OTHER)
     assert wrong.status_code == 401 and wrong.json()["code"] == "invalid_signature"
-    stale = deliver(client, at=time.time() - 301)
+    # One second outside the 300 s tolerance either way; never decided by elapsed time.
+    stale = deliver(client, at=frozen - 301)
     assert stale.status_code == 401
-    future = deliver(client, at=time.time() + 301)
+    future = deliver(client, at=frozen + 301)
     assert future.status_code == 401
     tampered = client.post(
         "/v0.2/events/issue-triage",
         content=body.replace(b"evt-1001", b"evt-9999"),
-        headers=signed(body),
+        headers=signed(body, at=frozen),
     )
     assert tampered.status_code == 401
     unsigned = client.post(
@@ -422,7 +439,7 @@ def test_verification_accepts_the_standard_webhooks_published_example(
             return cls.fromtimestamp(stamp, tz=tz)
 
     monkeypatch.setattr(webhooks, "datetime", Frozen)
-    monkeypatch.setattr(time, "time", lambda: float(stamp))
+    monkeypatch.setattr(events, "clock", lambda: float(stamp))
     secrets = (Webhook("whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"),)
     headers = {
         "webhook-id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
@@ -434,11 +451,11 @@ def test_verification_accepts_the_standard_webhooks_published_example(
         events.verify(secrets, headers, b'{"test": 2432232315}', 300)
 
 
-def test_tolerance_is_host_configuration(kernel: Kernel) -> None:
+def test_tolerance_is_host_configuration(kernel: Kernel, frozen: int) -> None:
     kernel.event_triggers = EventTriggers(timestamp_tolerance_seconds=30)
     client = TestClient(create_app(kernel))
-    assert deliver(client, at=time.time() - 60).status_code == 401
-    assert deliver(client, at=time.time() - 5).status_code == 202
+    assert deliver(client, at=frozen - 31).status_code == 401
+    assert deliver(client, at=frozen - 30).status_code == 202  # the boundary is inclusive
 
 
 def test_rotated_secrets_both_verify(kernel: Kernel, secret: Path) -> None:
