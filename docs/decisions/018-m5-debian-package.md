@@ -38,3 +38,19 @@ The [observed fit](../../experiments/m5/PACKAGING-REPORT.md) uses debhelper 13.2
 ## Amendment 2026-11-16: arm64 builds
 
 The package is now built for amd64 and arm64 (`Architecture: amd64 arm64`). Nothing else in the package is architecture-specific: dh-virtualenv installs the same hash-locked export, whose binary dependencies all have CPython 3.13 `manylinux` aarch64 wheels, and the helper selects the Debian 6.12 kernel pattern of the machine it runs on (`-amd64` on x86_64, `-arm64` on aarch64, generic or cloud, with an optional `+deb13.N` point-release suffix). CI builds the package in a `debian:13` container on native amd64 and arm64 runners and installs it in a fresh one (`packaging/container_build.sh`). That is build and install evidence, not a host fit. **arm64 is a development profile:** no M2 host fit or package acceptance has run on arm64, so confinement there is unverified. The amd64 evidence above is unchanged.
+
+## Amendment 2026-11-21: security updates within the accepted package lines
+
+The package pinned `python3`, `sudo`, `systemd` and `bubblewrap` to exact versions. When Debian published a later `sudo` update (`1.9.16p2-3+deb13u5` replaced `+deb13u2`), the pinned version left the archive, and the package could no longer be installed anywhere. Refusing a `sudo` security update is a worse risk than the drift it was meant to prevent.
+
+- **Each dependency now accepts its fitted version or any later Debian stable or security update of the same upstream version and Debian revision:**
+  - `python3 (>= 3.13.5-1), python3 (<< 3.13.5-2~)`
+  - `sudo (>= 1.9.16p2-3+deb13u2), sudo (<< 1.9.16p2-4~)`
+  - `systemd (>= 257.13-1~deb13u1), systemd (<< 257.13-2~)`
+  - `bubblewrap (>= 0.12.0-1~deb13u1), bubblewrap (<< 0.12.0-2~)`
+
+  The `~` upper bounds exclude every later Debian revision, and therefore every later upstream version.
+- **The root helper's probe applies the same rule** to the two packages it checks: `systemd 257.13-1~deb13uN` and `bubblewrap 0.12.0-1~deb13uN`, for N ≥ 1. A changed helper must be reinstalled from the same commit, as always.
+- **A new upstream version or Debian revision is outside the accepted lines.** The package refuses to install with it, the helper refuses it, and accepting it needs fresh host fit and acceptance evidence. The "dependency security update requires renewed inventory/fit" gate above now applies only to updates outside these lines.
+- **Checked 2026-11-21** against the Debian archive (madison, trixie suites): `sudo 1.9.16p2-3+deb13u5`, `systemd 257.13-1~deb13u1`, `bubblewrap 0.12.0-1~deb13u1` and `python3-defaults 3.13.5-1`. All fall within the ranges.
+

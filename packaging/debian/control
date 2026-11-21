@@ -8,7 +8,7 @@ Rules-Requires-Root: no
 
 Package: cardea-kernel
 Architecture: amd64 arm64
-Depends: ${misc:Depends}, ${shlibs:Depends}, python3 (= 3.13.5-1), adduser, sudo (= 1.9.16p2-3+deb13u2), systemd (= 257.13-1~deb13u1), bubblewrap (= 0.12.0-1~deb13u1)
+Depends: ${misc:Depends}, ${shlibs:Depends}, python3 (>= 3.13.5-1), python3 (<< 3.13.5-2~), adduser, sudo (>= 1.9.16p2-3+deb13u2), sudo (<< 1.9.16p2-4~), systemd (>= 257.13-1~deb13u1), systemd (<< 257.13-2~), bubblewrap (>= 0.12.0-1~deb13u1), bubblewrap (<< 0.12.0-2~)
 Description: Cardea authenticated single-host agent runtime
  Private service and fixed confined operations for the tested Debian 13 profile.
  Identity-provider enrollment and explicit local policy provisioning are required.

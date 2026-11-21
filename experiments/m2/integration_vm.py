@@ -56,7 +56,8 @@ def prepare(state: Path, spire_archive: Path) -> None:
         state,
         "test $(cat /etc/cardea-disposable-m2-vm) = yes && "
         "apt-get update -qq && apt-get install -y --no-install-recommends "
-        "python3-venv=3.13.5-1 sudo=1.9.16p2-3+deb13u2 && "
+        # sudo takes the archive's current security update of the accepted line (ADR-018).
+        "python3-venv=3.13.5-1 sudo && "
         "useradd --system --no-create-home --user-group --shell /usr/sbin/nologin cardea-worker && "
         "useradd --create-home --user-group --shell /bin/bash cardea-kernel && "
         "python3 -m venv /opt/cardea-venv",
