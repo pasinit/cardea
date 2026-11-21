@@ -80,6 +80,11 @@ def test_worker_configuration_passes_the_helper_checks() -> None:
         launcher.validate_worker(entry, config["profiles"])
     # Browsers start one at a time on a small host.
     assert config["profiles"]["browser"]["concurrency"] == 1
+    # The sandbox binds /usr only: a worker that runs git over TLS needs the CA bundle.
+    git_workers = [w for w in config["workers"].values() if "vcs.push_branch" in w["argv"]]
+    assert git_workers
+    for entry in git_workers:
+        assert "/etc/ssl/certs" in entry["read_only"]
 
 
 def test_confined_config_names_an_installed_session_profile() -> None:

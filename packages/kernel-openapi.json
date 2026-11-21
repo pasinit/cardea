@@ -5556,7 +5556,7 @@
       },
       "ReceiptRequirement": {
         "additionalProperties": false,
-        "description": "Evidence a transition needs: a successful call of `operation` by the caller.\n\n`same_task` accepts a call of the caller's own task (its run). `same_caller` accepts one\nof any task of the same agent principal within `window_seconds` before the transition.\nThe cited call must name this record: its `record_id` argument, or an idempotency\ncontext `<record_id>.<epoch>`.\n\n`result` (ADR-034 amendment, 2026-11-16) is a CEL guard over the cited call's output,\nas `result`: for example `result.passed == true` accepts only a passing `env.try`\nrun. It has the record guards' limits (no comprehension macros), so an operation\nthat wants such a guard reports a summary field. False, an error, or a receipt with\nno output refuses the transition (`receipt_result_refused`).",
+        "description": "Evidence a transition needs: a successful call of `operation` by the caller.\n\n`same_task` accepts a call of the caller's own task (its run). `same_caller` accepts one\nof any task of the same agent principal within `window_seconds` before the transition.\nThe cited call must name this record: its `record_id` argument, or an idempotency\ncontext `<record_id>.<epoch>`.\n\n`result` (ADR-034 amendment, 2026-11-16) is a CEL guard over the cited call's output,\nas `result`: for example `result.passed == true` accepts only a passing `env.try`\nrun. It has the record guards' limits (no comprehension macros), so an operation\nthat wants such a guard reports a summary field. False, an error, or a receipt with\nno output refuses the transition (`receipt_result_refused`).\n\n`sets` (2026-11-21) copies values from the cited call's output into the record's data,\nas `{field: JSON pointer}`: for example `{\"change\": \"/number\"}` records the pull\nrequest a `vcs.open_change` call opened. The new data must still match the schema; a\npointer the output lacks refuses the transition (`receipt_result_refused`).",
         "properties": {
           "in": {
             "default": "same_task",
@@ -5583,6 +5583,25 @@
               }
             ],
             "title": "Result"
+          },
+          "sets": {
+            "anyOf": [
+              {
+                "maxProperties": 8,
+                "minProperties": 1,
+                "patternProperties": {
+                  "^[a-z][a-z0-9_]{0,63}$": {
+                    "pattern": "^(/[^/]{1,64}){1,8}$",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sets"
           },
           "window_seconds": {
             "anyOf": [

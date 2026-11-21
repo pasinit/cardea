@@ -140,6 +140,11 @@ RIGHTS: tuple[Right, ...] = (
 )
 
 
+# The request ID prefix of the cancels that disabling a supervisor records (the kill
+# switch, ADR-034 amendment); claim follow-ups wake holders those cancels interrupted.
+DISABLED_REQUEST_PREFIX = "disabled."
+
+
 def now() -> datetime:
     return datetime.now(UTC)
 

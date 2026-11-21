@@ -14,7 +14,7 @@ Every trigger refuses double work:
 - **Members.** A member runs one run at a time. Events that arrive meanwhile coalesce into one follow-up.
 - **Events and slots.** One event or schedule slot admits at most one run per member.
 
-A transition that needs evidence cites a receipt. `submit` needs the run's `vcs.open_change`. `approve` needs the PE's `vcs.review` with `state == APPROVED`. `merge` needs the developer's `vcs.merge`.
+A transition that needs evidence cites a receipt. `submit` needs the run's `vcs.open_change`, and it copies the pull request number from that call onto the item as `data.change`, where the PE finds it. `approve` needs the PE's `vcs.review` with `state == APPROVED`, and `request_changes` needs one with `state == CHANGES_REQUESTED`. `merge` needs the developer's `vcs.merge`. Each of these calls passes the item's `record_id`.
 
 ## What the host needs first
 

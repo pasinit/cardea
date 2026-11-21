@@ -16,10 +16,11 @@ from cardea_env_ops import descriptors as env_descriptors
 from cardea_vcs_ops import in_process_descriptors
 from mcp.client.session import ClientSession
 from test_agent_runs import FakeSession, call
+from test_vcs_ops import text
 
 from cardea.kernel.models import DispatchLease, TaskState
 from cardea.runtime.agent_session import SessionRequest, SessionResult
-from cardea.service import agent_run_runtime, journal
+from cardea.service import agent_run_runtime, claims, journal
 from cardea.service import kernel as handlers
 from cardea.service.agent_run_runtime import AgentRunRuntime
 from cardea.service.auth import Authentication, Proof
@@ -300,6 +301,31 @@ def admitted(kernel: Kernel, agent: str) -> list[str]:
         ]
 
 
+def ready_item(kernel: Kernel, session: FakeSession, title: str = "Fix it") -> str:
+    """A work item the team lead created and triaged; its record ID."""
+    created: dict[str, Any] = {}
+
+    async def lead(client: ClientSession, request: SessionRequest) -> SessionResult:
+        made = await call(
+            client, "records-create", collection="work", client_key=title, data={"title": title}
+        )
+        assert not made.is_error, made.content
+        created.update(made.structured_content["record"])
+        moved = await call(
+            client,
+            "records-transition",
+            collection="work",
+            record_id=created["record_id"],
+            transition="triage",
+        )
+        assert not moved.is_error, moved.content
+        return SessionResult(text="Triaged.", is_error=False)
+
+    session.scripts = [lead]
+    assert AgentRunRuntime(kernel).execute(member_run(kernel, "dev-team.tl.0")) == "succeeded"
+    return str(created["record_id"])
+
+
 def test_an_assignment_wakes_the_developers_and_only_one_claims_it(
     team: tuple[Kernel, FakeSession],
 ) -> None:
@@ -519,6 +545,142 @@ def test_disabling_the_supervisor_cancels_its_unfinished_runs(
             ).scalar_one()
             == 1
         )
+
+
+def test_a_holder_interrupted_by_the_kill_switch_is_woken_after_resume(
+    team: tuple[Kernel, FakeSession],
+) -> None:
+    """A run the pause cancelled leaves its holder's claim idle; once the team is resumed,
+    the next tick wakes the holder for it, without waiting for half the lease."""
+    kernel, session = team
+    record_id = ready_item(kernel, session)
+
+    async def start(client: ClientSession, request: SessionRequest) -> SessionResult:
+        started = await call(
+            client,
+            "records-transition",
+            collection="work",
+            record_id=record_id,
+            transition="start",
+        )
+        assert not started.is_error, started.content
+        return SessionResult(text="Started.", is_error=False)
+
+    session.scripts = [start]
+    assert AgentRunRuntime(kernel).execute(member_run(kernel, "dev-team.dev.0")) == "succeeded"
+    interrupted = member_run(kernel, "dev-team.dev.0", "t1")
+    provision_team(kernel, paused=True)
+    at = now() + timedelta(minutes=1)
+    assert claims.followups(kernel, at) == []  # nothing is admitted while paused
+    provision_team(kernel, paused=False)
+    woken = claims.followups(kernel, at)
+    assert len(woken) == 1 and woken[0] != interrupted
+    assert admitted(kernel, "dev-team.dev.0")[-1] == woken[0]
+    # One wake per interruption: the follow-up is now the holder's latest run.
+    assert claims.followups(kernel, at) == []
+
+
+def test_submit_records_the_pull_request_and_reviews_drive_the_item(
+    team: tuple[Kernel, FakeSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`submit` copies the opened pull request's number onto the item (data.change), where
+    the PE reads it; `request_changes`, like `approve`, needs the PE's matching review."""
+    kernel, session = team
+    record_id = ready_item(kernel, session)
+    events: list[str] = []
+
+    async def opened(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+        return {"number": 42, "url": "https://git.example/pull/42", "state": "open", "head": "b"}
+
+    async def reviewed(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+        events.append(arguments["event"])
+        state = {"REQUEST_CHANGES": "CHANGES_REQUESTED", "APPROVE": "APPROVED"}
+        return {
+            "review_id": len(events),
+            "state": state.get(arguments["event"], "COMMENTED"),
+            "url": "https://git.example/pull/42#r",
+        }
+
+    for name, fake in (("vcs.open_change", opened), ("vcs.review", reviewed)):
+        handler = kernel.operations.get(name).cardea.handler
+        monkeypatch.setitem(kernel.operations.handlers, str(handler), fake)
+
+    async def develop(client: ClientSession, request: SessionRequest) -> SessionResult:
+        for transition in ("start", "submit"):
+            if transition == "submit":
+                made = await call(
+                    client,
+                    "vcs-open_change",
+                    repository="cardea",
+                    head="agent/dev-team/fix",
+                    base="main",
+                    title="Fix it",
+                    record_id=record_id,
+                )
+                assert not made.is_error, made.content
+            moved = await call(
+                client,
+                "records-transition",
+                collection="work",
+                record_id=record_id,
+                transition=transition,
+                **({"claim_epoch": 1} if transition == "submit" else {}),
+            )
+            assert not moved.is_error, moved.content
+        return SessionResult(text="Submitted.", is_error=False)
+
+    session.scripts = [develop]
+    assert AgentRunRuntime(kernel).execute(member_run(kernel, "dev-team.dev.0")) == "succeeded"
+    with kernel.database.read() as conn:
+        state, data = conn.exec_driver_sql(
+            "SELECT state, data_json FROM records WHERE record_id=?", (record_id,)
+        ).one()
+    assert state == "in_review" and json.loads(data) == {"title": "Fix it", "change": 42}
+    refusals: list[str] = []
+
+    async def review(client: ClientSession, request: SessionRequest) -> SessionResult:
+        async def request_changes() -> Any:
+            return await call(
+                client,
+                "records-transition",
+                collection="work",
+                record_id=record_id,
+                transition="request_changes",
+            )
+
+        refusals.append(text(await request_changes()))  # no review yet
+        for event in ("COMMENT", "REQUEST_CHANGES"):
+            made = await call(
+                client,
+                "vcs-review",
+                repository="cardea",
+                number=42,
+                event=event,
+                body="Please add a test.",
+                client_key=f"review-{event}",
+                record_id=record_id,
+            )
+            assert not made.is_error, made.content
+            moved = await request_changes()
+            if event == "COMMENT":
+                refusals.append(text(moved))  # a comment is not a changes-requested review
+            else:
+                assert not moved.is_error, moved.content
+        return SessionResult(text="Changes requested.", is_error=False)
+
+    session.scripts = [review]
+    assert AgentRunRuntime(kernel).execute(member_run(kernel, "dev-team.pe.0")) == "succeeded"
+    assert "receipt_required" in refusals[0] and "receipt_result_refused" in refusals[1]
+    assert events == ["COMMENT", "REQUEST_CHANGES"]
+    with kernel.database.read() as conn:
+        assert (
+            conn.exec_driver_sql(
+                "SELECT state FROM records WHERE record_id=?", (record_id,)
+            ).scalar_one()
+            == "in_progress"
+        )
+    pe = next(p for p in kit().group_document(host())["spec"]["pools"] if p["name"] == "pe")
+    assert "data.change" in pe["run"]["instructions"]
 
 
 def test_the_supervisor_oversees_its_members_runs(team: tuple[Kernel, FakeSession]) -> None:

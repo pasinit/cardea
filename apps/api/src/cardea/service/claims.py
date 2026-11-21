@@ -17,8 +17,11 @@ attempt started just before the lease ended, plus one minute tick for the sweep,
 last progress. The per-minute trigger tick expires lapsed claims and,
 for group members whose claim is past half its lease and who have no unfinished run, admits
 one coalesced follow-up run from the member's first trigger template, at most
-`max_followups` per epoch until the holder acts on the record again. A claim that lapses
-after its follow-ups is escalated to the collection's supervisor by mail.
+`max_followups` per epoch until the holder acts on the record again. A holder whose latest
+run the kill switch cancelled (disabling its supervisor) is woken as soon as admission
+works again, without waiting for half the lease: nothing else would resume the claimed
+work. A claim that lapses after its follow-ups is escalated to the collection's supervisor
+by mail.
 """
 
 import logging
@@ -30,7 +33,7 @@ from pydantic import ValidationError
 
 from cardea.service import mailbox
 from cardea.service.database import Fault, borrow
-from cardea.service.models import TriggerSpec, now
+from cardea.service.models import DISABLED_REQUEST_PREFIX, TriggerSpec, now
 from cardea.service.records import (
     ATTEMPT_RENEWAL_MARGIN_SECONDS,
     CollectionSpec,
@@ -212,13 +215,30 @@ def followups(kernel: "Kernel", at: datetime) -> list[str]:
         if claims is None or holder in woken or int(row["followups"]) >= claims.max_followups:
             continue
         left = datetime.fromisoformat(str(row["lease_expires_at"])) - at
-        if left.total_seconds() * 2 >= claims.lease_seconds:
+        if left.total_seconds() * 2 >= claims.lease_seconds and not interrupted(kernel, holder):
             continue
         task = _followup(kernel, row, holder)
         if task is not None:
             woken.add(holder)
             admitted.append(task)
     return admitted
+
+
+def interrupted(kernel: "Kernel", holder: str) -> bool:
+    """The holder's latest run was cancelled by disabling its supervisor (the kill switch).
+
+    Once a run is admitted again (a follow-up) it is the latest, so one interruption wakes
+    the holder once; while the supervisor stays disabled, admission refuses the follow-up
+    and nothing is counted."""
+    with kernel.database.read() as conn:
+        row = conn.exec_driver_sql(
+            "SELECT t.state, (SELECT 1 FROM control_requests c WHERE c.task_id=b.task_id "
+            "AND c.kind='cancel' AND substr(c.request_id,1,?)=?) "
+            "FROM task_bindings b JOIN tasks t USING(task_id) "
+            "WHERE b.agent_id=? ORDER BY b.rowid DESC LIMIT 1",
+            (len(DISABLED_REQUEST_PREFIX), DISABLED_REQUEST_PREFIX, holder),
+        ).first()
+    return row is not None and row[0] == "cancelled" and row[1] is not None
 
 
 def _followup(kernel: "Kernel", row: sa.RowMapping, holder: str) -> str | None:
