@@ -10,6 +10,15 @@ Further host-file fields:
   - `session_profile` (default `session`) names that profile.
   - `workers_config` (default `/etc/cardea-host-workers.json`) names the file that holds it.
   - `render` warns and `provision` and `apply` refuse when a timeout exceeds the wall. When the file is unreadable, the check cannot run and `render` says so.
+- **`product`:** the product's goals, which the product manager works to: `goals` (text) or `goals_file` (a path, relative to the host file), and optional `non_goals`. Together they are at most 8 KiB of UTF-8, non-empty, with no control characters except newlines and tabs; `load_host` refuses anything else. They come from the private host file only, never from the repository; the example's goals are placeholders to replace. With goals:
+  - the PM tests the product against them and files failures and gaps. It also designs and decides new features itself, without waiting for approval, and files each one as a work item stating the user problem, the proposed behaviour and acceptance criteria. Without `product`, the PM only tests and files what fails;
+  - the team lead gets the goals' first lines (at most 1 KiB) to prioritise by.
+- **`email`:** with an `alias` (for example `client`), the PM is granted `email.send` to that alias at the `rate_limit` (default 3 every 7 days, enforced by the email host file). Its instructions then carry the email policy:
+  - only a genuine preference question the goals do not settle ("X or Y?"), short, with the options and its own choice;
+  - a reply is optional input that arrives in its mailbox on a later run, and never blocks work;
+  - never status reports, summaries or anything the goals already decide.
+
+  Without `email`, neither the grant nor the policy is rendered.
 - **Mail:** each role's grants are pool addresses (`mail:<group>.<pool>`). The team lead and the PE are the exception for developers: they get each developer's own address (`mail:<group>.dev.<n>`) instead of the developer pool. Each role's instructions list exactly the addresses it holds, so no role mails an address it is not granted.
 - **`repositories_config`** (default `/opt/cardea-code/repositories.json`): the host's repository registry. `status` reads it only to report a waiver of the host's branch rules, described next.
 
