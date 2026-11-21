@@ -99,7 +99,7 @@ Compose existing pieces into one operations package, `vcs.*` and `code.*`, insta
 | Operation | Effect | Idempotency scope (ADR-026) | Reconciler (after `outcome_unknown`) |
 |---|---|---|---|
 | `code.session {repository, base_ref, task, task_key, harness?, model?, gates?}` | effect (publishes kernel objects; nothing leaves the host) | `/repository`, `/base_ref`, `/task_key` | the published change object exists for the call's effect key → applied; else not applied, so a retry runs a fresh session |
-| `vcs.read_change {repository, number}` | read | none | none |
+| `vcs.read_change {repository, number, diff?, diff_offset?}` | read | none | none |
 | `vcs.push_branch {repository, branch, change, expected_head?}` | effect | `/repository`, `/branch`, `/change` | the branch's head on the host equals the change's head commit → applied |
 | `vcs.open_change {repository, head, base, title, body, draft?}` | effect | `/repository`, `/head` | `GET .../pulls?head=<owner>:<head>&state=all` returns the pull request → applied, with its number and URL |
 | `vcs.comment {repository, number, body, client_key}` | effect | `/repository`, `/number`, `/client_key` | a comment on the pull request carries the marker `cardea:<effect_key>` → applied |
@@ -528,3 +528,14 @@ All decided; the answers are in [Decided by the owner](#decided-by-the-owner-202
     - with an API key (`api_key`), it also passes `--bare`.
 
     Which should the first harness use: the subscription token without `--bare`, relying on those flags and on the fit test's evidence that repository hooks and MCP servers do not run, or an API key with `--bare`? Without `--bare`, Claude Code still reads the repository's `CLAUDE.md`. That is repository text the model reads, which is untrusted either way, and the fit test records whether the model follows it.
+
+## Amendment (2026-11-21): reviewers read the diff
+
+A dry run of the dev team showed the principal engineer could not review: `vcs.read_change` returned the description but no code, so every review requested changes "for lack of evidence". `vcs.read_change` gains `diff: true`, which adds a bounded diff of the pull request. There is no new operation: grants are unchanged (the operation's grant plus `repo:<alias>`), and so are its confined worker and the host permission (`pull_requests:read`).
+
+- **Shape.** `diff.files` lists the changed files: path, previous path, status, line counts and `binary`. It lists at most 100, within 12 KiB, and `files_truncated` and `files_total` say what was left out. `diff.patches` holds the patches of the files from `diff_offset` on, as the host gives them (hunks only). Each patch is capped at 12 KiB and all of them at 32 KiB. A cut patch ends with `[cardea: patch truncated, N of M bytes shown]` and has `truncated: true`. `next_offset` is the index to read from next, or `null` when every patch has been shown.
+- **Bounds.** Sizes are counted as the receipt records them (compact ASCII JSON, escapes included). Whatever the body and reviews take, the whole output stays within the receipt's 64 KiB recorded output, so one call fits a reviewer's context. At most 50 patches are returned per call.
+- **Binary and oversized files.** These are listed and never dumped. A patch the host omits is `omitted: "binary"` when it counts no lines, else `omitted: "too_large"`.
+- **Data, not instructions.** The body, reviews and patches are untrusted repository text. `diff.note` says so, and credential-shaped strings are replaced with `[redacted]`: the shapes `env.try` scrubs, not key-like assignments, so ordinary code reads unchanged. The team kit's principal engineer is told to read the whole diff, following `next_offset`, before reviewing, and to treat it as the author's data.
+- **Tests.** `test_vcs_diff.py` runs against the fake host, whose `pulls/<n>/files` is computed with git. It covers the file list and statuses, binary files, scrubbing, per-file truncation, paging until `next_offset` is `null` within the recorded-output cap, the file-list cap, and host-omitted patches.
+
