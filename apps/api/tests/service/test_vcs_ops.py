@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from cardea_vcs_ops import Vcs, descriptors, in_process_descriptors
+from cardea_vcs_ops import Vcs, descriptors, git, in_process_descriptors
 from cardea_vcs_ops.config import FixedTokenConfig, VcsConfig
 from cardea_vcs_ops.credentials import Credential
 from cardea_vcs_ops.fake import FakeGitHub
@@ -676,6 +676,8 @@ def test_remote_git_gets_the_profiles_proxy_and_nothing_else_inherited(
     monkeypatch.setenv("https_proxy", proxy)
     monkeypatch.setenv("NO_PROXY", "127.0.10.0,localhost")
     monkeypatch.setenv("CARDEA_UNRELATED", "kept out")
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+    monkeypatch.setattr(git, "CA_BUNDLES", ())
     credential = Credential(TOKEN, datetime.now(UTC) + timedelta(minutes=5))
     with Workspace(b"", "0" * 40, "https://git.example.test/a/b.git", credential) as workspace:
         env = workspace._environment()
@@ -692,6 +694,21 @@ def test_remote_git_gets_the_profiles_proxy_and_nothing_else_inherited(
         "https_proxy",
         "NO_PROXY",
     }
+
+
+def test_remote_git_names_the_ca_bundle_it_finds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bundle = tmp_path / "ca-certificates.crt"
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+    monkeypatch.setattr(git, "CA_BUNDLES", (str(tmp_path / "absent.crt"), str(bundle)))
+    assert git.ca_bundle() == {}  # nothing bound: git keeps its default
+    bundle.write_text("certificates")
+    assert git.ca_bundle() == {"GIT_SSL_CAINFO": str(bundle)}
+    named = tmp_path / "named.pem"
+    named.write_text("certificates")
+    monkeypatch.setenv("SSL_CERT_FILE", str(named))
+    assert git.ca_bundle() == {"GIT_SSL_CAINFO": str(named)}
 
 
 def test_descriptors_without_resource_or_inputs_keep_their_digest() -> None:

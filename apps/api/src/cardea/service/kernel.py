@@ -45,6 +45,7 @@ from cardea.service.mailbox import is_group_address as mailbox_address
 from cardea.service.models import (
     APPROVAL_OPERATIONS,
     DEFAULT_MAX_TASK_REQUEST_BYTES,
+    DISABLED_REQUEST_PREFIX,
     RECORD_GRANT_PREFIX,
     RECORD_OPERATIONS,
     AgentRunRequest,
@@ -319,7 +320,7 @@ def provision(
                             str(task_id),
                             str(namespace),
                             "host-admin",
-                            f"disabled.{revision}",
+                            f"{DISABLED_REQUEST_PREFIX}{revision}",
                             "cancel",
                         )
                 for row in pending:

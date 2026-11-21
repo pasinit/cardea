@@ -23,6 +23,7 @@ from hashlib import sha256
 from typing import Annotated, Any, Literal, Self
 from uuid import uuid4
 
+import jsonpointer  # type: ignore[import-untyped]  # ships no type information
 import rfc8785
 import sqlalchemy as sa
 from jsonschema import Draft202012Validator
@@ -196,9 +197,17 @@ class CollectionSpec(Record):
             self.migrate,
             self.claims is not None,
         )
+        properties = self.json_schema.get("properties")
         for transition in self.transitions:
             # Compiles the gate's rule now, so its CEL limits are checked at apply.
             approval_rule("c", transition)
+            needs = transition.requires_receipt
+            for field in (needs.sets or {}) if needs is not None else ():
+                if not isinstance(properties, dict) or field not in properties:
+                    raise ValueError(
+                        f"Transition {transition.name} sets {field}, which the schema does not "
+                        "declare"
+                    )
         return self
 
     @model_validator(mode="after")
@@ -247,6 +256,8 @@ class CollectionDocument(Record):
             needs = transition.get("requires_receipt") if isinstance(transition, dict) else None
             if isinstance(needs, dict) and needs.get("result") is None:
                 needs.pop("result", None)  # added 2026-11-16 (ADR-038 Q3)
+            if isinstance(needs, dict) and needs.get("sets") is None:
+                needs.pop("sets", None)  # added 2026-11-21
         return spec
 
     @property
@@ -838,6 +849,28 @@ def check_receipt(
     if need.result is not None:
         check_result(need.result, receipt)
     return receipt_id
+
+
+def receipt_values(
+    conn: sa.Connection, need: ReceiptRequirement, receipt_id: str
+) -> dict[str, JsonValue]:
+    """The data fields `need.sets` takes from the cited call's output; fail closed."""
+    if not need.sets:
+        return {}
+    row = conn.exec_driver_sql(
+        "SELECT snapshot FROM operations WHERE receipt_id=?", (receipt_id,)
+    ).one()
+    receipt = OperationReceipt.model_validate_json(row[0])
+    output = receipt.result.get("output") if isinstance(receipt.result, dict) else None
+    values: dict[str, JsonValue] = {}
+    for field, pointer in need.sets.items():
+        try:
+            values[field] = jsonpointer.resolve_pointer(output, pointer)
+        except jsonpointer.JsonPointerException:
+            raise OperationRejected(
+                f"The cited call's output has no {pointer} for {field}", "receipt_result_refused"
+            ) from None
+    return values
 
 
 def check_result(source: str, receipt: OperationReceipt) -> None:
@@ -1565,9 +1598,19 @@ class Records:
                     record_id,
                     int(row["claim_epoch"]),
                 )
+                values = receipt_values(conn, transition.requires_receipt, receipt)
+                if values:
+                    data = old["data"]
+                    assert isinstance(data, dict)
+                    new["data"] = _data(spec, {**data, **values})
             write_claim(
                 conn, row, new, acquired, holder_event=actor in (row["holder"], new["holder"])
             )
+            if new["data"] != old["data"]:
+                conn.exec_driver_sql(
+                    "UPDATE records SET data_json=? WHERE seq=?",
+                    (json.dumps(new["data"]), row["seq"]),
+                )
             detail: dict[str, JsonValue] = {
                 "transition": name,
                 "from": old["state"],

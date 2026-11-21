@@ -284,7 +284,7 @@ used by the examples.
 | `rate_limited` | This role may send {…} emails per {…} days | `cardea_email_ops.ops` |
 | `receipt_invalid` | Cite a receipt of {…}; The cited call did not succeed; The cited call was not made for this record (and 3 more) | `cardea.service.records` |
 | `receipt_required` | This transition needs receipt_id of a {…} call | `cardea.service.records` |
-| `receipt_result_refused` | The cited call has no result to check; The receipt result guard failed to evaluate: {…}; The cited call's result does not satisfy this transition | `cardea.service.records` |
+| `receipt_result_refused` | The cited call has no result to check; The receipt result guard failed to evaluate: {…}; The cited call's result does not satisfy this transition (and 1 more) | `cardea.service.records` |
 | `recipient_not_allowed` | This role may not email that recipient | `cardea_email_ops.ops` |
 | `reconciliation_required` | An interrupted effect has unknown outcome. | `cardea.kernel.store` |
 | `record_claimed` | Another principal holds this record | `cardea.service.records` |

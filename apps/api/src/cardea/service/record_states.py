@@ -73,12 +73,27 @@ class ReceiptRequirement(_Aliased):
     run. It has the record guards' limits (no comprehension macros), so an operation
     that wants such a guard reports a summary field. False, an error, or a receipt with
     no output refuses the transition (`receipt_result_refused`).
+
+    `sets` (2026-11-21) copies values from the cited call's output into the record's data,
+    as `{field: JSON pointer}`: for example `{"change": "/number"}` records the pull
+    request a `vcs.open_change` call opened. The new data must still match the schema; a
+    pointer the output lacks refuses the transition (`receipt_result_refused`).
     """
 
     operation: OperationName
     within: Literal["same_task", "same_caller"] = Field("same_task", alias="in")
     window_seconds: Annotated[int, Field(strict=True, ge=60, le=30 * 24 * 3600)] | None = None
     result: ResultGuardSource | None = None
+    sets: (
+        Annotated[
+            dict[
+                Annotated[str, Field(strict=True, pattern=r"^[a-z][a-z0-9_]{0,63}$")],
+                Annotated[str, Field(strict=True, pattern=r"^(/[^/]{1,64}){1,8}$")],
+            ],
+            Field(min_length=1, max_length=8),
+        ]
+        | None
+    ) = None
 
     @model_validator(mode="after")
     def window(self) -> Self:

@@ -816,3 +816,70 @@ def test_a_requirement_without_a_result_guard_keeps_its_digest() -> None:
     assert isinstance(stored, list)
     assert all("result" not in json.dumps(t) for t in stored)
     assert plain.digest != guarded.digest
+
+
+def recording_spec(
+    sets: dict[str, str] | None, schema: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    spec = guarded_spec(None)
+    spec["schema"] = schema or {
+        "type": "object",
+        "properties": {"title": {"type": "string"}, "passed": {"type": "boolean"}},
+    }
+    if sets is not None:
+        spec["transitions"][-1]["requires_receipt"]["sets"] = sets
+    return spec
+
+
+def test_a_transition_records_values_from_its_cited_receipt(work: Kernel) -> None:
+    assert apply(work, "work", recording_spec({"passed": "/passed"})).status_code == 200
+    record = ready(work)
+    move(work, record, "start")
+    cited = ci_receipt(work, record["record_id"], passed=True)
+    state, output, _ = move(work, record, "submit", claim_epoch=1, receipt_id=cited)
+    assert state == "succeeded" and output is not None
+    assert output["record"]["data"] == {"title": "k1", "passed": True}
+    assert json.loads(stored(work, record["record_id"])["data_json"]) == {
+        "title": "k1",
+        "passed": True,
+    }
+
+
+def test_a_recorded_value_must_exist_and_match_the_schema(work: Kernel) -> None:
+    assert apply(work, "work", recording_spec({"passed": "/missing"})).status_code == 200
+    record = ready(work)
+    move(work, record, "start")
+    cited = ci_receipt(work, record["record_id"], passed=True)
+    missing = move(work, record, "submit", claim_epoch=1, receipt_id=cited)
+    assert missing[0] == "failed" and missing[2] == "receipt_result_refused"
+    # The schema still applies: a boolean is not a string.
+    mismatched = recording_spec(
+        {"passed": "/passed"},
+        {
+            "type": "object",
+            "properties": {"title": {"type": "string"}, "passed": {"type": "string"}},
+        },
+    )
+    assert apply(work, "work", mismatched).status_code == 200
+    refused = move(work, record, "submit", claim_epoch=1, receipt_id=cited)
+    assert refused[0] == "failed" and refused[2] == "record_invalid"
+    assert stored(work, record["record_id"])["state"] == "doing"
+
+
+def test_a_recorded_field_must_be_declared_at_apply(work: Kernel) -> None:
+    response = apply(work, "work", recording_spec({"undeclared": "/passed"}))
+    assert response.status_code == 422, response.json()
+
+
+def test_a_requirement_without_sets_keeps_its_digest() -> None:
+    plain = CollectionDocument.model_validate(
+        {"metadata": {"name": "work", "namespace": "test"}, "spec": recording_spec(None)}
+    )
+    recording = CollectionDocument.model_validate(
+        {
+            "metadata": {"name": "work", "namespace": "test"},
+            "spec": recording_spec({"passed": "/passed"}),
+        }
+    )
+    assert all("sets" not in json.dumps(t) for t in plain.spec_json()["transitions"])  # type: ignore[union-attr]
+    assert plain.digest != recording.digest

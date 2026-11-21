@@ -11,7 +11,12 @@
         "number": {"type": "integer", "minimum": 1},
         "event": {"enum": ["COMMENT", "REQUEST_CHANGES", "APPROVE"]},
         "body": {"type": "string", "minLength": 1, "maxLength": 16000},
-        "client_key": {"type": "string", "minLength": 1, "maxLength": 128}
+        "client_key": {"type": "string", "minLength": 1, "maxLength": 128},
+        "record_id": {
+          "type": "string",
+          "pattern": "^rec-[0-9a-f]{32}$",
+          "description": "The work record this review is for (ADR-034 receipt evidence). Recorded in the receipt only; never sent to the host."
+        }
       },
       "required": ["repository", "number", "event", "body", "client_key"]
     },

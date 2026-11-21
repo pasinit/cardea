@@ -222,7 +222,8 @@
       "read_only": [
         "/opt/cardea",
         "/opt/cardea-vcs",
-        "/opt/cardea-code/repositories.json"
+        "/opt/cardea-code/repositories.json",
+        "/etc/ssl/certs"
       ],
       "env": {
         "CARDEA_VCS_CONFIG": "/opt/cardea-vcs/vcs.json",

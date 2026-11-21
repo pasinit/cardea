@@ -863,3 +863,21 @@ Decided by the lead on 2026-11-09 in the review of slice 2 (claims); the owner m
 - **Disabling a supervisor cancels its tasks.** When provisioning newly disables a principal, the kernel records a host-owner cancel (`disabled.<policy revision>`) for every unfinished task that principal supervises, in the provisioning transaction. Running sessions stop at once rather than continuing until their next authority check fails, and re-provisioning the same disabled principal signals nothing again.
 - The team kit's `pause` relies on this: it disables the supervisor and does nothing else.
 
+- **Resuming wakes interrupted holders.** A cancel of this kind leaves the holder's claim with no run, and it may be anywhere in its lease. Follow-up wakes (decision 2.4) wait for half the lease to pass, so after a resume the holder could sit idle for hours. A holder whose latest run was cancelled by `disabled.*` is now due for a follow-up on the first tick once the supervisor is enabled again. The follow-up is counted against `max_followups` as usual. While the supervisor stays disabled, admission refuses the follow-up and nothing is counted. Once the follow-up is admitted it becomes the holder's latest run, so each interruption wakes the holder once.
+
+## Amendment 2026-11-21: transitions that record their evidence
+
+- **Finding.** In the dev-team dry run, the developer's `submit` moved the item to `in_review`, but the PE, woken by the transition, could not find the pull request. The collection's `change` field stays empty unless the developer also writes it.
+- **Decision.** `requires_receipt` gains an optional `sets`: `{field: JSON pointer}` into the cited call's output. The transition copies those values into the record's data in the same transaction.
+
+  ```yaml
+  requires_receipt: {operation: vcs.open_change, in: same_task, sets: {change: /number}}
+  ```
+
+  - The cited receipt is the one the requirement already selects and checks.
+  - The new data must still match the collection's schema and size limit (`record_invalid`, `record_too_large`).
+  - A pointer the output lacks refuses the transition (`receipt_result_refused`).
+  - Each field must be declared in the schema's `properties`. This is checked at apply.
+  - **Compatibility.** A requirement without `sets` keeps its stored form and digest.
+- **Review evidence names the record.** `vcs.review` takes an optional `record_id`, like `vcs.open_change`. Without it a review could not satisfy the receipt check that it was made for the record.
+- **The team kit** ties `request_changes` to a `vcs.review` with `state == 'CHANGES_REQUESTED'`, as `approve` is tied to `APPROVED`. Its PE instructions say to read the pull request from `data.change`.

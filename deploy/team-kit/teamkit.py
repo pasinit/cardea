@@ -186,13 +186,24 @@ def work_collection(host: dict[str, Any]) -> dict[str, Any]:
                     "from": ["in_progress"],
                     "to": "in_review",
                     "claim": "holder",
-                    "requires_receipt": {"operation": "vcs.open_change", "in": "same_task"},
+                    # The opened pull request's number goes on the item, for the reviewer.
+                    "requires_receipt": {
+                        "operation": "vcs.open_change",
+                        "in": "same_task",
+                        "sets": {"change": "/number"},
+                    },
                 },
                 {
                     "name": "request_changes",
                     "from": ["in_review"],
                     "to": "in_progress",
                     "guard": f"caller.pool == {pool('pe')}",
+                    # Tied to the review as approve is: it cites a CHANGES_REQUESTED review.
+                    "requires_receipt": {
+                        "operation": "vcs.review",
+                        "in": "same_task",
+                        "result": "result.state == 'CHANGES_REQUESTED'",
+                    },
                 },
                 {
                     "name": "approve",
@@ -400,7 +411,9 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
                 "session, push and submit again. Otherwise start one ready item (only one "
                 "developer gets its claim; if start is refused, stop), implement it with a "
                 "coding session, push the change, open a pull request and submit the item. "
-                "If you are blocked, tell the team lead.",
+                "Pass the item's record_id to vcs.push_branch, vcs.open_change and vcs.merge: "
+                "submit records the pull request number on the item (data.change) from your "
+                "vcs.open_change call. If you are blocked, tell the team lead.",
                 [
                     "records.query",
                     "records.transition",
@@ -439,10 +452,14 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
                 *_mail(group, "dev", "tl"),
             ],
             "run": run(
-                "You are the principal engineer. Review each item in review: read its pull "
-                "request, then submit a review. Approve (vcs.review APPROVE, then the approve "
-                "transition) only when the change is correct, tested and in scope; otherwise "
-                "request changes with concrete reasons. Record architecture decisions.",
+                "You are the principal engineer. Review each item in review: its pull request "
+                "number is the item's data.change; read it with vcs.read_change, then submit "
+                "a review with the item's record_id. Approve (vcs.review APPROVE, then the "
+                "approve transition) only when the change is correct, tested and in scope; "
+                "otherwise request changes with concrete reasons (vcs.review REQUEST_CHANGES, "
+                "then the request_changes transition, which hands the item back to its "
+                "developer). Each transition cites your review, so make the review first. "
+                "Record architecture decisions.",
                 [
                     "records.query",
                     "records.transition",
