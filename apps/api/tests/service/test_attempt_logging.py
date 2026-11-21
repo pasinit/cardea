@@ -1,6 +1,7 @@
 """Attempt observability: lifecycle lines, harness output capture, heartbeat, redaction."""
 
 import asyncio
+import base64
 import hashlib
 import json
 import logging
@@ -454,6 +455,49 @@ def test_a_confined_session_logs_its_worker_unit(logs: pytest.LogCaptureFixture)
     assert len(records(logs, "confined session finished")) == 1
 
 
+def test_a_failed_confined_session_logs_the_workers_diagnostics(
+    logs: pytest.LogCaptureFixture,
+) -> None:
+    host = WorkerHost()
+    host.outcome = worker_finished(
+        {
+            "output": {
+                "text": "",
+                "success": False,
+                "failure_reason": "harness_error",
+                "diagnostics": ["harness error: ProcessError: Command failed with exit code 1"],
+            }
+        }
+    )
+    adapter = ConfinedAgentSession(Workers(host), "session", "agent", None)
+    with activities.bind(AttemptActivity("task-d", 1)):
+        result = asyncio.run(adapter.run(request(job_key="task-d:1")))
+    assert result.failure_reason == "harness_error"
+    (line,) = records(logs, "harness worker:")
+    assert "exit code 1" in line.getMessage() and line.levelno == logging.WARNING
+
+
+def test_a_crashed_session_worker_logs_a_scrubbed_tail(logs: pytest.LogCaptureFixture) -> None:
+    host = WorkerHost()
+    # A credential-shaped line, assembled at run time so the fixture holds no key literal.
+    value = "z" * 16
+    crash = f"Traceback (most recent call last):\nauth_token={value}\nRuntimeError: boom\n"
+    host.outcome = {
+        "state": "finished",
+        "result": "exit-code",
+        "exit_status": "1",
+        "output": base64.b64encode(crash.encode()).decode(),
+    }
+    adapter = ConfinedAgentSession(Workers(host), "session", "agent", None)
+    with activities.bind(AttemptActivity("task-e", 1)):
+        result = asyncio.run(adapter.run(request(job_key="task-e:1")))
+    assert result.failure_reason == "worker_failed"
+    tail = [r.getMessage() for r in records(logs, "harness worker:")]
+    assert tail[-1] == "harness worker: RuntimeError: boom"
+    assert not any(value in line for line in tail)
+    assert any("auth_token=[redacted]" in line for line in tail)
+
+
 def test_the_session_worker_writes_nothing_to_stderr(tmp_path: Path) -> None:
     # The unit duplicates the result file onto stderr: a log line there would corrupt it.
     binary = tmp_path / "opencode"
@@ -472,4 +516,10 @@ def test_the_session_worker_writes_nothing_to_stderr(tmp_path: Path) -> None:
             check=True,
         )
     assert done.stderr == b""
-    assert json.loads(done.stdout)["output"]["failure_reason"] == "harness_error"
+    output = json.loads(done.stdout)["output"]
+    assert output["failure_reason"] == "harness_error"
+    # A failed result carries the harness's scrubbed log tail, never the credential.
+    diagnostics = output["diagnostics"]
+    assert 0 < len(diagnostics) <= 20 and all(len(line.encode()) <= 512 for line in diagnostics)
+    assert any("retrying with key [redacted]" in line for line in diagnostics)
+    assert "sk-provider-secret" not in json.dumps(output)

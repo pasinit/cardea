@@ -13,6 +13,17 @@ from typing import Annotated, Any, Protocol, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+# Egress proxy a confined worker's profile sets (ADR-028); NO_PROXY keeps the loopback tool
+# endpoint direct. Harnesses must pass these through, or the model API is unreachable there.
+PROXY_VARIABLES = (
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "https_proxy",
+    "http_proxy",
+    "NO_PROXY",
+    "no_proxy",
+)
+
 
 class _Frozen(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)

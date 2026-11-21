@@ -932,6 +932,57 @@ def test_claude_session_has_no_builtin_tools_or_host_settings(
         ClaudeAgentSession(model=None)
 
 
+PROXIES = ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy", "NO_PROXY", "no_proxy")
+
+
+def proxied_options(tmp_path: Path, mcp_url: str = "http://127.0.0.1:1/mcp") -> dict[str, Any]:
+    adapter = ClaudeAgentSession(model="claude-sonnet-5-5", api_key="k")
+    request = SessionRequest(
+        system_prompt="s",
+        prompt="p",
+        mcp_url=mcp_url,
+        mcp_token="t",
+        tool_names=("mail-send",),
+        max_turns=5,
+        max_cost_usd=1.0,
+        timeout_seconds=60,
+    )
+    env: dict[str, Any] = adapter.options(request, tmp_path)["env"]
+    return env
+
+
+def test_claude_session_keeps_a_confined_workers_egress_proxy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Inside a confined worker the proxy is the only route to the model API (ADR-028)."""
+    monkeypatch.setenv("SMTP_PASSWORD", "service-secret")
+    for name in PROXIES[:4]:
+        monkeypatch.setenv(name, "http://127.0.10.2:3128")
+    for name in PROXIES[4:]:
+        monkeypatch.setenv(name, "127.0.0.1,localhost")
+    env = proxied_options(tmp_path)
+    assert {name: env[name] for name in PROXIES[:4]} == dict.fromkeys(
+        PROXIES[:4], "http://127.0.10.2:3128"
+    )
+    # The tool endpoint stays direct; it is already listed, so NO_PROXY is unchanged.
+    assert env["NO_PROXY"] == env["no_proxy"] == "127.0.0.1,localhost"
+    assert env["SMTP_PASSWORD"] == "" and env["ANTHROPIC_API_KEY"] == "k"
+    # A proxy without the endpoint's host in NO_PROXY gets it added.
+    monkeypatch.setenv("NO_PROXY", "localhost")
+    monkeypatch.delenv("no_proxy")
+    env = proxied_options(tmp_path, "http://127.0.0.9:4000/mcp")
+    assert env["NO_PROXY"] == "localhost,127.0.0.9" and env["no_proxy"] == "127.0.0.9"
+
+
+def test_claude_session_adds_no_proxy_settings_without_a_proxy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for name in PROXIES:
+        monkeypatch.delenv(name, raising=False)
+    env = proxied_options(tmp_path)
+    assert not set(PROXIES) & set(env)
+
+
 def claude_request(**changes: Any) -> SessionRequest:
     fields: dict[str, Any] = {
         "system_prompt": "s",

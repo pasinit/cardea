@@ -37,12 +37,13 @@ from typing import Any
 
 from pydantic import JsonValue
 
+from cardea.runtime.harness import PROXY_VARIABLES
 from cardea.service.operations import OperationRejected
 
 TOOLS = ("Bash", "Read", "Edit", "Write", "Glob", "Grep")
 # File tools are limited to the checkout (the working directory).
 ALLOWED = ("Bash", "Read(./**)", "Edit(./**)", "Write(./**)", "Glob", "Grep")
-PROXY = ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy", "NO_PROXY", "no_proxy")
+PROXY = PROXY_VARIABLES
 CREDENTIAL_VARIABLE = {"oauth_token": "CLAUDE_CODE_OAUTH_TOKEN", "api_key": "ANTHROPIC_API_KEY"}
 MAX_SUMMARY = 2048
 DEFAULT_MAX_TURNS = 60
