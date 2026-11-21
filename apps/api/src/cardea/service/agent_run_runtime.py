@@ -1024,7 +1024,13 @@ class AgentRunRuntime:
                     self.kernel.queue_allowance(name),
                 )
         except Fault as refused:
-            self._current(task_id).tool_refused(name, refused.code, kind=kind)
+            activity = self._current(task_id)
+            missing = {
+                key: activity.scrub(str(refused.details[key]))
+                for key in ("grant", "holder")
+                if key in refused.details
+            }
+            activity.tool_refused(name, refused.code, kind=kind, **missing)
             return Outcome(refused.code, refused.message)
         activity = self._current(task_id)
         if admitted.deduplicated is not None:
