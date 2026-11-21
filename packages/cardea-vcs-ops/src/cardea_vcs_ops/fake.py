@@ -61,6 +61,8 @@ class FakeRepository:
     checks: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     # Pull request number to its changed files, overriding the git-computed list.
     files: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
+    # A plan without rulesets (a private repository on a free plan): the rules API is 403.
+    rules_unavailable: bool = False
 
     def pass_checks(self, sha: str, *names: str) -> None:
         self.checks[sha] = [
@@ -197,6 +199,14 @@ class FakeGitHub:
                 200, json={"full_name": full, "default_branch": repo.default_branch}
             )
         if rest[:2] == ["rules", "branches"] and method == "GET":
+            if repo.rules_unavailable:
+                return httpx.Response(
+                    403,
+                    json={
+                        "message": "Upgrade to GitHub Pro or make this repository public to "
+                        "enable this feature."
+                    },
+                )
             page = int(request.url.params.get("page", "1"))
             rules = repo.rules_for("/".join(rest[2:])) if page == 1 else []
             return httpx.Response(200, json=rules)

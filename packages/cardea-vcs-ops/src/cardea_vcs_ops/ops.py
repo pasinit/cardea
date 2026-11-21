@@ -235,6 +235,19 @@ class Vcs:
             return self.config.branch_prefix
         return self.registry.repositories[str(alias)].branch_prefix
 
+    def waiver(self, alias: object) -> str | None:
+        """The host owner's reason for waiving the host's own branch rules on this
+        repository (registry `host_rules: waived`), or None where they are required."""
+        if self.registry is None:
+            return None
+        entry = self.registry.repositories.get(str(alias))
+        return entry.waiver_reason if entry is not None and entry.host_rules == "waived" else None
+
+    def waived(self, alias: object) -> dict[str, JsonValue]:
+        """What a receipt records about a waiver: nothing where host rules are required."""
+        reason = self.waiver(alias)
+        return {} if reason is None else {"host_rules": "waived", "waiver_reason": reason}
+
     def may_approve(self, context: OperationContext) -> bool:
         """Whether the caller may submit an `APPROVE` review (ADR-037 question 2).
 
@@ -325,6 +338,7 @@ class Vcs:
             "repository": str(arguments["repository"]),
             "branch": branch,
             "head": head,
+            **self.waived(arguments["repository"]),
         }
         with Workspace(bundle, head, repository.git_url, credential) as workspace:
             try:
@@ -583,6 +597,7 @@ class Vcs:
             "opened_receipt": str(opener.get("receipt_id")),
             "approval_receipt": str(at_head[0].get("receipt_id")),
             "head_deleted": deleted,
+            **self.waived(arguments["repository"]),
         }
 
     async def _delete_head(
@@ -692,32 +707,52 @@ class Vcs:
     ) -> dict[str, JsonValue]:
         """Whether the host's rules hold what the team relies on (ADR-037): on the default
         branch one approving review, approval of the last push, no force push and no
-        deletion; pushes only under the agent prefix. Reports only."""
-        repository = self.repository(arguments["repository"])
-        prefix = self.branch_prefix(arguments["repository"])
+        deletion; pushes only under the agent prefix. Reports only.
+
+        A host plan without rulesets answers the rules API with 403: the rules are then
+        `rules_available: false`, not an error. Where the host owner waived the host's rules
+        (registry `host_rules: waived`, amendment 2026-11-21), the repository is ready on
+        Cardea's own guards: the report says so, with the reason, and lists the host-side
+        checks that do not hold as `waived_checks` instead of `missing`."""
+        alias = arguments["repository"]
+        repository = self.repository(alias)
+        prefix = self.branch_prefix(alias)
         root = prefix.split("{group}", 1)[0] or "agent/"
         inside = prefix.format(group=context.group or "readiness") + PROBE
+        available = True
         async with await self.client(repository, context, "metadata:read") as host:
             try:
                 default = str((await host.metadata()).get("default_branch") or "main")
-                on_default = await host.branch_rules(default)
-                outside = await host.branch_rules(PROBE)
-                on_agent = await host.branch_rules(inside)
+                try:
+                    on_default = await host.branch_rules(default)
+                    outside = await host.branch_rules(PROBE)
+                    on_agent = await host.branch_rules(inside)
+                except HostRefused as refused:
+                    if refused.status != 403:
+                        raise
+                    # For example "Upgrade to GitHub Pro": the plan has no rules to read.
+                    on_default, outside, on_agent, available = [], [], [], False
             except HostRefused as refused:
                 raise OperationRejected(str(refused), "host_refused") from None
         checks = readiness(default, root, on_default, outside, on_agent)
         missing: list[JsonValue] = [c["name"] for c in checks if c["required"] and not c["ok"]]
-        return {
-            "repository": str(arguments["repository"]),
+        reason = self.waiver(alias)
+        report: dict[str, JsonValue] = {
+            "repository": str(alias),
             "default_branch": default,
-            "ready": not missing,
+            "ready": reason is not None or not missing,
             "checks": list(checks),
-            "missing": missing,
+            "missing": [] if reason is not None else missing,
+            "host_rules": "required" if reason is None else "waived",
+            "rules_available": available,
             "not_checked": [
                 "bypass actors: the App or token must not be able to bypass these rules",
                 "classic branch protection, which this read does not list",
             ],
         }
+        if reason is not None:
+            report |= {"waiver_reason": reason, "waived_checks": missing}
+        return report
 
     def handlers(self) -> dict[str, Any]:
         """Entry-point name to handler, bound to this instance."""

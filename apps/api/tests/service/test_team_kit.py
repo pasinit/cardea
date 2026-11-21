@@ -865,3 +865,17 @@ def test_a_team_lead_answer_about_an_item_wakes_only_its_holder(
         "dev-team.dev.0": before["dev-team.dev.0"],
         "dev-team.dev.1": before["dev-team.dev.1"] + 1,
     }
+
+
+def test_status_reports_a_waiver_of_the_host_rules(tmp_path: Path) -> None:
+    module = kit()
+    registry = tmp_path / "repositories.json"
+    document = {**example(), "repositories_config": str(registry)}
+    assert module.host_rules_note(document) == []  # unreadable: nothing to report
+    entry: dict[str, Any] = {"source": "/srv/mirror"}
+    registry.write_text(json.dumps({"repositories": {document["repository"]: entry}}))
+    assert module.host_rules_note(document) == []  # rules required: nothing to say
+    entry.update(host_rules="waived", waiver_reason="No rulesets on this plan.")
+    registry.write_text(json.dumps({"repositories": {document["repository"]: entry}}))
+    (line,) = module.host_rules_note(document)
+    assert "WAIVED" in line and "No rulesets on this plan." in line
