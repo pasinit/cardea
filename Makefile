@@ -192,8 +192,8 @@ m4-check: check-uv
 # pins its digest in the repository registry; the kit's timer refreshes it weekly.
 TRY_REGISTRY ?= /opt/cardea-code/repositories.json
 try-toolchain:
-	sudo python3 -I packaging/try_toolchain.py build --registry $(TRY_REGISTRY)
-	sudo python3 -I packaging/try_toolchain.py pin $(TRY_REGISTRY)
+	digest="$$(sudo python3 -I packaging/try_toolchain.py build --registry $(TRY_REGISTRY))" && \
+		sudo python3 -I packaging/try_toolchain.py pin $(TRY_REGISTRY) --sha256 "$$digest"
 
 .PHONY: acceptance-check
 # The Debian acceptance scripts (docs/acceptance/debian-adr-034-037.md): lint and types only;

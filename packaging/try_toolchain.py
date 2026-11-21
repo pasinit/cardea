@@ -11,9 +11,12 @@ root with the packages the scenarios need, plus the pinned `uv` release binary a
 release, checked against the SHA-256 pinned below before anything is built, and copied in
 with a customize hook). It writes the root as a tarball, takes its SHA-256 and
 unpacks it read-only at `<root>/<sha256>/`. It prints the digest. Older images beyond
-`--keep` are removed, never the one a registry pins. `SOURCE_DATE_EPOCH` is set to the
-start of the current ISO week, so a rebuild in the same week of the same package set gives
-the same tarball.
+`--keep` are removed, never the one just built or one a registry pins.
+`SOURCE_DATE_EPOCH` is set to the start of the current ISO week, so a rebuild in the same
+week of the same package set gives the same tarball. Every unpacked image therefore
+carries the week's date, so build order is kept apart from it: `build` records each
+digest's build sequence in `<root>/.builds.json`, and `pin` (without `--sha256`) and
+pruning order images by it.
 
 `pin` writes the image's path and digest into every `environment.toolchain` of the
 repository registry, atomically, so the next `env.try` call has a new run key. The host
@@ -63,6 +66,9 @@ UV_ARCHIVES = {
 UV_RELEASES = "https://github.com/astral-sh/uv/releases/download"
 UV_PATH = "/usr/local/bin/uv"
 DEFAULT_ROOT = Path("/opt/cardea-try/toolchain")
+# Digest -> build sequence (nanoseconds, strictly increasing). Images' own mtimes are the
+# reproducible SOURCE_DATE_EPOCH, so two builds in one week tie on them.
+BUILDS = ".builds.json"
 WEEK = 7 * 24 * 3600
 # The ISO week starts on Monday; the Unix epoch was a Thursday.
 MONDAY_OFFSET = 3 * 24 * 3600
@@ -179,12 +185,48 @@ def pinned(registry: Path) -> set[str]:
     return found
 
 
-def prune(root: Path, keep: int, current: str, protected: set[str]) -> list[str]:
-    images = sorted(
-        (p for p in root.iterdir() if p.is_dir() and len(p.name) == 64),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
+def builds(root: Path) -> dict[str, int]:
+    path = root / BUILDS
+    if not path.exists():
+        return {}
+    document = json.loads(path.read_text())
+    return (
+        {k: v for k, v in document.items() if isinstance(v, int)}
+        if isinstance(document, dict)
+        else {}
     )
+
+
+def _write_builds(root: Path, recorded: dict[str, int]) -> None:
+    staged = root / f".{BUILDS}.tmp"
+    staged.write_text(json.dumps(recorded, indent=2, sort_keys=True) + "\n")
+    staged.chmod(0o644)
+    os.replace(staged, root / BUILDS)
+
+
+def record_build(root: Path, digest: str, now_ns: int | None = None) -> int:
+    """Mark `digest` as the newest build; a same-week rebuild of an existing digest counts too."""
+    recorded = builds(root)
+    sequence = max(
+        [now_ns if now_ns is not None else time.time_ns(), *(v + 1 for v in recorded.values())]
+    )
+    recorded[digest] = sequence
+    _write_builds(root, recorded)
+    return sequence
+
+
+def images_newest_first(root: Path) -> list[Path]:
+    """Unpacked images by recorded build order. Images built before the record existed sort
+    after every recorded one, among themselves by mtime."""
+    recorded = builds(root)
+    images = [p for p in root.iterdir() if p.is_dir() and len(p.name) == 64]
+    return sorted(
+        images, key=lambda p: (recorded.get(p.name, -1), p.stat().st_mtime, p.name), reverse=True
+    )
+
+
+def prune(root: Path, keep: int, current: str, protected: set[str]) -> list[str]:
+    images = images_newest_first(root)
     removed = []
     for image in images[keep:]:
         if image.name in protected or image.name == current:
@@ -194,6 +236,9 @@ def prune(root: Path, keep: int, current: str, protected: set[str]) -> list[str]
                 path.chmod(path.lstat().st_mode | 0o200)
         shutil.rmtree(image)
         removed.append(image.name)
+    if removed:
+        recorded = builds(root)
+        _write_builds(root, {k: v for k, v in recorded.items() if k not in removed})
     return removed
 
 
@@ -209,6 +254,7 @@ def build(root: Path, keep: int, registry: Path | None) -> str:
         subprocess.run(mmdebstrap_argv(tarball, uv), env=env, check=True)
         digest = sha256_file(tarball)
         unpack(tarball, root, digest)
+    record_build(root, digest)
     prune(root, keep, digest, pinned(registry) if registry else set())
     return digest
 
@@ -232,10 +278,10 @@ def pin(registry: Path, root: Path, digest: str) -> dict[str, Any]:
 
 
 def latest(root: Path) -> str:
-    images = [p for p in root.iterdir() if p.is_dir() and len(p.name) == 64]
+    images = images_newest_first(root)
     if not images:
         raise SystemExit("no toolchain image built yet")
-    return max(images, key=lambda p: p.stat().st_mtime).name
+    return images[0].name
 
 
 def main(argv: list[str]) -> int:
