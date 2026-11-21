@@ -133,7 +133,7 @@ errors answer 409. A request that fails schema validation answers
 | `object_version_conflict` | 409 | Object version has changed. | `cardea.kernel.store` |
 | `operation_changed` | 403 | Operation was reinstalled | `cardea.service.agent_run_runtime` |
 | `operation_duplicate` | 500 | Operation is installed twice | `cardea.service.operations` |
-| `operation_handler_missing` | 500, 503 | Operation handler is not installed; Operation handler is not loaded; Reconciler is not loaded (and 1 more) | `cardea.service.operations` |
+| `operation_handler_missing` | 500, 503 | Operation handler is not installed; Operation handler is not loaded; Reconciler is not loaded (and 2 more) | `cardea.service.operations` |
 | `operation_invalid` | 500 | Operation declares no reply poller; Invalid operation descriptor {…}: {…} | `cardea.service.operations` |
 | `operation_not_found` | 409 | Operation does not exist. | `cardea.kernel.store` |
 | `operation_not_installed` | 403, 409 | Approval rules name an operation that is not installed; Policy names an operation that is not installed; Operation is not installed | `cardea.service.kernel`, `cardea.service.operations` |

@@ -149,3 +149,57 @@ Revisit if:
 - receipts grow enough that `count_calls` and the thread lookup need an index on the operation name;
 - the send should move into a confined worker, which needs a confined way to deliver replies;
 - several roles share one thread, or replies need to reach a pool rather than the sending member.
+
+## Amendment (2026-11-21): inbound mail from the client
+
+- **Requirement (owner).** The client must be able to email a team's inbox with a new message, not only reply to a thread a role started. That mail reaches one configured role as data and wakes it like any mail. The checks stay as strict as for replies:
+  - only the host's listed aliases may write;
+  - the sender must be authenticated, failing closed;
+  - each message is delivered once;
+  - size and rate are bounded;
+  - every rejection is recorded without its content.
+- **Standards and existing mechanisms checked (2026-11-21).**
+
+  | Need | Candidate | Fit |
+  |---|---|---|
+  | Find new mail | IMAP4rev1 `UID SEARCH HEADER From` ([RFC 3501 §6.4.4](https://www.rfc-editor.org/rfc/rfc3501#section-6.4.4)) under `EXAMINE`; AgentMail [List Messages](https://docs.agentmail.to/api-reference/inboxes/messages/list) by the `received` label with `after`, and [Get Message](https://docs.agentmail.to/api-reference/inboxes/messages/get) | **Reused**, with the same clients and the same read-only narrowing. With IMAP, only mail whose From names a configured address is fetched. With AgentMail, only such mail is opened in full; any other sender's message is seen as list metadata only, which is enough to reject it. |
+  | Tell new mail from replies | `In-Reply-To` / `References` ([RFC 5322 §3.6.4](https://www.rfc-editor.org/rfc/rfc5322#section-3.6.4)); AgentMail `thread_id` | **Reused.** A message on a thread Cardea started (a recent send's thread id or Message-ID, or a reference to a Cardea Message-ID) belongs to `poll_replies` and is skipped. |
+  | Sender authentication | The existing RFC 8601 / AgentMail verdicts (decision 5) | **Reused unchanged:** an aligned pass is required, and an unknown verdict is a rejection unless `accept_unauthenticated` is set. |
+  | Exactly-once delivery | The Message-ID ([RFC 5322 §3.6.4](https://www.rfc-editor.org/rfc/rfc5322#section-3.6.4)) as the key, ADR-034 mailbox `client_key` | **Reused.** The delivery key is derived from the operation and the provider's message id. |
+  | Deliver and wake | ADR-034 pool mail and its `cardea.mailbox.sent` journal event | **Reused.** A pool address wakes the pool through its existing mail trigger. |
+  | Push delivery | AgentMail webhooks and WebSockets; IMAP IDLE ([RFC 2177](https://www.rfc-editor.org/rfc/rfc2177)) | Not used. Webhooks need a public endpoint. IDLE and WebSockets need a long-lived connection per inbox, and the existing 5-minute poll is enough for a client's mail. |
+
+  The only new mechanism is the kernel's inbound pass: one more call on the reply poller's thread, with no new table.
+- **Decision.**
+  1. **Host opt-in.** `email.json` gains an optional `inbound` section, off by default:
+
+     ```json
+     "inbound": {"from": ["<alias>"], "deliver_to": {"namespace": "<ns>", "pool": "<group>.<pool>"},
+                 "rate_limit": {"count": 10, "window_days": 1}, "max_bytes": 8192, "window_days": 7}
+     ```
+
+     The aliases must be in `recipients`. One section serves the transport's inbox.
+  2. **Poller.** `email.send`'s `replies` names a second entry point, `inbound: "email.poll_inbound"`. The kernel calls it once per reply interval with the recent send threads. It returns a `replies.Inbox`, or None when `inbound` is not configured. For each new message within `window_days` that is on none of those threads, it applies these checks:
+     - the exact sender address must belong to a listed alias, else `sender_not_allowed`;
+     - the sender must be authenticated, else `unauthenticated` or `authentication_unknown`;
+     - the message must not be spam, else `spam`;
+     - its text must be at most `max_bytes`, else `too_large`. It is rejected, not shortened, because a cut-off request from a client is worse than none.
+  3. **Delivery (kernel).** Each accepted message goes to the configured pool once, keyed by the Message-ID. It is sent by the kernel's runtime and carries these parts:
+     - its text;
+     - `{"email_inbound": {from: <alias>, subject, received_at, thread_id}}`;
+     - `{"inbound": {operation, from_outside: true}}`.
+
+     The mailbox renders it as an untrusted context block, like any mail. It is never instructions to the kernel or the role.
+     - Its receipt is the content-free journal event `operation.inbound_delivered`, holding the operation, the message-id digest, the mailbox message id and the pool.
+     - The host's `rate_limit` bounds deliveries per window. A message past it is rejected with `rate_limited`.
+  4. **Rejections.** Each rejected message is recorded once, as `operation.inbound_dropped` with the operation, the reason, the sender's domain and the message-id digest. It is never delivered later. Journal triggers see neither inbound event, and the logs carry only counts.
+  5. **Replying.** The role answers with `email.send` to the alias, as today. That starts a new thread whose replies are polled as before. Replying inside the client's own thread (AgentMail's reply endpoint, `In-Reply-To` over SMTP) is not part of this change.
+- **Compatibility.** `replies.inbound` is optional. A descriptor without it keeps its digest, and `email.send`'s digest changes because it now names the poller. Hosts without `inbound` see no change: no inbox listing and no extra reads.
+- **Tests** (`apps/api/tests/service/test_email_ops.py`, both fake transports):
+  - accepted mail reaches the pool once and arrives as untrusted data from the alias, and a later `email.send` works;
+  - the rejections: wrong sender (never opened or fetched), unauthenticated, unknown verdict, oversize, and rate-limited. Each is recorded once with only the domain and the reason, and its content is stored nowhere;
+  - a duplicate Message-ID is delivered once;
+  - a reply on a Cardea thread is delivered as a reply, not as inbound mail;
+  - inbound is off by default;
+  - configuration validation;
+  - `test_team_kit`: the PM fragment is opt-in.

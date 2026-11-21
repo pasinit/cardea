@@ -17,6 +17,20 @@ Delivery is idempotent: a reply's mailbox `client_key` is derived from the recei
 provider's reply id, so polling the same thread again delivers nothing new. Nothing here
 calls the destination except through the poller, and a poller failure leaves everything as
 it was until the next tick.
+
+Inbound messages (amendment 2026-11-21): an operation whose `replies` also names an
+`inbound` poller is asked, once per interval, for new messages that are on none of its
+recent threads, for example a client emailing a team's inbox directly. The poller returns
+an `Inbox`, or None when the host has not enabled inbound mail (the default):
+
+- each accepted message is delivered once, keyed by the operation and the provider's
+  message id, to the configured pool, sent by the kernel's runtime and marked as from
+  outside (`inbound`). The delivery wakes the pool like any mail, and its receipt is the
+  content-free journal event `operation.inbound_delivered`;
+- the host's `rate_limit` bounds deliveries per window; a message past it is rejected;
+- each rejected message is recorded once as `operation.inbound_dropped`, with only the
+  operation, the reason, the sender's domain and a digest of the message id. It is never
+  delivered later, and journal triggers never see either event.
 """
 
 import asyncio
@@ -45,6 +59,10 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 DROPPED = "operation.reply_dropped"
+INBOUND_DELIVERED = "operation.inbound_delivered"
+INBOUND_DROPPED = "operation.inbound_dropped"
+MAX_INBOUND_PER_POLL = 50
+DOMAIN = r"^[a-z0-9.-]{1,253}$"
 # Calls that may have reached their destination count toward a role's limit.
 COUNTED_STATES = ("running", "succeeded", "outcome_unknown")
 MAX_REPLIES_PER_THREAD = 50
@@ -61,10 +79,12 @@ class Reply:
 
 @dataclass(frozen=True)
 class Dropped:
-    """A reply the poller refuses. Only a digest of `reply_id` and the reason are kept."""
+    """A reply the poller refuses. Only a digest of `reply_id` and the reason are kept, and
+    for an inbound message the sender's domain."""
 
     reply_id: str
     reason: str
+    sender_domain: str | None = None
 
 
 @dataclass(frozen=True)
@@ -74,6 +94,21 @@ class Polled:
 
 
 Poller = Callable[[dict[str, JsonValue]], Awaitable[Polled]]
+
+
+@dataclass(frozen=True)
+class Inbox:
+    """What an inbound poller found: messages for the pool `<group>.<pool>` in `namespace`.
+
+    `accepted` are delivered (their `reply_id` is the provider's message id); `dropped` are
+    recorded. `rate_limit` is `(count, window_days)` for deliveries, or None for no limit.
+    """
+
+    namespace: str
+    pool: str
+    accepted: tuple[Reply, ...] = ()
+    dropped: tuple[Dropped, ...] = ()
+    rate_limit: tuple[int, int] | None = None
 
 
 @dataclass
@@ -253,6 +288,115 @@ def deliver(kernel: "Kernel", thread: dict[str, JsonValue], polled: Polled, tall
             tally.drop(dropped.reason)
 
 
+def deliver_inbound(kernel: "Kernel", name: str, inbox: Inbox, tally: Tally) -> None:
+    """Commit one inbound poll's deliveries and rejections in one transaction."""
+    at = now()
+    group = inbox.pool.split(".", 1)[0]
+    with kernel.database.engine.begin() as conn, borrow(conn) as tx:
+        supervisor = conn.exec_driver_sql(
+            "SELECT supervisor_id FROM agent_groups WHERE namespace=? AND name=?",
+            (inbox.namespace, group),
+        ).scalar()
+
+        def recorded(event: str) -> list[dict[str, Any]]:
+            return [
+                json.loads(row[0])
+                for row in conn.exec_driver_sql(
+                    "SELECT payload FROM events WHERE namespace=? AND event_type=? "
+                    "AND correlation_id=?",
+                    (inbox.namespace, event, name),
+                )
+            ]
+
+        rejected = {entry.get("message_sha256") for entry in recorded(INBOUND_DROPPED)}
+        since = (at - timedelta(days=inbox.rate_limit[1])).isoformat() if inbox.rate_limit else ""
+        used = sum(1 for entry in recorded(INBOUND_DELIVERED) if str(entry.get("at", "")) >= since)
+        drops = list(inbox.dropped)
+        for message in inbox.accepted[:MAX_INBOUND_PER_POLL]:
+            digest = _digest(name, message.reply_id)
+            key = "inbound." + digest[:40]
+            if (
+                digest in rejected
+                or conn.exec_driver_sql(
+                    "SELECT 1 FROM mailbox_messages WHERE namespace=? AND sender_id=? "
+                    "AND client_key=?",
+                    (inbox.namespace, kernel.runtime_id, key),
+                ).first()
+            ):
+                continue  # already delivered, or already rejected: never both
+            if supervisor is None:
+                drops.append(Dropped(message.reply_id, "recipient_unavailable"))
+                continue
+            if inbox.rate_limit is not None and used >= inbox.rate_limit[0]:
+                drops.append(Dropped(message.reply_id, "rate_limited"))
+                continue
+            parts: list[dict[str, JsonValue]] = [
+                *message.parts,
+                # From a person outside Cardea: data for the role, never an instruction.
+                {"data": {"inbound": {"operation": name, "from_outside": True}}},
+            ]
+            savepoint = conn.begin_nested()
+            try:
+                sent = mailbox.send(
+                    conn,
+                    tx,
+                    namespace=inbox.namespace,
+                    sender_id=kernel.runtime_id,
+                    supervisor_id=str(supervisor),
+                    to=mailbox.Address(pool=inbox.pool),
+                    parts=parts,
+                    runtime_id=kernel.runtime_id,
+                    at=at,
+                    client_key=key,
+                )
+            except Fault as refused:
+                savepoint.rollback()
+                reason = {"body_too_large": "too_large", "invalid_parts": "invalid"}.get(
+                    refused.code, "recipient_unavailable"
+                )
+                drops.append(Dropped(message.reply_id, reason))
+                continue
+            savepoint.commit()
+            used += 1
+            tx.append_event(
+                namespace=inbox.namespace,
+                event_type=INBOUND_DELIVERED,
+                producer_id=kernel.runtime_id,
+                correlation_id=name,
+                task_id=None,
+                at=at,
+                payload={
+                    "operation": name,
+                    "message_sha256": digest,
+                    "mailbox_message_id": sent.get("message_id"),
+                    "to": {"pool": inbox.pool},
+                    "at": at.isoformat(),
+                },
+            )
+            tally.delivered += 1
+        for dropped in drops:
+            digest = _digest(name, dropped.reply_id)
+            if digest in rejected:
+                continue
+            rejected.add(digest)
+            domain = dropped.sender_domain
+            tx.append_event(
+                namespace=inbox.namespace,
+                event_type=INBOUND_DROPPED,
+                producer_id=kernel.runtime_id,
+                correlation_id=name,
+                task_id=None,
+                at=at,
+                payload={
+                    "operation": name,
+                    "reason": dropped.reason,
+                    "sender_domain": domain if domain and re.fullmatch(DOMAIN, domain) else None,
+                    "message_sha256": digest,
+                },
+            )
+            tally.drop(dropped.reason)
+
+
 def dropped_counts(conn: sa.Connection, namespace: str | None = None) -> dict[str, int]:
     """Dropped replies by reason, from the journal; never their content."""
     counts: dict[str, int] = {}
@@ -311,7 +455,8 @@ class ReplyPoller:
                     # The class name only: an error text may hold an address or a reply.
                     log.warning("reply poll of %s failed: %s", name, type(error).__name__)
                     tally.failed += 1
-        if tally.threads:
+            self.inbound(name, found, tally)
+        if tally.threads or tally.delivered or tally.dropped or tally.failed:
             log.info(
                 "reply poll: %d threads, %d delivered, %d failed, dropped %s",
                 tally.threads,
@@ -320,3 +465,26 @@ class ReplyPoller:
                 dict(sorted(tally.dropped.items())),
             )
         return tally
+
+    def inbound(self, name: str, found: list[dict[str, JsonValue]], tally: Tally) -> None:
+        """New messages on none of the operation's threads, if it declares an inbound poller
+        and the host enabled it (the poller returns None otherwise)."""
+        try:
+            poller = self.kernel.operations.inbound_poller(name)
+            if poller is None:
+                return
+            inbox: object = asyncio.run(
+                _complete(poller({"operation": name, "threads": cast(JsonValue, found)}))
+            )
+            if inbox is None:
+                return
+            if not isinstance(inbox, Inbox):
+                raise TypeError("An inbound poller must return Inbox or None")
+            for dropped in inbox.dropped:
+                if not re.fullmatch(REASON, dropped.reason):
+                    raise ValueError("A dropped message needs a short reason")
+            deliver_inbound(self.kernel, name, inbox, tally)
+        except Exception as error:
+            # The class name only: an error text may hold an address or a message.
+            log.warning("inbound poll of %s failed: %s", name, type(error).__name__)
+            tally.failed += 1
