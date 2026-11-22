@@ -102,6 +102,12 @@ def test_developer_and_pe_schedules_are_opt_in() -> None:
     assert crons(host, "dev") == ["*/20 * * * *"]
     assert crons(host, "pe") == ["5-59/20 * * * *"]
     assert crons(host, "tl") == ["30 8 * * 1-5"]  # a partial override keeps the defaults
+    # Trigger ids are positional: the fixed triggers keep their places when a schedule is
+    # added, so an applied team can turn the schedule on (the kernel refuses kind changes).
+    before = {p["name"]: p["triggers"] for p in kit().group_document(example())["spec"]["pools"]}
+    after = {p["name"]: p["triggers"] for p in kit().group_document(host)["spec"]["pools"]}
+    for name in ("dev", "pe"):
+        assert after[name][: len(before[name])] == before[name]
 
 
 def test_provisioning_merges_the_team_into_the_host_document() -> None:
