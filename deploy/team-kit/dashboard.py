@@ -151,7 +151,12 @@ def send_message(backend: Backend, body: object) -> dict[str, Any]:
     return backend.send(role, text, key)
 
 
-def handler(backend: Backend, port: int) -> type[BaseHTTPRequestHandler]:
+def handler(
+    backend: Backend,
+    port: int,
+    static: dict[str, tuple[str, str]] = STATIC,
+    writable: bool = True,
+) -> type[BaseHTTPRequestHandler]:
     hosts = {f"{LOOPBACK}:{port}", f"localhost:{port}"}
 
     class Handler(BaseHTTPRequestHandler):
@@ -192,8 +197,8 @@ def handler(backend: Backend, port: int) -> type[BaseHTTPRequestHandler]:
 
         def do_GET(self) -> None:
             def get() -> None:
-                if self.path in STATIC:
-                    name, kind = STATIC[self.path]
+                if self.path in static:
+                    name, kind = static[self.path]
                     return self.reply(HTTPStatus.OK, (HERE / name).read_bytes(), kind)
                 if self.path == "/api/status":
                     return self.json(HTTPStatus.OK, backend.overview())
@@ -205,7 +210,7 @@ def handler(backend: Backend, port: int) -> type[BaseHTTPRequestHandler]:
 
         def do_POST(self) -> None:
             def post() -> None:
-                if self.path != "/api/message":
+                if self.path != "/api/message" or not writable:
                     return self.json(HTTPStatus.NOT_FOUND, {"code": "not_found"})
                 # A cross-site form cannot send JSON, and a script cannot do so unpreflighted.
                 if self.headers.get_content_type() != "application/json":
@@ -227,15 +232,23 @@ def handler(backend: Backend, port: int) -> type[BaseHTTPRequestHandler]:
     return Handler
 
 
-def server(backend: Backend, port: int = DEFAULT_PORT) -> ThreadingHTTPServer:
+def server(
+    backend: Backend,
+    port: int = DEFAULT_PORT,
+    bind: str = LOOPBACK,
+    static: dict[str, tuple[str, str]] = STATIC,
+    writable: bool = True,
+) -> ThreadingHTTPServer:
     """A server on the loopback interface; `port` 0 picks a free port."""
-    httpd = ThreadingHTTPServer((LOOPBACK, port), BaseHTTPRequestHandler)
-    httpd.RequestHandlerClass = handler(backend, httpd.server_port)
+    if bind != LOOPBACK:
+        raise DashboardError("bind_not_loopback")
+    httpd = ThreadingHTTPServer((bind, port), BaseHTTPRequestHandler)
+    httpd.RequestHandlerClass = handler(backend, httpd.server_port, static, writable)
     return httpd
 
 
-def serve(backend: Backend, port: int = DEFAULT_PORT) -> None:
-    httpd = server(backend, port)
+def serve(backend: Backend, port: int = DEFAULT_PORT, **options: Any) -> None:
+    httpd = server(backend, port, **options)
     print(f"dashboard on http://{LOOPBACK}:{httpd.server_port}/", file=sys.stderr)
     try:
         httpd.serve_forever()
