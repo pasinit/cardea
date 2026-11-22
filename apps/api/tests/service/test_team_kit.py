@@ -5,7 +5,7 @@ import importlib.util
 import json
 import time
 from collections.abc import Iterator
-from datetime import timedelta
+from datetime import date, timedelta
 from pathlib import Path
 from types import ModuleType
 from typing import Any, cast
@@ -854,6 +854,66 @@ def test_status_shows_a_paused_team(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     with pytest.raises(ClientError):
         module.status(example())
+
+
+def test_status_while_paused_shows_reason_tokens_and_failures(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from cardea.service.client import ClientError
+
+    module = kit()
+    base = tmp_path / "base.json"
+    base.write_text(json.dumps({"principals": [], "grants": [], "platform": []}))
+    document = {
+        **example(),
+        "provisioning": {"base": str(base), "out": str(tmp_path / "provision.json")},
+    }
+    document["credentials"] = {**document["credentials"], "expires_on": "2027-01-31"}
+    failed = {
+        "task_id": "t-9",
+        "outcome": "failed",
+        "failure_code": "attempt_timeout",
+        "finished_at": "2026-11-21T10:00:00Z",
+    }
+    view = {"pools": [{"members": [{"principal_id": "dev-team.dev.0", "last_run": failed}]}]}
+    monkeypatch.setattr(module, "overview", lambda host: view)
+    monkeypatch.setattr(module, "provision", lambda host, paused: None)
+    module.pause(document, "rotating the \x1b[31mtoken\nnow")
+
+    def disabled(host: dict[str, Any]) -> dict[str, Any]:
+        raise ClientError("principal_disabled", 403)
+
+    monkeypatch.setattr(module, "overview", disabled)
+    text = "\n".join(module.status(document, today=date(2026, 11, 22)))
+    assert text.startswith("team paused")
+    assert "pause reason since " in text and "rotating the  [31mtoken now" in text
+    assert "dev-team.dev.0: attempt_timeout (t-9, 2026-11-21T10:00:00Z)" in text
+    assert "github, github-reviewer expire on 2027-01-31: 70 day(s) left" in text
+    # The pause record holds no secrets, only the reason, time and failure codes.
+    assert set(json.loads(module.pause_record_path(document).read_text())) == {
+        "paused_at",
+        "reason",
+        "failures",
+    }
+    monkeypatch.setattr(module, "provision", lambda host, paused: None)
+    module.resume(document)
+    assert "not recorded" in "\n".join(module.status(document))
+
+
+def test_a_token_within_the_warning_window_is_flagged() -> None:
+    module = kit()
+    document = example()
+    document["credentials"] = {**document["credentials"], "expires_on": "2026-12-01"}
+    (soon,) = module.token_lines(document, date(2026, 11, 25))
+    assert "EXPIRES SOON, in 6 day(s)" in soon and "github-reviewer" in soon
+    (outside,) = module.token_lines(document, date(2026, 11, 22))
+    assert "EXPIRES SOON" not in outside and "9 day(s) left" in outside
+    document["credentials"]["warn_days"] = 10
+    assert "EXPIRES SOON" in module.token_lines(document, date(2026, 11, 22))[0]
+    (gone,) = module.token_lines(document, date(2026, 12, 3))
+    assert "EXPIRED 2 day(s) ago" in gone
+    # Names and dates only: nothing else from the credentials section is printed.
+    assert "reviewer-login" not in gone
 
 
 def test_run_timeouts_must_fit_the_session_wall_time(tmp_path: Path) -> None:

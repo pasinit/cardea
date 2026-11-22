@@ -97,7 +97,7 @@ Grants expire after `grant_days` (14 by default). Run `provision` again before t
 
 ## Observe
 
-- **Status.** `teamkit.py status` prints each member's active or last run, the work items by state, and each spend account's runs and dollars against its ceiling.
+- **Status.** `teamkit.py status` prints each member's active or last run, the work items by state, and each spend account's runs and dollars against its ceiling. It also lists when the vcs tokens expire (names and dates only), flagged `EXPIRES SOON` within `credentials.warn_days` (default 7) of `expires_on` and `EXPIRED` after it, and the last failed runs (member, failure code, task id, time).
 - **Full overview.** `GET /v0.2/groups/<group>/overview?namespace=<ns>` adds mail, approvals and the latest journal events.
 - **Status API.** Read-only, paged JSON for the supervisor: `GET /v0.2/groups/<group>/status/{work,runs,mail,changes,spend,standing}?namespace=<ns>` gives work by state and holder, runs with cost and outcome, mail between roles, pull requests with review state, spend against each ceiling, and what is paused or waived. `changes` is what the kernel's receipts record, not the host's live view.
 - **One run.** `cardea inspect <task>` and `cardea events <task>`.
@@ -134,7 +134,7 @@ It provisions the supervisor disabled, and nothing else; this is the first and o
 - Every member's authority is checked live against its supervisor, so no new run is admitted and no trigger fires.
 - The kit lists the runs that were active, read beforehand on a best-effort basis. A kernel that cannot answer does not stop the pause.
 
-Nothing else is changed. Collections, records, claims and mail stay as they were. While paused, `status` prints "team paused" instead of an overview, because the disabled supervisor cannot read it.
+Nothing else is changed. Collections, records, claims and mail stay as they were. While paused, `status` prints "team paused" instead of an overview, because the disabled supervisor cannot read it. It still prints the pause reason (`pause --reason "..."`, one plain line, no secrets), the token expiries and the last failures, all from a small record (`<group>.pause.json`, mode 0600) the kit writes beside the provisioning file at pause time and removes on `resume`.
 
 If the kit itself cannot run, the same kill switch is to set the supervisor's `disabled: true` in the provisioning document and run `cardea provision`.
 
