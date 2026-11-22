@@ -1363,7 +1363,7 @@ def test_instructions_name_only_transitions_the_work_collection_has() -> None:
         assert granted <= named, (name, granted - named)
         named_by[name] = named
     assert named_by["tl"] == {"triage", "cancel"}
-    assert named_by["dev"] == {"start", "submit", "merge"}
+    assert named_by["dev"] == {"start", "submit", "resubmit", "merge"}
     assert named_by["pe"] == {"approve", "request_changes"}
     tl = pools["tl"]["run"]["instructions"]
     assert "not the state's" in tl and "records.update never changes an item's state" in tl
