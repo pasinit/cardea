@@ -77,6 +77,14 @@ def spec_digest(spec: GroupSpec) -> str:
     return sha256(rfc8785.dumps(spec.model_dump(mode="json"))).hexdigest()
 
 
+def _substitute(text: str, names: dict[str, str]) -> str:
+    """`$member`, `$pool` and `$group` in a run template's instructions, so each replica
+    is told its own identity. Text without them is unchanged, and so is its digest."""
+    for token, value in names.items():
+        text = text.replace(token, value)
+    return text
+
+
 def compile_trigger(
     spec: GroupSpec, namespace: str, pool: GroupPool, member: str, index: int, group: str
 ) -> TriggerSpec:
@@ -84,11 +92,12 @@ def compile_trigger(
     journal trigger on the group's own namespace (ADR-034 decision 6)."""
     trigger = pool.triggers[index]
     run, bounds = pool.run, pool.run.bounds
+    names = {"$member": member, "$pool": f"{group}.{pool.name}", "$group": group}
     template: dict[str, JsonValue] = {
         "agent_id": member,
         "namespace": namespace,
         "objective": run.objective or f"Agent group {group}, pool {pool.name}",
-        "instructions": run.instructions,
+        "instructions": _substitute(run.instructions, names),
         "operations": list(run.operations),
         "grants": list(pool.grants),
         "context": [c.model_dump(mode="json", exclude_none=True) for c in run.context],
@@ -112,7 +121,6 @@ def compile_trigger(
         }
     else:
         assert trigger.event is not None, "a group trigger has a schedule or an event"
-        names = {"$member": member, "$pool": f"{group}.{pool.name}", "$group": group}
         source = {
             "journal": {
                 "types": list(trigger.event.types),

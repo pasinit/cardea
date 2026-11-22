@@ -920,3 +920,18 @@ Decided by the lead on 2026-11-09 in the review of slice 2 (claims); the owner m
 - **Permission refusals name what refused.** A denied transition's message names the grant it lacked, where the live ceiling lacked it (`task`, `platform`, `supervisor_allow`, `supervisor_delegate`) and the caller, with its group pool when it is a member: `Operation is outside explicit task grants: record:work/triage is not held by the task; caller a1 (pool team.builders)`. The code is unchanged.
 - **Guard refusals name the guard and the caller.** `guard_refused` names the transition (or collection action) whose guard refused, the caller and its pool, and the guard expression (first 120 characters): `Transition triage guard refused this call for a1 (pool team.builders): args.priority > 0`. A caller holding the grant already holds the right to the table, so the expression discloses nothing new.
 - **Tool text.** The `records.transition` description tells agents to name a transition of the table, not the target state.
+
+## Amendment 2026-11-22: member placeholders in run instructions, and developers that keep working
+
+- **Finding.** A team-kit dev team with three developers and several ready items wasted runs:
+  - every developer woke on the same `triage` event and tried `start` on the same first item, and the losers ended their runs while other items were ready;
+  - a developer that merged its approved item ended its run instead of starting a ready one;
+  - a developer held an approved item whose pull request another member had opened, so `vcs.merge` refused with `merge_not_opener`. The cause: a claim that lapses (decision 2.4, the 2026-11-17 amendment) returns the item to `start`'s `on_claim_expiry`, `ready`, whatever its state, and `data.change` stays. The next developer starts it at a new epoch. If it pushes to the earlier branch, `vcs.open_change` returns the existing pull request, whose oldest receipt names the first developer as opener.
+- **Decision: placeholders.** In a pool's `run.instructions`, `$member`, `$pool` and `$group` stand for the member's principal ID, pool address and group, as they already do in trigger `subjects`. The kernel substitutes them when it compiles each member's trigger. Instructions without them compile unchanged, with the same trigger digests.
+- **Decision: the team kit's developers.**
+  - They work until nothing is left in one run: merge, rework, then take ready items, and go back to taking an item after each merge or submit.
+  - Developer `n` tries the `k` ready items from position `n mod k`, in `records.query` order. It moves past a start lost to another developer, and gives up after three refusals, when none is ready or on `claim_limit`.
+  - `max_per_holder` is 2, so one item can wait in review while its developer works on the next.
+  - Each developer pushes to its own branch per claim, `agent/<group>/<record_id>-<claim_epoch>`, and opens its own pull request. It may start its coding session from the earlier holder's branch.
+- **`vcs.merge` keeps its opener rule.** Letting the claim holder merge another member's pull request would need `vcs.merge` to read record claims, which the vcs package cannot see, and it would weaken an accountability check for a case the kit can avoid. The PE's approval at the reviewed head is still required, unchanged. A developer refused with `merge_not_opener` tells the team lead.
+- **Open.** A lapsed claim on an `in_review` or `approved` item returns it to `ready`, so the review is lost. Whether `on_claim_expiry` should apply only from the acquiring transition's own target state is a kernel question for a later change.
