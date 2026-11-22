@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -1024,3 +1025,252 @@ def test_probe_accepts_security_updates_of_the_fitted_packages(
     lines: list[str], accepted: bool
 ) -> None:
     assert launcher.accepted_packages(lines) is accepted
+
+
+# The loopback phase (ADR-038 amendment, 2026-11-22): a second unit in a private network
+# namespace, inheriting the first phase's workspace.
+FETCHING = {**SMALL, "memory_mb": 2048, "scratch_mb": 256, "workspace_mb": 512, "network": {
+    "policy": "allow_list",
+    "proxy": "127.0.10.7:3128",
+    "hosts": ["pypi.org"],
+}}  # fmt: skip
+LOOPBACK = {
+    **SMALL,
+    "memory_mb": 2048,
+    "scratch_mb": 256,
+    "network": {"policy": "loopback"},
+    "inherit_workspace": True,
+}
+WORKER = {"argv": ["/opt/cardea/bin/python3", "-I", "-m", "x"], "read_only": ["/opt/cardea"]}
+
+
+@pytest.fixture
+def phases(configured: list[list[str]], monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    config = {
+        "profiles": {"try": FETCHING, "try-loopback": LOOPBACK, "small": SMALL},
+        "workers": {
+            "fetch": {**WORKER, "profiles": ["try"]},
+            "serve": {**WORKER, "profiles": ["try-loopback"]},
+            "hash": {"argv": ["/usr/bin/sha256sum"], "profiles": ["small"]},
+        },
+    }
+    monkeypatch.setattr(launcher, "worker_config", lambda: config)
+    monkeypatch.setattr(
+        launcher.pwd, "getpwnam", lambda name: SimpleNamespace(pw_uid=994, pw_gid=994)
+    )
+    return configured
+
+
+def test_the_loopback_unit_has_a_private_namespace_and_no_route_out(
+    phases: list[list[str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing in the unit can name an address outside its own namespace's loopback."""
+    first, second = "a" * 32, "b" * 32
+    launcher.handle(start(first, "try", "fetch"))
+    mounted = launcher.ROOT / first / "work"
+    monkeypatch.setattr(os.path, "ismount", lambda path: Path(path) == mounted)
+    monkeypatch.setattr(launcher, "run", _finished(phases))
+    launcher.handle(start(second, "try-loopback", "serve", workspace_from=first))
+    command = phases[-1]
+    props = properties(command)
+    env = environment(command)
+    # The namespace is the unit's own: `PrivateNetwork` stays, and with it only `lo`.
+    assert props["PrivateNetwork"] == "yes"
+    # TCP on that loopback, and only that: the cgroup filter is a second fence.
+    assert props["IPAddressDeny"] == "any" and props["IPAddressAllow"] == "localhost"
+    assert props["RestrictAddressFamilies"] == "AF_UNIX AF_INET AF_INET6"
+    # No raw sockets or netlink to rebuild a route, and no capability to do either.
+    assert props["CapabilityBoundingSet"] == "" and props["AmbientCapabilities"] == ""
+    assert "AF_NETLINK" not in props["RestrictAddressFamilies"]
+    assert props["NoNewPrivileges"] == "yes" and props["User"] == "cardea-worker"
+    assert "--disable-userns" in command and "--unshare-net" not in command
+    # No proxy, no kernel endpoint and no registry list: there is nothing to reach.
+    assert not [name for name in env if name.upper().endswith("_PROXY")]
+    assert "CARDEA_REGISTRIES" not in env
+    assert not any(
+        "127.0.10." in value or launcher.ENDPOINT_ADDRESS in value for value in props.values()
+    )
+    # The inherited workspace is the only thing it shares with the first phase.
+    at = command.index(str(mounted))
+    assert command[at - 1 : at + 2] == ["--bind", str(mounted), launcher.WORKSPACE]
+    assert env["CARDEA_WORKSPACE"] == launcher.WORKSPACE
+
+
+def _finished(commands: list[list[str]]) -> Any:
+    def run(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        commands.append(args)
+        return subprocess.CompletedProcess(args, 0, "SubState=exited\n", "")
+
+    return run
+
+
+def test_the_first_phase_keeps_its_proxy_and_gets_a_capped_workspace(
+    phases: list[list[str]],
+) -> None:
+    job = "a" * 32
+    launcher.handle(start(job, "try", "fetch"))
+    mount, command = phases
+    work = launcher.ROOT / job / "work"
+    assert mount[:4] == ["/usr/bin/mount", "-t", "tmpfs", "-o"]
+    assert mount[4] == "size=512m,mode=0700,uid=994,gid=994,nosuid,nodev"
+    assert mount[-1] == str(work)
+    props = properties(command)
+    # Egress control is the profile's, unchanged.
+    assert "PrivateNetwork" not in props and props["IPAddressAllow"] == "127.0.10.7/32"
+    assert environment(command)["HTTPS_PROXY"] == "http://127.0.10.7:3128"
+    assert command[command.index(str(work)) - 1] == "--bind"
+
+
+def test_a_profile_without_a_workspace_is_unchanged(phases: list[list[str]]) -> None:
+    launcher.handle(start("c" * 32, "small", "hash"))
+    (command,) = phases
+    assert "CARDEA_WORKSPACE" not in environment(command)
+    assert launcher.WORKSPACE not in command
+    assert not (launcher.ROOT / ("c" * 32) / "work").exists()
+
+
+@pytest.mark.parametrize(
+    ("profile", "worker", "change", "reason"),
+    [
+        ("try-loopback", "serve", {}, "invalid_workspace"),
+        ("try-loopback", "serve", {"workspace_from": "z"}, "invalid_workspace"),
+        ("try-loopback", "serve", {"workspace_from": "d" * 32}, "invalid_workspace"),
+        ("try-loopback", "serve", {"workspace_from": "e" * 32}, "workspace_missing"),
+        ("try", "fetch", {"workspace_from": "e" * 32}, "workspace_not_allowed"),
+        ("small", "hash", {"workspace_from": "e" * 32}, "workspace_not_allowed"),
+    ],
+)
+def test_an_inherited_workspace_is_checked_before_the_fence(
+    phases: list[list[str]], profile: str, worker: str, change: dict[str, Any], reason: str
+) -> None:
+    job = "d" * 32
+    with pytest.raises(launcher.Rejected, match=f"^{reason}$"):
+        launcher.handle(start(job, profile, worker, **change))
+    assert phases == [] and not (launcher.ROOT / job).exists()
+
+
+def test_a_workspace_still_in_use_is_not_inherited(
+    phases: list[list[str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = "a" * 32
+    launcher.handle(start(first, "try", "fetch"))
+    mounted = launcher.ROOT / first / "work"
+    monkeypatch.setattr(os.path, "ismount", lambda path: Path(path) == mounted)
+    # The default fake reports the first unit as not finished.
+    with pytest.raises(launcher.Rejected, match="^workspace_in_use$"):
+        launcher.handle(start("b" * 32, "try-loopback", "serve", workspace_from=first))
+    assert not (launcher.ROOT / ("b" * 32)).exists()
+
+
+def test_cleanup_unmounts_a_workspace_before_deleting_anything(
+    phases: list[list[str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    job = "a" * 32
+    launcher.handle(start(job, "try", "fetch"))
+    work = launcher.ROOT / job / "work"
+    (work / "left").write_text("x")
+    monkeypatch.setattr(os.path, "ismount", lambda path: Path(path) == work)
+    order: list[str] = []
+
+    def run(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        order.append(args[0])
+        if args[0] == "/usr/bin/umount":
+            assert (work / "left").exists()  # nothing deleted yet
+        return subprocess.CompletedProcess(args, 0, "ActiveState=inactive\n", "")
+
+    monkeypatch.setattr(launcher, "run", run)
+    assert launcher.handle({"action": "cleanup", "job": job}) == {"cleaned": True}
+    assert "/usr/bin/umount" in order and not (launcher.ROOT / job).exists()
+
+
+def test_cleanup_is_refused_while_the_workspace_cannot_be_unmounted(
+    phases: list[list[str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    job = "a" * 32
+    launcher.handle(start(job, "try", "fetch"))
+    work = launcher.ROOT / job / "work"
+    (work / "left").write_text("x")
+    monkeypatch.setattr(os.path, "ismount", lambda path: Path(path) == work)
+
+    def run(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        busy = 1 if args[0] == "/usr/bin/umount" else 0
+        return subprocess.CompletedProcess(args, busy, "ActiveState=inactive\n", "")
+
+    monkeypatch.setattr(launcher, "run", run)
+    with pytest.raises(ValueError, match="^workspace_busy$"):
+        launcher.handle({"action": "cleanup", "job": job})
+    assert (work / "left").exists()  # nothing was deleted through the mount
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"workspace_mb": 0},
+        {"workspace_mb": 4096},  # more than the profile's memory
+        {"workspace_mb": True},
+        {"workspace_mb": 8, "inherit_workspace": True},
+        {"workspace_mb": 8, "network": {"policy": "loopback"}},
+    ],
+)
+def test_a_workspace_is_valid_only_on_a_networked_first_phase(change: dict[str, Any]) -> None:
+    with pytest.raises(ValueError):
+        launcher.validate_profile({**FETCHING, **change})
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"inherit_workspace": "yes"},
+        {"network": {"policy": "none"}},
+        {"network": {"policy": "loopback", "proxy": "127.0.10.7:3128"}},
+        {"network": {"policy": "loopback", "hosts": ["pypi.org"]}},
+    ],
+)
+def test_the_loopback_profile_takes_no_network_settings(change: dict[str, Any]) -> None:
+    assert launcher.validate_profile(LOOPBACK) is LOOPBACK
+    with pytest.raises(ValueError):
+        launcher.validate_profile({**LOOPBACK, **change})
+
+
+def test_the_loopback_policy_adds_nothing_to_the_egress_proxy() -> None:
+    assert launcher.egress_rules("try-loopback", {"policy": "loopback"}) == []
+
+
+def test_a_fresh_network_namespace_has_no_route_outside_loopback() -> None:
+    """What `PrivateNetwork=yes` gives the unit, on this kernel: nothing but `lo`, no
+    default route, and an address outside it is unreachable, not merely filtered. Skipped
+    where the host forbids unprivileged namespaces; `env_try.sh` proves it in the unit."""
+    if sys.platform != "linux":
+        pytest.skip("network namespaces are Linux's")
+    probe = (
+        "import json, pathlib, socket\n"
+        "routes = pathlib.Path('/proc/net/route').read_text().splitlines()[1:]\n"
+        "table = pathlib.Path('/proc/net/dev').read_text().splitlines()[2:]\n"
+        "devices = sorted(line.split(':')[0].strip() for line in table)\n"
+        "answers = {}\n"
+        "for label, host in (('external', '93.184.216.34'), ('metadata', '169.254.169.254'),\n"
+        "                    ('host_proxy', '127.0.10.7')):\n"
+        "    try:\n"
+        "        socket.create_connection((host, 80), 2).close()\n"
+        "        answers[label] = 'connected'\n"
+        "    except OSError as error:\n"
+        "        answers[label] = error.errno\n"
+        "print(json.dumps({'routes': routes, 'devices': devices, 'answers': answers}))\n"
+    )
+    try:
+        done = subprocess.run(
+            ["unshare", "--user", "--map-root-user", "--net", sys.executable, "-c", probe],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except FileNotFoundError:
+        pytest.skip("unshare is not installed")
+    if done.returncode:
+        pytest.skip(f"this host does not allow a user and network namespace: {done.stderr[:100]}")
+    seen = json.loads(done.stdout)
+    assert seen["routes"] == [] and seen["devices"] == ["lo"]
+    assert "connected" not in seen["answers"].values()
+    # ENETUNREACH or EHOSTUNREACH: no route, not a refusal from something that answered.
+    assert set(seen["answers"].values()) <= {101, 113}, seen

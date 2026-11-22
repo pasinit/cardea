@@ -80,7 +80,13 @@ def environment_digest(
         if entry is not None and entry.environment is not None:
             catalog = entry.environment.digest()
     pinned = (
-        {k: executor.get(k) for k in ("profile", "worker", "profile_sha256")} if executor else None
+        {
+            k: executor.get(k)
+            for k in ("profile", "worker", "profile_sha256", "then")
+            if k in executor
+        }
+        if executor
+        else None
     )
     return _digest({"executor": pinned, "environment": catalog})
 

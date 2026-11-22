@@ -353,6 +353,7 @@ def test_the_env_try_wrapper_restores_the_registry_and_its_catalog_is_valid(
         "try",
         "teams",
         "slow",
+        "loopback",
         "forge",
         "background",
         "check",
@@ -360,4 +361,9 @@ def test_the_env_try_wrapper_restores_the_registry_and_its_catalog_is_valid(
     }
     # The scenario is the commit's own code, which the catalog only names.
     assert all(s.argv[2] == "scenario.py" for s in entry.environment.scenarios.values())
+    # Only the loopback scenario asks for the private-namespace phase, after its fetch.
+    needing = {n for n, s in entry.environment.scenarios.items() if s.network == "loopback"}
+    assert needing == {"loopback"}
+    assert entry.environment.scenarios["loopback"].fetch is not None
+    assert "/proc/net/route" in env_try.SCENARIO
     compile(env_try.SCENARIO, "scenario.py", "exec")

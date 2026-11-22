@@ -72,6 +72,13 @@ RelativePath = Annotated[
 ]
 
 
+class Fetch(Record):
+    """The step that fetches a loopback scenario's dependencies while the proxy is reachable."""
+
+    argv: Annotated[tuple[Annotated[str, Field(min_length=1)], ...], Field(min_length=1)]
+    timeout_seconds: Annotated[int, Field(strict=True, ge=1, le=7200)] = 900
+
+
 class Scenario(Record):
     """One `env.try` scenario: a fixed command run in the checkout (ADR-038)."""
 
@@ -81,6 +88,19 @@ class Scenario(Record):
     tier: Literal["process", "init"] = "process"
     # Paths in the checkout kept as artifacts after the scenario, each at most 256 KiB.
     artifacts: Annotated[tuple[RelativePath, ...], Field(max_length=16)] = ()
+    # `proxy` (default): the profile's egress proxy and nothing else. `loopback`: TCP on the
+    # unit's own loopback and no other route, run as a separate phase in a private network
+    # namespace after `fetch` (ADR-038 amendment, 2026-11-22).
+    network: Literal["proxy", "loopback"] = "proxy"
+    # The dependency fetch a loopback scenario needs, run through the egress proxy before
+    # its phase starts (the phase itself has no network). Only with `network: loopback`.
+    fetch: Fetch | None = None
+
+    @model_validator(mode="after")
+    def fetch_belongs_to_a_loopback_scenario(self) -> Self:
+        if self.fetch is not None and self.network != "loopback":
+            raise ValueError("fetch is only for a scenario that runs with network: loopback")
+        return self
 
 
 class Toolchain(Record):

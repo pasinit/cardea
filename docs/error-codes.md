@@ -245,6 +245,8 @@ used by the examples.
 | `effect_not_applied` | Destination shows no effect | `cardea.service.operation_runtime` |
 | `env_commit_unknown` | the commit is not in the repository; the checkout is not the named commit | `cardea_env_ops.try_` |
 | `env_invalid` | the scenario environment may not set {…} | `cardea_env_ops.try_` |
+| `env_loopback_unavailable` | Scenarios {…} need loopback, whose second phase this host does not offer | `cardea_env_ops.try_` |
+| `env_phase_invalid` | The second phase does not match the first; The second phase has no workspace | `cardea_env_ops.try_` |
 | `env_scenario_unknown` | Unknown scenarios: {…} | `cardea_env_ops.try_` |
 | `env_source_unavailable` | the repository source could not be read | `cardea_env_ops.try_` |
 | `env_tier_unavailable` | Scenario {…} needs the {…} tier, which this host does not offer | `cardea_env_ops.try_` |
@@ -302,6 +304,6 @@ used by the examples.
 | `worker_error` | {…} (HTTP {…}) | `cardea.service.confined` |
 | `worker_failed` | exit status {…}, systemd result {…} | `cardea.service.confined` |
 | `worker_lost` | Worker lease expired. | `cardea.kernel.store` |
-| `worker_output_invalid` | unexpected artifacts; output is not JSON; not a reconciliation | `cardea.service.confined` |
+| `worker_output_invalid` | unexpected artifacts; output is not JSON; not a reconciliation (and 2 more) | `cardea.service.confined` |
 | `worker_start_unknown` | helper start failed | `cardea.service.confined` |
 | `worker_status_unknown` | worker status unavailable | `cardea.service.confined` |

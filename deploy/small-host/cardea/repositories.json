@@ -49,7 +49,15 @@
               "/usr/bin/make",
               "teams"
             ],
-            "timeout_seconds": 900
+            "timeout_seconds": 900,
+            "network": "loopback",
+            "fetch": {
+              "argv": [
+                "/usr/bin/make",
+                "install"
+              ],
+              "timeout_seconds": 900
+            }
           },
           "getting-started": {
             "argv": [

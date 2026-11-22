@@ -25,6 +25,13 @@ acceptance tests):
    to `/proc/<worker>/fd/*` and read `/proc/<worker>/mem` fail and report nothing forged;
    a `setsid` background process is killed before the next scenario, which sees no
    tampering; a scenario that kills the worker leaves the call failed with no result.
+7. **Loopback phase** (ADR-038 amendment, 2026-11-22). A scenario that declares
+   `network: loopback` runs after its dependency fetch in a second unit with a private
+   network namespace. It reports its routes, its interfaces and what each attempt outside
+   the namespace did: there must be no route, only `lo`, and every attempt (an external
+   address, the metadata address, the proxy, the kernel's loopback port, DNS) must fail,
+   while TCP between two sockets on its own loopback works. The first phase still reaches the
+   proxy; nothing is left mounted or running afterwards.
 5. **Concurrency.** With the profile's concurrency of 1, an identical call made while the
    first runs is refused with `env_run_in_progress` and starts nothing.
 
@@ -59,7 +66,7 @@ NAMESPACE = "acc"
 ALIAS = "env-acceptance"
 # The scenario script in the fixture: its behaviour comes from the commit's `mode` file.
 SCENARIO = r"""
-import json, os, pathlib, socket, sys, time, urllib.request
+import json, os, pathlib, socket, sys, threading, time, urllib.request
 mode = pathlib.Path("mode").read_text().strip()
 name = sys.argv[1]
 print("scenario", name, "mode", mode)
@@ -106,6 +113,51 @@ if name == "killer":
     sys.exit(0)
 if name == "slow":
     time.sleep(3600)
+if name == "fetch":
+    # The dependency fetch: first phase, through the proxy, into the shared workspace.
+    pathlib.Path("fetched").write_text("deps")
+    seen = {"proxy": os.environ.get("HTTPS_PROXY")}
+    try:
+        urllib.request.urlopen("https://pypi.org/simple/", timeout=20).close()
+        seen["pypi"] = "reached"
+    except Exception as error:
+        seen["pypi"] = type(error).__name__
+    print("FETCH", json.dumps(seen, sort_keys=True))
+    sys.exit(0)
+if name == "loopback":
+    # Second phase: no route outside this namespace's own loopback.
+    table = pathlib.Path("/proc/net/dev").read_text().splitlines()[2:]
+    report = {
+        "fetched": pathlib.Path("fetched").exists(),
+        "routes": pathlib.Path("/proc/net/route").read_text().splitlines()[1:],
+        "devices": sorted(line.split(":")[0].strip() for line in table),
+        "proxy_variables": sorted(k for k in os.environ if k.upper().endswith("_PROXY")),
+    }
+    outside = {}
+    def reach(label, action):
+        try:
+            action()
+            outside[label] = "reached"
+        except Exception as error:
+            outside[label] = type(error).__name__
+    reach("external", lambda: socket.create_connection(("93.184.216.34", 443), 3).close())
+    reach("metadata", lambda: socket.create_connection(("169.254.169.254", 80), 3).close())
+    reach("proxy", lambda: socket.create_connection(("127.0.10.7", 3128), 3).close())
+    reach("kernel", lambda: socket.create_connection(("127.0.0.1", 8443), 3).close())
+    reach("kernel_endpoint", lambda: socket.create_connection(("127.0.11.1", 8443), 3).close())
+    reach("dns", lambda: socket.getaddrinfo("example.com", 443))
+    reach("ipv6", lambda: socket.create_connection(("2606:4700:4700::1111", 443), 3).close())
+    report["outside"] = outside
+    server = socket.create_server(("127.0.0.1", 0))
+    threading.Thread(target=lambda: server.accept()[0].sendall(b"pong"), daemon=True).start()
+    try:
+        with socket.create_connection(server.getsockname(), 5) as client:
+            report["loopback_tcp"] = client.recv(4).decode()
+    except OSError as error:
+        report["loopback_tcp"] = type(error).__name__
+    pathlib.Path("out/loopback.json").write_text(json.dumps(report))
+    print("LOOPBACK", json.dumps(report, sort_keys=True))
+    sys.exit(0)
 if mode == "bad" and name == "try":
     sys.exit(3)
 if mode != "hostile":
@@ -152,6 +204,13 @@ def catalog(source: str) -> dict[str, Any]:
                         },
                         "teams": {"argv": [*run, "teams"], "timeout_seconds": 600},
                         "slow": {"argv": [*run, "slow"], "timeout_seconds": 20},
+                        "loopback": {
+                            "argv": [*run, "loopback"],
+                            "timeout_seconds": 120,
+                            "artifacts": ["out/loopback.json"],
+                            "network": "loopback",
+                            "fetch": {"argv": [*run, "fetch"], "timeout_seconds": 120},
+                        },
                         "forge": {"argv": [*run, "forge"], "timeout_seconds": 60},
                         "background": {"argv": [*run, "background"], "timeout_seconds": 60},
                         "check": {"argv": [*run, "check"], "timeout_seconds": 60},
@@ -319,7 +378,13 @@ def leftovers() -> dict[str, Any]:
         text=True,
         check=False,
     ).stdout.split()
-    return {"units": [u for u in units if u.startswith("cardea-host-")]}
+    # A loopback job's workspace is a tmpfs the helper mounts; none may outlive its call.
+    mounts = [
+        line.split()[4]
+        for line in Path("/proc/self/mountinfo").read_text().splitlines()
+        if "/var/lib/cardea-host/" in line
+    ]
+    return {"units": [u for u in units if u.startswith("cardea-host-")], "mounts": mounts}
 
 
 def run(args: argparse.Namespace) -> int:
@@ -416,6 +481,31 @@ def run(args: argparse.Namespace) -> int:
             killed.get("state") == "failed" and not killed.get("output"),
             **killed,
         )
+
+        # 7. The loopback phase.
+        looped = call(store, commits["good"], ["loopback", "try"])
+        result = looped.get("output") or {}
+        steps = {s.get("name"): s for s in result.get("scenarios", [])}
+        tail = str((steps.get("loopback") or {}).get("log_tail"))
+        line = next((x for x in tail.splitlines() if x.startswith("LOOPBACK ")), "")
+        seen = json.loads(line.removeprefix("LOOPBACK ")) if line else {}
+        evidence.observe("loopback_phase", seen)
+        evidence.check(
+            "loopback_scenario_passes_after_its_fetch",
+            result.get("passed") is True and seen.get("fetched") is True,
+            **looped,
+        )
+        evidence.check(
+            "loopback_phase_has_no_route_outside_loopback",
+            bool(seen)
+            and seen["routes"] == []
+            and seen["devices"] == ["lo"]
+            and seen["proxy_variables"] == []
+            and all(v != "reached" for v in seen["outside"].values()),
+            seen=seen,
+        )
+        evidence.check("loopback_tcp_works_inside_the_phase", seen.get("loopback_tcp") == "pong")
+        evidence.check("nothing_left_after_loopback", leftovers() == before, left=leftovers())
 
         # 5. Concurrency: an identical call while the first runs.
         results: dict[str, Any] = {}
