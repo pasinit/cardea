@@ -22,7 +22,13 @@ from cardea_email_ops.agentmail import AgentMail
 from cardea_email_ops.config import EmailConfig
 from cardea_email_ops.fake import FakeAgentMail, FakeImap, FakeSmtp
 from cardea_email_ops.smtp_imap import SmtpImap
-from cardea_email_ops.transport import Outgoing, ReconcileUnavailable, Refused, Thread
+from cardea_email_ops.transport import (
+    Outgoing,
+    ProviderError,
+    ReconcileUnavailable,
+    Refused,
+    Thread,
+)
 from mcp.client.session import ClientSession
 from test_agent_runs import FakeSession, call
 from test_vcs_ops import DENIED, Auth, FakeClient, gate_config
@@ -1085,3 +1091,43 @@ def test_imap_inbound_mail_past_the_rate_limit_is_rejected(
         imap.deliver(new_mail(CLIENT, f"Message {n}"))
     tally = replies.ReplyPoller(imap_kernel).poll(force=True)
     assert tally.delivered == 2 and tally.dropped == {"rate_limited": 1}
+
+
+@pytest.mark.parametrize(
+    ("route", "route_name"),
+    [
+        ("GET /messages", "GET /inboxes/{inbox}/messages"),
+        ("GET /messages/", "GET /inboxes/{inbox}/messages/{message}"),
+    ],
+)
+def test_a_refused_inbound_poll_names_the_status_and_endpoint_only(
+    inbound_kernel: Kernel,
+    provider: FakeAgentMail,
+    caplog: pytest.LogCaptureFixture,
+    route: str,
+    route_name: str,
+) -> None:
+    caplog.set_level("DEBUG")
+    if route == "GET /messages":
+        provider.refuse[route] = 403
+    else:
+        message_id = provider.incoming(f"Client <{CLIENT}>", "Hello")
+        provider.refuse[f"GET /messages/{message_id}"] = 403
+    tally = replies.ReplyPoller(inbound_kernel).poll(force=True)
+    assert tally.failed == 1 and tally.delivered == 0
+    logged = "\n".join(r.getMessage() for r in caplog.records)
+    assert f"AgentMail answered HTTP 403 for {route_name}" in logged
+    for hidden in (API_KEY, "secret-detail", INBOX_ID, CLIENT, "fake.agentmail.invalid"):
+        assert hidden not in logged
+
+
+def test_the_adapter_error_holds_the_status_and_route_template(
+    tmp_path: Path, provider: FakeAgentMail
+) -> None:
+    provider.refuse["GET /messages"] = 400
+    config = email_config(tmp_path)
+    assert config.transport.kind == "agentmail"
+    adapter = AgentMail(config.transport, provider.transport())
+    with pytest.raises(ProviderError) as caught:
+        asyncio.run(adapter.poll_inbound((CLIENT,), datetime.now(UTC), frozenset()))
+    assert str(caught.value) == "AgentMail answered HTTP 400 for GET /inboxes/{inbox}/messages"

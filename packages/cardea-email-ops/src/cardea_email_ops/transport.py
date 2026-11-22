@@ -72,7 +72,8 @@ class Refused(Exception):
 
 class ProviderError(Exception):
     """The provider failed in a way that leaves the outcome open. Its message holds only a
-    status or reply code, never a URL, an address or the provider's own text."""
+    status or reply code and at most a route template such as `GET /inboxes/{inbox}/messages`,
+    never a URL, an address, a key or the provider's own text."""
 
 
 class ReconcileUnavailable(Exception):

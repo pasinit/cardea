@@ -39,6 +39,8 @@ class FakeAgentMail:
     sends: int = 0
     # Status codes to answer the next sends with, instead of sending.
     fail_next: list[int] = field(default_factory=list)
+    # Status codes to answer a route with, as "GET /messages": a refusal the adapter must report.
+    refuse: dict[str, int] = field(default_factory=dict)
     # Message ids read one by one (`GET /messages/{id}`): what the adapter opened in full.
     read: list[str] = field(default_factory=list)
 
@@ -93,6 +95,9 @@ class FakeAgentMail:
         if not path.startswith(prefix):
             return httpx.Response(404, json={"name": "NotFound", "message": "no inbox"})
         rest = path[len(prefix) :]
+        refused = self.refuse.get(f"{request.method} {rest}")
+        if refused is not None:
+            return httpx.Response(refused, json={"name": "Error", "message": "secret-detail"})
         if request.method == "POST" and rest == "/messages/send":
             return self._send(request)
         if request.method == "GET" and rest == "/messages":
