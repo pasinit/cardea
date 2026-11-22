@@ -3,6 +3,7 @@ fresh host, a repeated run changes nothing, a killed run resumes at its step, an
 step prints its verify result. The host is simulated; nothing here runs on Debian."""
 
 import importlib.util
+import io
 import json
 import os
 import re
@@ -671,8 +672,6 @@ def test_a_new_token_that_is_already_expired_is_refused(rig: Rig) -> None:
 
 
 def test_sources_file_stdin_and_no_terminal(tmp_path: Path) -> None:
-    import io
-
     token = tmp_path / "token"
     token.write_text(SECRET + "\n")
     source = setup.InputSecretSource(
@@ -684,7 +683,7 @@ def test_sources_file_stdin_and_no_terminal(tmp_path: Path) -> None:
         source.read("c")
 
 
-def test_the_cli_stores_a_secret_from_a_file_without_printing_it(
+def test_the_cli_reads_secret_options_and_never_prints_them(
     rig: Rig, capsys: pytest.CaptureFixture[str]
 ) -> None:
     layout = setup.Layout(rig.host, setup.load_kit())
@@ -703,3 +702,29 @@ def test_the_cli_stores_a_secret_from_a_file_without_printing_it(
     assert SECRET not in streams.out + streams.err
     with pytest.raises(SystemExit):
         setup.main([*args, "--expires-on", "vcs:github=not-a-date"])
+
+
+def test_a_secret_from_a_file_or_stdin_is_stored_0600_with_its_expiry_and_never_echoed(
+    rig: Rig, capsys: pytest.CaptureFixture[str]
+) -> None:
+    token = rig.base / "token-in"
+    token.write_text(SECRET + "\n")
+    store = prompting(
+        rig, files={"vcs:github": token}, stdin_name="email:key", stdin=io.StringIO("mail-secret\n")
+    )
+    store.expiries = {"vcs:github": datetime.now(UTC).date() + timedelta(days=90)}
+    for name in ("vcs:github", "email:key"):
+        assert store.status(name).ok is False
+        store.provide(name)
+        assert store.status(name).ok is True
+        assert stat.S_IMODE(store.files[name].stat().st_mode) == 0o600
+    assert store.files["vcs:github"].read_text() == SECRET + "\n"
+    assert store.files["email:key"].read_text() == "mail-secret\n"
+    # Only the expiry is recorded, and only for the secret that was given one.
+    recorded = json.loads(store.meta.read_text())
+    assert list(recorded) == ["vcs:github"]
+    assert SECRET not in store.meta.read_text() and "mail-secret" not in store.meta.read_text()
+    assert store.asked == []
+    assert store.redact(f"{SECRET} and mail-secret") == "[redacted] and [redacted]"
+    streams = capsys.readouterr()
+    assert SECRET not in streams.out + streams.err
