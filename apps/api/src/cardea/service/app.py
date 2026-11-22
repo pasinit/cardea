@@ -81,6 +81,7 @@ from cardea.service.responses import (
     RunView,
     StatusChanges,
     StatusMail,
+    StatusMailText,
     StatusRuns,
     StatusSpend,
     StatusStanding,
@@ -113,6 +114,7 @@ TriggerPath = Annotated[str, Path(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,110}$"
 OperationID = Annotated[str, Path(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")]
 GroupPath = Annotated[str, Path(pattern=r"^[a-z][a-z0-9-]{0,39}$")]
 Namespace = Annotated[str, Query(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")]
+ITEM = f"^{COLLECTION_NAME}/[A-Za-z0-9][A-Za-z0-9._:-]{{0,127}}$"
 CollectionPath = Annotated[str, Path(pattern=f"^{COLLECTION_NAME}$")]
 ApprovalID = Annotated[str, Path(pattern=r"^req-[0-9a-f]{32}$")]
 
@@ -693,6 +695,22 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
     ) -> dict[str, Any]:
         """Read-only: messages between the group's roles, newest first, without bodies."""
         return team_status.mail(kernel, proof, namespace, name, after=after, limit=limit)
+
+    @app.get("/v0.2/groups/{name}/status/mail/text", response_model=StatusMailText)
+    def status_mail_text(
+        name: GroupPath,
+        namespace: Namespace,
+        proof: Credential,
+        member: Annotated[str | None, Query(pattern=mailbox.IDENTIFIER, max_length=128)] = None,
+        item: Annotated[str | None, Query(pattern=ITEM)] = None,
+        after: Annotated[str, Query(max_length=64)] = "",
+        limit: Annotated[int, Query(ge=1, le=50)] = 20,
+    ) -> dict[str, Any]:
+        """Read-only, supervisor only: the group's messages with full text, newest first,
+        filtered by `member` (sender or recipient) and by `item` (`<collection>/<record_id>`)."""
+        return team_status.mail_text(
+            kernel, proof, namespace, name, member=member, item=item, after=after, limit=limit
+        )
 
     @app.get("/v0.2/groups/{name}/status/changes", response_model=StatusChanges)
     def status_changes(

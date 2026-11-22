@@ -25,6 +25,7 @@ __all__ = ["setup"]
 
 STEPS = iter(range(10**6))
 SECTIONS = ("work", "runs", "mail", "changes", "spend", "standing")
+READABLE = (*SECTIONS, "mail/text")
 
 
 def status(kernel: Kernel, section: str, who: str | None = "sup-eng", **params: Any) -> Any:
@@ -119,7 +120,14 @@ def record(kernel: Kernel, record_id: str, state: str, title: str, holder: str |
 
 
 def message(
-    kernel: Kernel, message_id: str, sender: str, kind: str, address: str, at: str, body: str
+    kernel: Kernel,
+    message_id: str,
+    sender: str,
+    kind: str,
+    address: str,
+    at: str,
+    body: str,
+    item: dict[str, str] | None = None,
 ) -> None:
     """A message and its first delivery, as `mailbox.send` stores them."""
     pool = address if kind == "pool" else None
@@ -127,9 +135,19 @@ def message(
     with kernel.database.engine.begin() as conn:
         conn.exec_driver_sql(
             "INSERT INTO mailbox_messages(message_id,namespace,kind,sender_id,supervisor_id,"
-            "request_sha256,to_kind,to_address,parts_json,body_bytes,max_deliveries,created_at) "
-            "VALUES (?,'eng','message',?,'sup-eng','x',?,?,?,?,3,?)",
-            (message_id, sender, kind, address, json.dumps([{"text": body}]), len(body), at),
+            "request_sha256,to_kind,to_address,parts_json,body_bytes,max_deliveries,created_at,"
+            "record_json,client_key) VALUES (?,'eng','message',?,'sup-eng','x',?,?,?,?,3,?,?,?)",
+            (
+                message_id,
+                sender,
+                kind,
+                address,
+                json.dumps([{"text": body}]),
+                len(body),
+                at,
+                json.dumps(item) if item else None,
+                f"ck-secret-{message_id}",
+            ),
         )
         if kind != "group":
             conn.exec_driver_sql(
@@ -367,6 +385,106 @@ def test_mail_pages_and_refuses_a_foreign_cursor(team: tuple[Kernel, str, str]) 
     assert refused.status_code == 400 and refused.json()["code"] == "invalid_cursor"
 
 
+def test_mail_text_returns_full_text_unmodified_and_no_secrets(
+    team: tuple[Kernel, str, str],
+) -> None:
+    kernel, _, _ = team
+    markup = '<script>alert(1)</script> <a href="javascript:x">y</a> & "q"'
+    message(
+        kernel,
+        "00000000-0000-0000-0000-000000000009",
+        "eng-team.dev.0",
+        "instance",
+        "eng-team.lead.0",
+        "2026-11-22T11:00:00+00:00",
+        markup,
+        {"collection": "work", "record_id": "rec-a"},
+    )
+    view = status(kernel, "mail/text").json()
+    assert view["total"] == 2
+    newest, oldest = view["items"]
+    assert newest["parts"] == [{"text": markup}]
+    assert newest["item"] == {"collection": "work", "record_id": "rec-a"}
+    assert oldest["parts"] == [{"text": "Item a is ready."}] and oldest["item"] is None
+    assert newest["from"]["role"] == "dev" and newest["to"]["role"] == "lead"
+    assert "ck-secret" not in json.dumps(view) and "client_key" not in json.dumps(view)
+
+
+def test_mail_text_filters_by_member_and_item(team: tuple[Kernel, str, str]) -> None:
+    kernel, _, _ = team
+    second = "00000000-0000-0000-0000-000000000009"
+    message(
+        kernel,
+        second,
+        "eng-team.dev.0",
+        "instance",
+        "eng-team.lead.0",
+        "2026-11-22T11:00:00+00:00",
+        "Done.",
+        {"collection": "work", "record_id": "rec-a"},
+    )
+
+    def ids(**params: str) -> list[str]:
+        return [i["message_id"] for i in status(kernel, "mail/text", **params).json()["items"]]
+
+    assert ids(member="eng-team.lead.0") == [second, "00000000-0000-0000-0000-000000000001"]
+    assert ids(member="eng-team.dev.0") == [second]
+    assert ids(member="eng-team.product.0") == []
+    assert ids(item="work/rec-a") == [second]
+    assert ids(item="work/rec-bb") == []
+    assert ids(member="eng-team.lead.0", item="work/rec-a") == [second]
+    assert status(kernel, "mail/text", item="not an item").status_code == 422
+    assert status(kernel, "mail/text", member="a b").status_code == 422
+    filtered = status(kernel, "mail/text", item="work/rec-a").json()
+    assert filtered["total"] == 1
+
+
+def test_mail_text_pages_and_refuses_a_cursor_outside_the_filter(
+    team: tuple[Kernel, str, str],
+) -> None:
+    kernel, _, _ = team
+    for n in range(2, 5):
+        message(
+            kernel,
+            f"00000000-0000-0000-0000-00000000000{n}",
+            "eng-team.lead.0",
+            "pool",
+            "eng-team.dev",
+            f"2026-11-22T1{n}:00:00+00:00",
+            f"Note {n}",
+        )
+    seen: list[str] = []
+    after = ""
+    while True:
+        page = status(kernel, "mail/text", limit=2, after=after).json()
+        assert len(page["items"]) <= 2 and page["total"] == 4
+        seen += [i["message_id"] for i in page["items"]]
+        if page["next"] is None:
+            break
+        after = page["next"]
+    assert len(seen) == len(set(seen)) == 4
+    assert seen[-1] == "00000000-0000-0000-0000-000000000001"
+    refused = status(kernel, "mail/text", member="eng-team.product.0", after=seen[0])
+    assert refused.status_code == 400 and refused.json()["code"] == "invalid_cursor"
+
+
+def test_mail_text_pages_stay_under_the_response_cap(team: tuple[Kernel, str, str]) -> None:
+    kernel, _, _ = team
+    for n in range(20):
+        message(
+            kernel,
+            f"00000000-0000-0000-0001-0000000000{n:02d}",
+            "eng-team.lead.0",
+            "pool",
+            "eng-team.dev",
+            f"2026-11-22T12:{n:02d}:00+00:00",
+            "x" * 15000,
+        )
+    page = status(kernel, "mail/text", limit=50)
+    assert page.status_code == 200 and len(page.content) < 262144
+    assert page.json()["next"] is not None
+
+
 def test_changes_show_open_and_merged_with_review_state(changes: Kernel) -> None:
     view = status(changes, "changes").json()
     assert view["totals"] == {"open": 2, "merged": 1}
@@ -523,7 +641,7 @@ def test_standing_reports_pauses_and_waivers(
     assert work.status_code == 200
 
 
-@pytest.mark.parametrize("section", SECTIONS)
+@pytest.mark.parametrize("section", READABLE)
 def test_only_the_groups_live_supervisor_may_read(
     team: tuple[Kernel, str, str], section: str
 ) -> None:
@@ -543,7 +661,7 @@ def test_only_the_groups_live_supervisor_may_read(
     assert gone.status_code == 403 and gone.json()["code"] == "principal_disabled"
 
 
-@pytest.mark.parametrize("section", SECTIONS)
+@pytest.mark.parametrize("section", READABLE)
 def test_there_is_no_write_path(team: tuple[Kernel, str, str], section: str) -> None:
     kernel, _, _ = team
     client = TestClient(create_app(kernel))
@@ -560,4 +678,4 @@ def test_there_is_no_write_path(team: tuple[Kernel, str, str], section: str) -> 
         for route in create_app(kernel).routes
         if getattr(route, "path", "").startswith("/v0.2/groups/{name}/status/")
     ]
-    assert len(routed) == len(SECTIONS) and all(methods == {"GET"} for methods in routed)
+    assert len(routed) == len(READABLE) and all(methods == {"GET"} for methods in routed)
