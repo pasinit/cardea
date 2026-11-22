@@ -768,10 +768,21 @@ def check_condition(
         {"record": dict(record), "args": dict(args), "caller": dict(caller)},
         GUARD_VARIABLES,
     )
+    who = _who(caller)
     if error is not None:
-        raise OperationRejected(f"{label} guard failed to evaluate: {error}", "guard_refused")
+        raise OperationRejected(
+            f"{label} guard failed to evaluate for {who}: {error}", "guard_refused"
+        )
     if value is not True:
-        raise OperationRejected(f"{label} guard refused this call", "guard_refused")
+        raise OperationRejected(
+            f"{label} guard refused this call for {who}: {source[:120]}", "guard_refused"
+        )
+
+
+def _who(caller: Mapping[str, JsonValue]) -> str:
+    """The caller a refusal names: its principal, and its group pool when it has one."""
+    pool = caller.get("pool")
+    return f"{caller.get('id')} (pool {pool})" if pool else str(caller.get("id"))
 
 
 def _names_record(receipt: OperationReceipt, record_id: str, epoch: int) -> bool:
@@ -913,6 +924,69 @@ def caller_of(conn: sa.Connection, principal: str) -> dict[str, JsonValue]:
         "group": str(member[0]) if member else None,
         "pool": f"{member[0]}.{member[1]}" if member else None,
     }
+
+
+def _holds_collection_grant(policy: Policy, task_id: str, collection: str) -> bool:
+    """Whether the task's live ceiling holds any `record:<collection>/<action>` grant."""
+    prefix = record_grant(collection, "")
+    for grant in json.loads(policy.binding(task_id)["grants_json"]):
+        if not str(grant).startswith(prefix):
+            continue
+        try:
+            policy.ceiling(task_id, str(grant))
+        except Fault:
+            continue
+        return True
+    return False
+
+
+def _lacking(conn: sa.Connection, policy: Policy, task_id: str, grant: str, denied: Fault) -> str:
+    """Which grant a refused call lacked, where, and the caller's pool, for the message."""
+    holder = denied.details.get("holder")
+    text = f"{grant} is not held by the {holder}" if holder else f"{grant} is not held"
+    try:
+        caller = caller_of(conn, str(policy.binding(task_id)["agent_id"]))
+    except Fault:
+        return text
+    return f"{text}; caller {_who(caller)}"
+
+
+def _either(names: list[str]) -> str:
+    """`"a"`, `"a" or "b"`, `"a", "b" or "c"`."""
+    quoted = [f'"{n}"' for n in names]
+    return " or ".join(filter(None, (", ".join(quoted[:-1]), *quoted[-1:])))
+
+
+def unknown_transition(
+    conn: sa.Connection,
+    namespace: str,
+    spec: CollectionSpec,
+    collection: str,
+    record_id: str,
+    name: str,
+) -> OperationRejected:
+    """A name that is not a transition of the table, with what the caller can use instead:
+    the transition into a state it named, then the transitions from the record's state.
+    The agent sees the first 200 characters, so the hint comes first."""
+    row = _record_row(conn, namespace, collection, record_id)
+    state = None if row is None else row["state"]
+    allowed = [t.name for t in spec.transitions if state is None or state in t.from_]
+    tail = (
+        f"use {_either(allowed)}"
+        if state is None
+        else f'from state "{state}" use {_either(allowed)}'
+        if allowed
+        else f'no transition leaves state "{state}"'
+    )
+    if name in (spec.states or ()):
+        into = [t.name for t in spec.transitions if t.to == name]
+        lead = f"the transition into it is {_either(into)}" if into else "none leads into it"
+        return OperationRejected(
+            f'"{name}" is a state, not a transition; {lead}; {tail}', "transition_unknown"
+        )
+    return OperationRejected(
+        f'Collection {collection} has no transition "{name}"; {tail}', "transition_unknown"
+    )
 
 
 def claim_context(record_id: str, epoch: int) -> str:
@@ -1120,6 +1194,42 @@ class Records:
             binding = policy.ceiling(context.task_id, record_grant(collection, action))
         except Fault as denied:
             raise OperationRejected(denied.message, denied.code) from None
+        row = _row(conn, context.namespace, collection)
+        if row is None:
+            raise OperationRejected("No such collection in this namespace", "collection_not_found")
+        spec = CollectionSpec.model_validate_json(row["spec_json"])
+        return spec, caller_of(conn, str(binding["agent_id"]))
+
+    def _authorize_transition(
+        self,
+        conn: sa.Connection,
+        context: OperationContext,
+        collection: str,
+        name: str,
+        record_id: str,
+    ) -> tuple[CollectionSpec, dict[str, JsonValue]]:
+        """`_authorize` for a transition, whose grant action is the transition's name.
+
+        Without the grant, a caller that holds some live grant on the collection learns
+        what is wrong when the name is not a transition of the table (a state name, a
+        typo); a caller with no grant on the collection learns nothing about its table.
+        """
+        policy = Policy(conn)
+        grant = record_grant(collection, name)
+        try:
+            binding = policy.ceiling(context.task_id, grant)
+        except Fault as denied:
+            row = _row(conn, context.namespace, collection)
+            if row is not None and _holds_collection_grant(policy, context.task_id, collection):
+                spec = CollectionSpec.model_validate_json(row["spec_json"])
+                if spec.transition(name) is None:
+                    raise unknown_transition(
+                        conn, context.namespace, spec, collection, record_id, name
+                    ) from None
+            raise OperationRejected(
+                f"{denied.message}: {_lacking(conn, policy, context.task_id, grant, denied)}",
+                denied.code,
+            ) from None
         row = _row(conn, context.namespace, collection)
         if row is None:
             raise OperationRejected("No such collection in this namespace", "collection_not_found")
@@ -1532,12 +1642,11 @@ class Records:
         targs = arguments.get("args", {})
         assert isinstance(targs, dict)
         with self.database.engine.begin() as conn:
-            spec, caller = self._authorize(conn, context, collection, name)
+            spec, caller = self._authorize_transition(conn, context, collection, name, record_id)
             transition = spec.transition(name)
             if transition is None:
-                raise OperationRejected(
-                    f"Collection {collection} has no transition {name}", "transition_unknown"
-                )
+                # Granted a name the table does not have, e.g. one it used to.
+                raise unknown_transition(conn, context.namespace, spec, collection, record_id, name)
             row = _record_row(conn, context.namespace, collection, record_id)
             if row is None:
                 raise OperationRejected("No such record", "record_not_found")
@@ -1556,7 +1665,7 @@ class Records:
                     "transition_not_allowed",
                 )
             old = record_view(row)
-            check_condition(transition.guard, name, old, targs, caller)
+            check_condition(transition.guard, f"Transition {name}", old, targs, caller)
             new: dict[str, JsonValue] = {
                 **old,
                 "state": transition.to,
@@ -1868,7 +1977,8 @@ DESCRIPTORS: tuple[OperationDescriptor, ...] = (
     ),
     _descriptor(
         "records.transition",
-        "Move a record along its collection's state machine (grant action: the transition's name)",
+        "Move a record along its collection's state machine by naming a transition of its table, "
+        "not the target state (grant action: the transition's name)",
         "effect",
         {
             "record_id": _RECORD_ID,

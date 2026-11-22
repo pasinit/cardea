@@ -507,6 +507,31 @@ Portable tests go in `apps/api/tests/service/`. Before the record is called veri
   - **No new storage.** It needs no migration, no index and no new state.
 - **No page.** The kernel serves no static pages, and adding a web UI is out of scope. The walkthrough (`make teams`) prints the software team's overview at the end of its run.
 
+## Amendment (2026-11-21): team status API
+
+- **Requirement.** A supervisor, or a tool acting as one, needs the team's state as JSON in answerable pieces: work by state and holder, active and recent runs with cost and outcome, mail between roles, pull requests with review state, spend against every ceiling, and what is paused or waived. The overview (above) is one bounded snapshot for people; it cannot be paged, and it has no runs, pull requests or host allocation. No write path, and no one but the supervisor.
+- **Candidates.**
+
+  | Candidate | Fit |
+  |---|---|
+  | The overview, extended | One snapshot must stay small; runs, mail and pull requests grow without bound, so it would need paging in every section and would break its fixed shape. Rejected for these sections; the overview stays as it is. |
+  | The existing reads (`GET /v0.2/mailbox`, the run view, `GET /v0.2/groups/{name}`) | They answer for one message or one task, and mail needs the caller to be a sender or recipient. They give no group-wide list, no counts and no ceilings. They stay the detail reads. |
+  | A metrics stack (Prometheus) or the host's own pull-request pages | Separate services; neither applies the supervisor's live authority, and pull requests there are the host's view, not what the kernel's receipts record. Revisit for history. |
+  | Paged JSON resource lists (the repository's own convention: `after` cursor, `limit`, `next`) | Fits. Reused. |
+- **Decision.** Add six read-only routes, `GET /v0.2/groups/{name}/status/{work,runs,mail,changes,spend,standing}?namespace=`, in `service/team_status.py`.
+  - **Who may read.** Exactly who may read the overview: the group's live supervisor holding `groups.manage`. No credential is `401`; anyone else is `404 group_not_found`. A supervisor disabled by the kill switch has no live authority, so it is refused with `principal_disabled`, as for every route.
+  - **Read-only.** Only `GET` is routed (other methods answer `405`); no table is written and none is added.
+  - **Bounds.** List sections take `limit` (1 to 100, default 25) and an opaque `after`, and return `next`. Counts (`by_state`, `by_holder`, `totals`) cover the whole group. The holder summary and a pull request's review list are capped. Titles are clipped to 200 characters; message bodies, record data and run output are not returned.
+  - **Sections.**
+    - `work`: records of the group's collections by state, live claims by holder, and a page of records (filters `collection`, `state`, `holder`).
+    - `runs`: the members' runs newest first, each with state, outcome (the terminal state, null while active), failure code, reported cost (null while unknown) and its spend reservation; filter `active`.
+    - `mail`: messages sent from or to the group's roles, with role (pool, `supervisor`, or none), delivery counts by state and size; no bodies.
+    - `changes`: pull requests from the kernel's own `vcs.open_change`, `vcs.review` and `vcs.merge` receipts: open or merged, the newest deciding review (`APPROVED` or `CHANGES_REQUESTED`, else `none`) and the latest reviews. The kernel does not ask the host, so a pull request closed on the host without a merge still shows open.
+    - `spend`: each account's usd and run ceiling against use, remaining and `at_ceiling` (group, then pools), and the supervisor's host allocation (tool time, output bytes, concurrency).
+    - `standing`: the group's state, disabled and draining members, `paused` (not active, or every active member disabled), and the registry's host-rule waivers (ADR-037 amendment 2026-11-21) for repositories the supervisor holds a `repo:` grant for. A waiver on another repository is not disclosed.
+  - **Consistency.** Each section is one read transaction. Sections are separate requests, so they are not one snapshot; use the overview when one is needed.
+- **Verification.** `tests/service/test_team_status.py` covers each section on fixtures, paging and bounds, refusal of unauthenticated, other and disabled callers, and that no other method is routed.
+
 ## Amendment (2026-11-16): guards over the cited receipt's result
 
 - **Requirement.** "Accept only after a passing run" must be enforced by the kernel, not left to the reviewer agent ([ADR-038](038-throwaway-test-environments.md), owner decision on question 3). Receipt evidence (decision 3) checks only that a successful call of the named operation exists. A call that ran and reported a failure is still a successful call.
@@ -882,3 +907,16 @@ Decided by the lead on 2026-11-09 in the review of slice 2 (claims); the owner m
 - **Review evidence names the record.** `vcs.review` takes an optional `record_id`, like `vcs.open_change`. Without it a review could not satisfy the receipt check that it was made for the record.
 - **The team kit** ties `request_changes` to a `vcs.review` with `state == 'CHANGES_REQUESTED'`, as `approve` is tied to `APPROVED`. Its PE instructions say to read the pull request from `data.change`.
 - **Events refused while a principal is disabled wait.** A journal trigger that is refused with `principal_disabled` now keeps that event as its one pending wake, rather than consuming it. This happens, for example, while a paused team's supervisor is disabled. The refusal is recorded once. The trigger admits the event on the first tick after the principal is enabled again. A later refused event replaces the pending one, so a pause leaves at most one wake per trigger. Every other refusal is still final history.
+
+## Amendment 2026-11-22: refusals that say what is wrong with a transition
+
+- **Finding.** An agent called `records.transition` with `transition: "ready"`, the name of the target state; the transition into `ready` is `triage`. The grant `record:<C>/ready` was checked before the name, so the call was refused with `task_grant_denied`. The agent concluded it lacked permission and worked around the table by adding a label.
+- **Decision.** When the caller lacks the grant `record:<C>/<name>` and `<name>` is not a transition of the collection, the refusal is `transition_unknown` instead of a permission code, provided the caller's live ceiling holds some other `record:<C>/<action>` grant. The message names what to use:
+  - for a state name, the transition into it: `"ready" is a state, not a transition; the transition into it is "triage"; from state "open" use "triage" or "broken"`;
+  - for any other name, the transitions from the record's current state: `Collection work has no transition "nope"; from state "open" use "triage" or "broken"`.
+  - The same message replaces the bare `transition_unknown` a caller got when granted a name the table lacks.
+  - The hint comes first because an agent sees at most 200 characters of a refusal.
+- **Ordering.** A caller with no live grant on the collection still gets the permission refusal and learns nothing of the table, not even whether the name exists. A transition that exists but is not granted is still a permission refusal.
+- **Permission refusals name what refused.** A denied transition's message names the grant it lacked, where the live ceiling lacked it (`task`, `platform`, `supervisor_allow`, `supervisor_delegate`) and the caller, with its group pool when it is a member: `Operation is outside explicit task grants: record:work/triage is not held by the task; caller a1 (pool team.builders)`. The code is unchanged.
+- **Guard refusals name the guard and the caller.** `guard_refused` names the transition (or collection action) whose guard refused, the caller and its pool, and the guard expression (first 120 characters): `Transition triage guard refused this call for a1 (pool team.builders): args.priority > 0`. A caller holding the grant already holds the right to the table, so the expression discloses nothing new.
+- **Tool text.** The `records.transition` description tells agents to name a transition of the table, not the target state.

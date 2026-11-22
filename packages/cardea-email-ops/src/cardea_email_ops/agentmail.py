@@ -5,12 +5,17 @@ Endpoints (https://docs.agentmail.to/api-reference, read 2026-11-17), base
 - `POST /inboxes/{inbox_id}/messages/send` with an `Idempotency-Key` header: a retry
   with the same key within 24 hours returns the first message and sends nothing;
 - `GET /inboxes/{inbox_id}/messages?labels=...` to find a send by the label it carries;
-- `GET /inboxes/{inbox_id}/threads/{thread_id}` for the messages on one thread.
+- `GET /inboxes/{inbox_id}/threads/{thread_id}` for the messages on one thread;
+- `GET /inboxes/{inbox_id}/messages?labels=received&after=...` and
+  `GET /inboxes/{inbox_id}/messages/{message_id}` for inbound mail on no Cardea thread
+  (amendment 2026-11-21). Only messages from an allowed address are read in full.
 
 Inbound mail is polled, never pushed: the host needs no public endpoint or webhook. The
 official Python SDK is not used: see ADR-039 for why.
 """
 
+from datetime import datetime
+from email.utils import parseaddr
 from typing import Any
 from urllib.parse import quote
 
@@ -100,6 +105,61 @@ class AgentMail:
             return None
         return Sent(thread_id=str(found[0]["thread_id"]), message_id=str(found[0]["message_id"]))
 
+    async def poll_inbound(
+        self, senders: tuple[str, ...], since: datetime, known: frozenset[str]
+    ) -> list[Inbound]:
+        """Received messages since `since` on no known thread. A message from any other
+        address is reported by its sender only (no body is read), so it can be rejected."""
+        wanted = {s.lower() for s in senders}
+        items: list[dict[str, Any]] = []
+        found: list[Inbound] = []
+        async with self._client() as client:
+            token: str | None = None
+            for _ in range(MAX_PAGES):
+                params: dict[str, Any] = {
+                    "labels": "received",
+                    "after": since.isoformat(),
+                    "limit": 100,
+                }
+                if token:
+                    params["page_token"] = token
+                page = _checked(await client.get(f"/inboxes/{self.inbox}/messages", params=params))
+                items.extend(page.get("messages") or [])
+                token = page.get("next_page_token")
+                if not token:
+                    break
+            for item in items:
+                labels = set(item.get("labels") or [])
+                if "sent" in labels or str(item.get("thread_id")) in known:
+                    continue
+                if not _after(item.get("timestamp"), since):
+                    continue
+                sender = str(item.get("from") or "")
+                if parseaddr(sender)[1].lower() in wanted:
+                    response = await client.get(
+                        f"/inboxes/{self.inbox}/messages/{quote(str(item['message_id']), safe='')}"
+                    )
+                    item = {**item, **_checked(response)}
+                    text = str(item.get("extracted_text") or item.get("text") or "")
+                    authenticated = from_agentmail(item)
+                else:
+                    text, authenticated = "", None
+                size = item.get("size")
+                found.append(
+                    Inbound(
+                        reply_id=str(item["message_id"]),
+                        sender=sender,
+                        subject=str(item.get("subject") or ""),
+                        text=text,
+                        received_at=str(item.get("timestamp") or ""),
+                        authenticated=authenticated,
+                        spam="spam" in labels,
+                        thread_id=str(item.get("thread_id") or ""),
+                        size=size if isinstance(size, int) else None,
+                    )
+                )
+        return found
+
     async def poll_replies(self, thread: Thread) -> list[Inbound]:
         messages: list[dict[str, Any]] = []
         token: str | None = None
@@ -136,3 +196,11 @@ class AgentMail:
                 )
             )
         return found
+
+
+def _after(stamp: object, since: datetime) -> bool:
+    """Whether a provider timestamp is at or after `since`; an unreadable one counts."""
+    try:
+        return datetime.fromisoformat(str(stamp)) >= since
+    except (ValueError, TypeError):
+        return True

@@ -32,6 +32,11 @@
     "timeout_seconds": 60,
     "idempotency_scope": ["/to", "/client_key"],
     "reconciler": "email.find_sent",
-    "replies": {"poller": "email.poll_replies", "interval_seconds": 300, "window_days": 14}
+    "replies": {
+      "poller": "email.poll_replies",
+      "interval_seconds": 300,
+      "window_days": 14,
+      "inbound": "email.poll_inbound"
+    }
   }
 }

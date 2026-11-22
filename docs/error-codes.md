@@ -44,7 +44,7 @@ errors answer 409. A request that fails schema validation answers
 | `collection_deleted` | 409 | This collection was deleted; choose a new name | `cardea.service.records` |
 | `collection_in_use` | 409 | Groups {…} still use this collection; remove it from them first | `cardea.service.records` |
 | `collection_mismatch` | 422 | Path and body collection names differ | `cardea.service.app` |
-| `collection_not_found` | 404, 422 | Collection {…} does not exist in this namespace under this supervisor; No accessible collection | `cardea.service.groups`, `cardea.service.records` |
+| `collection_not_found` | 404, 422 | Collection {…} does not exist in this namespace under this supervisor; No accessible collection | `cardea.service.groups`, `cardea.service.records`, `cardea.service.team_status` |
 | `collection_supervisor` | 403 | The caller must be the collection's supervisor; The collection belongs to another supervisor | `cardea.service.records` |
 | `content_gate_unavailable` | 503 | The content gate cannot run ({…}) | `cardea.service.content_gate` |
 | `context_not_read_only` | 422 | Context operations must be read-only | `cardea.service.operations` |
@@ -94,7 +94,7 @@ errors answer 409. A request that fails schema validation answers
 | `invalid_backup` | 400 | Use a standalone SQLite backup, not the active file; Wrong database application identity; Unsupported base schema (and 5 more) | `cardea.service.admin`, `cardea.service.maintenance` |
 | `invalid_checkpoint` | 409 | This store checkpoints only settled work. | `cardea.kernel.store` |
 | `invalid_credential` | 401 | Bound coordinator proof required; Bearer authentication is required; Credential has expired (and 2 more) | `cardea.runtime.a2a`, `cardea.service.app`, `cardea.service.auth` |
-| `invalid_cursor` | 400, 409 | Event cursor must be a nonnegative integer.; Cursor does not name a message; Cursor does not name an item of this list | `cardea.kernel.store`, `cardea.service.app`, `cardea.service.pages` |
+| `invalid_cursor` | 400, 409 | Event cursor must be a nonnegative integer.; Cursor does not name a message; Cursor does not name an item of this list (and 3 more) | `cardea.kernel.store`, `cardea.service.app`, `cardea.service.pages`, `cardea.service.team_status` |
 | `invalid_diff` | 422 | A hunk header is malformed; An added line is outside a file's hunk | `cardea.service.content_gate` |
 | `invalid_event` | 400 | Body is not a supported CloudEvents 1.0 event | `cardea.service.events` |
 | `invalid_host_usage` | 500 | Host usage exceeds its reserved allocation | `cardea.service.host_budget` |
@@ -133,7 +133,7 @@ errors answer 409. A request that fails schema validation answers
 | `object_version_conflict` | 409 | Object version has changed. | `cardea.kernel.store` |
 | `operation_changed` | 403 | Operation was reinstalled | `cardea.service.agent_run_runtime` |
 | `operation_duplicate` | 500 | Operation is installed twice | `cardea.service.operations` |
-| `operation_handler_missing` | 500, 503 | Operation handler is not installed; Operation handler is not loaded; Reconciler is not loaded (and 1 more) | `cardea.service.operations` |
+| `operation_handler_missing` | 500, 503 | Operation handler is not installed; Operation handler is not loaded; Reconciler is not loaded (and 2 more) | `cardea.service.operations` |
 | `operation_invalid` | 500 | Operation declares no reply poller; Invalid operation descriptor {…}: {…} | `cardea.service.operations` |
 | `operation_not_found` | 409 | Operation does not exist. | `cardea.kernel.store` |
 | `operation_not_installed` | 403, 409 | Approval rules name an operation that is not installed; Policy names an operation that is not installed; Operation is not installed | `cardea.service.kernel`, `cardea.service.operations` |
@@ -253,7 +253,7 @@ used by the examples.
 | `executor_busy` | — | `cardea.service.invocation` |
 | `expectation_exceeded` | — | `cardea.service.agent_run_runtime` |
 | `gate_changed_checkout` | a gate changed the checkout ({…}); gates may check the change, not alter it | `cardea_coding_ops.session` |
-| `guard_refused` | {…} guard failed to evaluate: {…}; {…} guard refused this call | `cardea.service.records` |
+| `guard_refused` | {…} guard failed to evaluate for {…}: {…}; {…} guard refused this call for {…}: {…} | `cardea.service.records` |
 | `host_mount_propagation` | the host's / or /run mount is not shared, so systemd cannot give the worker its credential; run `mount --make-rshared /` or reboot the host | `cardea.service.confined` |
 | `host_outcome_unknown` | Interrupted host intent; no replay | `cardea.service.host_runtime` |
 | `host_refused` | The host reports a duplicate it does not list | `cardea_vcs_ops.ops` |
@@ -296,7 +296,7 @@ used by the examples.
 | `snapshot_restored` | Historical execution sealed by snapshot recovery. | `cardea.service.admin` |
 | `stale_call` | This call is no longer running | `cardea.service.approval_requests`, `cardea.service.records` |
 | `transition_not_allowed` | Transition {…} needs state {…}; the record is in {…} | `cardea.service.records` |
-| `transition_unknown` | Collection {…} has no transition {…} | `cardea.service.records` |
+| `transition_unknown` | Collection {…} has no transition "{…}"; {…}; "{…}" is a state, not a transition; {…}; {…} | `cardea.service.records` |
 | `verification_failed` | Stored index or input versions failed checks.; result does not match the operation's output schema or size limit (at most 64 KiB is recorded) | `cardea.kernel.demo`, `cardea.service.invocation` |
 | `version_conflict` | expected version {…}, record is at version {…} | `cardea.service.records` |
 | `worker_error` | {…} (HTTP {…}) | `cardea.service.confined` |

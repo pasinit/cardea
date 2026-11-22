@@ -965,3 +965,37 @@ def test_status_reports_a_waiver_of_the_host_rules(tmp_path: Path) -> None:
     registry.write_text(json.dumps({"repositories": {document["repository"]: entry}}))
     (line,) = module.host_rules_note(document)
     assert "WAIVED" in line and "No rulesets on this plan." in line
+
+
+def test_inbound_email_for_the_pm_is_opt_in() -> None:
+    module = kit()
+    assert "inbound" not in module.email_fragment(example())
+    pm = next(p for p in module.group_document(example())["spec"]["pools"] if p["name"] == "pm")
+    assert "reaches your mailbox" not in pm["run"]["instructions"]
+    document = example()
+    document["email"] = {
+        **document["email"],
+        "inbound": {"rate_limit": {"count": 5, "window_days": 1}},
+    }
+    fragment = module.email_fragment(document)
+    assert fragment["inbound"] == {
+        "from": [document["email"]["alias"]],
+        "deliver_to": {"namespace": document["namespace"], "pool": "dev-team.pm"},
+        "rate_limit": {"count": 5, "window_days": 1},
+    }
+    from cardea_email_ops.config import EmailConfig
+
+    # The fragment fits the email host file's shape.
+    EmailConfig.model_validate(
+        {
+            "transport": {
+                "kind": "agentmail",
+                "inbox_id": "team@agents.example.invalid",
+                "api_key_file": "/etc/cardea/agentmail.key",
+            },
+            "recipients": {document["email"]["alias"]: "someone@example.invalid"},
+            **fragment,
+        }
+    )
+    pm = next(p for p in module.group_document(document)["spec"]["pools"] if p["name"] == "pm")
+    assert "also reaches your mailbox as data" in pm["run"]["instructions"]

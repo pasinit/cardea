@@ -39,6 +39,8 @@ class FakeAgentMail:
     sends: int = 0
     # Status codes to answer the next sends with, instead of sending.
     fail_next: list[int] = field(default_factory=list)
+    # Message ids read one by one (`GET /messages/{id}`): what the adapter opened in full.
+    read: list[str] = field(default_factory=list)
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self.handle)
@@ -78,6 +80,10 @@ class FakeAgentMail:
         )
         return message_id
 
+    def incoming(self, sender: str, text: str, **options: Any) -> str:
+        """A new message on its own thread: mail that replies to nothing Cardea sent."""
+        return self.reply(f"thread-{uuid.uuid4().hex[:12]}", sender, text, **options)
+
     def handle(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
         if request.headers.get("authorization") != f"Bearer {self.api_key}":
@@ -96,6 +102,13 @@ class FakeAgentMail:
             return httpx.Response(
                 200, json={"count": len(found[:limit]), "messages": found[:limit]}
             )
+        if request.method == "GET" and rest.startswith("/messages/"):
+            wanted_id = rest[len("/messages/") :]
+            match = next((m for m in self.messages if m["message_id"] == wanted_id), None)
+            if match is None:
+                return httpx.Response(404, json={"name": "NotFound", "message": "no message"})
+            self.read.append(wanted_id)
+            return httpx.Response(200, json=match)
         if request.method == "GET" and rest.startswith("/threads/"):
             thread_id = rest[len("/threads/") :]
             found = [m for m in self.messages if m["thread_id"] == thread_id]

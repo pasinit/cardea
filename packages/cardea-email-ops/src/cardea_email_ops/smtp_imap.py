@@ -9,7 +9,9 @@ Reading (`imaplib`, RFC 3501) is narrow by construction:
 - the only searches are `UID SEARCH HEADER In-Reply-To <id>` and `HEADER References <id>`
   for a thread Cardea created, never a scan of the mailbox;
 - only the messages those searches return are fetched, with `BODY.PEEK[]`;
-- nothing is stored, copied, moved, flagged or expunged, and unmatched mail is never read.
+- nothing is stored, copied, moved, flagged or expunged, and unmatched mail is never read;
+- inbound mail (amendment 2026-11-21) is found only by `UID SEARCH HEADER From <address>`
+  for each configured sender address, so mail from anyone else is never fetched.
 A mailbox password usually grants the whole mailbox; this narrowing is the only guard.
 """
 
@@ -20,12 +22,15 @@ import imaplib
 import re
 import smtplib
 import ssl
+from dataclasses import replace
+from datetime import datetime
 from email.message import EmailMessage
 from email.parser import BytesParser
 from email.policy import default
 
 from cardea_email_ops.authentication import from_header
 from cardea_email_ops.config import (
+    ADDRESS,
     CredentialUnavailable,
     Endpoint,
     ImapEndpoint,
@@ -194,6 +199,62 @@ class SmtpImap:
     async def poll_replies(self, thread: Thread) -> list[Inbound]:
         return await asyncio.to_thread(self._poll, thread)
 
+    def _from(self, client: imaplib.IMAP4, address: str) -> list[bytes]:
+        if not ADDRESS.fullmatch(address):
+            raise ValueError("not a configured address")
+        status, data = client.uid("SEARCH", "HEADER", "From", f'"{address}"')
+        if status != "OK":
+            raise RuntimeError("IMAP search failed")
+        return [uid for chunk in data if chunk for uid in chunk.split()]
+
+    def _inbound_poll(
+        self, senders: tuple[str, ...], since: datetime, known: frozenset[str]
+    ) -> list[Inbound]:
+        found: list[Inbound] = []
+        own = f"@{self.config.message_id_domain}>".lower()
+        client = self._imap()
+        try:
+            status, _ = client.select(f'"{self.config.imap.folder}"', readonly=True)
+            if status != "OK":
+                raise RuntimeError("IMAP folder unavailable")
+            uids: list[bytes] = []
+            for address in senders:
+                for uid in self._from(client, address):
+                    if uid not in uids:
+                        uids.append(uid)
+            # The newest matches only: UIDs grow with arrival.
+            for uid in sorted(uids, key=int)[-MAX_MATCHES:]:
+                status, data = client.uid("FETCH", uid.decode(), "(BODY.PEEK[])")
+                raw = next(
+                    (item[1] for item in data if isinstance(item, tuple) and len(item) > 1),
+                    None,
+                )
+                if status != "OK" or not isinstance(raw, bytes):
+                    continue
+                parsed = BytesParser(policy=default).parsebytes(raw, headersonly=True)
+                threads = f"{parsed.get('In-Reply-To', '')} {parsed.get('References', '')}"
+                if "<cardea." in threads.lower() and own in threads.lower():
+                    continue  # a reply to a thread Cardea started: `poll_replies` reads it
+                if str(parsed.get("Message-ID", "")).strip() in known:
+                    continue
+                if not _since(str(parsed.get("Date", "")), since):
+                    continue
+                message = self._inbound(uid, raw)
+                found.append(replace(message, size=len(message.text.encode())))
+        finally:
+            with contextlib.suppress(OSError, imaplib.IMAP4.error):
+                client.logout()
+        return found
+
+    async def poll_inbound(
+        self, senders: tuple[str, ...], since: datetime, known: frozenset[str]
+    ) -> list[Inbound]:
+        """New mail from `senders` (exact `From` addresses, rechecked after parsing) in the
+        inbox since `since`, that replies to no Cardea thread (amendment 2026-11-21). Only
+        `UID SEARCH HEADER From` for each configured address, then `BODY.PEEK[]` of the
+        newest matches: mail from anyone else is never fetched."""
+        return await asyncio.to_thread(self._inbound_poll, senders, since, known)
+
     def _find(self, effect_key: str) -> Sent | None:
         folder = self.config.imap.sent_folder
         if folder is None:
@@ -212,3 +273,15 @@ class SmtpImap:
 
     async def find_sent(self, effect_key: str) -> Sent | None:
         return await asyncio.to_thread(self._find, effect_key)
+
+
+def _since(date: str, since: datetime) -> bool:
+    """Whether an RFC 5322 Date is at or after `since`; an unreadable one counts."""
+    try:
+        sent = email.utils.parsedate_to_datetime(date)
+    except (TypeError, ValueError):
+        return True
+    try:
+        return sent >= since
+    except TypeError:
+        return True
