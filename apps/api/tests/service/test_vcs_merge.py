@@ -679,7 +679,7 @@ def test_a_pull_request_behind_its_base_is_refused_until_brought_up_to_date(
     # The refusal says what to do: bring the base in, push, green checks, re-approval.
     for step in (
         "does not contain the latest main",
-        "Bring the latest main into your branch",
+        "Merge the latest main into your branch (no rebase, no force-push)",
         "push it",
         "every check to pass at the new head",
         "new approval of that head",

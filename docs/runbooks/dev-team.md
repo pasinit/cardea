@@ -18,11 +18,16 @@ Every trigger refuses double work:
 
 Mail to a pool wakes every member of that pool. So the team lead and the PE hold no grant to mail the whole developer pool. They answer about an item by mailing its holder at the holder's own address (`<group>.dev.<n>`); the kit grants one address per developer. A developer that holds no item and finds none ready stops without sending mail.
 
-Only the member that opened a pull request may merge it (`merge_not_opener`). A claim that lapses, for example while an item waits in review past its lease and follow-ups, returns the item to `ready` with `data.change` still set, and the next developer claims it at a new epoch. So each developer pushes to its own branch per claim, `agent/<group>/<record_id>-<claim_epoch>`, and opens its own pull request; it may start its coding session from the earlier branch. A developer whose merge is refused with `merge_not_opener` tells the team lead.
+Only the member that opened a pull request may merge it (`merge_not_opener`). When a developer's claim lapses (its lease and follow-ups run out, or the team is paused), what happens depends on the item's state:
+- **In progress:** the item returns to `ready` and the next developer claims it at a new epoch.
+- **In review or approved:** the item keeps its state and its review, and only the holder is dropped. The PE still reviews it. If the PE requests changes, the item is in progress with no holder, and any developer may `start` it. Approved, it waits for the developer that opened its pull request, which merges it without holding it; any other developer's `vcs.merge` is refused with `merge_not_opener`, and it leaves the item alone. If that developer is gone, the team lead cancels the item and files it again.
+- `data.change` stays in every case, so a developer taking an item over pushes to its own branch per claim, `agent/<group>/<record_id>-<claim_epoch>`, and opens its own pull request. It may start its coding session from the earlier branch.
 
 A transition that needs evidence cites a receipt. `submit` needs the run's `vcs.open_change`, and it copies the pull request number from that call onto the item as `data.change`, where the PE finds it. `approve` needs the PE's `vcs.review` with `state == APPROVED`, and `request_changes` needs one with `state == CHANGES_REQUESTED`. `merge` needs the developer's `vcs.merge`. Each of these calls passes the item's `record_id`.
 
 ## What the host needs first
+
+`teamsetup.py plan --host $H` checks every item below and the setup steps that follow from them; `apply` does what it can. The list stays the reference. See [team kit](../../deploy/team-kit/README.md).
 
 - The kernel installed and running with host execution: [deploy/small-host/README.md](../../deploy/small-host/README.md), section 4.
   - The `vcs` and `try` profiles (steps 9 and 10) and `code.session` (step 8).

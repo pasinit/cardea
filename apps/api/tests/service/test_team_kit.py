@@ -30,7 +30,7 @@ from cardea.service.groups import apply
 from cardea.service.harnesses import IMPLICIT_ID, Catalog, Harnesses, ModelEntry, implicit_entry
 from cardea.service.kernel import Kernel, provision
 from cardea.service.models import AgentGroup, AgentRunRequest, Provisioning, Signal, now
-from cardea.service.operations import OperationDescriptor, Registry
+from cardea.service.operations import OperationDescriptor, OperationRejected, Registry
 from cardea.service.policy import Policy
 from cardea.service.records import CollectionDocument, apply_collection
 
@@ -305,7 +305,9 @@ def registry() -> Registry:
         OperationDescriptor.model_validate_json(p.read_text()) for p in coding_descriptors()
     )
     vcs = Vcs(
-        VcsConfig(credentials=FixedTokenConfig(kind="test", token=SecretStr("t" * 16))),
+        VcsConfig(
+            credentials=FixedTokenConfig(kind="test", token=SecretStr("t" * 16)),
+        ),
         transport=FakeGitHub(Path("/nonexistent")).transport(),
     )
     return Registry((*in_process_descriptors(), *confined, *env_descriptors()), vcs.handlers())
@@ -981,6 +983,7 @@ def test_developers_are_told_what_to_do_when_behind_the_base() -> None:
     dev = next(p for p in document["spec"]["pools"] if p["name"] == "dev")
     instructions = dev["run"]["instructions"]
     assert "merge_behind_base" in instructions and "resubmit" in instructions
+    assert "no rebase, no force-push" in instructions and "rebasing" not in instructions
     assert "record:work/resubmit" in dev["grants"]
 
 
@@ -1034,6 +1037,10 @@ def test_developers_keep_working_and_move_past_a_lost_start() -> None:
     # A developer pushes its own branch per claim, so it is the opener of what it submits.
     assert "`agent/dev-team/<record_id>-<claim_epoch>`" in text
     assert "only the member that opened a pull request may merge it" in text
+    # Items whose claim lapsed after review: in progress can be taken over, approved waits
+    # for its opener.
+    assert "An in-progress item no one holds" in text
+    assert "an approved item no one holds" in text and "so leave it" in text
     # One item may wait in review while its developer works on the next.
     claims = module.work_collection(example())["spec"]["claims"]
     assert claims["max_per_holder"] == 2 == module.MAX_ITEMS_PER_DEVELOPER
@@ -1059,8 +1066,11 @@ def test_each_developer_is_told_its_own_member_id(team: tuple[Kernel, FakeSessio
 
 def fake_open_change(kernel: Kernel, monkeypatch: pytest.MonkeyPatch) -> None:
     async def opened(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+        # One pull request per branch: `...-<epoch>` opens number 41 + epoch.
         head = str(arguments["head"])
-        return {"number": 42, "url": "https://git.example/pull/42", "state": "open", "head": head}
+        number = 41 + int(head.rsplit("-", 1)[1])
+        url = f"https://git.example/pull/{number}"
+        return {"number": number, "url": url, "state": "open", "head": head}
 
     handler = kernel.operations.get("vcs.open_change").cardea.handler
     monkeypatch.setitem(kernel.operations.handlers, str(handler), opened)
@@ -1125,7 +1135,8 @@ def test_a_developer_starts_the_next_item_after_submitting(
 
     session.scripts = [second]
     assert AgentRunRuntime(kernel).execute(member_run(kernel, "dev-team.dev.1")) == "succeeded"
-    assert ["transition_not_allowed" in r for r in refused[1:3]] == [True, True]
+    assert "transition_not_allowed" in refused[1]  # A is in review
+    assert "record_claimed" in refused[2]  # B is in progress, held by the first developer
     assert refused[3] == ""
     with kernel.database.read() as conn:
         held = {
@@ -1141,47 +1152,190 @@ def test_a_developer_starts_the_next_item_after_submitting(
     }
 
 
-def test_a_lapsed_claim_returns_a_reviewed_item_with_its_pull_request(
-    team: tuple[Kernel, FakeSession], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """How a holder ends up holding another member's pull request: a claim that lapses
-    in review goes back to ready (start's on_claim_expiry) and keeps data.change, so the
-    next developer starts it at a new epoch. Its own branch per epoch makes it the opener
-    of what it submits."""
-    kernel, session = team
-    fake_open_change(kernel, monkeypatch)
-    record_id = ready_item(kernel, session)
+# A lapsed claim keeps the review (ADR-034 amendment, 2026-11-22)
 
-    async def develop(client: ClientSession, request: SessionRequest) -> SessionResult:
-        assert (await start(client, record_id))[0] == ""
-        made = await call(
-            client,
-            "vcs-open_change",
-            repository="cardea",
-            head=f"agent/dev-team/{record_id}-1",
-            base="main",
-            title="Fix it",
-            record_id=record_id,
-        )
-        assert not made.is_error, made.content
-        moved = await call(
-            client,
-            "records-transition",
-            collection="work",
-            record_id=record_id,
-            transition="submit",
-            claim_epoch=1,
-        )
-        assert not moved.is_error, moved.content
-        return SessionResult(text="Submitted.", is_error=False)
+LEASE = timedelta(seconds=14400 + 60)
 
-    session.scripts = [develop]
-    assert AgentRunRuntime(kernel).execute(member_run(kernel, "dev-team.dev.0")) == "succeeded"
-    assert claims.sweep(kernel, now() + timedelta(seconds=14400 + 60)) == 1
+
+def fake_review_and_merge(kernel: Kernel, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reviews state what they asked for. A merge applies `vcs.merge`'s opener rule to the
+    kernel's evidence (the oldest `vcs.open_change` receipt for the pull request) and then
+    succeeds without a host; the rule itself is tested in test_vcs_merge."""
+    states = {"REQUEST_CHANGES": "CHANGES_REQUESTED", "APPROVE": "APPROVED"}
+
+    async def reviewed(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+        number = arguments["number"]
+        return {
+            "review_id": number,
+            "state": states.get(arguments["event"], "COMMENTED"),
+            "url": f"https://git.example/pull/{number}#r",
+        }
+
+    merge = str(kernel.operations.get("vcs.merge").cardea.handler)
+
+    async def merged(arguments: dict[str, Any], context: Any) -> Any:
+        opened = context.evidence.get("opened") or ()
+        if not opened or opened[0].get("agent_id") != context.agent_id:
+            raise OperationRejected(
+                "Only the member that opened the pull request may merge it", "merge_not_opener"
+            )
+        sha = "a" * 40
+        return {"number": arguments["number"], "merged": True, "sha": sha, "head_sha": sha}
+
+    review = str(kernel.operations.get("vcs.review").cardea.handler)
+    monkeypatch.setitem(kernel.operations.handlers, review, reviewed)
+    monkeypatch.setitem(kernel.operations.handlers, merge, merged)
+
+
+def item(kernel: Kernel, record_id: str) -> tuple[str, str | None, int, Any]:
     with kernel.database.read() as conn:
         state, holder, epoch, data = conn.exec_driver_sql(
             "SELECT state, holder, claim_epoch, data_json FROM records WHERE record_id=?",
             (record_id,),
         ).one()
-    assert (state, holder, epoch) == ("ready", None, 2)
-    assert json.loads(data)["change"] == 42  # the earlier holder's pull request
+    return str(state), holder, int(epoch), json.loads(data).get("change")
+
+
+def as_member(kernel: Kernel, session: FakeSession, member: str, script: Any) -> None:
+    session.scripts = [script]
+    assert AgentRunRuntime(kernel).execute(member_run(kernel, member)) == "succeeded"
+
+
+async def transition(client: ClientSession, record_id: str, name: str, **extra: Any) -> str:
+    """One transition: "" when it succeeded, else the refusal's text."""
+    moved = await call(
+        client,
+        "records-transition",
+        collection="work",
+        record_id=record_id,
+        transition=name,
+        **extra,
+    )
+    return text(moved) if moved.is_error else ""
+
+
+def develop(record_id: str) -> Any:
+    """A developer's run: start the item, open its own pull request and submit."""
+
+    async def script(client: ClientSession, request: SessionRequest) -> SessionResult:
+        started, output = await start(client, record_id)
+        assert started == "", started
+        epoch = output["claim"]["claim_epoch"]
+        made = await call(
+            client,
+            "vcs-open_change",
+            repository="cardea",
+            head=f"agent/dev-team/{record_id}-{epoch}",
+            base="main",
+            title="Fix it",
+            record_id=record_id,
+        )
+        assert not made.is_error, made.content
+        assert await transition(client, record_id, "submit", claim_epoch=epoch) == ""
+        return SessionResult(text="Submitted.", is_error=False)
+
+    return script
+
+
+def review(kernel: Kernel, record_id: str, event: str, then: str) -> Any:
+    async def script(client: ClientSession, request: SessionRequest) -> SessionResult:
+        number = item(kernel, record_id)[3]
+        made = await call(
+            client,
+            "vcs-review",
+            repository="cardea",
+            number=number,
+            event=event,
+            body="Reviewed.",
+            client_key=f"review-{number}-{event}",
+            record_id=record_id,
+        )
+        assert not made.is_error, made.content
+        assert await transition(client, record_id, then) == ""
+        return SessionResult(text="Reviewed.", is_error=False)
+
+    return script
+
+
+def merge(record_id: str, number: int, outcome: list[str], epoch: int | None = None) -> Any:
+    """Merge the pull request and move the item to done (with the claim's epoch when the
+    caller holds it); records each refusal."""
+
+    async def script(client: ClientSession, request: SessionRequest) -> SessionResult:
+        made = await call(
+            client, "vcs-merge", repository="cardea", number=number, record_id=record_id
+        )
+        outcome.append(text(made) if made.is_error else "")
+        held = {} if epoch is None else {"claim_epoch": epoch}
+        outcome.append(await transition(client, record_id, "merge", **held))
+        return SessionResult(text="Merged.", is_error=False)
+
+    return script
+
+
+def test_a_lapse_in_progress_returns_the_item_to_ready(
+    team: tuple[Kernel, FakeSession],
+) -> None:
+    kernel, session = team
+    record_id = ready_item(kernel, session)
+
+    async def started(client: ClientSession, request: SessionRequest) -> SessionResult:
+        assert (await start(client, record_id))[0] == ""
+        return SessionResult(text="Started.", is_error=False)
+
+    as_member(kernel, session, "dev-team.dev.0", started)
+    assert claims.sweep(kernel, now() + LEASE) == 1
+    assert item(kernel, record_id) == ("ready", None, 2, None)
+
+
+def test_a_lapse_in_review_keeps_the_review_and_another_developer_takes_over(
+    team: tuple[Kernel, FakeSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """In review, a lapsed claim drops only the holder. The PE still reviews; changes it
+    requests leave the item in progress with no holder, and another developer starts it,
+    opens its own pull request and, approved, merges it as its opener."""
+    kernel, session = team
+    fake_open_change(kernel, monkeypatch)
+    fake_review_and_merge(kernel, monkeypatch)
+    record_id = ready_item(kernel, session)
+    as_member(kernel, session, "dev-team.dev.0", develop(record_id))
+    assert claims.sweep(kernel, now() + LEASE) == 1
+    assert item(kernel, record_id) == ("in_review", None, 2, 42)
+    as_member(
+        kernel,
+        session,
+        "dev-team.pe.0",
+        review(kernel, record_id, "REQUEST_CHANGES", "request_changes"),
+    )
+    assert item(kernel, record_id) == ("in_progress", None, 2, 42)
+    as_member(kernel, session, "dev-team.dev.1", develop(record_id))
+    assert item(kernel, record_id) == ("in_review", "dev-team.dev.1", 3, 44)
+    as_member(kernel, session, "dev-team.pe.0", review(kernel, record_id, "APPROVE", "approve"))
+    outcome: list[str] = []
+    as_member(kernel, session, "dev-team.dev.1", merge(record_id, 44, outcome, epoch=3))
+    assert outcome == ["", ""]
+    assert item(kernel, record_id)[:2] == ("done", None)
+
+
+def test_a_lapse_when_approved_keeps_the_approval_for_the_opener(
+    team: tuple[Kernel, FakeSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Approved, a lapsed claim drops only the holder. Another developer cannot merge the
+    pull request (the opener rule), so the item waits, approved, and its opener merges it
+    without holding it."""
+    kernel, session = team
+    fake_open_change(kernel, monkeypatch)
+    fake_review_and_merge(kernel, monkeypatch)
+    record_id = ready_item(kernel, session)
+    as_member(kernel, session, "dev-team.dev.0", develop(record_id))
+    as_member(kernel, session, "dev-team.pe.0", review(kernel, record_id, "APPROVE", "approve"))
+    assert claims.sweep(kernel, now() + LEASE) == 1
+    assert item(kernel, record_id) == ("approved", None, 2, 42)
+    outcome: list[str] = []
+    as_member(kernel, session, "dev-team.dev.1", merge(record_id, 42, outcome))
+    assert "merge_not_opener" in outcome[0] and "receipt_required" in outcome[1]
+    assert item(kernel, record_id) == ("approved", None, 2, 42)
+    outcome.clear()
+    as_member(kernel, session, "dev-team.dev.0", merge(record_id, 42, outcome))
+    assert outcome == ["", ""]
+    assert item(kernel, record_id)[:2] == ("done", None)

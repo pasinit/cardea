@@ -884,10 +884,10 @@ async def _up_to_date(host: GitHub, base: str, head: str) -> str:
     if not isinstance(behind, int) or behind != 0:
         raise OperationRejected(
             f"The pull request's head does not contain the latest {base}, and this "
-            "repository requires it to be up to date before merging. Bring the latest "
-            f"{base} into your branch (merge or rebase), push it, wait for every check to "
-            "pass at the new head, get a new approval of that head, then call vcs.merge "
-            "again.",
+            "repository requires it to be up to date before merging. Merge the latest "
+            f"{base} into your branch (no rebase, no force-push), push it, wait for every "
+            "check to pass at the new head, get a new approval of that head, then call "
+            "vcs.merge again.",
             "merge_behind_base",
         )
     return str((compared.get("base_commit") or {}).get("sha") or "")

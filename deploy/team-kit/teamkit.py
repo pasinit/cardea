@@ -40,6 +40,7 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -223,7 +224,10 @@ def developer_instructions(group: str) -> str:
         "You are a developer, member $member; your number n is the last part of that ID. "
         "Work in this run until nothing is left for you, in this order. "
         "(1) If you hold an approved item, merge its change with vcs.merge and move the item "
-        "to done with the merge transition. "
+        "to done with the merge transition. Do the same for an approved item no one holds "
+        "(its claim lapsed after the review): vcs.merge refuses with merge_not_opener "
+        "unless you opened its pull request, and then the item is its opener's to merge, "
+        "so leave it. "
         "(2) If you hold an item with changes requested, read the review, change the code "
         "with a coding session, push and submit again. If you hold an item in progress "
         "that an earlier run did not submit, finish it as in (4). "
@@ -233,7 +237,9 @@ def developer_instructions(group: str) -> str:
         "at position n mod k (counting from 0), then on the next ones in that order, "
         "wrapping round. A start refused because another developer claimed the item first "
         "(record_claimed, or transition_not_allowed because it is no longer ready) is "
-        "normal: try the next item. Stop looking after "
+        "normal: try the next item. An in-progress item no one holds (changes were "
+        "requested after its developer's claim lapsed) can be started like a ready one. "
+        "Stop looking after "
         f"{MAX_START_REFUSALS} refused starts, when no item is ready, or on claim_limit "
         "(you hold as many items as you may). "
         "(4) Implement the item you started with a coding session, push the change to a "
@@ -249,13 +255,13 @@ def developer_instructions(group: str) -> str:
         "vcs.open_change call. If you hold no item and none is ready, stop at once and "
         "send no mail: there is nothing to report, and the team lead triages work on "
         "its own. If vcs.merge refuses with merge_behind_base, the default branch moved "
-        "since your branch was cut: bring the latest base into your branch with a coding "
-        "session (base_ref your branch, merging or rebasing onto the base and fixing any "
-        "conflict, such as a duplicate migration revision), push it to the same branch, "
+        "since your branch was cut: merge the latest base into your branch (no rebase, no "
+        "force-push) with a coding session from your branch (base_ref), fixing any "
+        "conflict, such as a duplicate migration revision; push it to the same branch, "
         "and move the item back to review with the resubmit transition (in the same run "
         "as that push) so it is reviewed at the new head; merge only once it is approved "
-        "again and its checks are green. If you are blocked on an item you "
-        "hold, or vcs.merge refuses with merge_not_opener, tell the team lead once."
+        "again and its checks are green. If you are blocked on an item you hold, or "
+        "vcs.merge refuses an item you hold with merge_not_opener, tell the team lead once."
     )
 
 
@@ -353,7 +359,9 @@ def work_collection(host: dict[str, Any]) -> dict[str, Any]:
                 },
                 {
                     "name": "start",
-                    "from": ["ready"],
+                    # In progress too: an item whose claim lapsed in review, and then had
+                    # changes requested, is in progress with no holder until one starts it.
+                    "from": ["ready", "in_progress"],
                     "to": "in_progress",
                     "claim": "acquire",
                     "on_claim_expiry": "ready",
@@ -887,7 +895,9 @@ def check_placeholders(host: dict[str, Any]) -> None:
         raise HostError("the host file still holds placeholder values at " + ", ".join(found))
 
 
-def provision(host: dict[str, Any], *, paused: bool) -> Path:
+def provision(
+    host: dict[str, Any], *, paused: bool, runner: Callable[..., Any] = subprocess.run
+) -> Path:
     check_placeholders(host)
     if not paused:
         check_walls(host)
@@ -905,16 +915,16 @@ def provision(host: dict[str, Any], *, paused: bool) -> Path:
     # The kernel's own CLI, from the kit's environment (`python -I -m cardea.service`).
     cardea = list(settings.get("cardea", [*KIT_PYTHON, "-I", "-m", "cardea.service"]))
     config = settings.get("config", "/etc/cardea/config.json")
-    subprocess.run([*cardea, "provision", "--config", config, str(out)], check=True)
+    runner([*cardea, "provision", "--config", config, str(out)], check=True)
     return out
 
 
-def apply(host: dict[str, Any]) -> list[str]:
+def apply(host: dict[str, Any], connect: Callable[[dict[str, Any]], Any] = client) -> list[str]:
     check_placeholders(host)
     check_walls(host)
     namespace, group, _, _ = _names(host)
     done = []
-    kernel = client(host)
+    kernel = connect(host)
     try:
         for document in (work_collection(host), decisions_collection(host)):
             name = document["metadata"]["name"]
