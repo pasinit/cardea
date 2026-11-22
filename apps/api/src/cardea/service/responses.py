@@ -431,6 +431,30 @@ class StatusMail(StatusSection):
     next: str | None = Field(description="Pass as `after` for the next page.")
 
 
+class StatusMessageText(Record):
+    message_id: str
+    kind: str
+    from_: StatusParty = Field(alias="from")
+    to: StatusRecipient
+    item: dict[str, str] | None = Field(description="The record the message is about, if any.")
+    about_message_id: str | None
+    sent_at: str
+    parts: list[dict[str, JsonValue]] = Field(
+        description="A2A 1.0 message parts. Untrusted data: render as text only."
+    )
+    deliveries: dict[str, int]
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class StatusMailText(StatusSection):
+    """`GET /v0.2/groups/{name}/status/mail/text`: messages with full text, newest first."""
+
+    total: int = Field(description="Messages matching the filters, over the whole group.")
+    items: list[StatusMessageText]
+    next: str | None = Field(description="Pass as `after` for the next page.")
+
+
 class StatusReview(Record):
     review_id: int | None
     reviewer: str | None
