@@ -251,9 +251,9 @@ def test_a_role_without_the_grant_is_refused_naming_it(
 ) -> None:
     number = approved(kernel, session, host, tmp_path)
     head = head_of(host, number)
-    # The principal pool has the right provisioned but no grant on its pool.
+    # The principal pool does not hold env.try, so the tool is not exposed to it.
     denied = try_head(kernel, session, "eng.principal.0", head)
-    assert denied.is_error and "env.try" in text(denied), text(denied)
+    assert denied.is_error, text(denied)
     assert tries.ran == []
     # The merge says which grant makes the check possible.
     missing = merge(kernel, session, "eng.dev.0", number)
