@@ -259,8 +259,15 @@ def developer_instructions(group: str) -> str:
         "submit records the pull request number on the item (data.change) from your "
         "vcs.open_change call. If you hold no item and none is ready, stop at once and "
         "send no mail: there is nothing to report, and the team lead triages work on "
-        "its own. If you are blocked on an item you hold, or vcs.merge refuses an item you "
-        "hold with merge_not_opener, tell the team lead once."
+        "its own. If vcs.merge refuses with merge_behind_base, the default branch moved "
+        "since your branch was cut: merge the latest base into your branch (no rebase, no "
+        "force-push) with a coding session from your branch (base_ref), fixing any "
+        "conflict, such as a duplicate migration revision; push it to the same branch, "
+        f"and move the item back to review with {call('resubmit')} and your claim_epoch, "
+        "in the same run as that push, so it is reviewed at the new head; merge only once "
+        "it is approved again and its checks are green. If you are blocked on an item "
+        "you hold, or vcs.merge refuses an item you hold with merge_not_opener, tell the "
+        "team lead once."
     )
 
 
@@ -370,6 +377,15 @@ def work_transitions(group: str) -> list[dict[str, Any]]:
                 "in": "same_task",
                 "result": "result.state == 'APPROVED'",
             },
+        },
+        {
+            # An approved change whose branch fell behind the base (vcs.merge
+            # merge_behind_base): the base merged in and pushed, back to review.
+            "name": "resubmit",
+            "from": ["approved"],
+            "to": "in_review",
+            "claim": "holder",
+            "requires_receipt": {"operation": "vcs.push_branch", "in": "same_task"},
         },
         {
             "name": "merge",
@@ -630,6 +646,7 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
                 "record:work/read",
                 "record:work/start",
                 "record:work/submit",
+                "record:work/resubmit",
                 "record:work/merge",
                 "code.session",
                 "vcs.push_branch",
@@ -1029,8 +1046,11 @@ def stop(host: dict[str, Any]) -> tuple[list[str], str | None]:
 
 
 def host_rules_note(host: dict[str, Any]) -> list[str]:
-    """A line when the host owner waived the host's branch rules for the team's repository
-    (registry `host_rules: waived`), so a waiver is never silent in `status`.
+    """Lines on how the team's repository guards its default branch, from the host's
+    repository registry: a waiver of the host's branch rules (`host_rules: waived`), so a
+    waiver is never silent in `status`, and whether `vcs.merge` requires an up-to-date
+    branch (`require_up_to_date`, ADR-037 amendment 2026-11-22), loudest when a waiver
+    leaves nothing else to require it.
 
     `repositories_config` (default `/opt/cardea-code/repositories.json`) names the host's
     repository registry; when it is unreadable there is nothing to report."""
@@ -1039,12 +1059,30 @@ def host_rules_note(host: dict[str, Any]) -> list[str]:
         entry = json.loads(path.read_text())["repositories"][str(host["repository"])]
     except (OSError, ValueError, KeyError, TypeError):
         return []
-    if not isinstance(entry, dict) or entry.get("host_rules") != "waived":
+    if not isinstance(entry, dict):
         return []
-    return [
-        f"repository {host['repository']}: host rules WAIVED ({entry.get('waiver_reason')}); "
-        "only Cardea's own guards apply, so the host token must stay kernel-only"
-    ]
+    repository = host["repository"]
+    waived = entry.get("host_rules") == "waived"
+    lines = []
+    if waived:
+        lines.append(
+            f"repository {repository}: host rules WAIVED ({entry.get('waiver_reason')}); "
+            "only Cardea's own guards apply, so the host token must stay kernel-only"
+        )
+    if entry.get("require_up_to_date") is True:
+        lines.append(f"repository {repository}: up-to-date branch required to merge: on")
+    elif waived:
+        lines.append(
+            f"repository {repository}: up-to-date branch required to merge: OFF; with the "
+            "host rules waived, nothing stops two changes that are each green from breaking "
+            "the default branch once both merge (set require_up_to_date in the registry)"
+        )
+    else:
+        lines.append(
+            f"repository {repository}: up-to-date branch required to merge: off "
+            "(only the host's own rules can require it)"
+        )
+    return lines
 
 
 def status(host: dict[str, Any]) -> list[str]:
