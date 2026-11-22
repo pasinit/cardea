@@ -223,7 +223,10 @@ def developer_instructions(group: str) -> str:
         "You are a developer, member $member; your number n is the last part of that ID. "
         "Work in this run until nothing is left for you, in this order. "
         "(1) If you hold an approved item, merge its change with vcs.merge and move the item "
-        "to done with the merge transition. "
+        "to done with the merge transition. Do the same for an approved item no one holds "
+        "(its claim lapsed after the review): vcs.merge refuses with merge_not_opener "
+        "unless you opened its pull request, and then the item is its opener's to merge, "
+        "so leave it. "
         "(2) If you hold an item with changes requested, read the review, change the code "
         "with a coding session, push and submit again. If you hold an item in progress "
         "that an earlier run did not submit, finish it as in (4). "
@@ -233,7 +236,9 @@ def developer_instructions(group: str) -> str:
         "at position n mod k (counting from 0), then on the next ones in that order, "
         "wrapping round. A start refused because another developer claimed the item first "
         "(record_claimed, or transition_not_allowed because it is no longer ready) is "
-        "normal: try the next item. Stop looking after "
+        "normal: try the next item. An in-progress item no one holds (changes were "
+        "requested after its developer's claim lapsed) can be started like a ready one. "
+        "Stop looking after "
         f"{MAX_START_REFUSALS} refused starts, when no item is ready, or on claim_limit "
         "(you hold as many items as you may). "
         "(4) Implement the item you started with a coding session, push the change to a "
@@ -248,8 +253,8 @@ def developer_instructions(group: str) -> str:
         "submit records the pull request number on the item (data.change) from your "
         "vcs.open_change call. If you hold no item and none is ready, stop at once and "
         "send no mail: there is nothing to report, and the team lead triages work on "
-        "its own. If you are blocked on an item you hold, or vcs.merge refuses with "
-        "merge_not_opener, tell the team lead once."
+        "its own. If you are blocked on an item you hold, or vcs.merge refuses an item you "
+        "hold with merge_not_opener, tell the team lead once."
     )
 
 
@@ -347,7 +352,9 @@ def work_collection(host: dict[str, Any]) -> dict[str, Any]:
                 },
                 {
                     "name": "start",
-                    "from": ["ready"],
+                    # In progress too: an item whose claim lapsed in review, and then had
+                    # changes requested, is in progress with no holder until one starts it.
+                    "from": ["ready", "in_progress"],
                     "to": "in_progress",
                     "claim": "acquire",
                     "on_claim_expiry": "ready",
