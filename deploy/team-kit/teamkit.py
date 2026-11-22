@@ -203,6 +203,56 @@ def repository_note(host: dict[str, Any], operations: list[str]) -> str:
     )
 
 
+# Items a developer may hold at once: one in review while it works on the next.
+MAX_ITEMS_PER_DEVELOPER = 2
+# Refused `start` calls after which a developer stops looking for a ready item.
+MAX_START_REFUSALS = 3
+
+
+def developer_instructions(group: str) -> str:
+    """What a developer does in one run, in order, until nothing is left for it.
+
+    One run keeps going after a merge or a submit, so a ready item does not wait for the
+    next wake. Developers wake together on the same event; each tries the ready items
+    from its own offset (its member number modulo their count) and moves on when another
+    developer claimed one first, so a lost race costs one refused call, not the run.
+    `$member` is the member's own ID (the kernel fills it in per replica).
+    """
+    branch = f"agent/{group}/<record_id>-<claim_epoch>"
+    return (
+        "You are a developer, member $member; your number n is the last part of that ID. "
+        "Work in this run until nothing is left for you, in this order. "
+        "(1) If you hold an approved item, merge its change with vcs.merge and move the item "
+        "to done with the merge transition. "
+        "(2) If you hold an item with changes requested, read the review, change the code "
+        "with a coding session, push and submit again. If you hold an item in progress "
+        "that an earlier run did not submit, finish it as in (4). "
+        "(3) Then take a ready item, unless you already hold "
+        f"{MAX_ITEMS_PER_DEVELOPER} items: list the ready items with records.query (state "
+        "ready) in the order it returns them; with k items, call start first on the item "
+        "at position n mod k (counting from 0), then on the next ones in that order, "
+        "wrapping round. A start refused because another developer claimed the item first "
+        "(record_claimed, or transition_not_allowed because it is no longer ready) is "
+        "normal: try the next item. Stop looking after "
+        f"{MAX_START_REFUSALS} refused starts, when no item is ready, or on claim_limit "
+        "(you hold as many items as you may). "
+        "(4) Implement the item you started with a coding session, push the change to a "
+        f"branch of your own, `{branch}` (the claim_epoch your start returned), open a "
+        "pull request and submit the item. If the item already has data.change, that is "
+        "an earlier holder's pull request: you may start your coding session from its "
+        "branch (base_ref), but push to your own branch and open your own pull request, "
+        "because only the member that opened a pull request may merge it. "
+        "(5) After a merge or a submit, go back to (3): finishing an item does not end the "
+        "run while an item is ready. "
+        "Pass the item's record_id to vcs.push_branch, vcs.open_change and vcs.merge: "
+        "submit records the pull request number on the item (data.change) from your "
+        "vcs.open_change call. If you hold no item and none is ready, stop at once and "
+        "send no mail: there is nothing to report, and the team lead triages work on "
+        "its own. If you are blocked on an item you hold, or vcs.merge refuses with "
+        "merge_not_opener, tell the team lead once."
+    )
+
+
 def _names(host: dict[str, Any]) -> tuple[str, str, str, str]:
     group = str(host.get("group", "dev-team"))
     return str(host["namespace"]), group, str(host["supervisor"]["principal_id"]), group
@@ -272,7 +322,11 @@ def work_collection(host: dict[str, Any]) -> dict[str, Any]:
                 "required": ["title"],
             },
             # One claim per item and one item per developer at a time.
-            "claims": {"lease_seconds": 14400, "max_per_holder": 1, "max_followups": 6},
+            "claims": {
+                "lease_seconds": 14400,
+                "max_per_holder": MAX_ITEMS_PER_DEVELOPER,
+                "max_followups": 6,
+            },
             "states": [
                 "open",
                 "ready",
@@ -550,17 +604,7 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
                 *_mail(group, "tl", "pe"),
             ],
             "run": run(
-                "You are a developer. If you hold an item that is approved, merge its change with "
-                "vcs.merge and move the item to done with the merge transition. If you hold an "
-                "item with changes requested, read the review, change the code with a coding "
-                "session, push and submit again. Otherwise start one ready item (only one "
-                "developer gets its claim; if start is refused, stop), implement it with a "
-                "coding session, push the change, open a pull request and submit the item. "
-                "Pass the item's record_id to vcs.push_branch, vcs.open_change and vcs.merge: "
-                "submit records the pull request number on the item (data.change) from your "
-                "vcs.open_change call. If you hold no item and none is ready, stop at once and "
-                "send no mail: there is nothing to report, and the team lead triages work on "
-                "its own. If you are blocked on an item you hold, tell the team lead once.",
+                developer_instructions(group),
                 [
                     "records.query",
                     "records.transition",

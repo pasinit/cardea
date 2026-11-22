@@ -6,15 +6,19 @@ This runbook covers how to start, watch, pause, resume and stop the dev team fro
 |---|---|---|---|
 | Product manager | `pm` | its schedule, twice a day; mail | reads main's head (`vcs.read_branch`), tries it with `env.try` and files failures as work items |
 | Team lead | `tl` | its daily schedule; a new work item; mail | plans, splits and cancels work, and triages the next item for the developers |
-| Developers | `dev` (2 by default) | an item made `ready`; an item `approved`; `request_changes`; mail | claim one item, change the code with `code.session`, push, open a pull request, submit; merge after approval |
+| Developers | `dev` (2 by default) | an item made `ready`; an item `approved`; `request_changes`; mail | claim a ready item, change the code with `code.session`, push, open a pull request, submit; merge after approval; then take the next ready item in the same run |
 | Principal engineer | `pe` | an item entering `in_review`; mail | reviews the pull request and approves it, or requests changes |
 
 Every trigger refuses double work:
-- **Work items.** One claim per item: of the developers an assignment wakes, only one claims the item, and each holds at most one at a time.
+- **Work items.** One claim per item: of the developers an assignment wakes, only one claims the item. Each developer holds at most two, so one can wait in review while it works on the next.
+  - Developers wake together, so each tries the ready items from its own offset: developer `n` starts at position `n mod k` of the `k` ready items, in `records.query` order. A start refused because another developer claimed the item first is normal; the developer tries the next and gives up after three refusals.
+  - A developer does not end its run after a merge or a submit while an item is ready, and it does not stop on a lost start.
 - **Members.** A member runs one run at a time. Events that arrive meanwhile coalesce into one follow-up.
 - **Events and slots.** One event or schedule slot admits at most one run per member.
 
 Mail to a pool wakes every member of that pool. So the team lead and the PE hold no grant to mail the whole developer pool. They answer about an item by mailing its holder at the holder's own address (`<group>.dev.<n>`); the kit grants one address per developer. A developer that holds no item and finds none ready stops without sending mail.
+
+Only the member that opened a pull request may merge it (`merge_not_opener`). A claim that lapses, for example while an item waits in review past its lease and follow-ups, returns the item to `ready` with `data.change` still set, and the next developer claims it at a new epoch. So each developer pushes to its own branch per claim, `agent/<group>/<record_id>-<claim_epoch>`, and opens its own pull request; it may start its coding session from the earlier branch. A developer whose merge is refused with `merge_not_opener` tells the team lead.
 
 A transition that needs evidence cites a receipt. `submit` needs the run's `vcs.open_change`, and it copies the pull request number from that call onto the item as `data.change`, where the PE finds it. `approve` needs the PE's `vcs.review` with `state == APPROVED`, and `request_changes` needs one with `state == CHANGES_REQUESTED`. `merge` needs the developer's `vcs.merge`. Each of these calls passes the item's `record_id`.
 

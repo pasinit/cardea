@@ -999,3 +999,172 @@ def test_inbound_email_for_the_pm_is_opt_in() -> None:
     )
     pm = next(p for p in module.group_document(document)["spec"]["pools"] if p["name"] == "pm")
     assert "also reaches your mailbox as data" in pm["run"]["instructions"]
+
+
+# Developers keep going, and spread out over the ready items
+
+
+def test_developers_keep_working_and_move_past_a_lost_start() -> None:
+    module = kit()
+    pools = {p["name"]: p for p in module.group_document(example())["spec"]["pools"]}
+    text = pools["dev"]["run"]["instructions"]
+    # Finishing an item does not end the run while one is ready.
+    assert "After a merge or a submit, go back to (3)" in text
+    # Each developer starts at its own offset and moves on when it loses a race.
+    assert "member $member" in text and "position n mod k" in text
+    assert "try the next item" in text and "after 3 refused starts" in text
+    assert "if start is refused, stop" not in text
+    # A developer pushes its own branch per claim, so it is the opener of what it submits.
+    assert "`agent/dev-team/<record_id>-<claim_epoch>`" in text
+    assert "only the member that opened a pull request may merge it" in text
+    # One item may wait in review while its developer works on the next.
+    claims = module.work_collection(example())["spec"]["claims"]
+    assert claims["max_per_holder"] == 2 == module.MAX_ITEMS_PER_DEVELOPER
+
+
+def test_each_developer_is_told_its_own_member_id(team: tuple[Kernel, FakeSession]) -> None:
+    kernel, _ = team
+    with kernel.database.read() as conn:
+        rows = conn.exec_driver_sql(
+            "SELECT trigger_id, definition_json FROM triggers WHERE trigger_id LIKE 'dev-team.%'"
+        ).all()
+    told = {
+        str(trigger).rsplit(".", 1)[0]: json.loads(definition)["template"]["instructions"]
+        for trigger, definition in rows
+    }
+    assert "member dev-team.dev.0;" in told["dev-team.dev.0"]
+    assert "member dev-team.dev.1;" in told["dev-team.dev.1"]
+    assert not any("$member" in text for text in told.values())
+    # Instructions without a placeholder are passed on unchanged.
+    tl = next(p for p in kit().group_document(host())["spec"]["pools"] if p["name"] == "tl")
+    assert told["dev-team.tl.0"] == tl["run"]["instructions"]
+
+
+def fake_open_change(kernel: Kernel, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def opened(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+        head = str(arguments["head"])
+        return {"number": 42, "url": "https://git.example/pull/42", "state": "open", "head": head}
+
+    handler = kernel.operations.get("vcs.open_change").cardea.handler
+    monkeypatch.setitem(kernel.operations.handlers, str(handler), opened)
+
+
+async def start(client: ClientSession, record_id: str) -> tuple[str, dict[str, Any]]:
+    """`start` on one item: "" when it succeeded, else the refusal's text."""
+    moved = await call(
+        client, "records-transition", collection="work", record_id=record_id, transition="start"
+    )
+    return (text(moved) if moved.is_error else ""), dict(moved.structured_content or {})
+
+
+def test_a_developer_starts_the_next_item_after_submitting(
+    team: tuple[Kernel, FakeSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With two items per developer, one run submits an item and starts the next; another
+    developer's lost starts are refused one by one and it claims what is left."""
+    kernel, session = team
+    fake_open_change(kernel, monkeypatch)
+    items = [ready_item(kernel, session, title) for title in ("A", "B", "C")]
+    refused: list[str] = []
+
+    async def first(client: ClientSession, request: SessionRequest) -> SessionResult:
+        started, output = await start(client, items[0])
+        assert started == "", started
+        epoch = output["claim"]["claim_epoch"]
+        made = await call(
+            client,
+            "vcs-open_change",
+            repository="cardea",
+            head=f"agent/dev-team/{items[0]}-{epoch}",
+            base="main",
+            title="A",
+            record_id=items[0],
+        )
+        assert not made.is_error, made.content
+        moved = await call(
+            client,
+            "records-transition",
+            collection="work",
+            record_id=items[0],
+            transition="submit",
+            claim_epoch=epoch,
+        )
+        assert not moved.is_error, moved.content
+        assert (await start(client, items[1]))[0] == ""  # the run goes on to the next item
+        refused.append((await start(client, items[2]))[0])  # two items is the limit
+        return SessionResult(text="Submitted A, started B.", is_error=False)
+
+    session.scripts = [first]
+    assert AgentRunRuntime(kernel).execute(member_run(kernel, "dev-team.dev.0")) == "succeeded"
+    assert "claim_limit" in refused[0]
+
+    async def second(client: ClientSession, request: SessionRequest) -> SessionResult:
+        for record_id in items:
+            started, _ = await start(client, record_id)
+            refused.append(started)
+            if not started:
+                break
+        return SessionResult(text="Started C.", is_error=False)
+
+    session.scripts = [second]
+    assert AgentRunRuntime(kernel).execute(member_run(kernel, "dev-team.dev.1")) == "succeeded"
+    assert ["transition_not_allowed" in r for r in refused[1:3]] == [True, True]
+    assert refused[3] == ""
+    with kernel.database.read() as conn:
+        held = {
+            str(record): str(holder)
+            for record, holder in conn.exec_driver_sql(
+                "SELECT record_id, holder FROM records WHERE collection='work'"
+            )
+        }
+    assert held == {
+        items[0]: "dev-team.dev.0",
+        items[1]: "dev-team.dev.0",
+        items[2]: "dev-team.dev.1",
+    }
+
+
+def test_a_lapsed_claim_returns_a_reviewed_item_with_its_pull_request(
+    team: tuple[Kernel, FakeSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """How a holder ends up holding another member's pull request: a claim that lapses
+    in review goes back to ready (start's on_claim_expiry) and keeps data.change, so the
+    next developer starts it at a new epoch. Its own branch per epoch makes it the opener
+    of what it submits."""
+    kernel, session = team
+    fake_open_change(kernel, monkeypatch)
+    record_id = ready_item(kernel, session)
+
+    async def develop(client: ClientSession, request: SessionRequest) -> SessionResult:
+        assert (await start(client, record_id))[0] == ""
+        made = await call(
+            client,
+            "vcs-open_change",
+            repository="cardea",
+            head=f"agent/dev-team/{record_id}-1",
+            base="main",
+            title="Fix it",
+            record_id=record_id,
+        )
+        assert not made.is_error, made.content
+        moved = await call(
+            client,
+            "records-transition",
+            collection="work",
+            record_id=record_id,
+            transition="submit",
+            claim_epoch=1,
+        )
+        assert not moved.is_error, moved.content
+        return SessionResult(text="Submitted.", is_error=False)
+
+    session.scripts = [develop]
+    assert AgentRunRuntime(kernel).execute(member_run(kernel, "dev-team.dev.0")) == "succeeded"
+    assert claims.sweep(kernel, now() + timedelta(seconds=14400 + 60)) == 1
+    with kernel.database.read() as conn:
+        state, holder, epoch, data = conn.exec_driver_sql(
+            "SELECT state, holder, claim_epoch, data_json FROM records WHERE record_id=?",
+            (record_id,),
+        ).one()
+    assert (state, holder, epoch) == ("ready", None, 2)
+    assert json.loads(data)["change"] == 42  # the earlier holder's pull request

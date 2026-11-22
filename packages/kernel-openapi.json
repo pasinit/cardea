@@ -6249,7 +6249,7 @@
       },
       "RunTemplate-Input": {
         "additionalProperties": false,
-        "description": "A pool's ADR-027 agent-run template; the kernel fills in the member, namespace,\ngrants and per-slot identity.",
+        "description": "A pool's ADR-027 agent-run template; the kernel fills in the member, namespace,\ngrants and per-slot identity.\n\nIn `instructions`, `$member`, `$pool` and `$group` stand for the member's principal ID,\nits pool address and its group, as in trigger subjects, so one template can tell each\nreplica who it is (ADR-034 amendment, 2026-11-22).",
         "properties": {
           "bounds": {
             "$ref": "#/components/schemas/RunBounds",
@@ -6360,7 +6360,7 @@
       },
       "RunTemplate-Output": {
         "additionalProperties": false,
-        "description": "A pool's ADR-027 agent-run template; the kernel fills in the member, namespace,\ngrants and per-slot identity.",
+        "description": "A pool's ADR-027 agent-run template; the kernel fills in the member, namespace,\ngrants and per-slot identity.\n\nIn `instructions`, `$member`, `$pool` and `$group` stand for the member's principal ID,\nits pool address and its group, as in trigger subjects, so one template can tell each\nreplica who it is (ADR-034 amendment, 2026-11-22).",
         "properties": {
           "bounds": {
             "$ref": "#/components/schemas/RunBounds",
