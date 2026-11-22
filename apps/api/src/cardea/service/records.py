@@ -1128,14 +1128,21 @@ def expire(
     reason: str,
     spec: "CollectionSpec | None" = None,
 ) -> None:
-    """Return a lapsed claim to the pool: holder cleared, epoch incremented, and the state
-    set to the acquiring transition's `on_claim_expiry`, with history and a journal event,
-    all in the caller's transaction."""
+    """Return a lapsed claim to the pool: holder cleared and epoch incremented, with
+    history and a journal event, all in the caller's transaction.
+
+    The acquiring transition's `on_claim_expiry` undoes the acquisition, so it applies only
+    while the record is still in that transition's target state. A record that later
+    transitions moved on (into review, approved) keeps its state, and with it the work
+    they recorded (ADR-034 amendment, 2026-11-22).
+    """
     old = record_view(row)
     acquired = (
         spec.transition(row["claim_transition"]) if spec and row["claim_transition"] else None
     )
-    state = acquired.on_claim_expiry if acquired and acquired.on_claim_expiry else old["state"]
+    state = old["state"]
+    if acquired is not None and acquired.on_claim_expiry and state == acquired.to:
+        state = acquired.on_claim_expiry
     new: dict[str, JsonValue] = {
         **old,
         "state": state,
