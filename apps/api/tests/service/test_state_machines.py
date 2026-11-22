@@ -22,8 +22,13 @@ from cardea.service.database import Database, Fault, borrow
 from cardea.service.kernel import Kernel, provision
 from cardea.service.models import RIGHTS, OperationTaskRequest, Provisioning, now
 from cardea.service.operation_runtime import OperationRuntime
-from cardea.service.operations import OperationContext, OperationDescriptor, Registry
-from cardea.service.records import CollectionDocument
+from cardea.service.operations import (
+    OperationContext,
+    OperationDescriptor,
+    OperationRejected,
+    Registry,
+)
+from cardea.service.records import CollectionDocument, check_condition
 from cardea.service.triggers import Scheduler
 
 TOKENS = {"runtime", "supervisor", "approver", "operator", "outsider"}
@@ -363,6 +368,72 @@ def test_guards_refuse_and_fail_closed(work: Kernel) -> None:
     assert move(work, record, "triage")[2] == "guard_refused"  # args.priority is missing
     assert move(work, record, "broken")[2] == "guard_refused"  # evaluation error
     assert stored(work, record["record_id"])["state"] == "open"
+
+
+def refusal(kernel: Kernel, record: dict[str, Any], transition: str, **changes: Any) -> str:
+    """The message of the last call's failure, after checking that it failed."""
+    state, _, code = move(kernel, record, transition, **changes)
+    assert state != "succeeded" and code is not None
+    with kernel.database.read() as conn:
+        snapshot = conn.exec_driver_sql(
+            "SELECT snapshot FROM operations ORDER BY rowid DESC LIMIT 1"
+        ).scalar_one()
+    failure = json.loads(snapshot)["failure"]
+    assert failure["code"] == code
+    # What the agent is told: the bounded summary of the handler's own message.
+    return f"{code}: {failure['details']['summary']}"
+
+
+def test_an_unknown_transition_lists_those_from_the_records_state(work: Kernel) -> None:
+    record = create(work)
+    assert refusal(work, record, "nope") == (
+        'transition_unknown: Collection work has no transition "nope"; from state "open" use '
+        '"triage" or "broken"'
+    )
+
+
+def test_a_state_name_points_to_the_transition_into_it(work: Kernel) -> None:
+    record = create(work)
+    assert refusal(work, record, "review") == (
+        'transition_unknown: "review" is a state, not a transition; the transition into it is '
+        '"submit"; from state "open" use "triage" or "broken"'
+    )
+    assert '"ready" is a state, not a transition; the transition into it is "triage" or ' in (
+        refusal(work, record, "ready")
+    )
+    # A name the caller is granted but the table lacks gets the same help.
+    provision(work.database, document((*SUPERVISOR, "record:work/open")), REGISTRY)
+    assert '"open" is a state, not a transition; none leads into it' in (
+        refusal(work, record, "open", grants=(*ALL, "record:work/open"))
+    )
+    assert stored(work, record["record_id"])["state"] == "open"
+
+
+def test_a_caller_without_a_grant_on_the_collection_learns_nothing_of_its_table(
+    work: Kernel,
+) -> None:
+    record = create(work)
+    message = refusal(work, record, "ready", grants=("record:orders/read",))
+    assert message == (
+        "task_grant_denied: Operation is outside explicit task grants: record:work/ready is "
+        "not held by the task; caller a1"
+    )
+    # A transition that exists but is not granted is still a permission refusal.
+    no_grant = tuple(g for g in ALL if g != "record:work/triage")
+    assert refusal(work, record, "triage", grants=no_grant, args={"priority": 1}) == (
+        "task_grant_denied: Operation is outside explicit task grants: record:work/triage is "
+        "not held by the task; caller a1"
+    )
+
+
+def test_a_guard_refusal_names_the_guard_and_the_caller(work: Kernel) -> None:
+    record = create(work)
+    assert refusal(work, record, "triage", args={"priority": 0}) == (
+        "guard_refused: Transition triage guard refused this call for a1: args.priority > 0"
+    )
+    caller: dict[str, JsonValue] = {"id": "a1", "group": "team", "pool": "team.builders"}
+    with pytest.raises(OperationRejected, match=r"for a1 \(pool team\.builders\): args\.x"):
+        check_condition("args.x == 1", "Transition triage", {}, {"x": 2}, caller)
 
 
 def test_transitions_are_history_and_cloudevents(work: Kernel) -> None:
