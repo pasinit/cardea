@@ -100,8 +100,8 @@ def test_without_the_flag_there_is_no_diff(vcs: Vcs, host: FakeGitHub, tmp_path:
     before = len(host.authorizations)
     output = read(vcs, number)
     assert "diff" not in output and valid(output)
-    # The pull request, its reviews and its comments: the files are not even requested.
-    assert len(host.authorizations) - before == 3
+    # The pull request, its reviews, its comments and the head's checks: no files.
+    assert len(host.authorizations) - before == 4
 
 
 def test_the_diff_lists_files_and_shows_patches_as_scrubbed_data(
@@ -312,3 +312,58 @@ def test_patch_offset_past_the_end_or_mid_character(
     past = read(vcs, number, diff=True, patch_offset=10**6)["diff"]
     assert past["patches"][0]["patch"] == "" and past["next_offset"] is None
     assert past["next_patch_offset"] is None
+
+
+def test_the_heads_checks_come_failed_first_with_ci_annotations(
+    vcs: Vcs, host: FakeGitHub, tmp_path: Path
+) -> None:
+    number = change(host, tmp_path, {"a.py": b"x = 1\n"}, {"a.py": b"x = 2\n"})
+    repo = host.repositories["acme/cardea"]
+    head = str(repo.head("agent/eng/x"))
+    failing = {"annotations_count": 3}
+    repo.checks[head] = [
+        {"id": 1, "name": "lint", "status": "completed", "conclusion": "success"},
+        {"id": 2, "name": "python", "status": "completed", "conclusion": "failure",
+         "html_url": "https://github.test/run/2", "output": failing},
+        {"id": 3, "name": "build", "status": "in_progress", "conclusion": None},
+    ]  # fmt: skip
+    repo.annotations[2] = [
+        {"annotation_level": "failure", "title": "Failures (1)",
+         "message": f"FAILED tests/t.py::test_x - assert 1 == 2 ({LEAKED})"},
+        {"annotation_level": "warning", "title": "Node 16", "message": "deprecated"},
+        {"annotation_level": "failure", "title": "Log tail", "message": "x" * 50_000},
+    ]  # fmt: skip
+    output = read(vcs, number)
+    assert valid(output)
+    checks = output["checks"]
+    assert [c["name"] for c in checks] == ["python", "build", "lint"]
+    python = checks[0]
+    assert python["conclusion"] == "failure" and python["url"] == "https://github.test/run/2"
+    # Failures only, credential shapes scrubbed, bounded.
+    assert [a["title"] for a in python["annotations"]] == ["Failures (1)", "Log tail"]
+    assert "test_x" in python["annotations"][0]["message"]
+    assert LEAKED not in str(python["annotations"])
+    assert len(python["annotations"][1]["message"]) < 5_000
+    # Passing and unfinished runs carry no annotations, and none are requested for them.
+    assert "annotations" not in checks[1] and "annotations" not in checks[2]
+
+
+def test_annotations_leave_room_for_the_diff(vcs: Vcs, host: FakeGitHub, tmp_path: Path) -> None:
+    number = change(host, tmp_path, {"a.py": b"x = 1\n"}, {"a.py": b"x = 2\n"})
+    repo = host.repositories["acme/cardea"]
+    head = str(repo.head("agent/eng/x"))
+    repo.checks[head] = [
+        {"id": n, "name": f"job{n}", "status": "completed", "conclusion": "failure",
+         "output": {"annotations_count": 5}}
+        for n in range(1, 11)
+    ]  # fmt: skip
+    for n in range(1, 11):
+        repo.annotations[n] = [
+            {"annotation_level": "failure", "title": "t", "message": "y" * 4000}
+        ] * 5
+    output = read(vcs, number, diff=True)
+    assert valid(output)
+    kept = sum(len(a["message"]) for c in output["checks"] for a in c.get("annotations", []))
+    assert kept <= vcs_ops.MAX_ANNOTATION_BYTES
+    assert output["diff"]["patches"][0]["patch"]
+    assert _size_of(output) <= MAX_RECORDED_OUTPUT_BYTES
