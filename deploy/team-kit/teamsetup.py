@@ -413,21 +413,39 @@ class Context:
         return self.system.install(path, json.dumps(document, indent=2) + "\n", mode, owner)
 
 
+# What reading the host can raise when something it reads is absent or malformed.
+OBSERVE_ERRORS = (OSError, ValueError, LookupError, TypeError, AttributeError)
+
+
 class Step(ABC):
     name: str
     title: str
 
     @abstractmethod
-    def check(self, ctx: Context) -> bool:
-        """Already done? Read-only, and false (never an error) when a prerequisite is absent."""
+    def is_done(self, ctx: Context) -> bool:
+        """Already done? Read-only."""
 
     @abstractmethod
     def action(self, ctx: Context) -> None:
         """Do it; safe to repeat after a crash at any point."""
 
     @abstractmethod
-    def verify(self, ctx: Context) -> Verdict:
+    def observe(self, ctx: Context) -> Verdict:
         """Observe the result. Read-only."""
+
+    def check(self, ctx: Context) -> bool:
+        """`is_done`, but false (never an error) when what it reads is absent or malformed."""
+        try:
+            return self.is_done(ctx)
+        except OBSERVE_ERRORS:
+            return False
+
+    def verify(self, ctx: Context) -> Verdict:
+        """`observe`, but a failed verdict (never an error) when it cannot read the host."""
+        try:
+            return self.observe(ctx)
+        except OBSERVE_ERRORS as error:
+            return Verdict(False, f"cannot observe: {error}")
 
     def planned_check(self, ctx: Context) -> bool:
         """`check` as `plan` runs it; override when `check` has an effect."""
@@ -498,7 +516,7 @@ class TeamHost(Step):
         found.extend(ctx.kit.wall_problems(ctx.host))
         return found
 
-    def check(self, ctx: Context) -> bool:
+    def is_done(self, ctx: Context) -> bool:
         return not self.problems(ctx)
 
     def action(self, ctx: Context) -> None:
@@ -508,7 +526,7 @@ class TeamHost(Step):
         if remaining:
             raise StepError("edit the host file: " + "; ".join(remaining))
 
-    def verify(self, ctx: Context) -> Verdict:
+    def observe(self, ctx: Context) -> Verdict:
         found = self.problems(ctx)
         if found:
             return Verdict(False, "; ".join(found))
@@ -547,7 +565,7 @@ class Base(Step):
             found.append(f"{layout.data_dir} as a 0700 directory")
         return found
 
-    def check(self, ctx: Context) -> bool:
+    def is_done(self, ctx: Context) -> bool:
         return not self.missing(ctx)
 
     def action(self, ctx: Context) -> None:
@@ -585,7 +603,7 @@ class Base(Step):
             ]
         )
 
-    def verify(self, ctx: Context) -> Verdict:
+    def observe(self, ctx: Context) -> Verdict:
         found = self.missing(ctx)
         if found:
             return Verdict(False, "missing: " + ", ".join(found))
@@ -660,7 +678,7 @@ class SpireIdentity(Step):
             found.append("bootstrap bundle")
         return found
 
-    def check(self, ctx: Context) -> bool:
+    def is_done(self, ctx: Context) -> bool:
         return not self.pending(ctx)
 
     def action(self, ctx: Context) -> None:
@@ -777,7 +795,7 @@ class SpireIdentity(Step):
         system.change(["install", "-d", "-m", "0755", str(target)])
         system.change(["tar", "-xzf", str(archive), "-C", str(target), "--strip-components=1"])
 
-    def verify(self, ctx: Context) -> Verdict:
+    def observe(self, ctx: Context) -> Verdict:
         agent = ctx.layout.spire_bin / "spire-agent"
         result = ctx.system.run([str(agent), "healthcheck", "-socketPath", "/run/spire/agent.sock"])
         return Verdict(
@@ -809,7 +827,7 @@ class SpireEntries(Step):
             if not re.search(rf"SPIFFE ID\s*:\s*{re.escape(i)}\s", out + "\n")
         ]
 
-    def check(self, ctx: Context) -> bool:
+    def is_done(self, ctx: Context) -> bool:
         return not self.absent(ctx)
 
     def action(self, ctx: Context) -> None:
@@ -831,7 +849,7 @@ class SpireEntries(Step):
                 ]
             )
 
-    def verify(self, ctx: Context) -> Verdict:
+    def observe(self, ctx: Context) -> Verdict:
         absent = self.absent(ctx)
         if absent:
             return Verdict(False, "no entry for " + ", ".join(absent))
@@ -889,7 +907,7 @@ class Workers(Step):
             found.append("squid running")
         return found
 
-    def check(self, ctx: Context) -> bool:
+    def is_done(self, ctx: Context) -> bool:
         return not self.pending(ctx)
 
     def action(self, ctx: Context) -> None:
@@ -917,7 +935,7 @@ class Workers(Step):
         system.change(["systemctl", "enable", "--now", "squid"])
         system.change(["systemctl", "restart", "squid"])
 
-    def verify(self, ctx: Context) -> Verdict:
+    def observe(self, ctx: Context) -> Verdict:
         probe = ctx.system.run(
             ["sudo", "-u", "cardea-kernel", "sudo", "-n", str(ctx.layout.helper)],
             input='{"action":"probe"}',
@@ -1002,7 +1020,7 @@ class Kernel(Step):
             found.append("cardea-kernel running")
         return found
 
-    def check(self, ctx: Context) -> bool:
+    def is_done(self, ctx: Context) -> bool:
         return not self.pending(ctx)
 
     def action(self, ctx: Context) -> None:
@@ -1020,7 +1038,7 @@ class Kernel(Step):
             system.change(["sudo", "-u", "cardea-kernel", *cardea, "init", "--config", config])
         system.change(["systemctl", "enable", "--now", "cardea-kernel"])
 
-    def verify(self, ctx: Context) -> Verdict:
+    def observe(self, ctx: Context) -> Verdict:
         socket = Path((ctx.host.get("kernel") or {}).get("socket", "/var/lib/cardea/kernel.sock"))
         active = ctx.system.run(["systemctl", "is-active", "--quiet", "cardea-kernel"]).code == 0
         present = socket.exists()
@@ -1073,7 +1091,7 @@ class Operations(Step):
             ).code
         ]
 
-    def check(self, ctx: Context) -> bool:
+    def is_done(self, ctx: Context) -> bool:
         return not self.pending(ctx)
 
     def action(self, ctx: Context) -> None:
@@ -1096,7 +1114,7 @@ class Operations(Step):
         if changed:
             system.change(["systemctl", "restart", "cardea-kernel"])
 
-    def verify(self, ctx: Context) -> Verdict:
+    def observe(self, ctx: Context) -> Verdict:
         found = self.pending(ctx)
         if found:
             return Verdict(False, "missing " + ", ".join(found))
@@ -1131,7 +1149,7 @@ class Repository(Step):
                 found.append("environment toolchain is not pinned (make try-toolchain)")
         return found
 
-    def check(self, ctx: Context) -> bool:
+    def is_done(self, ctx: Context) -> bool:
         return not self.problems(ctx)
 
     def action(self, ctx: Context) -> None:
@@ -1155,7 +1173,7 @@ class Repository(Step):
         if remaining:
             raise StepError("the registry entry needs: " + "; ".join(remaining))
 
-    def verify(self, ctx: Context) -> Verdict:
+    def observe(self, ctx: Context) -> Verdict:
         found = self.problems(ctx)
         if found:
             return Verdict(False, "; ".join(found))
@@ -1198,7 +1216,7 @@ class Tokens(Step):
             )
         return found
 
-    def check(self, ctx: Context) -> bool:
+    def is_done(self, ctx: Context) -> bool:
         return not self.problems(ctx)
 
     def action(self, ctx: Context) -> None:
@@ -1215,7 +1233,7 @@ class Tokens(Step):
         if remaining:
             raise StepError("; ".join(remaining))
 
-    def verify(self, ctx: Context) -> Verdict:
+    def observe(self, ctx: Context) -> Verdict:
         found = self.problems(ctx)
         if found:
             return Verdict(False, "; ".join(found))
@@ -1250,7 +1268,7 @@ class Email(Step):
             found.append(verdict.detail)
         return found
 
-    def check(self, ctx: Context) -> bool:
+    def is_done(self, ctx: Context) -> bool:
         return not self.problems(ctx)
 
     def action(self, ctx: Context) -> None:
@@ -1267,7 +1285,7 @@ class Email(Step):
         if remaining:
             raise StepError("; ".join(remaining))
 
-    def verify(self, ctx: Context) -> Verdict:
+    def observe(self, ctx: Context) -> Verdict:
         if not (ctx.host.get("email") or {}).get("alias"):
             return Verdict(True, "no email configured for the team")
         found = self.problems(ctx)
@@ -1289,7 +1307,7 @@ class Render(Step):
                     found.append(path.name)
         return found
 
-    def check(self, ctx: Context) -> bool:
+    def is_done(self, ctx: Context) -> bool:
         return not self.pending(ctx)
 
     def action(self, ctx: Context) -> None:
@@ -1297,7 +1315,7 @@ class Render(Step):
         ctx.kit.check_walls(ctx.host)
         ctx.kit.render(ctx.host, ctx.layout.render_dir)
 
-    def verify(self, ctx: Context) -> Verdict:
+    def observe(self, ctx: Context) -> Verdict:
         found = self.pending(ctx)
         return Verdict(
             not found,
@@ -1337,7 +1355,7 @@ class Provision(Step):
             return ["supervisor is disabled (team paused); resume with teamkit.py resume"]
         return []
 
-    def check(self, ctx: Context) -> bool:
+    def is_done(self, ctx: Context) -> bool:
         return not self.pending(ctx)
 
     def action(self, ctx: Context) -> None:
@@ -1346,7 +1364,7 @@ class Provision(Step):
 
         ctx.kit.provision(ctx.host, paused=False, runner=runner)
 
-    def verify(self, ctx: Context) -> Verdict:
+    def observe(self, ctx: Context) -> Verdict:
         found = self.pending(ctx)
         return Verdict(
             not found, "; ".join(found) or f"grants valid for {ctx.host.get('grant_days', 14)} days"
@@ -1357,8 +1375,8 @@ class RepositoryReady(Step):
     name = "repository-ready"
     title = "vcs.check_repository reports the repository ready"
 
-    def check(self, ctx: Context) -> bool:
-        return self.verify(ctx).ok
+    def is_done(self, ctx: Context) -> bool:
+        return self.observe(ctx).ok
 
     def action(self, ctx: Context) -> None:
         verdict = self.verify(ctx)
@@ -1367,7 +1385,7 @@ class RepositoryReady(Step):
             "or waive them in the registry"
         )
 
-    def verify(self, ctx: Context) -> Verdict:
+    def observe(self, ctx: Context) -> Verdict:
         return ctx.probe.check(str(ctx.host["repository"]))
 
     def planned_check(self, ctx: Context) -> bool:
@@ -1408,14 +1426,14 @@ class Apply(Step):
             kernel.close()
         return True
 
-    def check(self, ctx: Context) -> bool:
+    def is_done(self, ctx: Context) -> bool:
         recorded = ctx.state.get(self.name)
         return recorded.get("fingerprint") == self.fingerprint(ctx) and self.exists(ctx)
 
     def action(self, ctx: Context) -> None:
         ctx.kit.apply(ctx.host, ctx.connect)
 
-    def verify(self, ctx: Context) -> Verdict:
+    def observe(self, ctx: Context) -> Verdict:
         _, group, _, _ = ctx.kit._names(ctx.host)
         return Verdict(self.exists(ctx), f"group {group} in {ctx.host['namespace']}")
 

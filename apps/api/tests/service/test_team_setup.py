@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import stat
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -373,6 +374,7 @@ def test_plan_on_an_empty_host_reports_every_step_without_crashing(tmp_path: Pat
 
     assert len(empty.lines) == len(STEP_NAMES)
     assert all("would run" in line for line in empty.lines), empty.lines
+    assert all(re.search(r"verify (ok|FAILED): ", line) for line in empty.lines), empty.lines
     assert empty.fake.changes == [] and snapshot(tmp_path) == before
 
 
@@ -389,6 +391,47 @@ def test_every_check_and_verify_is_false_not_an_error_on_an_empty_host(tmp_path:
             continue  # its check is the probe, which the rig's Probe answers
         assert step.check(context) is False, step.name
         assert step.verify(context).ok is False, step.name
+
+
+@pytest.mark.parametrize("error", [FileNotFoundError, ValueError, KeyError, TypeError])
+def test_a_step_that_cannot_observe_checks_false_and_verifies_failed(
+    rig: Rig, error: type[Exception]
+) -> None:
+    base: Any = setup.Step
+
+    class Broken(base):  # type: ignore[misc]
+        name = "broken"
+        title = "broken"
+
+        def is_done(self, ctx: Any) -> bool:
+            raise error("gone")
+
+        def action(self, ctx: Any) -> None:
+            return None
+
+        def observe(self, ctx: Any) -> Any:
+            raise error("gone")
+
+    context = rig.context()
+    assert Broken().check(context) is False
+    verdict = Broken().verify(context)
+    assert verdict.ok is False
+    assert verdict.detail.startswith("cannot observe: ")
+
+
+def test_checks_and_verifies_are_bools_with_credentials_gone_and_malformed_provisioning(
+    rig: Rig,
+) -> None:
+    assert rig.apply()
+    context = rig.context()
+    shutil.rmtree(rig.base / "etc/credentials", ignore_errors=True)
+    Path(rig.host["provisioning"]["base"]).write_text("[]")
+    Path(rig.host["provisioning"]["out"]).write_text("[]")
+    for step in setup.steps():
+        if step.name == "repository-ready":
+            continue
+        assert isinstance(step.check(context), bool), step.name
+        assert isinstance(step.verify(context).ok, bool), step.name
 
 
 @pytest.mark.parametrize("fraction", [0.1, 0.35, 0.6, 0.85, 0.99])
