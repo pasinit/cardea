@@ -27,9 +27,12 @@ What each command does:
   against its supervisor's live authority.
 - `apply` applies the collections and the group as the supervisor, over the kernel socket.
 - `status` prints the team overview: members and their runs, work by state and claim,
-  mail, approvals and the spend and run ceilings.
-- `pause` cancels every member's unfinished run, then provisions the supervisor disabled.
-  Nothing starts again until `resume`, which provisions it enabled.
+  mail, approvals and the spend and run ceilings. It also prints when each credential
+  expires (flagged inside the warning window) and the last failed runs. While the team is
+  paused it still works, from the pause record the kit keeps beside the provisioning file.
+- `pause [--reason TEXT]` cancels every member's unfinished run, then provisions the
+  supervisor disabled and records the reason and the last failures. Nothing starts again
+  until `resume`, which provisions it enabled and removes the record.
 - `stop` pauses, then deletes the group (its members drain; the collections and records
   stay, for the record).
 """
@@ -42,7 +45,7 @@ import re
 import subprocess
 import sys
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -69,6 +72,11 @@ DEFAULT_BUDGETS: dict[str, Any] = {
 
 
 DEFAULT_BRANCH = "main"
+# Days before `credentials.expires_on` from which `status` flags the tokens (`warn_days`
+# overrides it); the same default as the setup command's check.
+TOKEN_WARNING_DAYS = 7
+MAX_REASON = 200
+MAX_FAILURES = 5
 # The product's goals and non-goals together, as UTF-8; the team lead gets a short form.
 MAX_PRODUCT_BYTES = 8192
 MAX_GOALS_SUMMARY = 1024
@@ -1024,13 +1032,7 @@ def summarise(view: dict[str, Any]) -> list[str]:
     return lines
 
 
-def active_runs(host: dict[str, Any]) -> list[str]:
-    """Member runs that are unfinished, as far as the supervisor can still see. Never
-    raises: the kill switch must not depend on the kernel answering."""
-    try:
-        view = overview(host)
-    except Exception:
-        return []
+def running(view: dict[str, Any]) -> list[str]:
     return [
         str(member["active_task_id"])
         for pool in view.get("pools", [])
@@ -1039,13 +1041,121 @@ def active_runs(host: dict[str, Any]) -> list[str]:
     ]
 
 
-def pause(host: dict[str, Any]) -> list[str]:
+def active_runs(host: dict[str, Any]) -> list[str]:
+    """Member runs that are unfinished, as far as the supervisor can still see. Never
+    raises: the kill switch must not depend on the kernel answering."""
+    try:
+        return running(overview(host))
+    except Exception:
+        return []
+
+
+def pause_record_path(host: dict[str, Any]) -> Path:
+    """Where the kit keeps why the team is paused: beside the provisioning file, which the
+    kit already writes as root. The kernel cannot answer while the supervisor is disabled,
+    so `status` reads this instead."""
+    _, group, _, _ = _names(host)
+    out = Path((host.get("provisioning") or {}).get("out", "/etc/cardea/provision.json"))
+    return out.with_name(f"{group}.pause.json")
+
+
+def clean_reason(reason: str | None) -> str:
+    """The operator's reason as one short plain line. It is free text from the command line,
+    so it is trimmed and stripped of control characters; never put a secret in it."""
+    text = _CONTROL.sub(" ", (reason or "").replace("\n", " ").replace("\t", " ")).strip()
+    return text[:MAX_REASON] or "no reason given"
+
+
+def failures(view: dict[str, Any]) -> list[dict[str, str]]:
+    """The members' most recent failed runs from an overview, newest first: task id, state,
+    failure code and time only (no run output)."""
+    found = []
+    for pool in view.get("pools", []):
+        for member in pool.get("members", []):
+            last = member.get("last_run") or {}
+            if last.get("failure_code") or last.get("outcome") == "failed":
+                found.append(
+                    {
+                        "member": str(member.get("principal_id")),
+                        "task_id": str(last.get("task_id")),
+                        "failure_code": str(last.get("failure_code") or "failed"),
+                        "finished_at": str(last.get("finished_at") or "-"),
+                    }
+                )
+    found.sort(key=lambda item: item["finished_at"], reverse=True)
+    return found[:MAX_FAILURES]
+
+
+def failure_lines(found: list[dict[str, str]]) -> list[str]:
+    if not found:
+        return ["last failures: none"]
+    return ["last failures:"] + [
+        f"  {item['member']}: {item['failure_code']} ({item['task_id']}, {item['finished_at']})"
+        for item in found
+    ]
+
+
+def token_lines(host: dict[str, Any], today: date | None = None) -> list[str]:
+    """When the team's vcs tokens expire, from the host file's `credentials.expires_on`:
+    token names and dates only, never a token or its path. Flagged as `EXPIRES SOON` from
+    `warn_days` (default `TOKEN_WARNING_DAYS`) before the date and `EXPIRED` from it on,
+    which is when `vcs.*` starts refusing calls."""
+    names = host.get("credentials") or {}
+    labels = [str(names[role]) for role in ("author", "reviewer") if names.get(role)]
+    if not labels:
+        return []
+    try:
+        last = date.fromisoformat(str(names.get("expires_on")))
+    except ValueError:
+        return [f"tokens {', '.join(labels)}: expires_on is not a date"]
+    window = names.get("warn_days", TOKEN_WARNING_DAYS)
+    window = window if isinstance(window, int) and window >= 0 else TOKEN_WARNING_DAYS
+    days = (last - (today or datetime.now(UTC).date())).days
+    if days < 0:
+        flag = f"EXPIRED {-days} day(s) ago: vcs calls are refused; rotate and update expires_on"
+    elif days <= window:
+        flag = f"EXPIRES SOON, in {days} day(s) (warning window {window}): rotate them"
+    else:
+        flag = f"{days} day(s) left"
+    return [f"tokens {', '.join(labels)} expire on {last}: {flag}"]
+
+
+def read_pause_record(host: dict[str, Any]) -> dict[str, Any]:
+    try:
+        record = json.loads(pause_record_path(host).read_text())
+    except (OSError, ValueError):
+        return {}
+    return record if isinstance(record, dict) else {}
+
+
+def pause(host: dict[str, Any], reason: str | None = None) -> list[str]:
     """The kill switch: disable the supervisor. Provisioning a disabled supervisor makes the
     kernel cancel every unfinished task it supervises, so running sessions stop and no
-    trigger admits again. Returns the runs that were active (read beforehand, best effort)."""
-    runs = active_runs(host)
+    trigger admits again. Returns the runs that were active (read beforehand, best effort).
+    Afterwards the reason and the last failures are kept for `status`, best effort too."""
+    try:
+        before = overview(host)
+    except Exception:
+        before = {}
+    runs = running(before)
     provision(host, paused=True)
+    record = {
+        "paused_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "reason": clean_reason(reason),
+        "failures": failures(before),
+    }
+    try:
+        path = pause_record_path(host)
+        path.write_text(json.dumps(record, indent=2) + "\n")
+        path.chmod(0o600)
+    except OSError:
+        pass
     return runs
+
+
+def resume(host: dict[str, Any]) -> None:
+    provision(host, paused=False)
+    pause_record_path(host).unlink(missing_ok=True)
 
 
 def stop(host: dict[str, Any]) -> tuple[list[str], str | None]:
@@ -1109,20 +1219,30 @@ def host_rules_note(host: dict[str, Any]) -> list[str]:
     return lines
 
 
-def status(host: dict[str, Any]) -> list[str]:
-    """The team's overview, or a clear paused view when the supervisor is disabled."""
+def status(host: dict[str, Any], today: date | None = None) -> list[str]:
+    """The team's overview, or, when the supervisor is disabled, the pause reason and the
+    failures recorded at the pause. The token expiries are host-side and always shown."""
     from cardea.service.client import ClientError
 
+    tokens = token_lines(host, today)
     try:
-        return host_rules_note(host) + summarise(overview(host))
+        view = overview(host)
     except ClientError as error:
         if error.code != "principal_disabled":
             raise
+        record = read_pause_record(host)
+        since = f" since {record['paused_at']}" if record.get("paused_at") else ""
         return [
             "team paused: the supervisor is disabled, so no run is admitted and the kernel "
             "cancelled the runs that were unfinished when it was paused",
+            f"pause reason{since}: {record.get('reason') or 'not recorded'}",
+            *tokens,
+            *failure_lines(
+                [item for item in record.get("failures") or [] if isinstance(item, dict)]
+            ),
             "resume with `teamkit.py resume --host <host file>`",
         ]
+    return host_rules_note(host) + tokens + failure_lines(failures(view)) + summarise(view)
 
 
 def main(argv: list[str]) -> int:
@@ -1135,6 +1255,8 @@ def main(argv: list[str]) -> int:
             command.add_argument("--out", type=Path, required=True)
         if name == "provision":
             command.add_argument("--paused", action="store_true")
+        if name == "pause":
+            command.add_argument("--reason", help="why, kept for `status` (no secrets)")
     args = parser.parse_args(argv)
     host = load_host(args.host)
     if args.command == "render":
@@ -1151,11 +1273,11 @@ def main(argv: list[str]) -> int:
     elif args.command == "status":
         print("\n".join(status(host)))
     elif args.command == "pause":
-        runs = pause(host)
+        runs = pause(host, args.reason)
         print(f"the supervisor is disabled; the kernel cancelled its {len(runs)} active run(s)")
         print("\n".join(f"  {run}" for run in runs))
     elif args.command == "resume":
-        provision(host, paused=False)
+        resume(host)
         print("the supervisor is enabled; triggers admit again")
     elif args.command == "stop":
         runs, problem = stop(host)
