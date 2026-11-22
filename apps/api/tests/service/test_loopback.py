@@ -26,6 +26,9 @@ from cardea.service.kernel import Kernel
 from cardea.service.operations import OperationContext
 from cardea.service.tool_endpoint import ToolEndpoint
 
+# Binds or connects over TCP loopback: not run by `make check-test`.
+pytestmark = pytest.mark.loopback
+
 # Fixtures shared with the agent-run tests.
 __all__ = ["kernel", "session", "tools"]
 
