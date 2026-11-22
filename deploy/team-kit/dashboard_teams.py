@@ -131,7 +131,9 @@ def kernel_source(
     def read_mail(query: dict[str, Any]) -> dict[str, Any]:
         kernel = kit.client(host)
         try:
-            return base.KernelBackend(kernel.request, namespace, group).mail(query)
+            backend = base.KernelBackend(kernel.request, namespace, group)
+            result: dict[str, Any] = backend.mail(query)
+            return result
         finally:
             kernel.close()
 
