@@ -28,7 +28,9 @@ Rules checked here, before any network call:
 - the repository is an alias from host configuration (its `repo:<alias>` grant is checked
   by the kernel, from the descriptor's `resource`);
 - a pushed branch, and a pull request's head, start with the caller's group prefix;
-- `APPROVE` reviews are refused unless the host owner allows them;
+- `APPROVE` reviews are refused unless the host owner allows them and every check run on
+  the pull request's head succeeded (`approve_checks_missing|pending|failed`, naming the
+  checks);
 - `vcs.merge` needs the kernel's own receipts: the caller opened the pull request, and an
   allowed pool approved its current head (ADR-037 amendment 2026-11-17);
 - where the registry sets `require_up_to_date`, `vcs.merge` also needs the head to contain
@@ -547,11 +549,20 @@ class Vcs:
                 "APPROVE reviews are not allowed on this host", "approve_refused"
             )
         self.gate(context, "vcs.review", texts={"review": body})
+        number = int(str(arguments["number"]))
         async with await self.client(repository, context, "pull_requests:write") as host:
+            head = None
+            if event == "APPROVE":
+                # Kernel-enforced, not left to the reviewer's instructions: an approval
+                # needs every check run on the head to have succeeded. The review is pinned
+                # to the head that was checked, so a push in between cannot inherit it.
+                try:
+                    head = str((await host.pull(number))["head"]["sha"])
+                    _check_runs(await host.check_runs(head), "approve")
+                except HostRefused as refused:
+                    raise OperationRejected(str(refused), "host_refused") from None
             try:
-                made = await host.create_review(
-                    int(str(arguments["number"])), event, f"{body}\n\n{marker(context)}"
-                )
+                made = await host.create_review(number, event, f"{body}\n\n{marker(context)}", head)
             except HostRefused as refused:
                 raise OperationRejected(str(refused), "host_refused") from None
         return {
@@ -649,7 +660,7 @@ class Vcs:
                     )
                 # 4. Every check run on the head succeeded.
                 runs = await host.check_runs(head)
-                _check_runs(runs)
+                _check_runs(runs, "merge")
                 # 5. The host can merge it.
                 if pull.get("mergeable") is not True:
                     # `null` while the host is still computing it: try again later.
@@ -893,19 +904,20 @@ async def _up_to_date(host: GitHub, base: str, head: str) -> str:
     return str((compared.get("base_commit") or {}).get("sha") or "")
 
 
-def _check_runs(runs: list[dict[str, Any]]) -> None:
-    """Every check run on the head completed with success, and there is at least one."""
+def _check_runs(runs: list[dict[str, Any]], operation: str) -> None:
+    """Every check run on the head completed with success, and there is at least one. The
+    refusal code is `<operation>_checks_missing|pending|failed` and names the checks."""
     if not runs:
-        raise OperationRejected("No check ran on the head", "merge_checks_missing")
+        raise OperationRejected("No check ran on the head", f"{operation}_checks_missing")
     pending = sorted(str(r.get("name")) for r in runs if r.get("status") != "completed")
     if pending:
         raise OperationRejected(
-            f"Checks still running: {', '.join(pending)[:200]}", "merge_checks_pending"
+            f"Checks still running: {', '.join(pending)[:200]}", f"{operation}_checks_pending"
         )
     failed = sorted(str(r.get("name")) for r in runs if r.get("conclusion") != "success")
     if failed:
         raise OperationRejected(
-            f"Checks did not succeed: {', '.join(failed)[:200]}", "merge_checks_failed"
+            f"Checks did not succeed: {', '.join(failed)[:200]}", f"{operation}_checks_failed"
         )
 
 
