@@ -29,7 +29,7 @@ from cardea.kernel.models import (
     canonical_json,
 )
 from cardea.kernel.store import KernelTransaction, StoreError
-from cardea.service import env_runs
+from cardea.service import env_runs, evidence_links
 from cardea.service.confined import CallAbandoned, ExecutorBusy, WorkerFailed, WorkerNotStarted
 from cardea.service.database import Fault
 from cardea.service.models import now
@@ -244,6 +244,41 @@ def _evidence(
     return found
 
 
+def _attach(
+    conn: sa.Connection,
+    registry: Registry,
+    task: Task,
+    receipt: OperationReceipt,
+    output: object,
+) -> Failure | None:
+    """Link a result to the record its call names, if the descriptor asks for it. The
+    authority is read live; a refusal is the call's failure, naming the missing grant."""
+    request = receipt.request
+    pointer = registry.get(request.name).cardea.attach_record
+    arguments = request.arguments.get("arguments")
+    target = _argument(arguments, pointer) if pointer and isinstance(arguments, dict) else None
+    if not isinstance(target, str) or not isinstance(output, dict):
+        return None
+    context = request.arguments.get("context")
+    key = context.get("idempotency_context") if isinstance(context, dict) else None
+    try:
+        evidence_links.attach(
+            conn,
+            task.task_id,
+            request.resource.namespace,
+            target,
+            output,
+            receipt_id=receipt.receipt_id,
+            idempotency_context=key if isinstance(key, str) else None,
+            caller=task.agent_id,
+        )
+    except OperationRejected as refused:
+        return Failure(refused.code, "rejected", str(refused))
+    except Fault as denied:
+        return Failure(denied.code, "denied", denied.message)
+    return None
+
+
 @dataclass(frozen=True)
 class Admitted:
     context: OperationContext
@@ -288,6 +323,14 @@ def admit(
         if not isinstance(value, str) or not value:
             raise Fault("invalid_arguments", "The resource argument must name a resource", 422)
         policy.ceiling(task.task_id, f"{resource.grant}:{value}")
+    if descriptor.cardea.attach_record is not None:
+        # Refuse before anything runs when the caller could not attach the result.
+        target = _argument(arguments, descriptor.cardea.attach_record)
+        if isinstance(target, str):
+            try:
+                evidence_links.authorize(conn, task.task_id, namespace, target)
+            except OperationRejected as refused:
+                raise Fault(refused.code, str(refused), 404) from None
     inputs = _stage_inputs(conn, tx, policy, task, namespace, descriptor, arguments)
     evidence = _evidence(conn, namespace, descriptor, arguments)
     member = conn.exec_driver_sql(
@@ -409,6 +452,9 @@ def admit(
         evidence=evidence,
     )
     if prior is not None:
+        # A result answered from the window or an earlier call is still linked, for this call.
+        if (refusal := _attach(conn, registry, task, receipt, prior)) is not None:
+            raise Fault(refusal.code, refusal.summary, 409)
         tx.change_operation(
             task.task_id,
             operation_id,
@@ -481,6 +527,7 @@ def settle(
             )
         else:
             content = checked
+            failure = _attach(conn, registry, task, receipt, json.loads(content))
     error = failure.code if failure else ""
     state = (
         OperationState.CANCELLED

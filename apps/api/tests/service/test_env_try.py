@@ -13,13 +13,13 @@ from typing import Any
 import pytest
 from cardea_env_ops import descriptors
 from cardea_env_ops.try_ import scrub
-from test_code_session import kernel_for, receipt, submit, task
+from test_code_session import document, kernel_for, receipt, submit, task
 
 import cardea
 from cardea.kernel.models import OperationState
 from cardea.service import artifacts
 from cardea.service.database import Fault
-from cardea.service.kernel import Kernel
+from cardea.service.kernel import Kernel, provision
 from cardea.service.operation_runtime import OperationRuntime
 from cardea.service.operations import Registry
 
@@ -153,7 +153,9 @@ def env_kernel(
     # The kernel reads the registry for the run key; the worker reads it to run.
     monkeypatch.setenv("CARDEA_REPOSITORIES", str(registry))
     host = EnvHost({"CARDEA_REPOSITORIES": str(registry)})
-    kernel = kernel_for(tmp_path, host, monkeypatch, Registry(descriptors(), {}), "env.try")
+    kernel = kernel_for(
+        tmp_path, host, monkeypatch, Registry(descriptors(), {}), "env.try", ("record:work/attach",)
+    )
     return kernel, host
 
 
@@ -519,3 +521,142 @@ def test_a_scenario_that_kills_the_worker_gets_no_result(
     state, settled = call(kernel, "kill", commit=repo["good"], scenarios=["killer"])
     assert state == "failed" and settled.state is not OperationState.SUCCEEDED
     assert settled.result is None
+
+
+# Attaching the result to a work item (record_id)
+
+ITEM = "rec-" + "a" * 32
+ATTACH = ("repo:app", "record:work/attach")
+
+
+def item(kernel: Kernel) -> None:
+    """A claimed work item in progress, inserted directly: only its links may change."""
+    with kernel.database.engine.begin() as conn:
+        conn.exec_driver_sql(
+            "INSERT INTO collections VALUES ('test','work','supervisor',1,'{}','x','t','t')"
+        )
+        conn.exec_driver_sql(
+            "INSERT INTO records(namespace,collection,record_id,data_json,labels_json,links_json,"
+            "state,holder,claim_epoch,lease_expires_at,version,created_by,created_at,updated_at) "
+            "VALUES ('test','work',?,'{}','[]','[]','in_progress','dev-1',2,"
+            "'2999-01-01T00:00:00.000000+00:00',1,'dev-1','2026-11-22T00:00:00',"
+            "'2026-11-22T00:00:00')",
+            (ITEM,),
+        )
+
+
+def stored(kernel: Kernel) -> dict[str, Any]:
+    with kernel.database.read() as conn:
+        row = conn.exec_driver_sql("SELECT * FROM records WHERE record_id=?", (ITEM,)).mappings()
+        found = dict(row.one())
+    found["links"] = json.loads(found["links_json"])
+    return found
+
+
+def attach_call(
+    kernel: Kernel,
+    key: str,
+    grants: tuple[str, ...] = ATTACH,
+    context: str | None = None,
+    **arguments: Any,
+) -> tuple[str, str]:
+    """The task's state and, when it failed, the refusal's message."""
+    task_id = submit(
+        kernel,
+        "env.try",
+        {"repo": "app", "record_id": ITEM, **arguments},
+        key=key,
+        grants=grants,
+        idempotency_context=context,
+    )
+    state = OperationRuntime(kernel).execute(task_id)
+    failure = task(kernel, task_id).failure
+    return state, failure.message if failure is not None else ""
+
+
+def test_the_result_is_linked_to_the_item_without_touching_its_claim(
+    env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
+) -> None:
+    kernel, _ = env_kernel
+    item(kernel)
+    before = stored(kernel)
+    assert attach_call(kernel, "ok", commit=repo["good"], scenarios=["try", "teams"])[0] == (
+        "succeeded"
+    )
+    after = stored(kernel)
+    (entry,) = after["links"]
+    assert entry["rel"] == "env.try" and entry["observed_state"] == "pass"
+    assert entry["url"].startswith(f"cardea://env.try/{repo['good']}?receipt=")
+    assert len(repo["good"]) == 40 and entry["url"].endswith("&scenarios=try,teams")
+    assert entry["external_id"] in entry["url"]
+    # Holder, lease, claim epoch and state are the same; only the links (and version) moved.
+    for column in ("holder", "lease_expires_at", "claim_epoch", "state", "data_json"):
+        assert after[column] == before[column], column
+    assert after["version"] == before["version"] + 1
+    # A failing commit is linked as a failure.
+    attach_call(kernel, "bad", commit=repo["bad"], scenarios=["try"])
+    assert [link["observed_state"] for link in stored(kernel)["links"]] == ["pass", "fail"]
+
+
+def test_a_role_without_the_grant_is_refused_naming_it_and_nothing_runs(
+    env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
+) -> None:
+    kernel, host = env_kernel
+    item(kernel)
+    state, message = attach_call(
+        kernel, "denied", grants=("repo:app",), commit=repo["good"], scenarios=["try"]
+    )
+    assert state == "failed"
+    assert "record:work/attach" in message
+    assert host.started == [] and stored(kernel)["links"] == []
+    # Without a record_id the call needs no such grant.
+    assert call(kernel, "plain", commit=repo["good"], scenarios=["try"])[0] == "succeeded"
+
+
+def test_authority_is_read_live_when_the_result_is_recorded(
+    env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    kernel, host = env_kernel
+    item(kernel)
+    real = host.start_confined
+
+    def revoked(*args: Any) -> None:
+        real(*args)
+        # The supervisor loses the grant while the worker runs.
+        provision(kernel.database, document("env.try"), Registry(descriptors(), {}))
+
+    monkeypatch.setattr(host, "start_confined", revoked)
+    state, message = attach_call(kernel, "live", commit=repo["good"], scenarios=["try"])
+    assert state == "failed" and "record:work/attach" in message
+    assert stored(kernel)["links"] == []
+
+
+def test_a_repeated_idempotency_key_adds_one_entry(
+    env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
+) -> None:
+    kernel, _ = env_kernel
+    item(kernel)
+    # Even a forced rerun with the same key is one entry; the key names it.
+    for key, rerun in (("first", False), ("second", True)):
+        state, _ = attach_call(
+            kernel, key, context="one-key", commit=repo["good"], scenarios=["try"], rerun=rerun
+        )
+        assert state == "succeeded"
+    (entry,) = stored(kernel)["links"]
+    assert entry["external_id"] == "one-key"
+
+
+def test_a_cached_result_is_linked_to_another_item_by_its_own_receipt(
+    env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
+) -> None:
+    kernel, host = env_kernel
+    item(kernel)
+    _, first = call(kernel, "a", commit=repo["good"], scenarios=["try"])
+    started = len(host.started)
+    assert attach_call(kernel, "b", commit=repo["good"], scenarios=["try"])[0] == "succeeded"
+    assert len(host.started) == started  # answered from the window, still linked
+    (entry,) = stored(kernel)["links"]
+    assert entry["external_id"] == first.receipt_id
+    # The same call again adds nothing.
+    attach_call(kernel, "c", commit=repo["good"], scenarios=["try"])
+    assert len(stored(kernel)["links"]) == 1
