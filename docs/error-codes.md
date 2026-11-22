@@ -253,7 +253,7 @@ used by the examples.
 | `executor_busy` | — | `cardea.service.invocation` |
 | `expectation_exceeded` | — | `cardea.service.agent_run_runtime` |
 | `gate_changed_checkout` | a gate changed the checkout ({…}); gates may check the change, not alter it | `cardea_coding_ops.session` |
-| `guard_refused` | {…} guard failed to evaluate: {…}; {…} guard refused this call | `cardea.service.records` |
+| `guard_refused` | {…} guard failed to evaluate for {…}: {…}; {…} guard refused this call for {…}: {…} | `cardea.service.records` |
 | `host_mount_propagation` | the host's / or /run mount is not shared, so systemd cannot give the worker its credential; run `mount --make-rshared /` or reboot the host | `cardea.service.confined` |
 | `host_outcome_unknown` | Interrupted host intent; no replay | `cardea.service.host_runtime` |
 | `host_refused` | The host reports a duplicate it does not list | `cardea_vcs_ops.ops` |
@@ -296,7 +296,7 @@ used by the examples.
 | `snapshot_restored` | Historical execution sealed by snapshot recovery. | `cardea.service.admin` |
 | `stale_call` | This call is no longer running | `cardea.service.approval_requests`, `cardea.service.records` |
 | `transition_not_allowed` | Transition {…} needs state {…}; the record is in {…} | `cardea.service.records` |
-| `transition_unknown` | Collection {…} has no transition {…} | `cardea.service.records` |
+| `transition_unknown` | Collection {…} has no transition "{…}"; {…}; "{…}" is a state, not a transition; {…}; {…} | `cardea.service.records` |
 | `verification_failed` | Stored index or input versions failed checks.; result does not match the operation's output schema or size limit (at most 64 KiB is recorded) | `cardea.kernel.demo`, `cardea.service.invocation` |
 | `version_conflict` | expected version {…}, record is at version {…} | `cardea.service.records` |
 | `worker_error` | {…} (HTTP {…}) | `cardea.service.confined` |
