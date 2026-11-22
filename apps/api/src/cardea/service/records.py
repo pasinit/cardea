@@ -1555,7 +1555,7 @@ class Records:
         """The collection's supervisor takes a record back from whoever holds it.
 
         The epoch is incremented, so the old holder's later writes fail with `claim_lost`.
-        Authority is checked live in this call: the grant, the caller being the
+        Authority is checked live in this call: the grant, the task's supervisor being the
         collection's supervisor and that supervisor still holding `groups.manage`. A record
         nobody holds is returned unchanged, without a new epoch or history row; a retry
         with the same `client_key` returns the first result (ADR-026).
@@ -1563,9 +1563,10 @@ class Records:
         collection = str(arguments["collection"])
         record_id = str(arguments["record_id"])
         with self.database.engine.begin() as conn:
-            spec, caller = self._authorize(conn, context, collection, "force_release")
-            principal = str(caller["id"])
+            spec, _ = self._authorize(conn, context, collection, "force_release")
             policy = Policy(conn)
+            # The caller is whoever submitted the task, not the agent running it.
+            principal = str(policy.binding(context.task_id)["supervisor_id"])
             try:
                 if spec.supervisor != principal:
                     raise Fault(

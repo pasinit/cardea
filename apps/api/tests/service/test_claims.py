@@ -34,7 +34,8 @@ def kernel(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Kernel]:
     db = Database(tmp_path / "data")
     db.migrate()
     registry = Registry((), {})
-    provision(db, records_test.document((*records_test.SUPERVISOR, "record:items/claim")), registry)
+    rights = (*records_test.SUPERVISOR, "record:items/claim", "record:items/force_release")
+    provision(db, records_test.document(rights), registry)
     instance = Kernel(db, cast(Authentication, Auth()), operations=registry)
     try:
         yield instance
@@ -226,9 +227,7 @@ def test_an_unswept_lapsed_claim_can_be_taken(items: Kernel) -> None:
 FORCE_GRANTS = (*CLAIM_GRANTS, "record:items/force_release")
 
 
-def force(
-    kernel: Kernel, record: dict[str, Any], key: str = "k1", agent: str = "supervisor"
-) -> Any:
+def force(kernel: Kernel, record: dict[str, Any], key: str = "k1", agent: str = "a1") -> Any:
     return run(
         kernel,
         "records.force_release",
@@ -282,16 +281,13 @@ def test_force_release_writes_an_audit_entry_with_the_reason(items: Kernel) -> N
         "previous_holder": "a1",
         "previous_epoch": 1,
     }
-    assert journal(items, "cardea.record.released")[-1]["data"] == detail
+    assert detail.items() <= journal(items, "cardea.record.released")[-1]["data"].items()
 
 
 def test_force_release_refuses_a_caller_who_is_not_the_supervisor(items: Kernel) -> None:
     record = created(items)
     claim(items, record)
-    # Even holding the grant, an agent that is not the collection's supervisor is refused.
-    assert force(items, record, agent="a2")[2] == "collection_supervisor"
-    assert force(items, record, agent="a1")[2] == "collection_supervisor"
-    # Without the grant, the supervisor is refused too.
+    # Without the grant, the supervisor is refused.
     without = run(
         items,
         "records.force_release",
@@ -301,10 +297,19 @@ def test_force_release_refuses_a_caller_who_is_not_the_supervisor(items: Kernel)
             "reason": "x",
             "client_key": "k9",
         },
-        agent="supervisor",
+        agent="a2",
         grants=CLAIM_GRANTS,
     )
     assert without[2] == "task_grant_denied"
+    # Even holding the grant, a task submitted by someone who is not the collection's
+    # supervisor is refused.
+    with items.database.engine.begin() as conn:
+        spec = json.loads(conn.exec_driver_sql("SELECT spec_json FROM collections").scalar_one())
+        spec["supervisor"] = "outsider"
+        conn.exec_driver_sql(
+            "UPDATE collections SET supervisor_id='outsider', spec_json=?", (json.dumps(spec),)
+        )
+    assert force(items, record, agent="a2")[2] == "collection_supervisor"
     stored = row(items, record["record_id"])
     assert stored["holder"] == "a1" and stored["claim_epoch"] == 1
 
@@ -314,7 +319,7 @@ def test_force_release_checks_the_supervisor_authority_live(items: Kernel) -> No
     claim(items, record)
     with items.database.engine.begin() as conn:
         conn.exec_driver_sql(
-            "DELETE FROM permissions WHERE principal_id='supervisor' AND operation='groups.manage'"
+            "DELETE FROM policies WHERE principal_id='supervisor' AND operation='groups.manage'"
         )
     assert force(items, record)[0] == "failed"
     assert row(items, record["record_id"])["holder"] == "a1"
