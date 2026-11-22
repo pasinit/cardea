@@ -194,3 +194,121 @@ def test_file_list_and_host_omissions_are_bounded(
     # An offset past the end returns no patches and nothing more to read.
     past = read(vcs, number, diff=True, diff_offset=1000)["diff"]
     assert past["patches"] == [] and past["next_offset"] is None
+
+
+MARKER = "\n[cardea: patch continues, bytes "
+
+
+def read_whole(vcs: Vcs, number: int) -> tuple[dict[str, str], int]:
+    """Every patch of the change, reassembled by following the resuming cursor."""
+    texts: dict[str, str] = {}
+    offset: int | None = 0
+    within: int | None = 0
+    calls = 0
+    while offset is not None:
+        assert within is not None
+        output = read(vcs, number, diff=True, diff_offset=offset, patch_offset=within)
+        calls += 1
+        assert valid(output)
+        assert len(canonical_json(output)) <= MAX_RECORDED_OUTPUT_BYTES
+        diff = output["diff"]
+        assert diff["offset"] == offset and diff["patch_offset"] == within
+        assert _size_of(diff["patches"]) <= vcs_ops.MAX_DIFF_BYTES
+        for patch in diff["patches"]:
+            text = patch["patch"]
+            if text is None:
+                continue
+            assert len(canonical_json(text)) <= vcs_ops.MAX_PATCH
+            seen = texts.get(patch["path"], "")
+            # Each page starts exactly where the last one stopped: no gap, no overlap.
+            assert patch["patch_offset"] == len(seen.encode())
+            if patch["truncated"]:
+                assert patch is diff["patches"][-1]
+                text, _, tail = text.rpartition(MARKER)
+                end = int(tail.split(" of ")[0].split("-")[1])
+                assert (
+                    diff["next_patch_offset"] == end == patch["patch_offset"] + len(text.encode())
+                )
+            texts[patch["path"]] = seen + text
+        offset, within = diff["next_offset"], diff["next_patch_offset"]
+        assert (offset is None) == (within is None)
+        assert calls < 100
+    return texts, calls
+
+
+def _size_of(value: object) -> int:
+    return len(canonical_json(value))
+
+
+def test_a_large_file_is_read_whole_over_several_calls(
+    vcs: Vcs, host: FakeGitHub, tmp_path: Path
+) -> None:
+    # About 59 KB of added lines, with escapes and multi-byte text, and a secret mid-file.
+    lines = [f'line {i} "quoted" \\ escaped é ✓ {"x" * (i % 37)}\n' for i in range(1090)]
+    lines[700] = f'token = "{LEAKED}"\n'
+    big = "".join(lines).encode()
+    assert 55_000 < len(big) < 65_000
+    number = change(host, tmp_path, {"README": b"r\n"}, {"big.txt": big, "small.py": b"y = 1\n"})
+    patches = host.repositories["acme/cardea"].changed_files(number)  # what the host sends
+    expected = {p["filename"]: vcs_ops.scrub(p["patch"]) for p in patches}
+    texts, calls = read_whole(vcs, number)
+    assert calls >= 5  # 59 KB at most 12 KiB a page
+    assert texts == expected
+    assert LEAKED not in texts["big.txt"] and 'token = "[redacted]"' in texts["big.txt"]
+
+
+def test_resuming_pages_cut_on_line_boundaries(vcs: Vcs, host: FakeGitHub, tmp_path: Path) -> None:
+    big = "".join(f"row {i:05d} {'abc' * 20}\n" for i in range(800)).encode()
+    number = change(host, tmp_path, {"README": b"r\n"}, {"a.txt": big})
+    output = read(vcs, number, diff=True, patch_offset=0)
+    patch = output["diff"]["patches"][0]
+    assert patch["truncated"] is True and patch["patch_offset"] == 0
+    text = patch["patch"].rpartition(MARKER)[0]
+    assert text.endswith("\n")  # a whole line, never half of one
+    later = read(vcs, number, diff=True, patch_offset=output["diff"]["next_patch_offset"])
+    assert later["diff"]["patches"][0]["patch"].startswith("+row ")
+
+
+def test_resuming_reads_many_files_and_large_ones_without_gaps(
+    vcs: Vcs, host: FakeGitHub, tmp_path: Path
+) -> None:
+    big = "".join(f'line {i} "quoted" \\ escaped\n' for i in range(3000)).encode()
+    head: dict[str, bytes | None] = {f"f{i}.txt": big for i in range(3)}
+    head.update({f"s{i}.py": f"v = {i}\n".encode() for i in range(5)})
+    head["logo.png"] = b"\x89PNG\x00\x02"
+    number = change(host, tmp_path, {"README": b"r\n"}, head)
+    expected = {
+        p["filename"]: vcs_ops.scrub(p["patch"])
+        for p in host.repositories["acme/cardea"].changed_files(number)
+        if isinstance(p.get("patch"), str)
+    }
+    texts, _ = read_whole(vcs, number)
+    assert texts == expected
+
+
+def test_old_style_calls_are_unchanged(vcs: Vcs, host: FakeGitHub, tmp_path: Path) -> None:
+    big = "".join(f"row {i}\n" for i in range(9000)).encode()
+    number = change(host, tmp_path, {"README": b"r\n"}, {"a.txt": big, "b.txt": big})
+    diff = read(vcs, number, diff=True)["diff"]
+    assert "patch_offset" not in diff and "next_patch_offset" not in diff
+    first = diff["patches"][0]
+    assert set(first) == {"path", "patch", "truncated"} and first["truncated"] is True
+    assert "[cardea: patch truncated," in first["patch"]
+    # Per-file paging: both cut patches on one page, nothing more to read.
+    assert [p["path"] for p in diff["patches"]] == ["a.txt", "b.txt"]
+    assert diff["next_offset"] is None
+
+
+def test_patch_offset_past_the_end_or_mid_character(
+    vcs: Vcs, host: FakeGitHub, tmp_path: Path
+) -> None:
+    number = change(host, tmp_path, {"a.txt": b"x\n"}, {"a.txt": "é✓\n".encode()})
+    whole = read(vcs, number, diff=True, patch_offset=0)["diff"]["patches"][0]
+    start = whole["patch"].index("é")
+    byte = len(whole["patch"][:start].encode()) + 1  # inside "é"
+    mid = read(vcs, number, diff=True, patch_offset=byte)["diff"]
+    assert mid["patches"][0]["patch"].startswith("✓")
+    assert mid["patches"][0]["patch_offset"] == byte + 1
+    past = read(vcs, number, diff=True, patch_offset=10**6)["diff"]
+    assert past["patches"][0]["patch"] == "" and past["next_offset"] is None
+    assert past["next_patch_offset"] is None
