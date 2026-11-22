@@ -6,6 +6,7 @@ import io
 import json
 import os
 import platform
+import pwd
 import subprocess
 import sys
 import time
@@ -1055,9 +1056,7 @@ def phases(configured: list[list[str]], monkeypatch: pytest.MonkeyPatch) -> list
         },
     }
     monkeypatch.setattr(launcher, "worker_config", lambda: config)
-    monkeypatch.setattr(
-        launcher.pwd, "getpwnam", lambda name: SimpleNamespace(pw_uid=994, pw_gid=994)
-    )
+    monkeypatch.setattr(pwd, "getpwnam", lambda name: SimpleNamespace(pw_uid=994, pw_gid=994))
     return configured
 
 
