@@ -99,7 +99,8 @@ def kernel_source(host_file: Path) -> Callable[[], dict[str, Any]]:
     def read() -> dict[str, Any]:
         kernel = kit.client(host)
         try:
-            return base.KernelBackend(kernel.request, namespace, group).overview()
+            view: dict[str, Any] = base.KernelBackend(kernel.request, namespace, group).overview()
+            return view
         finally:
             kernel.close()
 
@@ -108,7 +109,7 @@ def kernel_source(host_file: Path) -> Callable[[], dict[str, Any]]:
 
 def fixture_source(path: Path) -> Callable[[], dict[str, Any]]:
     view = json.loads(path.read_text())
-    return lambda: view  # type: ignore[no-any-return]
+    return lambda: view
 
 
 def server(backend: TeamsBackend, port: int = DEFAULT_PORT, bind: str = base.LOOPBACK) -> Any:

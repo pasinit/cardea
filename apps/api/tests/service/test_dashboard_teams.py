@@ -15,8 +15,14 @@ from cardea.service.client import ClientError
 TOKEN = "s3cr3t-token-value"
 
 
-def call(*args: Any, **kwargs: Any) -> tuple[int, Any]:
-    return raw_call(*args, build=teams().server, **kwargs)
+def call(
+    backend: Any,
+    method: str,
+    path: str,
+    body: Any = None,
+    headers: dict[str, str] | None = None,
+) -> tuple[int, Any]:
+    return raw_call(backend, method, path, body, headers, build=teams().server)
 
 
 def teams() -> Any:
