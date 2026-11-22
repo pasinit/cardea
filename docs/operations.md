@@ -255,6 +255,24 @@ The `cardea-env-ops` package installs `env.try` ([ADR-038](decisions/038-throwaw
 - **Toolchain.** `make try-toolchain` builds and pins the image; `cardea-try-toolchain.timer` refreshes it weekly.
 
 
+## Running checks from a developer session
+
+A developer session has no `uv`, `pytest`, `ruff` or `mypy`, and `pip` fails on the egress proxy's CA bundle. Do not work around either: do not install tools by hand, point `pip` at another index, disable certificate checks or widen the session's egress. The supported path is `env.try`, which runs the checks in the `try` profile with the pinned toolchain image (`uv` included) and the allow-listed package indexes.
+
+- **Scenarios.** The repository's `environment` catalog ([`cardea/repositories.json`](../deploy/small-host/cardea/repositories.json)) names one scenario per check:
+
+  | Scenario | Runs | Same as |
+  |---|---|---|
+  | `lint` | `make lint` | CI lint |
+  | `typecheck` | `make typecheck` | CI mypy |
+  | `api-test` | `make api-test` | the backend test suite |
+
+- **Run.** Push the work to a branch, then call `env.try` with `repo`, the branch head's full 40-hex `commit`, and `scenarios: ["lint", "typecheck", "api-test"]`. Read `passed` and each scenario's `log_tail` in the result. The session needs `env.try` and `repo:<alias>` in its ceiling; ask the supervisor if it lacks them.
+- **Targeted tests.** Callers send no command, so a session cannot pass a pytest path. For a narrower run, the host owner adds a scenario to the catalog with a fixed argv (for example `["/usr/bin/make", "kernel-test"]`). Run the full `api-test` before review.
+- **Cost.** Results are cached for 24 hours per commit and scenario set; commit again, or use `rerun: true` (3 a day), to run anew.
+- **Locally.** Where `uv` is installable (a workstation, not a confined session), `make lint`, `make typecheck` and `make api-test` run the same checks.
+- **Not available.** If the call answers `env_toolchain_missing` or `env_tier_unavailable`, the host has not completed [step 10](../deploy/small-host/README.md) (`make try-toolchain`); report it to the host owner, and state in the review that checks were not run.
+
 ## Retention and deletion
 
 Task, object, event, provenance, budget, receipt and idempotency history is retained for the lifetime of a store. Host payload cleanup is recoverable and retains reconciliation tombstones. Partial history or tombstone garbage collection is unsupported because deleting it could destroy evidence or permit duplicate effects.
