@@ -35,6 +35,7 @@ What each command does:
 """
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -78,6 +79,25 @@ class HostError(ValueError):
     """The host file is missing something the kit needs."""
 
 
+def _schema() -> Any:
+    """The sibling schema module, loaded by path: the kit is run as a script and loaded by
+    path, so it cannot rely on its directory being importable."""
+    spec = importlib.util.spec_from_file_location(
+        "teamschema", Path(__file__).with_name("teamschema.py")
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules.setdefault("teamschema", module)
+    spec.loader.exec_module(module)
+    return sys.modules["teamschema"]
+
+
+def team_problems(host: dict[str, Any]) -> list[str]:
+    """Plan-time findings about the host file's `team` section: triggers lacking a grant."""
+    problems: list[str] = _schema().trigger_problems(host)
+    return problems
+
+
 def load_host(path: Path) -> dict[str, Any]:
     document = json.loads(path.read_text())
     if not isinstance(document, dict):
@@ -99,6 +119,10 @@ def load_host(path: Path) -> dict[str, Any]:
         document["product"]["goals_file"] = str(
             goals if goals.is_absolute() else path.parent / goals
         )
+    try:
+        _schema().validate(document)
+    except ValueError as error:
+        raise HostError(str(error)) from error
     product(document)
     return document
 

@@ -1449,6 +1449,9 @@ def plan(ctx: Context, out: Callable[[str], None] = print) -> bool:
     """Prints each step's check and verify result, done or not. Changes nothing. True when
     every step is done."""
     converged = True
+    for problem in ctx.kit.team_problems(ctx.host):
+        out(f"team: {problem}")
+        converged = False
     for number, step in enumerate(steps(), 1):
         done = step.planned_check(ctx)
         verdict = step.planned_verify(ctx)
