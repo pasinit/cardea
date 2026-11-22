@@ -117,7 +117,7 @@ def server(backend: TeamsBackend, port: int = DEFAULT_PORT, bind: str = base.LOO
 
 
 def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--teams", type=Path, help="the teams file, naming one host file each")
     source.add_argument("--fixtures", nargs="+", metavar="NAME=FILE", help="recorded overviews")
