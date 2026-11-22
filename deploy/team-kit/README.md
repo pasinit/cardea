@@ -29,6 +29,8 @@ Further host-file fields:
 
 - **Transitions in the instructions:** every role step that moves an item names the exact call, for example `records.transition with collection "work" and transition "triage"`. The names come from the work collection's own table (`work_transitions`), so renaming or removing a transition fails the render. The team lead is also told that a field, priority or label saying "ready" moves nothing.
 
+- **`team`** (optional; schema in `teamschema.py`): roles as configuration. `team.roles.<name>` takes `count` (default 1), `instructions`, `grants`, `triggers` (`schedule.cron` or `event.types` with optional `filters`) and `budget` (`runs`, `usd`); `team.budget` caps the roles' sum. `load_host` refuses an unknown or inconsistent field with a message naming it (`team.roles.<name>.count`). The plan's `team-host` step reports a declared event trigger whose role lacks the grant to read it (`mailbox.inbox` for mail, `record:<collection>/read` for record events). The schema is not yet used to render the group; the fixed roles above still are.
+
 How to run it day to day is in the [runbook](../../docs/runbooks/dev-team.md).
 
 ## Repositories without host rules

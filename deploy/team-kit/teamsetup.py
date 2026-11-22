@@ -514,6 +514,7 @@ class TeamHost(Step):
         for path in ctx.kit.placeholders(ctx.host):
             found.append(f"placeholder value at {path}")
         found.extend(ctx.kit.wall_problems(ctx.host))
+        found.extend(ctx.kit.team_problems(ctx.host))
         return found
 
     def is_done(self, ctx: Context) -> bool:

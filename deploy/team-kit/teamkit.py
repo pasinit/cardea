@@ -35,6 +35,7 @@ What each command does:
 """
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -100,7 +101,34 @@ def load_host(path: Path) -> dict[str, Any]:
             goals if goals.is_absolute() else path.parent / goals
         )
     product(document)
+    team_roles(document)
     return document
+
+
+def team_schema() -> Any:
+    path = Path(__file__).with_name("teamschema.py")
+    spec = importlib.util.spec_from_file_location("teamschema", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def team_roles(host: dict[str, Any]) -> dict[str, dict[str, Any]] | None:
+    """The host file's `team` section, validated (teamschema.py); None when it has none."""
+    if "team" not in host:
+        return None
+    schema = team_schema()
+    try:
+        return schema.parse(host["team"])  # type: ignore[no-any-return]
+    except schema.SchemaError as error:
+        raise HostError(str(error)) from None
+
+
+def team_problems(host: dict[str, Any]) -> list[str]:
+    """Plan-time: triggers declared in `team` whose role lacks the grant to read the event."""
+    roles = team_roles(host)
+    return [] if roles is None else list(team_schema().grant_problems(roles))
 
 
 def _text(value: object, name: str) -> str:
