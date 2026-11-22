@@ -14,6 +14,7 @@ Inbound mail is polled, never pushed: the host needs no public endpoint or webho
 official Python SDK is not used: see ADR-039 for why.
 """
 
+import logging
 from datetime import datetime
 from email.utils import parseaddr
 from typing import Any
@@ -25,6 +26,12 @@ from cardea_email_ops.authentication import from_agentmail
 from cardea_email_ops.config import AgentMailTransport, CredentialUnavailable, secret
 from cardea_email_ops.transport import Inbound, Outgoing, ProviderError, Refused, Sent, Thread
 
+logger = logging.getLogger("cardea.email_ops.agentmail")
+
+SEND = "POST /inboxes/{inbox_id}/messages/send"
+LIST = "GET /inboxes/{inbox_id}/messages"
+MESSAGE = "GET /inboxes/{inbox_id}/messages/{message_id}"
+THREAD = "GET /inboxes/{inbox_id}/threads/{thread_id}"
 MAX_PAGES = 5
 # Responses that mean the request was refused before anything was sent. 409 is not one:
 # it means this idempotency key already sent a different request, so an earlier attempt
@@ -32,11 +39,18 @@ MAX_PAGES = 5
 DEFINITE = {400, 401, 403, 404, 413, 422, 429}
 
 
-def _checked(response: httpx.Response) -> dict[str, Any]:
-    """The JSON body of a successful response; otherwise only the status is reported (the
-    URL names the inbox, and the provider's message may echo the request)."""
+def _failure(response: httpx.Response, route: str) -> str:
+    """Log a failed call and return its message. Only the status and the route template
+    are reported: the URL names the inbox and the provider's message may echo the request."""
+    message = f"AgentMail answered HTTP {response.status_code} for {route}"
+    logger.warning(message)
+    return message
+
+
+def _checked(response: httpx.Response, route: str) -> dict[str, Any]:
+    """The JSON body of a successful response; a failed one is logged and raised."""
     if response.status_code >= 400:
-        raise ProviderError(f"AgentMail answered HTTP {response.status_code}")
+        raise ProviderError(_failure(response, route))
     try:
         data = response.json()
     except ValueError:
@@ -89,9 +103,8 @@ class AgentMail:
                 # No connection, so no request: nothing was sent.
                 raise Refused("AgentMail is unreachable", "provider_unreachable") from None
         if response.status_code in DEFINITE:
-            # The provider's own code only; its message may echo the request.
-            raise Refused(f"AgentMail refused the send (HTTP {response.status_code})")
-        data = _checked(response)
+            raise Refused(_failure(response, SEND))
+        data = _checked(response, SEND)
         return Sent(thread_id=str(data["thread_id"]), message_id=str(data["message_id"]))
 
     async def find_sent(self, effect_key: str) -> Sent | None:
@@ -100,7 +113,7 @@ class AgentMail:
                 f"/inboxes/{self.inbox}/messages",
                 params={"labels": label(effect_key), "limit": 1},
             )
-        found = _checked(response).get("messages") or []
+        found = _checked(response, LIST).get("messages") or []
         if not found:
             return None
         return Sent(thread_id=str(found[0]["thread_id"]), message_id=str(found[0]["message_id"]))
@@ -123,7 +136,8 @@ class AgentMail:
                 }
                 if token:
                     params["page_token"] = token
-                page = _checked(await client.get(f"/inboxes/{self.inbox}/messages", params=params))
+                response = await client.get(f"/inboxes/{self.inbox}/messages", params=params)
+                page = _checked(response, LIST)
                 items.extend(page.get("messages") or [])
                 token = page.get("next_page_token")
                 if not token:
@@ -139,7 +153,7 @@ class AgentMail:
                     response = await client.get(
                         f"/inboxes/{self.inbox}/messages/{quote(str(item['message_id']), safe='')}"
                     )
-                    item = {**item, **_checked(response)}
+                    item = {**item, **_checked(response, MESSAGE)}
                     text = str(item.get("extracted_text") or item.get("text") or "")
                     authenticated = from_agentmail(item)
                 else:
@@ -172,7 +186,7 @@ class AgentMail:
                     f"/inboxes/{self.inbox}/threads/{quote(thread.thread_id, safe='')}",
                     params=params,
                 )
-                page = _checked(response)
+                page = _checked(response, THREAD)
                 messages.extend(page.get("messages") or [])
                 token = page.get("next_page_token")
                 if not token:

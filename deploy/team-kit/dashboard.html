@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Team dashboard</title>
+<style>
+  body { font: 14px/1.4 system-ui, sans-serif; margin: 1.5rem; color: #1b1f24; background: #fafafa; }
+  h1 { font-size: 1.3rem; margin: 0 0 .25rem; }
+  h2 { font-size: 1rem; margin: 1.5rem 0 .4rem; border-bottom: 1px solid #d0d7de; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: .2rem .6rem .2rem 0; vertical-align: top; }
+  th { font-weight: 600; color: #57606a; }
+  .muted { color: #57606a; }
+  .bad { color: #b42318; }
+  .reply { margin: .3rem 0; padding-left: .6rem; border-left: 3px solid #d0d7de; white-space: pre-wrap; }
+  .ok { color: #1a7f37; }
+  #error { color: #b42318; }
+  form { display: grid; gap: .5rem; max-width: 40rem; }
+  textarea { min-height: 5rem; font: inherit; }
+</style>
+</head>
+<body>
+<h1 id="title">Team dashboard</h1>
+<p id="summary" class="muted">Loading…</p>
+<p id="error" role="alert"></p>
+
+<section id="message-box">
+  <h2>Message a role</h2>
+  <form id="message-form">
+    <label>Role <select id="role" required></select></label>
+    <label>Message <textarea id="text" maxlength="4000" required></textarea></label>
+    <button id="send" type="submit">Send</button>
+    <span id="sent" role="status"></span>
+  </form>
+</section>
+
+<section id="members"><h2>Members</h2><div class="body"></div></section>
+<section id="collections"><h2>Work</h2><div class="body"></div></section>
+<section id="mailbox"><h2>Mail</h2><div class="body"></div></section>
+<section id="approvals"><h2>Approvals</h2><div class="body"></div></section>
+<section id="spend"><h2>Spend and run ceilings</h2><div class="body"></div></section>
+<section id="journal"><h2>Latest events</h2><div class="body"></div></section>
+
+<script src="/dashboard.js"></script>
+</body>
+</html>

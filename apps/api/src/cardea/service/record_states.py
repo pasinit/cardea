@@ -228,6 +228,7 @@ _ACTIONS = {
     "records.update": "update",
     "records.claim": "claim",
     "records.release": "claim",
+    "records.force_release": "force_release",
 }
 
 

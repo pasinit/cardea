@@ -16,13 +16,20 @@ from itertools import count
 from pathlib import Path
 from typing import Any, cast
 
+import httpx
 import pytest
 from cardea_email_ops import Email, authentication, descriptors, handlers
 from cardea_email_ops.agentmail import AgentMail
 from cardea_email_ops.config import EmailConfig
 from cardea_email_ops.fake import FakeAgentMail, FakeImap, FakeSmtp
 from cardea_email_ops.smtp_imap import SmtpImap
-from cardea_email_ops.transport import Outgoing, ReconcileUnavailable, Refused, Thread
+from cardea_email_ops.transport import (
+    Outgoing,
+    ProviderError,
+    ReconcileUnavailable,
+    Refused,
+    Thread,
+)
 from mcp.client.session import ClientSession
 from test_agent_runs import FakeSession, call
 from test_vcs_ops import DENIED, Auth, FakeClient, gate_config
@@ -1085,3 +1092,80 @@ def test_imap_inbound_mail_past_the_rate_limit_is_rejected(
         imap.deliver(new_mail(CLIENT, f"Message {n}"))
     tally = replies.ReplyPoller(imap_kernel).poll(force=True)
     assert tally.delivered == 2 and tally.dropped == {"rate_limited": 1}
+
+
+# AgentMail failures are logged and raised by status and route template only
+
+ROUTES = "cardea.email_ops.agentmail"
+LEAK = "leak-" + INBOX_ID
+
+
+def failing(email: Email, status: int, only: str = "") -> AgentMail:
+    """An adapter whose provider answers `status` (to paths ending `only`), echoing secrets."""
+    transport = email.transport
+    assert isinstance(transport, AgentMail)
+    hit = {"message": f"{API_KEY} {LEAK}", "to": CLIENT}
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith(only):
+            return httpx.Response(status, json=hit)
+        item = {"message_id": "m-1", "thread_id": "t-1", "from": CLIENT, "labels": ["received"]}
+        return httpx.Response(200, json={"messages": [item]})
+
+    return AgentMail(transport.config, httpx.MockTransport(answer))
+
+
+def assert_reported(caplog: pytest.LogCaptureFixture, error: Exception, expected: str) -> None:
+    assert str(error) == expected
+    (record,) = [r for r in caplog.records if r.name == ROUTES]
+    assert record.levelname == "WARNING" and record.getMessage() == expected
+    for secret in (API_KEY, INBOX_ID, LEAK, CLIENT, "m-1", "t-1"):
+        assert secret not in caplog.text and secret not in str(error)
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 404, 413, 422, 429, 409, 500, 503])
+def test_a_failed_send_reports_only_the_status_and_route(
+    email: Email, caplog: pytest.LogCaptureFixture, status: int
+) -> None:
+    adapter = failing(email, status)
+    expected = f"AgentMail answered HTTP {status} for POST /inboxes/{{inbox_id}}/messages/send"
+    definite = status in {400, 401, 403, 404, 413, 422, 429}
+    expect = Refused if definite else ProviderError
+    with caplog.at_level("WARNING", ROUTES), pytest.raises(expect) as e:
+        asyncio.run(adapter.send(Outgoing(CLIENT, "s", "b", "a" * 64)))
+    assert_reported(caplog, e.value, expected)
+
+
+def test_a_failed_read_reports_only_the_status_and_route(
+    email: Email, caplog: pytest.LogCaptureFixture
+) -> None:
+    since = datetime.now(UTC) - timedelta(minutes=1)
+    thread = Thread("t-1", "m-0", since)
+    reads: list[tuple[str, str, Any]] = [
+        ("/messages", "GET /inboxes/{inbox_id}/messages", lambda a: a.find_sent("k")),
+        ("/messages", "GET /inboxes/{inbox_id}/messages", lambda a: poll(a, since)),
+        ("/m-1", "GET /inboxes/{inbox_id}/messages/{message_id}", lambda a: poll(a, since)),
+        ("/t-1", "GET /inboxes/{inbox_id}/threads/{thread_id}", lambda a: a.poll_replies(thread)),
+    ]
+    for only, route, read in reads:
+        caplog.clear()
+        with caplog.at_level("WARNING", ROUTES), pytest.raises(ProviderError) as e:
+            asyncio.run(read(failing(email, 500, only)))
+        assert_reported(caplog, e.value, f"AgentMail answered HTTP 500 for {route}")
+
+
+def poll(adapter: AgentMail, since: datetime) -> Any:
+    return adapter.poll_inbound((CLIENT,), since, frozenset())
+
+
+def test_a_successful_call_logs_nothing(
+    email: Email, provider: FakeAgentMail, caplog: pytest.LogCaptureFixture
+) -> None:
+    transport = email.transport
+    assert isinstance(transport, AgentMail)
+    with caplog.at_level("DEBUG", ROUTES):
+        sent = asyncio.run(transport.send(Outgoing(CLIENT, "s", "b", "b" * 64)))
+        asyncio.run(transport.find_sent("b" * 64))
+        thread = Thread(sent.thread_id, sent.message_id, datetime.now(UTC))
+        asyncio.run(transport.poll_replies(thread))
+    assert not [r for r in caplog.records if r.name == ROUTES]

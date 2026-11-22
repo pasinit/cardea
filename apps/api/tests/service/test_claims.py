@@ -34,7 +34,8 @@ def kernel(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Kernel]:
     db = Database(tmp_path / "data")
     db.migrate()
     registry = Registry((), {})
-    provision(db, records_test.document((*records_test.SUPERVISOR, "record:items/claim")), registry)
+    rights = (*records_test.SUPERVISOR, "record:items/claim", "record:items/force_release")
+    provision(db, records_test.document(rights), registry)
     instance = Kernel(db, cast(Authentication, Auth()), operations=registry)
     try:
         yield instance
@@ -219,6 +220,122 @@ def test_an_unswept_lapsed_claim_can_be_taken(items: Kernel) -> None:
     assert output["claim"]["claim_epoch"] == 3
     kinds = [e[0] for e in events(items, record["record_id"])]
     assert kinds[-2:] == ["claim_expired", "claimed"]
+
+
+# Supervisor release (force_release)
+
+FORCE_GRANTS = (*CLAIM_GRANTS, "record:items/force_release")
+
+
+def force(kernel: Kernel, record: dict[str, Any], key: str = "k1", agent: str = "a1") -> Any:
+    return run(
+        kernel,
+        "records.force_release",
+        {
+            "collection": "items",
+            "record_id": record["record_id"],
+            "reason": "holder unresponsive",
+            "client_key": key,
+        },
+        agent=agent,
+        grants=FORCE_GRANTS,
+    )
+
+
+def test_force_release_by_the_supervisor_frees_the_record_and_fences_the_holder(
+    items: Kernel,
+) -> None:
+    record = created(items)
+    claim(items, record)
+    state, output, _ = force(items, record)
+    assert state == "succeeded" and output["record"]["holder"] is None
+    stored = row(items, record["record_id"])
+    assert stored["holder"] is None and stored["lease_expires_at"] is None
+    assert stored["claim_epoch"] == 2
+    # The old holder's later writes are rejected by epoch.
+    stale = call(
+        items, "records.update", record, expected_version=3, claim_epoch=1, data={"title": "x"}
+    )
+    assert stale[2] == "claim_lost"
+    assert call(items, "records.release", record, claim_epoch=1)[2] == "claim_lost"
+    # Another role claims it at the new epoch.
+    _, taken, _ = claim(items, record, agent="a2")
+    assert taken["claim"]["claim_epoch"] == 3 and taken["record"]["holder"] == "a2"
+
+
+def test_force_release_writes_an_audit_entry_with_the_reason(items: Kernel) -> None:
+    record = created(items)
+    claim(items, record)
+    force(items, record)
+    kind, _, actor, receipt = events(items, record["record_id"])[-1]
+    assert (kind, actor) == ("released", "supervisor") and receipt
+    with items.database.read() as conn:
+        detail = json.loads(
+            conn.exec_driver_sql(
+                "SELECT detail_json FROM record_events WHERE receipt_id=?", (receipt,)
+            ).scalar_one()
+        )
+    assert detail == {
+        "forced": True,
+        "reason": "holder unresponsive",
+        "previous_holder": "a1",
+        "previous_epoch": 1,
+    }
+    assert detail.items() <= journal(items, "cardea.record.released")[-1]["data"].items()
+
+
+def test_force_release_refuses_a_caller_who_is_not_the_supervisor(items: Kernel) -> None:
+    record = created(items)
+    claim(items, record)
+    # Without the grant, the supervisor is refused.
+    without = run(
+        items,
+        "records.force_release",
+        {
+            "collection": "items",
+            "record_id": record["record_id"],
+            "reason": "x",
+            "client_key": "k9",
+        },
+        agent="a2",
+        grants=CLAIM_GRANTS,
+    )
+    assert without[2] == "task_grant_denied"
+    # Even holding the grant, a task submitted by someone who is not the collection's
+    # supervisor is refused.
+    with items.database.engine.begin() as conn:
+        spec = json.loads(conn.exec_driver_sql("SELECT spec_json FROM collections").scalar_one())
+        spec["supervisor"] = "outsider"
+        conn.exec_driver_sql(
+            "UPDATE collections SET supervisor_id='outsider', spec_json=?", (json.dumps(spec),)
+        )
+    assert force(items, record, agent="a2")[2] == "collection_supervisor"
+    stored = row(items, record["record_id"])
+    assert stored["holder"] == "a1" and stored["claim_epoch"] == 1
+
+
+def test_force_release_checks_the_supervisor_authority_live(items: Kernel) -> None:
+    record = created(items)
+    claim(items, record)
+    with items.database.engine.begin() as conn:
+        conn.exec_driver_sql(
+            "DELETE FROM policies WHERE principal_id='supervisor' AND operation='groups.manage'"
+        )
+    assert force(items, record)[0] == "failed"
+    assert row(items, record["record_id"])["holder"] == "a1"
+
+
+def test_a_double_force_release_is_a_no_op(items: Kernel) -> None:
+    record = created(items)
+    claim(items, record)
+    first = force(items, record)
+    again = force(items, record)
+    assert again[0] == "succeeded" and again[1] == first[1]
+    # A new key on a record nobody holds changes nothing either.
+    assert force(items, record, key="k2")[0] == "succeeded"
+    assert row(items, record["record_id"])["claim_epoch"] == 2
+    kinds = [e[0] for e in events(items, record["record_id"])]
+    assert kinds == ["created", "claimed", "released"]
 
 
 # Renewal only on evidence the holder is alive
