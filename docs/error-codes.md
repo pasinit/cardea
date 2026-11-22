@@ -265,6 +265,7 @@ used by the examples.
 | `member_draining` | A draining group member takes no new claims | `cardea.service.records` |
 | `merge_already_merged` | The pull request is already merged | `cardea_vcs_ops.ops` |
 | `merge_approval_stale` | An allowed reviewer approved an earlier head; a new approval is needed | `cardea_vcs_ops.ops` |
+| `merge_behind_base` | The pull request's head does not contain the latest {…}, and this repository requires it to be up to date before merging. Merge the latest {…} into your branch (no rebase, no force-push), push it, wait for every check to pass at the new head, get a new approval of that head, then call vcs.merge again. | `cardea_vcs_ops.ops` |
 | `merge_checks_failed` | Checks did not succeed: {…} | `cardea_vcs_ops.ops` |
 | `merge_checks_missing` | No check ran on the head | `cardea_vcs_ops.ops` |
 | `merge_checks_pending` | Checks still running: {…} | `cardea_vcs_ops.ops` |

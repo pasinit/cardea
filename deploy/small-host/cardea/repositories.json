@@ -37,6 +37,27 @@
           "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
         },
         "scenarios": {
+          "lint": {
+            "argv": [
+              "/usr/bin/make",
+              "lint"
+            ],
+            "timeout_seconds": 600
+          },
+          "typecheck": {
+            "argv": [
+              "/usr/bin/make",
+              "typecheck"
+            ],
+            "timeout_seconds": 600
+          },
+          "api-test": {
+            "argv": [
+              "/usr/bin/make",
+              "api-test"
+            ],
+            "timeout_seconds": 900
+          },
           "try": {
             "argv": [
               "/usr/bin/make",

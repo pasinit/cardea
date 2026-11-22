@@ -341,6 +341,12 @@ def test_scrub_hides_credential_shapes() -> None:
     assert cleaned.count("[redacted]") == 3 and cleaned.endswith(" ok")
 
 
+def test_scrub_keeps_task_ids() -> None:
+    text = '"task_id": "task-' + "a1" * 16 + '"'
+    assert scrub(text) == text
+    assert scrub("key sk-" + "x" * 20) == "key [redacted]"
+
+
 def test_the_descriptor_declares_the_run_window() -> None:
     (descriptor,) = descriptors()
     window = descriptor.cardea.run_window

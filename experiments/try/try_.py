@@ -159,6 +159,7 @@ def run(say: Callable[[str], None] = print) -> dict[str, Any]:
     # macOS limits Unix socket paths to 104 bytes; keep the store under /tmp.
     with tempfile.TemporaryDirectory(prefix="cardea-try-", dir="/tmp") as temp:
         trial = Trial(Path(temp))
+        say("Note: the 'UNENFORCED development identity' notice is expected in this demo.")
         try:
             started = time.monotonic()
             first = trial.start()

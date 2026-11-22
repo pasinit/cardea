@@ -920,3 +920,37 @@ Decided by the lead on 2026-11-09 in the review of slice 2 (claims); the owner m
 - **Permission refusals name what refused.** A denied transition's message names the grant it lacked, where the live ceiling lacked it (`task`, `platform`, `supervisor_allow`, `supervisor_delegate`) and the caller, with its group pool when it is a member: `Operation is outside explicit task grants: record:work/triage is not held by the task; caller a1 (pool team.builders)`. The code is unchanged.
 - **Guard refusals name the guard and the caller.** `guard_refused` names the transition (or collection action) whose guard refused, the caller and its pool, and the guard expression (first 120 characters): `Transition triage guard refused this call for a1 (pool team.builders): args.priority > 0`. A caller holding the grant already holds the right to the table, so the expression discloses nothing new.
 - **Tool text.** The `records.transition` description tells agents to name a transition of the table, not the target state.
+
+## Amendment 2026-11-22: member placeholders in run instructions, and developers that keep working
+
+- **Finding.** A team-kit dev team with three developers and several ready items wasted runs:
+  - every developer woke on the same `triage` event and tried `start` on the same first item, and the losers ended their runs while other items were ready;
+  - a developer that merged its approved item ended its run instead of starting a ready one;
+  - a developer held an approved item whose pull request another member had opened, so `vcs.merge` refused with `merge_not_opener`. The cause: a claim that lapses (decision 2.4, the 2026-11-17 amendment) returns the item to `start`'s `on_claim_expiry`, `ready`, whatever its state, and `data.change` stays. The next developer starts it at a new epoch. If it pushes to the earlier branch, `vcs.open_change` returns the existing pull request, whose oldest receipt names the first developer as opener.
+- **Decision: placeholders.** In a pool's `run.instructions`, `$member`, `$pool` and `$group` stand for the member's principal ID, pool address and group, as they already do in trigger `subjects`. The kernel substitutes them when it compiles each member's trigger. Instructions without them compile unchanged, with the same trigger digests.
+- **Decision: the team kit's developers.**
+  - They work until nothing is left in one run: merge, rework, then take ready items, and go back to taking an item after each merge or submit.
+  - Developer `n` tries the `k` ready items from position `n mod k`, in `records.query` order. It moves past a start lost to another developer, and gives up after three refusals, when none is ready or on `claim_limit`.
+  - `max_per_holder` is 2, so one item can wait in review while its developer works on the next.
+  - Each developer pushes to its own branch per claim, `agent/<group>/<record_id>-<claim_epoch>`, and opens its own pull request. It may start its coding session from the earlier holder's branch.
+- **`vcs.merge` keeps its opener rule.** Letting the claim holder merge another member's pull request would need `vcs.merge` to read record claims, which the vcs package cannot see, and it would weaken an accountability check for a case the kit can avoid. The PE's approval at the reviewed head is still required, unchanged. A developer refused with `merge_not_opener` tells the team lead.
+- **Open.** A lapsed claim on an `in_review` or `approved` item returns it to `ready`, so the review is lost. Whether `on_claim_expiry` should apply only from the acquiring transition's own target state is a kernel question for a later change. *Settled by the next amendment.*
+
+## Amendment 2026-11-22: a lapsed claim keeps the state that later transitions reached
+
+- **Finding.** A claim that lapsed set the record to the acquiring transition's `on_claim_expiry`, whatever its state. In the team kit, an item whose developer lost its claim while the item was `in_review` or `approved` went back to `ready`, and the review and approval were lost.
+- **Decision.** `on_claim_expiry` undoes the acquisition, so it applies only while the record is still in the acquiring transition's target state (`to`). Once later transitions have moved the record on, a lapse keeps its state. As before, the holder is cleared and the epoch incremented, so the old holder is fenced (`claim_lost`). The `claim_expired` event's `from` and `to` are then equal.
+  - **Why `to` and not a list of states:** being in the acquiring transition's target means no later transition recorded any work, so going back loses nothing. Any other state is the result of a transition (a submit, a review, an approval) that the table's author meant to keep. The rule needs no new field and holds for every table.
+  - A record that came back to the target state later, for example `in_progress` again after `request_changes`, counts as in it, and a lapse there returns it to `on_claim_expiry` as before. Nobody is working on it.
+  - Both expiry paths, the sweep and the inline expiry a transition performs on a lapsed claim, share this rule. So do drain releases (`member_removed`).
+- **The team kit.**
+  - `start` now also leaves `in_progress`. If the PE requests changes on an item no one holds, the item is in progress with no holder, and any developer may start it at a new epoch.
+  - An approved item no one holds is merged by the developer that opened its pull request. `merge` releases a claim no one holds, and its `vcs.merge` receipt still has to come from the opener. Other developers' `vcs.merge` calls are refused with `merge_not_opener`, and their instructions say to leave such an item to its opener. If that developer is gone, the team lead cancels the item and files it again.
+  - The PE's approval at the reviewed head is still required.
+- **No migration.** The rule reads the stored spec and `records.claim_transition`, which `m13_state_machines` already added. Stored data and its shape are unchanged. Records already sent back to `ready` under the old rule stay there.
+- **Tests.**
+  - `test_state_machines.py`: a lapse after `submit` keeps `review` with no holder, and a guard-allowed `approve` then closes it. The existing test still sends a lapse in the acquiring transition's own target state back to `on_claim_expiry`.
+  - `test_team_kit.py`, three cases:
+    - a lapse in progress returns the item to `ready`;
+    - a lapse in review keeps `in_review` with its pull request; changes requested leave it in progress with no holder; another developer starts it, opens its own pull request, is approved and merges it;
+    - a lapse when approved keeps the approval; another developer's merge is refused with `merge_not_opener`, and the opener merges it without holding it.
