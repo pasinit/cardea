@@ -6,7 +6,7 @@ This runbook covers how to start, watch, pause, resume and stop the dev team fro
 |---|---|---|---|
 | Product manager | `pm` | its schedule, twice a day; mail | reads main's head (`vcs.read_branch`), tries it with `env.try` and files failures as work items |
 | Team lead | `tl` | its daily schedule; a new work item; mail | plans, splits and cancels work, and triages the next item for the developers |
-| Developers | `dev` (2 by default) | an item made `ready`; an item `approved`; `request_changes`; mail; an optional schedule (`schedules.dev`) | claim a ready item, change the code with `code.session`, push, open a pull request, submit; merge after approval; then take the next ready item in the same run |
+| Developers | `dev` (2 by default) | an item made `ready`; an item `approved`; `request_changes`; mail; an optional schedule (`schedules.dev`) | claim a ready item, change the code with `code.session`, push, open a pull request, submit (with `env_try.dev_scenarios`, such as `["check"]`, only after `env.try` passes on the pushed head); merge after approval; then take the next ready item in the same run |
 | Principal engineer | `pe` | an item entering `in_review`; mail; an optional schedule (`schedules.pe`) | reviews the pull request and approves it, or requests changes |
 
 Every trigger refuses double work:
