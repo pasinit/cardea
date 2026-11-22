@@ -224,12 +224,14 @@ def developer_instructions(group: str) -> str:
         "You are a developer, member $member; your number n is the last part of that ID. "
         "Work in this run until nothing is left for you, in this order. "
         "(1) If you hold an approved item, merge its change with vcs.merge, then move the "
-        f"item to done with {call('merge')} (with your claim_epoch). Do the same for an approved item no one holds "
+        f"item to done with {call('merge')} (with your claim_epoch). "
+        "Do the same for an approved item no one holds "
         "(its claim lapsed after the review): vcs.merge refuses with merge_not_opener "
         "unless you opened its pull request, and then the item is its opener's to merge, "
         "so leave it. "
         "(2) If you hold an item with changes requested, read the review, change the code "
-        f"with a coding session, push, and submit again with {call('submit')}. If you hold an item in progress "
+        f"with a coding session, push, and submit again with {call('submit')}. "
+        "If you hold an item in progress "
         "that an earlier run did not submit, finish it as in (4). "
         "(3) Then take a ready item, unless you already hold "
         f"{MAX_ITEMS_PER_DEVELOPER} items: list the ready items with records.query (state "
@@ -690,7 +692,8 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
                 "correct, tested and in scope; otherwise request changes with concrete reasons "
                 f"(vcs.review REQUEST_CHANGES, then {call('request_changes')}, which "
                 "hands the item back to its developer). Each transition cites your review, so "
-                "make the review first; a review alone does not move the item. Never request changes for lack of evidence you did not "
+                "make the review first; a review alone does not move the item. "
+                "Never request changes for lack of evidence you did not "
                 "read. Record architecture decisions.",
                 [
                     "records.query",
