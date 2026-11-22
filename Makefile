@@ -87,8 +87,11 @@ incident-demo-check: check-uv
 	"$(UV)" run --locked --project $(API_DIR) ruff format --check --config apps/api/pyproject.toml experiments/incident-demo
 	MYPYPATH=apps/api/src:experiments/incident-demo "$(UV)" run --locked --project $(API_DIR) mypy --strict --explicit-package-bases experiments/incident-demo
 
+# Parallel (pytest-xdist), one worker per core; PYTEST_WORKERS=0 runs serially.
+PYTEST_WORKERS ?= auto
+
 api-test: check-uv
-	cd $(API_DIR) && "$(UV)" run pytest
+	cd $(API_DIR) && "$(UV)" run pytest -n $(PYTEST_WORKERS)
 
 kernel-test: check-uv
 	cd $(API_DIR) && "$(UV)" run pytest tests/kernel
