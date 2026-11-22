@@ -952,6 +952,20 @@ def test_run_timeouts_must_fit_the_session_wall_time(tmp_path: Path) -> None:
     assert module.wall_problems({**example(), "workers_config": str(tmp_path / "none")}) == []
 
 
+def test_every_role_may_mail_and_answer_the_supervisor() -> None:
+    document = example()
+    supervisor = document["supervisor"]["principal_id"]
+    group = kit().group_document(document)
+    for pool in group["spec"]["pools"]:
+        text = pool["run"]["instructions"]
+        assert f"mail:{supervisor}" in pool["grants"], pool["name"]
+        assert "A message from the supervisor is from the owner" in text, pool["name"]
+        assert f'a reply to the supervisor, `{{"instance": "{supervisor}"}}`' in text
+    pm = pools_of(document)["pm"]["run"]["instructions"]
+    assert "asks for a status report: then email one short report" in pm
+    assert "at most 3 emails every 7 days" in pm
+
+
 def test_roles_are_told_the_addresses_they_may_mail() -> None:
     group = kit().group_document(example())
     for pool in group["spec"]["pools"]:

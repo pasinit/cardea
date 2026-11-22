@@ -1,0 +1,53 @@
+{
+  "valid": {
+    "spend_limits": {
+      "team_usd": 25.5,
+      "per_run_usd": 2,
+      "roles_usd": {
+        "dev": 10
+      }
+    }
+  },
+  "invalid": [
+    {
+      "settings": {
+        "spend_limits": {}
+      },
+      "field": "spend_limits"
+    },
+    {
+      "settings": {
+        "spend_limits": {
+          "team_usd": 0
+        }
+      },
+      "field": "spend_limits.team_usd"
+    },
+    {
+      "settings": {
+        "spend_limits": {
+          "per_run_usd": -1
+        }
+      },
+      "field": "spend_limits.per_run_usd"
+    },
+    {
+      "settings": {
+        "spend_limits": {
+          "per_run_usd": "1"
+        }
+      },
+      "field": "spend_limits.per_run_usd"
+    },
+    {
+      "settings": {
+        "spend_limits": {
+          "roles_usd": {
+            "tl": false
+          }
+        }
+      },
+      "field": "spend_limits.roles_usd.tl"
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "valid": {
+    "developers": 4
+  },
+  "invalid": [
+    {
+      "settings": {
+        "developers": 0
+      },
+      "field": "developers"
+    },
+    {
+      "settings": {
+        "developers": 65
+      },
+      "field": "developers"
+    },
+    {
+      "settings": {
+        "developers": 2.5
+      },
+      "field": "developers"
+    },
+    {
+      "settings": {
+        "developers": true
+      },
+      "field": "developers"
+    }
+  ]
+}
