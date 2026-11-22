@@ -711,12 +711,14 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
                 ("tl", "pe"),
                 context=[{"operation": "records.claimed", "arguments": {"collection": "work"}}],
             ),
+            # Trigger ids are positional, so optional schedules come after the fixed
+            # triggers: adding one must not change an existing trigger's kind.
             "triggers": [
-                *(schedule(c) for c in schedules.get("dev", [])),
                 _state_trigger(state="ready"),
                 _state_trigger(state="approved"),
                 _state_trigger(transition="request_changes"),
                 _mail_trigger(),
+                *(schedule(c) for c in schedules.get("dev", [])),
             ],
             "spend": spend("dev"),
         },
@@ -766,9 +768,9 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
                 devs,
             ),
             "triggers": [
-                *(schedule(c) for c in schedules.get("pe", [])),
                 _state_trigger(state="in_review"),
                 _mail_trigger(),
+                *(schedule(c) for c in schedules.get("pe", [])),
             ],
             "spend": spend("pe"),
         },
