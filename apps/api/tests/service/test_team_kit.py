@@ -1339,3 +1339,34 @@ def test_a_lapse_when_approved_keeps_the_approval_for_the_opener(
     as_member(kernel, session, "dev-team.dev.0", merge(record_id, 42, outcome))
     assert outcome == ["", ""]
     assert item(kernel, record_id)[:2] == ("done", None)
+
+
+def test_instructions_name_only_transitions_the_work_collection_has() -> None:
+    """Agents told a state or a verb wrote fields instead of moving items. Every transition
+    an instruction names exists in the rendered collection, and every role names, as an
+    exact records.transition call, each transition its grants let it run."""
+    import re
+
+    module = kit()
+    document = example()
+    names = {t["name"] for t in module.work_collection(document)["spec"]["transitions"]}
+    assert names == module.TRANSITIONS
+    pools = {p["name"]: p for p in module.group_document(document)["spec"]["pools"]}
+    named_by: dict[str, set[str]] = {}
+    for name, pool in pools.items():
+        text = pool["run"]["instructions"]
+        named = set(
+            re.findall(r'records\.transition with collection "work" and transition "(\w+)"', text)
+        )
+        assert named <= names, name
+        granted = {g.removeprefix("record:work/") for g in pool["grants"]} & names
+        assert granted <= named, (name, granted - named)
+        named_by[name] = named
+    assert named_by["tl"] == {"triage", "cancel"}
+    assert named_by["dev"] == {"start", "submit", "merge"}
+    assert named_by["pe"] == {"approve", "request_changes"}
+    tl = pools["tl"]["run"]["instructions"]
+    assert "not the state's" in tl and "records.update never changes an item's state" in tl
+    assert "records.query (state ready)" in tl
+    with pytest.raises(ValueError, match="no transition 'ready'"):
+        module.call("ready")

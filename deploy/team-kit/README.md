@@ -27,6 +27,8 @@ Further host-file fields:
 
 - **Developers** work in one run until nothing is left for them: merge what is approved, rework what has changes requested, then take ready items. Each holds at most two items (`MAX_ITEMS_PER_DEVELOPER`), tries the ready items from its own offset (its member number modulo their count) and moves past a start another developer won, giving up after three refusals (`MAX_START_REFUSALS`). Each pushes its own branch per claim, `agent/<group>/<record_id>-<claim_epoch>`, so it opened every pull request it merges. An item whose claim lapses in review or approved keeps its state; developers take over in-progress items no one holds, and leave an approved item no one holds to its opener. The instructions name each developer through `$member`, which the kernel fills in per replica.
 
+- **Transitions in the instructions:** every role step that moves an item names the exact call, for example `records.transition with collection "work" and transition "triage"`. The names come from the work collection's own table (`work_transitions`), so renaming or removing a transition fails the render. The team lead is also told that a field, priority or label saying "ready" moves nothing.
+
 How to run it day to day is in the [runbook](../../docs/runbooks/dev-team.md).
 
 ## Repositories without host rules
