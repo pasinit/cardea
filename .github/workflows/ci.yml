@@ -9,12 +9,10 @@ permissions:
   contents: read
 
 jobs:
+  # Linux only: Cardea ships for Debian (ADR-018); a macOS run cost the most time and
+  # covered only local development.
   python:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     # Every step's output is also kept in ci.log; on failure, the last step attaches the
     # failures to the check run, where agents read them (vcs.read_change `checks`).
     defaults:
