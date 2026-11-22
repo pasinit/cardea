@@ -92,6 +92,18 @@ def test_the_triggers_are_the_planned_ones() -> None:
     assert approve["requires_receipt"]["result"] == "result.state == 'APPROVED'"
 
 
+def test_developer_and_pe_schedules_are_opt_in() -> None:
+    def crons(host: dict[str, Any], name: str) -> list[str]:
+        pools = {p["name"]: p for p in kit().group_document(host)["spec"]["pools"]}
+        return [t["schedule"]["cron"] for t in pools[name]["triggers"] if "schedule" in t]
+
+    assert crons(example(), "dev") == [] and crons(example(), "pe") == []
+    host = {**example(), "schedules": {"dev": ["*/20 * * * *"], "pe": ["5-59/20 * * * *"]}}
+    assert crons(host, "dev") == ["*/20 * * * *"]
+    assert crons(host, "pe") == ["5-59/20 * * * *"]
+    assert crons(host, "tl") == ["30 8 * * 1-5"]  # a partial override keeps the defaults
+
+
 def test_provisioning_merges_the_team_into_the_host_document() -> None:
     module = kit()
     base = {

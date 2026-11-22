@@ -63,7 +63,15 @@ SUPERVISOR_RIGHTS = (
     "tasks.submit",
     "events.read",
 )
-DEFAULT_SCHEDULES = {"pm": ["0 9 * * 1-5", "0 15 * * 1-5"], "tl": ["30 8 * * 1-5"]}
+# Developers and the principal engineer wake on record changes and mail. A change whose
+# checks were still running when vcs.merge was refused has no such event when they finish,
+# so a host can add "dev" and "pe" schedules that sweep held work (off by default).
+DEFAULT_SCHEDULES: dict[str, list[str]] = {
+    "pm": ["0 9 * * 1-5", "0 15 * * 1-5"],
+    "tl": ["30 8 * * 1-5"],
+    "dev": [],
+    "pe": [],
+}
 DEFAULT_BUDGETS: dict[str, Any] = {
     "team": {"runs": 30, "usd": 20.0},
     "roles": {"pm": {"runs": 4}, "tl": {"runs": 6}, "dev": {"runs": 14}, "pe": {"runs": 8}},
@@ -704,6 +712,7 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
                 context=[{"operation": "records.claimed", "arguments": {"collection": "work"}}],
             ),
             "triggers": [
+                *(schedule(c) for c in schedules.get("dev", [])),
                 _state_trigger(state="ready"),
                 _state_trigger(state="approved"),
                 _state_trigger(transition="request_changes"),
@@ -756,7 +765,11 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
                 ("tl",),
                 devs,
             ),
-            "triggers": [_state_trigger(state="in_review"), _mail_trigger()],
+            "triggers": [
+                *(schedule(c) for c in schedules.get("pe", [])),
+                _state_trigger(state="in_review"),
+                _mail_trigger(),
+            ],
             "spend": spend("pe"),
         },
     ]
