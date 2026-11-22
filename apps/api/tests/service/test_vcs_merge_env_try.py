@@ -44,7 +44,7 @@ from cardea.service.groups import apply
 from cardea.service.harnesses import IMPLICIT_ID, Catalog, Harnesses, ModelEntry, implicit_entry
 from cardea.service.kernel import Kernel, provision
 from cardea.service.models import AgentGroup
-from cardea.service.operations import OperationContext, Registry
+from cardea.service.operations import EvidenceQuery, OperationContext, Registry
 
 TRIED = (*DEV_OPS, "env.try")
 
@@ -270,3 +270,54 @@ def test_host_check_runs_do_not_stand_in_for_the_required_check(
     number = approved(kernel, session, host, tmp_path)
     host.repositories["acme/cardea"].pass_checks(head_of(host, number), "lint")
     refused(merge(kernel, session, "eng.dev.0", number), "merge_checks_missing")
+
+
+def merge_at(kernel: Kernel, session: FakeSession, member: str, number: int, head_sha: str) -> Any:
+    _, (result,) = act(
+        kernel,
+        session,
+        member,
+        [("vcs-merge", {"repository": "cardea", "number": number, "head_sha": head_sha})],
+    )
+    return result
+
+
+def test_a_pinned_head_finds_the_check_of_that_head(
+    kernel: Kernel,
+    session: FakeSession,
+    host: FakeGitHub,
+    tmp_path: Path,
+) -> None:
+    number = approved(kernel, session, host, tmp_path)
+    head = head_of(host, number)
+    refused(merge_at(kernel, session, "eng.dev.0", number, head), "merge_checks_missing")
+    assert not try_head(kernel, session, "eng.dev.0", head).is_error
+    merged = merge_at(kernel, session, "eng.dev.0", number, head)
+    assert not merged.is_error, text(merged)
+    assert merged.structured_content["check_receipt"]
+
+
+def test_a_pinned_stale_head_is_refused_even_with_its_check(
+    kernel: Kernel,
+    session: FakeSession,
+    host: FakeGitHub,
+    tmp_path: Path,
+) -> None:
+    number = approved(kernel, session, host, tmp_path)
+    old = head_of(host, number)
+    assert not try_head(kernel, session, "eng.dev.0", old).is_error
+    base.push_directly(host, number, tmp_path)
+    refused(merge_at(kernel, session, "eng.dev.0", number, old), "merge_head_moved")
+    assert host.calls.count("merge") == 0
+
+
+def test_only_the_tries_evidence_is_optional() -> None:
+    # Every other evidence query still requires the arguments it matches on.
+    assert EvidenceQuery(name="x", operation="y.z", match={"arguments/a": "/a"}).optional is False
+    queries = {
+        query.name: query.optional
+        for descriptor in in_process_descriptors()
+        for query in descriptor.cardea.evidence or ()
+    }
+    assert queries.pop("tries") is True
+    assert queries and not any(queries.values())
