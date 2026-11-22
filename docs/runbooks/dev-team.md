@@ -6,8 +6,8 @@ This runbook covers how to start, watch, pause, resume and stop the dev team fro
 |---|---|---|---|
 | Product manager | `pm` | its schedule, twice a day; mail | reads main's head (`vcs.read_branch`), tries it with `env.try` and files failures as work items |
 | Team lead | `tl` | its daily schedule; a new work item; mail | plans, splits and cancels work, and triages the next item for the developers |
-| Developers | `dev` (2 by default) | an item made `ready`; an item `approved`; `request_changes`; mail | claim a ready item, change the code with `code.session`, push, open a pull request, submit; merge after approval; then take the next ready item in the same run |
-| Principal engineer | `pe` | an item entering `in_review`; mail | reviews the pull request and approves it, or requests changes |
+| Developers | `dev` (2 by default) | an item made `ready`; an item `approved`; `request_changes`; mail; an optional schedule (`schedules.dev`) | claim a ready item, change the code with `code.session`, push, open a pull request, submit; merge after approval; then take the next ready item in the same run |
+| Principal engineer | `pe` | an item entering `in_review`; mail; an optional schedule (`schedules.pe`) | reviews the pull request and approves it, or requests changes |
 
 Every trigger refuses double work:
 - **Work items.** One claim per item: of the developers an assignment wakes, only one claims the item. Each developer holds at most two, so one can wait in review while it works on the next.
@@ -33,7 +33,7 @@ A transition that needs evidence cites a receipt. `submit` needs the run's `vcs.
   - The `vcs` and `try` profiles (steps 9 and 10) and `code.session` (step 8).
   - The repository alias in the registry, with its `environment` catalog.
   - The repository's rules ready: a supervisor's `vcs.check_repository` reports `ready: true`.
-    - On a host plan without rulesets (the rules API answers 403), the report says `rules_available: false` and the repository is not ready. The host owner can waive the host-side rules for that repository in the registry (`host_rules: "waived"` with a `waiver_reason`). The report is then `ready: true`, with `host_rules: "waived"`, the reason and the `waived_checks`. `teamkit.py status` prints the waiver on every call.
+    - On a host plan without rulesets (the rules API answers 403), the report says `rules_available: false` and the repository is not ready. The host owner can waive the host-side rules for that repository in the registry (`host_rules: "waived"` with a `waiver_reason`). The report is then `ready: true`, with `host_rules: "waived"`, the reason and the `waived_checks`. `teamkit.py status` prints the waiver on every call. With a waiver, also set `"require_up_to_date": true` on the alias, so `vcs.merge` refuses a branch behind the base (`merge_behind_base`); the report's `require_up_to_date` and `status` show whether it is on.
     - Waiving gives up the host's own stop on a direct push to the default branch made with the repository token. Keep that token in the vcs worker's credential only. Cardea's guards, the agent prefix, the content gate and `vcs.merge`'s conditions, are unchanged. See [team kit](../../deploy/team-kit/README.md#repositories-without-host-rules).
 - `cardea-vcs-ops`, `cardea-coding-ops`, `cardea-env-ops` and, if the PM mails, `cardea-email-ops` installed, with their descriptors in `operations_dir`.
 - The private host file, from `deploy/team-kit/team.host.example.json`, at for example `/etc/cardea/team.host.json` (root, `0600`). It holds the namespace, the supervisor's identity, the repository alias, the credential names, the email alias, the model, the budgets and the product's goals (`product.goals` or `product.goals_file`, optional `non_goals`, at most 8 KiB together). Replace the example's placeholder goals: the PM decides features from them.
@@ -97,7 +97,7 @@ Grants expire after `grant_days` (14 by default). Run `provision` again before t
 
 ## Observe
 
-- **Status.** `teamkit.py status` prints each member's active or last run, the work items by state, and each spend account's runs and dollars against its ceiling.
+- **Status.** `teamkit.py status` prints each member's active or last run, the work items by state, and each spend account's runs and dollars against its ceiling. It also lists when the vcs tokens expire (names and dates only), flagged `EXPIRES SOON` within `credentials.warn_days` (default 7) of `expires_on` and `EXPIRED` after it, and the last failed runs (member, failure code, task id, time).
 - **Full overview.** `GET /v0.2/groups/<group>/overview?namespace=<ns>` adds mail, approvals and the latest journal events.
 - **Status API.** Read-only, paged JSON for the supervisor: `GET /v0.2/groups/<group>/status/{work,runs,mail,changes,spend,standing}?namespace=<ns>` gives work by state and holder, runs with cost and outcome, mail between roles, pull requests with review state, spend against each ceiling, and what is paused or waived. `changes` is what the kernel's receipts record, not the host's live view.
 - **One run.** `cardea inspect <task>` and `cardea events <task>`.
@@ -134,7 +134,7 @@ It provisions the supervisor disabled, and nothing else; this is the first and o
 - Every member's authority is checked live against its supervisor, so no new run is admitted and no trigger fires.
 - The kit lists the runs that were active, read beforehand on a best-effort basis. A kernel that cannot answer does not stop the pause.
 
-Nothing else is changed. Collections, records, claims and mail stay as they were. While paused, `status` prints "team paused" instead of an overview, because the disabled supervisor cannot read it.
+Nothing else is changed. Collections, records, claims and mail stay as they were. While paused, `status` prints "team paused" instead of an overview, because the disabled supervisor cannot read it. It still prints the pause reason (`pause --reason "..."`, one plain line, no secrets), the token expiries and the last failures, all from a small record (`<group>.pause.json`, mode 0600) the kit writes beside the provisioning file at pause time and removes on `resume`.
 
 If the kit itself cannot run, the same kill switch is to set the supervisor's `disabled: true` in the provisioning document and run `cardea provision`.
 

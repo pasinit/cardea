@@ -611,3 +611,168 @@ def test_a_waiver_needs_a_reason_and_a_hosted_repository() -> None:
             {"source": "/srv/mirror", "host_rules": "waived", "waiver_reason": REASON}
         )
     assert Entry.model_validate(hosted).host_rules == "required"
+
+
+# A repository that requires up-to-date branches (ADR-037 amendment 2026-11-22)
+
+GIT_AS = ["git", "-c", "user.name=agent", "-c", "user.email=agent@example.invalid"]
+
+
+def require_up_to_date(vcs: Vcs, on: bool = True) -> None:
+    assert vcs.registry is not None
+    entries = dict(vcs.registry.repositories)
+    entries["cardea"] = entries["cardea"].model_copy(update={"require_up_to_date": on})
+    vcs.registry = vcs.registry.model_copy(update={"repositories": entries})
+
+
+def bare(host: FakeGitHub, *args: str) -> str:
+    repo = host.repositories["acme/cardea"]
+    found = subprocess.run(
+        [*GIT_AS, "-C", str(repo.path), *args], capture_output=True, text=True, check=True
+    )
+    return found.stdout.strip()
+
+
+def advance_main(host: FakeGitHub) -> str:
+    """Another change lands on main, as a merge of someone else's pull request would."""
+    commit = bare(host, "commit-tree", "main^{tree}", "-p", "main", "-m", "Another change")
+    bare(host, "update-ref", "refs/heads/main", commit)
+    return commit
+
+
+def bring_base_in(host: FakeGitHub, number: int, tmp_path: Path) -> str:
+    """The developer merges the latest main into its branch and pushes it."""
+    repo = host.repositories["acme/cardea"]
+    pull = repo.pull(number)
+    assert pull is not None
+    branch = pull["head"]["ref"]
+    work = tmp_path / f"update-{next(STEPS)}"
+    subprocess.run(["git", "clone", "-q", "-b", branch, str(repo.path), str(work)], check=True)
+    subprocess.run(
+        [*GIT_AS, "-C", str(work), "merge", "-q", "--no-edit", "origin/main"], check=True
+    )
+    subprocess.run(["git", "-C", str(work), "push", "-q", "origin", branch], check=True)
+    return head_of(host, number)
+
+
+def behind_main(kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path) -> int:
+    """An approved, green pull request whose branch was cut from main before main moved."""
+    number = open_pull(kernel, session, tmp_path, "eng.dev.0")
+    bare(host, "update-ref", "refs/heads/main", head_of(host, number))  # cut from main
+    push_directly(host, number, tmp_path)  # the change itself
+    advance_main(host)  # main moves on
+    assert not approve(kernel, session, number).is_error
+    host.repositories["acme/cardea"].pass_checks(head_of(host, number), "lint", "test")
+    return number
+
+
+def test_a_pull_request_behind_its_base_is_refused_until_brought_up_to_date(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, vcs: Vcs, tmp_path: Path
+) -> None:
+    require_up_to_date(vcs)
+    repo = host.repositories["acme/cardea"]
+    number = behind_main(kernel, session, host, tmp_path)
+    main = repo.head("main")
+    result = merge(kernel, session, "eng.dev.0", number)
+    refused(result, "merge_behind_base")
+    message = text(result)
+    # The refusal says what to do: bring the base in, push, green checks, re-approval.
+    for step in (
+        "does not contain the latest main",
+        "Merge the latest main into your branch (no rebase, no force-push)",
+        "push it",
+        "every check to pass at the new head",
+        "new approval of that head",
+        "call vcs.merge again",
+    ):
+        assert step in message, message
+    assert "merge" not in host.calls and repo.head("main") == main
+    # Brought up to date: the old approval and checks are for an earlier head.
+    head = bring_base_in(host, number, tmp_path)
+    refused(merge(kernel, session, "eng.dev.0", number), "merge_approval_stale")
+    assert not approve(kernel, session, number).is_error
+    refused(merge(kernel, session, "eng.dev.0", number), "merge_checks_missing")
+    repo.pass_checks(head, "lint", "test")
+    merged = merge(kernel, session, "eng.dev.0", number)
+    assert not merged.is_error, text(merged)
+    output = merged.structured_content
+    assert output["up_to_date"] is True and output["base_sha"] == main
+    assert output["head_sha"] == head and repo.head("main") == head
+
+
+def test_an_up_to_date_pull_request_merges_with_the_guard_on(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, vcs: Vcs, tmp_path: Path
+) -> None:
+    require_up_to_date(vcs)
+    repo = host.repositories["acme/cardea"]
+    number = open_pull(kernel, session, tmp_path, "eng.dev.0")
+    base = head_of(host, number)
+    bare(host, "update-ref", "refs/heads/main", base)
+    head = push_directly(host, number, tmp_path)  # ahead of main, not behind it
+    assert not approve(kernel, session, number).is_error
+    repo.pass_checks(head, "lint", "test")
+    merged = merge(kernel, session, "eng.dev.0", number)
+    assert not merged.is_error, text(merged)
+    output = merged.structured_content
+    assert output["up_to_date"] is True and output["base_sha"] == base
+    assert host.calls.count("compare") == 1 and host.calls.count("merge") == 1
+
+
+def test_with_the_guard_off_a_branch_behind_its_base_merges_as_before(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, vcs: Vcs, tmp_path: Path
+) -> None:
+    number = behind_main(kernel, session, host, tmp_path)
+    merged = merge(kernel, session, "eng.dev.0", number)
+    assert not merged.is_error, text(merged)
+    output = merged.structured_content
+    assert "up_to_date" not in output and "base_sha" not in output
+    assert "compare" not in host.calls and host.calls.count("merge") == 1
+
+
+def test_the_guard_keeps_every_other_rule(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, vcs: Vcs, tmp_path: Path
+) -> None:
+    require_up_to_date(vcs)
+    waive(vcs)
+    repo = host.repositories["acme/cardea"]
+    number = open_pull(kernel, session, tmp_path, "eng.dev.0")
+    bare(host, "update-ref", "refs/heads/main", head_of(host, number))
+    refused(merge(kernel, session, "eng.dev.0", number), "merge_not_approved")
+    assert not approve(kernel, session, number).is_error
+    refused(merge(kernel, session, "eng.dev.0", number), "merge_checks_missing")
+    repo.pass_checks(head_of(host, number), "lint", "test")
+    refused(merge(kernel, session, "eng.dev.1", number), "merge_not_opener")
+    merged = merge(kernel, session, "eng.dev.0", number)
+    assert not merged.is_error, text(merged)
+    assert merged.structured_content["up_to_date"] is True
+    assert merged.structured_content["host_rules"] == "waived"
+
+
+def test_check_repository_reports_the_guard(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, vcs: Vcs
+) -> None:
+    host.repositories["acme/cardea"].rules_unavailable = True
+    waive(vcs)
+    report = check(kernel, session)
+    # A waiver with no guard: visible, so the host owner can see nothing requires it.
+    assert report["host_rules"] == "waived" and report["require_up_to_date"] is False
+    require_up_to_date(vcs)
+    assert check(kernel, session)["require_up_to_date"] is True
+
+
+def test_the_guard_applies_only_to_a_hosted_repository() -> None:
+    from cardea.service.repositories import Repository as Entry
+
+    with pytest.raises(ValueError, match="require_up_to_date"):
+        Entry.model_validate({"source": "/srv/mirror", "require_up_to_date": True})
+    with pytest.raises(ValueError):
+        Entry.model_validate(
+            {
+                "source": "/srv/mirror",
+                "owner": "acme",
+                "name": "widgets",
+                "api_url": "https://api.github.test",
+                "git_url": "/srv/widgets.git",
+                "require_up_to_date": "yes",
+            }
+        )

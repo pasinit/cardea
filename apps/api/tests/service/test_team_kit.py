@@ -5,7 +5,7 @@ import importlib.util
 import json
 import time
 from collections.abc import Iterator
-from datetime import timedelta
+from datetime import date, timedelta
 from pathlib import Path
 from types import ModuleType
 from typing import Any, cast
@@ -90,6 +90,24 @@ def test_the_triggers_are_the_planned_ones() -> None:
     work = kit().work_collection(example())
     approve = next(t for t in work["spec"]["transitions"] if t["name"] == "approve")
     assert approve["requires_receipt"]["result"] == "result.state == 'APPROVED'"
+
+
+def test_developer_and_pe_schedules_are_opt_in() -> None:
+    def crons(host: dict[str, Any], name: str) -> list[str]:
+        pools = {p["name"]: p for p in kit().group_document(host)["spec"]["pools"]}
+        return [t["schedule"]["cron"] for t in pools[name]["triggers"] if "schedule" in t]
+
+    assert crons(example(), "dev") == [] and crons(example(), "pe") == []
+    host = {**example(), "schedules": {"dev": ["*/20 * * * *"], "pe": ["5-59/20 * * * *"]}}
+    assert crons(host, "dev") == ["*/20 * * * *"]
+    assert crons(host, "pe") == ["5-59/20 * * * *"]
+    assert crons(host, "tl") == ["30 8 * * 1-5"]  # a partial override keeps the defaults
+    # Trigger ids are positional: the fixed triggers keep their places when a schedule is
+    # added, so an applied team can turn the schedule on (the kernel refuses kind changes).
+    before = {p["name"]: p["triggers"] for p in kit().group_document(example())["spec"]["pools"]}
+    after = {p["name"]: p["triggers"] for p in kit().group_document(host)["spec"]["pools"]}
+    for name in ("dev", "pe"):
+        assert after[name][: len(before[name])] == before[name]
 
 
 def test_provisioning_merges_the_team_into_the_host_document() -> None:
@@ -856,6 +874,66 @@ def test_status_shows_a_paused_team(monkeypatch: pytest.MonkeyPatch) -> None:
         module.status(example())
 
 
+def test_status_while_paused_shows_reason_tokens_and_failures(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from cardea.service.client import ClientError
+
+    module = kit()
+    base = tmp_path / "base.json"
+    base.write_text(json.dumps({"principals": [], "grants": [], "platform": []}))
+    document = {
+        **example(),
+        "provisioning": {"base": str(base), "out": str(tmp_path / "provision.json")},
+    }
+    document["credentials"] = {**document["credentials"], "expires_on": "2027-01-31"}
+    failed = {
+        "task_id": "t-9",
+        "outcome": "failed",
+        "failure_code": "attempt_timeout",
+        "finished_at": "2026-11-21T10:00:00Z",
+    }
+    view = {"pools": [{"members": [{"principal_id": "dev-team.dev.0", "last_run": failed}]}]}
+    monkeypatch.setattr(module, "overview", lambda host: view)
+    monkeypatch.setattr(module, "provision", lambda host, paused: None)
+    module.pause(document, "rotating the \x1b[31mtoken\nnow")
+
+    def disabled(host: dict[str, Any]) -> dict[str, Any]:
+        raise ClientError("principal_disabled", 403)
+
+    monkeypatch.setattr(module, "overview", disabled)
+    text = "\n".join(module.status(document, today=date(2026, 11, 22)))
+    assert text.startswith("team paused")
+    assert "pause reason since " in text and "rotating the  [31mtoken now" in text
+    assert "dev-team.dev.0: attempt_timeout (t-9, 2026-11-21T10:00:00Z)" in text
+    assert "github, github-reviewer expire on 2027-01-31: 70 day(s) left" in text
+    # The pause record holds no secrets, only the reason, time and failure codes.
+    assert set(json.loads(module.pause_record_path(document).read_text())) == {
+        "paused_at",
+        "reason",
+        "failures",
+    }
+    monkeypatch.setattr(module, "provision", lambda host, paused: None)
+    module.resume(document)
+    assert "not recorded" in "\n".join(module.status(document))
+
+
+def test_a_token_within_the_warning_window_is_flagged() -> None:
+    module = kit()
+    document = example()
+    document["credentials"] = {**document["credentials"], "expires_on": "2026-12-01"}
+    (soon,) = module.token_lines(document, date(2026, 11, 25))
+    assert "EXPIRES SOON, in 6 day(s)" in soon and "github-reviewer" in soon
+    (outside,) = module.token_lines(document, date(2026, 11, 22))
+    assert "EXPIRES SOON" not in outside and "9 day(s) left" in outside
+    document["credentials"]["warn_days"] = 10
+    assert "EXPIRES SOON" in module.token_lines(document, date(2026, 11, 22))[0]
+    (gone,) = module.token_lines(document, date(2026, 12, 3))
+    assert "EXPIRED 2 day(s) ago" in gone
+    # Names and dates only: nothing else from the credentials section is printed.
+    assert "reviewer-login" not in gone
+
+
 def test_run_timeouts_must_fit_the_session_wall_time(tmp_path: Path) -> None:
     module = kit()
     workers = tmp_path / "workers.json"
@@ -962,11 +1040,29 @@ def test_status_reports_a_waiver_of_the_host_rules(tmp_path: Path) -> None:
     assert module.host_rules_note(document) == []  # unreadable: nothing to report
     entry: dict[str, Any] = {"source": "/srv/mirror"}
     registry.write_text(json.dumps({"repositories": {document["repository"]: entry}}))
-    assert module.host_rules_note(document) == []  # rules required: nothing to say
+    # Rules required, no guard: only the guard's state.
+    (line,) = module.host_rules_note(document)
+    assert "up-to-date branch required to merge: off" in line
     entry.update(host_rules="waived", waiver_reason="No rulesets on this plan.")
     registry.write_text(json.dumps({"repositories": {document["repository"]: entry}}))
-    (line,) = module.host_rules_note(document)
-    assert "WAIVED" in line and "No rulesets on this plan." in line
+    waived, guard = module.host_rules_note(document)
+    assert "WAIVED" in waived and "No rulesets on this plan." in waived
+    # A waiver with no guard is loud: nothing else requires an up-to-date branch.
+    assert "up-to-date branch required to merge: OFF" in guard and "require_up_to_date" in guard
+    entry.update(require_up_to_date=True)
+    registry.write_text(json.dumps({"repositories": {document["repository"]: entry}}))
+    waived, guard = module.host_rules_note(document)
+    assert "WAIVED" in waived and guard.endswith("up-to-date branch required to merge: on")
+
+
+def test_developers_are_told_what_to_do_when_behind_the_base() -> None:
+    module = kit()
+    document = module.group_document(example())
+    dev = next(p for p in document["spec"]["pools"] if p["name"] == "dev")
+    instructions = dev["run"]["instructions"]
+    assert "merge_behind_base" in instructions and "resubmit" in instructions
+    assert "no rebase, no force-push" in instructions and "rebasing" not in instructions
+    assert "record:work/resubmit" in dev["grants"]
 
 
 def test_inbound_email_for_the_pm_is_opt_in() -> None:
@@ -1321,3 +1417,34 @@ def test_a_lapse_when_approved_keeps_the_approval_for_the_opener(
     as_member(kernel, session, "dev-team.dev.0", merge(record_id, 42, outcome))
     assert outcome == ["", ""]
     assert item(kernel, record_id)[:2] == ("done", None)
+
+
+def test_instructions_name_only_transitions_the_work_collection_has() -> None:
+    """Agents told a state or a verb wrote fields instead of moving items. Every transition
+    an instruction names exists in the rendered collection, and every role names, as an
+    exact records.transition call, each transition its grants let it run."""
+    import re
+
+    module = kit()
+    document = example()
+    names = {t["name"] for t in module.work_collection(document)["spec"]["transitions"]}
+    assert names == module.TRANSITIONS
+    pools = {p["name"]: p for p in module.group_document(document)["spec"]["pools"]}
+    named_by: dict[str, set[str]] = {}
+    for name, pool in pools.items():
+        text = pool["run"]["instructions"]
+        named = set(
+            re.findall(r'records\.transition with collection "work" and transition "(\w+)"', text)
+        )
+        assert named <= names, name
+        granted = {g.removeprefix("record:work/") for g in pool["grants"]} & names
+        assert granted <= named, (name, granted - named)
+        named_by[name] = named
+    assert named_by["tl"] == {"triage", "cancel"}
+    assert named_by["dev"] == {"start", "submit", "resubmit", "merge"}
+    assert named_by["pe"] == {"approve", "request_changes"}
+    tl = pools["tl"]["run"]["instructions"]
+    assert "not the state's" in tl and "records.update never changes an item's state" in tl
+    assert "records.query (state ready)" in tl
+    with pytest.raises(ValueError, match="no transition 'ready'"):
+        module.call("ready")
