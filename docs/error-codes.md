@@ -45,7 +45,7 @@ errors answer 409. A request that fails schema validation answers
 | `collection_in_use` | 409 | Groups {…} still use this collection; remove it from them first | `cardea.service.records` |
 | `collection_mismatch` | 422 | Path and body collection names differ | `cardea.service.app` |
 | `collection_not_found` | 404, 422 | Collection {…} does not exist in this namespace under this supervisor; No accessible collection | `cardea.service.groups`, `cardea.service.records`, `cardea.service.team_status` |
-| `collection_supervisor` | 403 | The caller must be the collection's supervisor; The collection belongs to another supervisor | `cardea.service.records` |
+| `collection_supervisor` | 403 | The caller must be the collection's supervisor; The collection belongs to another supervisor; Only the collection's supervisor may do this | `cardea.service.records` |
 | `content_gate_unavailable` | 503 | The content gate cannot run ({…}) | `cardea.service.content_gate` |
 | `context_not_read_only` | 422 | Context operations must be read-only | `cardea.service.operations` |
 | `custom` | — | A pull request already exists for {…}:{…}. | `cardea_vcs_ops.fake` |
