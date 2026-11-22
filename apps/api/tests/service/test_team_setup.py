@@ -357,6 +357,40 @@ def test_plan_changes_nothing_and_reports_what_would_run(rig: Rig) -> None:
     )
 
 
+def test_plan_on_an_empty_host_reports_every_step_without_crashing(tmp_path: Path) -> None:
+    # Nothing exists: no checkout, no SPIRE, no workers file, no state, no kernel socket.
+    empty = Rig(tmp_path)
+    for tool in (tmp_path / "spire-bin/bin").iterdir():
+        tool.unlink()
+    empty.host["setup"]["source"] = str(tmp_path / "missing-checkout")
+    empty.host["kernel"]["socket"] = str(tmp_path / "missing/kernel.sock")
+    empty.host_path.unlink()
+    context = empty.context()
+    context.connect = lambda host: (_ for _ in ()).throw(ConnectionRefusedError())
+    before = snapshot(tmp_path)
+
+    assert setup.plan(context, empty.lines.append) is False
+
+    assert len(empty.lines) == len(STEP_NAMES)
+    assert all("would run" in line for line in empty.lines), empty.lines
+    assert empty.fake.changes == [] and snapshot(tmp_path) == before
+
+
+def test_every_check_and_verify_is_false_not_an_error_on_an_empty_host(tmp_path: Path) -> None:
+    empty = Rig(tmp_path)
+    for tool in (tmp_path / "spire-bin/bin").iterdir():
+        tool.unlink()
+    empty.host["setup"]["source"] = str(tmp_path / "missing-checkout")
+    empty.host_path.unlink()
+    context = empty.context()
+    context.connect = lambda host: (_ for _ in ()).throw(ConnectionRefusedError())
+    for step in setup.steps():
+        if step.name == "repository-ready":
+            continue  # its check is the probe, which the rig's Probe answers
+        assert step.check(context) is False, step.name
+        assert step.verify(context).ok is False, step.name
+
+
 @pytest.mark.parametrize("fraction", [0.1, 0.35, 0.6, 0.85, 0.99])
 def test_killed_mid_run_then_rerun_completes(rig: Rig, fraction: float) -> None:
     probe = Rig(rig.base / "probe")

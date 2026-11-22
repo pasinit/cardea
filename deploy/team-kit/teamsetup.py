@@ -539,7 +539,11 @@ class Base(Step):
         )
         if probe.code:
             found.append("the kernel's virtualenv with the source on its path")
-        if not layout.data_dir.is_dir() or stat.S_IMODE(layout.data_dir.stat().st_mode) != 0o700:
+        try:
+            data_mode = stat.S_IMODE(layout.data_dir.stat().st_mode)
+        except OSError:
+            data_mode = None
+        if not layout.data_dir.is_dir() or data_mode != 0o700:
             found.append(f"{layout.data_dir} as a 0700 directory")
         return found
 
@@ -640,7 +644,12 @@ class SpireIdentity(Step):
             )
             if expiring.code:
                 found.append("agent certificate expires within 30 days")
-        for path, content in self.files(ctx).items():
+        try:
+            files = self.files(ctx)
+        except OSError:
+            files = {}
+            found.append(f"SPIRE templates in {layout.small_host}")
+        for path, content in files.items():
             try:
                 same = path.read_text() == content
             except OSError:
@@ -864,7 +873,12 @@ class Workers(Step):
 
     def pending(self, ctx: Context) -> list[str]:
         found = self.profile_problems(ctx)
-        for path, (content, _) in self.wanted(ctx).items():
+        try:
+            wanted = self.wanted(ctx)
+        except OSError:
+            wanted = {}
+            found.append(f"the launcher and templates under {ctx.layout.source}")
+        for path, (content, _) in wanted.items():
             try:
                 same = path.read_text() == content
             except OSError:
@@ -970,7 +984,12 @@ class Kernel(Step):
 
     def pending(self, ctx: Context) -> list[str]:
         found = []
-        for path, (content, _) in self.documents(ctx).items():
+        try:
+            documents = self.documents(ctx)
+        except (OSError, ValueError):
+            documents = {}
+            found.append(f"the kernel templates under {ctx.layout.small_host}")
+        for path, (content, _) in documents.items():
             try:
                 same = path.read_text() == content
             except OSError:
@@ -1157,6 +1176,8 @@ class Tokens(Step):
 
     def problems(self, ctx: Context) -> list[str]:
         found = []
+        if len(self.names(ctx)) < 2:
+            return ["credentials needs author and reviewer names"]
         for name in self.names(ctx):
             verdict = ctx.secrets.status(f"vcs:{name}")
             if not verdict.ok:
@@ -1373,8 +1394,6 @@ class Apply(Step):
         )
 
     def exists(self, ctx: Context) -> bool:
-        from cardea.service.client import ClientError
-
         _, group, _, _ = ctx.kit._names(ctx.host)
         try:
             kernel = ctx.connect(ctx.host)
@@ -1382,7 +1401,8 @@ class Apply(Step):
             return False
         try:
             kernel.request("GET", f"/groups/{group}", params={"namespace": ctx.host["namespace"]})
-        except ClientError:
+        except Exception:
+            # No socket or identity yet, or a kernel that is not up: the group is not there.
             return False
         finally:
             kernel.close()
