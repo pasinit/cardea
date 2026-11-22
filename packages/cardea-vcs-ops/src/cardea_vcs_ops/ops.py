@@ -31,6 +31,8 @@ Rules checked here, before any network call:
 - `APPROVE` reviews are refused unless the host owner allows them;
 - `vcs.merge` needs the kernel's own receipts: the caller opened the pull request, and an
   allowed pool approved its current head (ADR-037 amendment 2026-11-17);
+- where the registry sets `require_up_to_date`, `vcs.merge` also needs the head to contain
+  the base branch's current head (`merge_behind_base`, amendment 2026-11-22);
 - the change and every text that leaves the host pass the kernel's content gate first
   (`OperationContext.check_content`, ADR-037 slice 6), which fails closed.
 """
@@ -306,6 +308,14 @@ class Vcs:
             return None
         entry = self.registry.repositories.get(str(alias))
         return entry.waiver_reason if entry is not None and entry.host_rules == "waived" else None
+
+    def up_to_date_required(self, alias: object) -> bool:
+        """Whether `vcs.merge` needs the pull request's head to contain the base branch's
+        current head (registry `require_up_to_date`, amendment 2026-11-22)."""
+        if self.registry is None:
+            return False
+        entry = self.registry.repositories.get(str(alias))
+        return entry is not None and entry.require_up_to_date
 
     def waived(self, alias: object) -> dict[str, JsonValue]:
         """What a receipt records about a waiver: nothing where host rules are required."""
@@ -616,6 +626,10 @@ class Vcs:
                         "The pull request's head moved since the caller read it",
                         "merge_head_moved",
                     )
+                # Where the registry requires it, the head contains the base's own head.
+                base_sha = None
+                if self.up_to_date_required(arguments["repository"]):
+                    base_sha = await _up_to_date(host, str(pull["base"]["ref"]), head)
                 at_head = [a for a in approvals if _field(a, "output/commit_id") == head]
                 if not approvals:
                     raise OperationRejected(
@@ -661,6 +675,7 @@ class Vcs:
             "opened_receipt": str(opener.get("receipt_id")),
             "approval_receipt": str(at_head[0].get("receipt_id")),
             "head_deleted": deleted,
+            **({} if base_sha is None else {"up_to_date": True, "base_sha": base_sha}),
             **self.waived(arguments["repository"]),
         }
 
@@ -811,6 +826,7 @@ class Vcs:
             "missing": [] if reason is not None else missing,
             "host_rules": "required" if reason is None else "waived",
             "rules_available": available,
+            "require_up_to_date": self.up_to_date_required(alias),
             "not_checked": [
                 "bypass actors: the App or token must not be able to bypass these rules",
                 "classic branch protection, which this read does not list",
@@ -857,6 +873,24 @@ def _host_approved(reviews: list[dict[str, Any]], login: str, head: str) -> bool
         and deciding[-1]["state"] == "APPROVED"
         and (deciding[-1].get("commit_id") == head)
     )
+
+
+async def _up_to_date(host: GitHub, base: str, head: str) -> str:
+    """The base branch's head, once the host shows `head` contains it; refused otherwise
+    (`merge_behind_base`). Two changes each green on its own can conflict once both are
+    merged, for example two migrations with the same revision."""
+    compared = await host.compare(base, head)
+    behind = compared.get("behind_by")
+    if not isinstance(behind, int) or behind != 0:
+        raise OperationRejected(
+            f"The pull request's head does not contain the latest {base}, and this "
+            "repository requires it to be up to date before merging. Bring the latest "
+            f"{base} into your branch (merge or rebase), push it, wait for every check to "
+            "pass at the new head, get a new approval of that head, then call vcs.merge "
+            "again.",
+            "merge_behind_base",
+        )
+    return str((compared.get("base_commit") or {}).get("sha") or "")
 
 
 def _check_runs(runs: list[dict[str, Any]]) -> None:

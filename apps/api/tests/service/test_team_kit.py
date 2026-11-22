@@ -960,11 +960,28 @@ def test_status_reports_a_waiver_of_the_host_rules(tmp_path: Path) -> None:
     assert module.host_rules_note(document) == []  # unreadable: nothing to report
     entry: dict[str, Any] = {"source": "/srv/mirror"}
     registry.write_text(json.dumps({"repositories": {document["repository"]: entry}}))
-    assert module.host_rules_note(document) == []  # rules required: nothing to say
+    # Rules required, no guard: only the guard's state.
+    (line,) = module.host_rules_note(document)
+    assert "up-to-date branch required to merge: off" in line
     entry.update(host_rules="waived", waiver_reason="No rulesets on this plan.")
     registry.write_text(json.dumps({"repositories": {document["repository"]: entry}}))
-    (line,) = module.host_rules_note(document)
-    assert "WAIVED" in line and "No rulesets on this plan." in line
+    waived, guard = module.host_rules_note(document)
+    assert "WAIVED" in waived and "No rulesets on this plan." in waived
+    # A waiver with no guard is loud: nothing else requires an up-to-date branch.
+    assert "up-to-date branch required to merge: OFF" in guard and "require_up_to_date" in guard
+    entry.update(require_up_to_date=True)
+    registry.write_text(json.dumps({"repositories": {document["repository"]: entry}}))
+    waived, guard = module.host_rules_note(document)
+    assert "WAIVED" in waived and guard.endswith("up-to-date branch required to merge: on")
+
+
+def test_developers_are_told_what_to_do_when_behind_the_base() -> None:
+    module = kit()
+    document = module.group_document(example())
+    dev = next(p for p in document["spec"]["pools"] if p["name"] == "dev")
+    instructions = dev["run"]["instructions"]
+    assert "merge_behind_base" in instructions and "resubmit" in instructions
+    assert "record:work/resubmit" in dev["grants"]
 
 
 def test_inbound_email_for_the_pm_is_opt_in() -> None:
