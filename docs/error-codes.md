@@ -94,7 +94,7 @@ errors answer 409. A request that fails schema validation answers
 | `invalid_backup` | 400 | Use a standalone SQLite backup, not the active file; Wrong database application identity; Unsupported base schema (and 5 more) | `cardea.service.admin`, `cardea.service.maintenance` |
 | `invalid_checkpoint` | 409 | This store checkpoints only settled work. | `cardea.kernel.store` |
 | `invalid_credential` | 401 | Bound coordinator proof required; Bearer authentication is required; Credential has expired (and 2 more) | `cardea.runtime.a2a`, `cardea.service.app`, `cardea.service.auth` |
-| `invalid_cursor` | 400, 409 | Event cursor must be a nonnegative integer.; Cursor does not name a message; Cursor does not name an item of this list (and 3 more) | `cardea.kernel.store`, `cardea.service.app`, `cardea.service.pages`, `cardea.service.team_status` |
+| `invalid_cursor` | 400, 409 | Event cursor must be a nonnegative integer.; Cursor does not name a message; Cursor does not name an item of this list (and 4 more) | `cardea.kernel.store`, `cardea.service.app`, `cardea.service.pages`, `cardea.service.team_status` |
 | `invalid_diff` | 422 | A hunk header is malformed; An added line is outside a file's hunk | `cardea.service.content_gate` |
 | `invalid_event` | 400 | Body is not a supported CloudEvents 1.0 event | `cardea.service.events` |
 | `invalid_host_usage` | 500 | Host usage exceeds its reserved allocation | `cardea.service.host_budget` |

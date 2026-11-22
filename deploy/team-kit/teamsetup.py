@@ -25,7 +25,11 @@ so a drifted step is repaired and a repeated run on a converged host changes not
 
 Secrets (the repository tokens and the email credential) are behind `SecretStore`. This
 module only asks whether a secret is present and usable and, when it is not, asks the store
-to `provide` it. The shipped store provides nothing: it names the file to create.
+to `provide` it. `FileSecretStore` provides nothing: it names the file to create.
+`PromptingSecretStore`, used by the command, takes a missing, expired or near-expiry secret
+once from `--secret-file`, `--secret-stdin` or a prompt without echo, writes it `0600`,
+records its expiry date (never the value) beside the state, and scrubs every value it handled
+from output and state. `plan` never prompts. A stored, valid secret is not asked for again.
 
 The runbook's "What the host needs first" is the list of checks below:
 - the kernel installed and running with host execution: steps `workers`, `kernel`;
@@ -45,6 +49,7 @@ to install when the binaries are missing, `setup.repository` (`clone_url`, `entr
 """
 
 import argparse
+import getpass
 import hashlib
 import importlib.util
 import json
@@ -138,6 +143,120 @@ class FileSecretStore:
             f"{name}: create {self.files.get(name, '<unconfigured>')} (0600) with the secret, "
             "or plug in a SecretStore that obtains it"
         )
+
+
+class SecretSource(Protocol):
+    """Where a secret's value comes from when the store must obtain it."""
+
+    def read(self, name: str) -> str:
+        """The value, or raise `SecretUnavailable` saying how to supply it."""
+        ...
+
+
+class InputSecretSource:
+    """A file per name (`--secret-file`), standard input for one name (`--secret-stdin`), else
+    a prompt without echo when a terminal is attached. Nothing here prints a value."""
+
+    def __init__(
+        self,
+        files: dict[str, Path] | None = None,
+        stdin_name: str | None = None,
+        stdin: Any = None,
+        prompt: Callable[[str], str] = getpass.getpass,
+        interactive: Callable[[], bool] | None = None,
+    ) -> None:
+        self.files = files or {}
+        self.stdin_name = stdin_name
+        self.stdin = stdin if stdin is not None else sys.stdin
+        self.prompt = prompt
+        self.interactive = interactive or (lambda: self.stdin.isatty())
+
+    def read(self, name: str) -> str:
+        if name in self.files:
+            try:
+                return self.files[name].read_text()
+            except OSError as error:
+                raise SecretUnavailable(
+                    f"{name}: cannot read {self.files[name]}: {error}"
+                ) from None
+        if name == self.stdin_name:
+            return str(self.stdin.read())
+        if self.interactive():
+            return self.prompt(f"{name} (input hidden): ")
+        raise SecretUnavailable(
+            f"{name}: no terminal to prompt on; pass --secret-file {name}=PATH "
+            f"or --secret-stdin {name}"
+        )
+
+
+class PromptingSecretStore(FileSecretStore):
+    """`FileSecretStore` that obtains a missing, expired or near-expiry secret once: it takes
+    the value from a `SecretSource`, writes it `0600`, and records its expiry date (never the
+    value) in `meta`. A stored, valid secret is never asked for again.
+
+    Every value it has handled is remembered so `redact` can scrub it from any output."""
+
+    def __init__(
+        self,
+        files: dict[str, Path],
+        source: SecretSource,
+        meta: Path,
+        system: "System",
+        expiries: dict[str, date] | None = None,
+        today: Callable[[], date] = lambda: datetime.now(UTC).date(),
+    ) -> None:
+        super().__init__(files)
+        self.source, self.meta, self.system = source, meta, system
+        self.expiries = expiries or {}
+        self.today = today
+        self.values: set[str] = set()
+
+    def recorded(self) -> dict[str, str]:
+        try:
+            loaded = json.loads(self.meta.read_text())
+        except (OSError, ValueError):
+            return {}
+        return {str(k): str(v) for k, v in loaded.items()} if isinstance(loaded, dict) else {}
+
+    def expiry(self, name: str) -> date | None:
+        try:
+            return date.fromisoformat(self.recorded()[name])
+        except (KeyError, ValueError):
+            return None
+
+    def status(self, name: str) -> Verdict:
+        verdict = super().status(name)
+        last = self.expiry(name)
+        if not verdict.ok or last is None:
+            return verdict
+        days = (last - self.today()).days
+        if days < 0:
+            return Verdict(False, f"{name}: expired on {last}")
+        if days < TOKEN_WARNING_DAYS:
+            return Verdict(False, f"{name}: expires on {last} ({days} days); rotate it")
+        return Verdict(True, f"{verdict.detail}, expires {last}")
+
+    def provide(self, name: str) -> None:
+        path = self.files.get(name)
+        if path is None:
+            raise SecretUnavailable(f"{name}: no file is configured for it")
+        value = self.source.read(name).strip()
+        if not value:
+            raise SecretUnavailable(f"{name}: the value is empty")
+        self.values.add(value)
+        last = self.expiries.get(name)
+        if last is not None and last <= self.today():
+            raise SecretUnavailable(f"{name}: the new token's expiry {last} is not in the future")
+        self.system.install(path, value + "\n", 0o600)
+        if last is not None:
+            self.system.install(
+                self.meta, json.dumps({**self.recorded(), name: last.isoformat()}, indent=2) + "\n"
+            )
+
+    def redact(self, text: str) -> str:
+        for value in sorted(self.values, key=len, reverse=True):
+            text = text.replace(value, "[redacted]")
+        return text
 
 
 @dataclass(frozen=True)
@@ -259,8 +378,10 @@ class State:
     """The record of the last run: per step `started`, `done` or `failed`. It reports and
     carries fingerprints; it never decides that a step is done."""
 
-    def __init__(self, path: Path, system: System) -> None:
-        self.path, self.system = path, system
+    def __init__(
+        self, path: Path, system: System, redact: Callable[[str], str] = lambda text: text
+    ) -> None:
+        self.path, self.system, self.redact = path, system, redact
         try:
             loaded = json.loads(path.read_text())
         except (OSError, ValueError):
@@ -269,7 +390,7 @@ class State:
         self.steps: dict[str, dict[str, Any]] = steps if isinstance(steps, dict) else {}
 
     def mark(self, name: str, status: str, detail: str = "", **extra: Any) -> None:
-        entry = {"status": status, "detail": detail, **extra}
+        entry = {"status": status, "detail": self.redact(detail), **extra}
         # A step whose status and fingerprint stay as they were is not rewritten (its detail
         # is only a note), so a repeated run changes nothing.
         before = self.get(name)
@@ -358,6 +479,19 @@ class Layout:
     @property
     def email_config(self) -> Path:
         return self.path("email_config", "/etc/cardea/email.json")
+
+    @property
+    def secret_meta(self) -> Path:
+        return self.path("secret_meta", str(self.credentials_dir.parent / "secret-expiry.json"))
+
+    def secret_expiries(self) -> dict[str, date]:
+        """Each repository token's expiry, from the host file, unless given on the command line."""
+        expires = (self.host.get("credentials") or {}).get("expires_on")
+        try:
+            last = date.fromisoformat(str(expires))
+        except ValueError:
+            return {}
+        return {name: last for name in self.secret_files() if name.startswith("vcs:")}
 
     @property
     def render_dir(self) -> Path:
@@ -1210,7 +1344,9 @@ class Tokens(Step):
         except ValueError:
             return [*found, "credentials.expires_on is not a date"]
         days = (last - ctx.today()).days
-        if days < TOKEN_WARNING_DAYS:
+        if days < 0:
+            found.append(f"tokens expired on {last}; rotate them and update expires_on")
+        elif days < TOKEN_WARNING_DAYS:
             found.append(
                 f"tokens expire on {last} ({days} days); rotate them and update expires_on"
             )
@@ -1501,24 +1637,70 @@ def apply_all(ctx: Context, out: Callable[[str], None] = print) -> bool:
     return True
 
 
+def named(values: list[str], option: str) -> dict[str, str]:
+    pairs = {}
+    for value in values:
+        name, separator, rest = value.partition("=")
+        if not separator or not name or not rest:
+            raise SystemExit(f"{option} takes NAME=VALUE, got {name or value!r}")
+        pairs[name] = rest
+    return pairs
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     commands = parser.add_subparsers(dest="command", required=True)
     for name in ("plan", "apply"):
-        commands.add_parser(name).add_argument("--host", type=Path, required=True)
+        command = commands.add_parser(name)
+        command.add_argument("--host", type=Path, required=True)
+    apply = commands.choices["apply"]
+    apply.add_argument(
+        "--secret-file", action="append", default=[], metavar="NAME=PATH",
+        help="read the secret NAME (e.g. vcs:github-author) from PATH when it must be stored",
+    )  # fmt: skip
+    apply.add_argument(
+        "--secret-stdin", metavar="NAME", help="read the secret NAME from standard input"
+    )
+    apply.add_argument(
+        "--expires-on", action="append", default=[], metavar="NAME=YYYY-MM-DD",
+        help="the expiry of a secret being stored; tokens default to credentials.expires_on",
+    )  # fmt: skip
     args = parser.parse_args(argv)
     kit = load_kit()
     host = kit.load_host(args.host)
     layout = Layout(host, kit)
     system = HostSystem()
+    expiries = layout.secret_expiries()
+    source = InputSecretSource()
+    if args.command == "apply":
+        try:
+            expiries.update(
+                {
+                    n: date.fromisoformat(v)
+                    for n, v in named(args.expires_on, "--expires-on").items()
+                }
+            )
+        except ValueError as error:
+            raise SystemExit(f"--expires-on: {error}") from None
+        source = InputSecretSource(
+            {n: Path(v) for n, v in named(args.secret_file, "--secret-file").items()},
+            args.secret_stdin,
+        )
+    store = PromptingSecretStore(
+        layout.secret_files(), source, layout.secret_meta, system, expiries
+    )
     ctx = Context(
         host=host, host_path=args.host, layout=layout, kit=kit, system=system,
-        secrets=FileSecretStore(layout.secret_files()), probe=KernelProbe(host, kit),
-        state=State(layout.state, system), connect=kit.client,
+        secrets=store, probe=KernelProbe(host, kit),
+        state=State(layout.state, system, store.redact), connect=kit.client,
     )  # fmt: skip
+
+    def out(line: str) -> None:
+        print(store.redact(line))
+
     if args.command == "plan":
-        return 0 if plan(ctx) else 2
-    return 0 if apply_all(ctx) else 1
+        return 0 if plan(ctx, out) else 2
+    return 0 if apply_all(ctx, out) else 1
 
 
 if __name__ == "__main__":

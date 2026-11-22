@@ -9,6 +9,13 @@ kernel socket and the supervisor's credential source, so the credential is read 
 and never reaches the page. The page and its API carry the overviews and, for a team that cannot
 be read, a short error code. There is no message box and no write route.
 
+Each team has a tab showing its state (running, stalled, paused or idle) and a mail view:
+`GET /api/mail?team=NAME[&member=ID][&item=COLLECTION/RECORD][&after=CURSOR][&limit=N]` returns
+one page of the team's messages with their full text, newest first. The kernel serves it to the
+team's supervisor only (`GET /v0.2/groups/{name}/status/mail/text`), checking that authority live
+on every read; a refusal is relayed as its error code. The page renders all text with
+`textContent`, never as HTML or as a link.
+
 TEAMS.json is `{"teams": [{"name": "dev", "host": "path/to/host.json"}, ...]}`. One team being
 unreachable shows an error in its column; the others still render.
 """
@@ -53,14 +60,22 @@ def error_code(error: Exception) -> str:
 
 
 class TeamsBackend:
-    """Reads every team's overview; `sources` maps a team name to a function returning its view."""
+    """Reads every team's overview; `sources` maps a team name to a function returning its view.
 
-    def __init__(self, sources: dict[str, Callable[[], dict[str, Any]]]) -> None:
-        self.sources = sources
+    `mails` maps a team name to a function returning one page of its mail for a filter query.
+    """
+
+    def __init__(
+        self,
+        sources: dict[str, Callable[[], dict[str, Any]]],
+        mails: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] | None = None,
+    ) -> None:
+        self.sources, self.mails = sources, mails or {}
 
     def one(self, name: str) -> dict[str, Any]:
         try:
-            return {"name": name, "view": self.sources[name]()}
+            view = self.sources[name]()
+            return {"name": name, "state": base.team_state(view), "view": view}
         except Exception as error:  # an unreachable team must not hide the others
             return {"name": name, "error": error_code(error)}
 
@@ -70,6 +85,13 @@ class TeamsBackend:
 
     def send(self, role: str, text: str, client_key: str) -> dict[str, Any]:
         raise DashboardError("read_only", 405)
+
+    def mail(self, query: dict[str, Any]) -> dict[str, Any]:
+        team = query.get("team")
+        if team not in self.sources:
+            raise DashboardError("unknown_team", 404)
+        read = self.mails.get(team)
+        return read(query) if read else {"total": 0, "items": [], "next": None}
 
 
 def read_teams(path: Path) -> list[tuple[str, Path]]:
@@ -90,8 +112,10 @@ def read_teams(path: Path) -> list[tuple[str, Path]]:
     return teams
 
 
-def kernel_source(host_file: Path) -> Callable[[], dict[str, Any]]:
-    """One team's overview, read as its supervisor through its own host file."""
+def kernel_source(
+    host_file: Path,
+) -> tuple[Callable[[], dict[str, Any]], Callable[[dict[str, Any]], dict[str, Any]]]:
+    """One team's overview and its mail, read as its supervisor through its own host file."""
     kit = load("teamkit")
     host = kit.load_host(host_file)
     namespace, group, _, _ = kit._names(host)
@@ -104,7 +128,16 @@ def kernel_source(host_file: Path) -> Callable[[], dict[str, Any]]:
         finally:
             kernel.close()
 
-    return read
+    def read_mail(query: dict[str, Any]) -> dict[str, Any]:
+        kernel = kit.client(host)
+        try:
+            backend = base.KernelBackend(kernel.request, namespace, group)
+            result: dict[str, Any] = backend.mail(query)
+            return result
+        finally:
+            kernel.close()
+
+    return read, read_mail
 
 
 def fixture_source(path: Path) -> Callable[[], dict[str, Any]]:
@@ -126,11 +159,15 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
     try:
         if args.teams:
-            sources = {n: kernel_source(h) for n, h in read_teams(args.teams)}
+            kernels = {n: kernel_source(h) for n, h in read_teams(args.teams)}
+            backend = TeamsBackend(
+                {n: read for n, (read, _) in kernels.items()},
+                {n: mail for n, (_, mail) in kernels.items()},
+            )
         else:
             pairs = [item.partition("=") for item in args.fixtures]
-            sources = {n: fixture_source(Path(f)) for n, _, f in pairs}
-        httpd = server(TeamsBackend(sources), args.port, args.bind)
+            backend = TeamsBackend({n: fixture_source(Path(f)) for n, _, f in pairs})
+        httpd = server(backend, args.port, args.bind)
     except DashboardError as error:
         print(f"dashboard: {error.code}", file=sys.stderr)
         return 2
