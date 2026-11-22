@@ -109,6 +109,7 @@ def test_approval_with_every_check_passed_is_pinned_to_the_checked_head(
     [
         ("failed", "approve_checks_failed", "test"),
         ("running", "approve_checks_pending", "lint"),
+        ("action_required", "approve_checks_action_required", "test"),
         ("missing", "approve_checks_missing", ""),
         ("other_head", "approve_checks_missing", ""),
     ],
@@ -123,12 +124,24 @@ def test_approval_is_refused_and_nothing_is_reviewed_unless_every_check_passed(
         repo.pass_checks(head, "lint", "test")
     if case == "failed":
         repo.checks[head][1]["conclusion"] = "failure"
+    elif case == "action_required":
+        repo.checks[head][1]["conclusion"] = "action_required"
     elif case == "running":
         repo.checks[head][0].update(status="in_progress", conclusion=None)
     with pytest.raises(OperationRejected) as refused:
         approve(vcs)
     assert refused.value.code == code and named in str(refused.value)
     assert NUMBER not in repo.reviews
+
+
+def test_skipped_and_neutral_checks_count_as_passed(
+    host: FakeGitHub, vcs: Vcs, tmp_path: Path
+) -> None:
+    repo, head = open_pull(host, tmp_path)
+    repo.pass_checks(head, "lint", "test")
+    repo.checks[head][0]["conclusion"] = "skipped"
+    repo.checks[head][1]["conclusion"] = "neutral"
+    assert approve(vcs)["state"] == "APPROVED"
 
 
 def test_request_changes_and_comments_need_no_passing_checks(

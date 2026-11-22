@@ -29,8 +29,8 @@ Rules checked here, before any network call:
   by the kernel, from the descriptor's `resource`);
 - a pushed branch, and a pull request's head, start with the caller's group prefix;
 - `APPROVE` reviews are refused unless the host owner allows them and every check run on
-  the pull request's head succeeded (`approve_checks_missing|pending|failed`, naming the
-  checks);
+  the pull request's head passed (`approve_checks_missing|pending|action_required|failed`,
+  naming the checks);
 - `vcs.merge` needs the kernel's own receipts: the caller opened the pull request, and an
   allowed pool approved its current head (ADR-037 amendment 2026-11-17);
 - where the registry sets `require_up_to_date`, `vcs.merge` also needs the head to contain
@@ -558,7 +558,7 @@ class Vcs:
                 # to the head that was checked, so a push in between cannot inherit it.
                 try:
                     head = str((await host.pull(number))["head"]["sha"])
-                    _check_runs(await host.check_runs(head), "approve")
+                    _approval_checks(await host.check_runs(head))
                 except HostRefused as refused:
                     raise OperationRejected(str(refused), "host_refused") from None
             try:
@@ -660,7 +660,7 @@ class Vcs:
                     )
                 # 4. Every check run on the head succeeded.
                 runs = await host.check_runs(head)
-                _check_runs(runs, "merge")
+                _check_runs(runs)
                 # 5. The host can merge it.
                 if pull.get("mergeable") is not True:
                     # `null` while the host is still computing it: try again later.
@@ -904,21 +904,42 @@ async def _up_to_date(host: GitHub, base: str, head: str) -> str:
     return str((compared.get("base_commit") or {}).get("sha") or "")
 
 
-def _check_runs(runs: list[dict[str, Any]], operation: str) -> None:
-    """Every check run on the head completed with success, and there is at least one. The
-    refusal code is `<operation>_checks_missing|pending|failed` and names the checks."""
+# The host counts these conclusions as passing for a required check.
+PASSING = {"success", "neutral", "skipped"}
+
+
+def _check_runs(runs: list[dict[str, Any]]) -> None:
+    """Every check run on the head completed and passed, and there is at least one. The
+    refusal names the checks. A run that waits for a maintainer to approve it
+    (`action_required`) is its own refusal: no review can unblock it, so it says who can."""
     if not runs:
-        raise OperationRejected("No check ran on the head", f"{operation}_checks_missing")
+        raise OperationRejected("No check ran on the head", "merge_checks_missing")
     pending = sorted(str(r.get("name")) for r in runs if r.get("status") != "completed")
     if pending:
         raise OperationRejected(
-            f"Checks still running: {', '.join(pending)[:200]}", f"{operation}_checks_pending"
+            f"Checks still running: {', '.join(pending)[:200]}", "merge_checks_pending"
         )
-    failed = sorted(str(r.get("name")) for r in runs if r.get("conclusion") != "success")
+    waiting = sorted(str(r.get("name")) for r in runs if r.get("conclusion") == "action_required")
+    if waiting:
+        raise OperationRejected(
+            f"Checks wait for a maintainer to approve their run: {', '.join(waiting)[:200]}. "
+            "Neither a review nor a retry starts them; ask the supervisor.",
+            "merge_checks_action_required",
+        )
+    failed = sorted(str(r.get("name")) for r in runs if r.get("conclusion") not in PASSING)
     if failed:
         raise OperationRejected(
-            f"Checks did not succeed: {', '.join(failed)[:200]}", f"{operation}_checks_failed"
+            f"Checks did not succeed: {', '.join(failed)[:200]}", "merge_checks_failed"
         )
+
+
+def _approval_checks(runs: list[dict[str, Any]]) -> None:
+    """The same rule for an approval, refused as `approve_checks_<why>`."""
+    try:
+        _check_runs(runs)
+    except OperationRejected as refused:
+        code = refused.code.replace("merge_", "approve_", 1)
+        raise OperationRejected(str(refused), code) from None
 
 
 def _rule(rules: list[dict[str, Any]], kind: str) -> dict[str, Any] | None:

@@ -2,7 +2,7 @@
   "tool": {
     "name": "vcs.review",
     "title": "Review a pull request",
-    "description": "Submit one review (COMMENT or REQUEST_CHANGES; APPROVE only where the host owner allows it, and then only when every check run on the head succeeded: approve_checks_missing, approve_checks_pending or approve_checks_failed otherwise, naming the checks) on a pull request of an allowed repository. The same client_key never reviews twice. Needs repo:<alias>.",
+    "description": "Submit one review (COMMENT or REQUEST_CHANGES; APPROVE only where the host owner allows it, and then only when every check run on the head succeeded: approve_checks_missing, approve_checks_pending, approve_checks_action_required or approve_checks_failed otherwise, naming the checks) on a pull request of an allowed repository. The same client_key never reviews twice. Needs repo:<alias>.",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
