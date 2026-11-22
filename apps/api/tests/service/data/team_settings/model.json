@@ -1,0 +1,25 @@
+{
+  "valid": {
+    "model": "claude-opus-5-5"
+  },
+  "invalid": [
+    {
+      "settings": {
+        "model": ""
+      },
+      "field": "model"
+    },
+    {
+      "settings": {
+        "model": 5
+      },
+      "field": "model"
+    },
+    {
+      "settings": {
+        "model": "has space"
+      },
+      "field": "model"
+    }
+  ]
+}
