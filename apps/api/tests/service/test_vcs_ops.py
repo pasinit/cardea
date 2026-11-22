@@ -427,7 +427,7 @@ def test_approve_reviews_are_refused_unless_allowed(
     vcs.config = vcs.config.model_copy(update={"allow_approve": True})
     _, _, (no_ci,) = run_calls(kernel, session, [("vcs-review", {**approve, "client_key": "a5"})])
     assert no_ci.is_error and "approve_checks_missing" in text(no_ci)
-    assert untouched(host, before)
+    assert "create_review" not in host.calls  # the head was read; no review was sent
     head = host.repositories["acme/cardea"].pull(opened)["head"]["sha"]  # type: ignore[index]
     host.repositories["acme/cardea"].pass_checks(head, "lint", "test")
     # Allowed for the caller's pool (ADR-037 question 2: the dev team's principal role).
