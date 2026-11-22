@@ -99,7 +99,7 @@ Compose existing pieces into one operations package, `vcs.*` and `code.*`, insta
 | Operation | Effect | Idempotency scope (ADR-026) | Reconciler (after `outcome_unknown`) |
 |---|---|---|---|
 | `code.session {repository, base_ref, task, task_key, harness?, model?, gates?}` | effect (publishes kernel objects; nothing leaves the host) | `/repository`, `/base_ref`, `/task_key` | the published change object exists for the call's effect key → applied; else not applied, so a retry runs a fresh session |
-| `vcs.read_change {repository, number, diff?, diff_offset?}` | read | none | none |
+| `vcs.read_change {repository, number, diff?, diff_offset?, patch_offset?}` | read | none | none |
 | `vcs.push_branch {repository, branch, change, expected_head?}` | effect | `/repository`, `/branch`, `/change` | the branch's head on the host equals the change's head commit → applied |
 | `vcs.open_change {repository, head, base, title, body, draft?}` | effect | `/repository`, `/head` | `GET .../pulls?head=<owner>:<head>&state=all` returns the pull request → applied, with its number and URL |
 | `vcs.comment {repository, number, body, client_key}` | effect | `/repository`, `/number`, `/client_key` | a comment on the pull request carries the marker `cardea:<effect_key>` → applied |
@@ -568,3 +568,15 @@ A dry run of the dev team showed the principal engineer could not review: `vcs.r
   - a waived repository still refuses a push outside the prefix, and a merge without approval, without green checks, or by someone other than the opener;
   - the merge receipt records the waiver;
   - the registry refuses a waiver without a reason, a reason without a waiver, and a waiver on a repository with no host.
+
+## Amendment (2026-11-22): reviewers read a large file whole
+
+- **Requirement.** Paging was per file, and each patch was cut at 12 KiB, so no call could show more of a file than its first 12 KiB. A principal engineer asked to review a pull request that adds a 59 KB file could not read most of it and gave no verdict.
+- **Decision.** `vcs.read_change` takes `patch_offset`, a byte offset in the scrubbed patch of the file at `diff_offset`. With it, the diff's cursor is the pair (file, byte):
+  - the first patch on the page starts at `patch_offset`, moved forward to a character boundary;
+  - a patch that does not fit is cut after its last whole line (mid-line only when a single line is longer than the room) and ends the page;
+  - a cut patch ends with `[cardea: patch continues, bytes A-B of M shown; read on with patch_offset B]`, has `truncated: true`, and every patch carries `patch_offset` (where its text starts) and `patch_bytes` (the whole patch's size);
+  - the diff reports `next_offset` and `next_patch_offset`. The next call passes them as `diff_offset` and `patch_offset`. Both are `null` when every patch has been shown whole.
+- **Unchanged.** A call without `patch_offset` behaves as before, byte for byte: each patch is cut at 12 KiB with the old marker, and `next_offset` moves to the next file. The bounds hold in both modes: 12 KiB per patch, 32 KiB of patches per call, at most 50 patches, and the whole output within the receipt's 64 KiB recorded output. The patch is scrubbed whole before it is sliced, so a credential is never split across pages. Grants, worker and host permission are unchanged. The descriptor changes (input and output schema, description), so its digest changes.
+- **Reviewers.** The descriptor and the team kit's principal engineer are told to pass `patch_offset: 0` and keep reading until `next_offset` is `null`.
+- **Tests** (`test_vcs_diff.py`): a 59 KB single-file patch, with escapes, multi-byte text and a credential, is reassembled over several calls exactly equal to the scrubbed host patch, with each page starting where the last stopped; many files mixing large, small and binary read with no gap or overlap; resumed pages cut on line boundaries; an offset inside a character or past the end; an old-style call keeps its shape and per-file paging; every page stays within the per-patch, per-call and recorded-output bounds.
