@@ -92,6 +92,23 @@ def test_the_triggers_are_the_planned_ones() -> None:
     assert approve["requires_receipt"]["result"] == "result.state == 'APPROVED'"
 
 
+def test_developers_run_env_try_before_submitting_only_when_the_host_names_scenarios() -> None:
+    def dev(host: dict[str, Any]) -> dict[str, Any]:
+        pools = {p["name"]: p for p in kit().group_document(host)["spec"]["pools"]}
+        pool: dict[str, Any] = pools["dev"]
+        return pool
+
+    without = {**example(), "env_try": {"scenarios": ["try"]}}
+    assert "env.try" not in dev(without)["grants"]
+    assert "env.try" not in dev(without)["run"]["operations"]
+    assert "env.try" not in dev(without)["run"]["instructions"]
+    with_check = {**example(), "env_try": {"scenarios": ["try"], "dev_scenarios": ["check"]}}
+    pool = dev(with_check)
+    assert "env.try" in pool["grants"] and "env.try" in pool["run"]["operations"]
+    assert "Before every submit, run env.try" in pool["run"]["instructions"]
+    assert 'scenarios ["check"]' in pool["run"]["instructions"]
+
+
 def test_developer_and_pe_schedules_are_opt_in() -> None:
     def crons(host: dict[str, Any], name: str) -> list[str]:
         pools = {p["name"]: p for p in kit().group_document(host)["spec"]["pools"]}
