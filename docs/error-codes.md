@@ -266,7 +266,7 @@ used by the examples.
 | `merge_already_merged` | The pull request is already merged | `cardea_vcs_ops.ops` |
 | `merge_approval_stale` | An allowed reviewer approved an earlier head; a new approval is needed | `cardea_vcs_ops.ops` |
 | `merge_checks_failed` | Checks did not succeed: {…} | `cardea_vcs_ops.ops` |
-| `merge_checks_missing` | No check ran on the head | `cardea_vcs_ops.ops` |
+| `merge_checks_missing` | No passing env.try on head {…} for scenarios {…} (repo {…}). Run env.try with commit {…}; that needs the grants env.try and repo:{…}; No check ran on the head | `cardea_vcs_ops.ops` |
 | `merge_checks_pending` | Checks still running: {…} | `cardea_vcs_ops.ops` |
 | `merge_head_moved` | The pull request's head moved since the caller read it; The head moved before the merge | `cardea_vcs_ops.ops` |
 | `merge_host_not_approved` | The host shows no approval of the head by the configured reviewer | `cardea_vcs_ops.ops` |

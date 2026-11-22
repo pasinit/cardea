@@ -6,7 +6,7 @@ naming the grant. `env.try` here is an in-process stand-in that passes or fails 
 the real worker is covered in test_env_try.py.
 """
 
-# ruff: noqa: F811
+# ruff: noqa: F401, F811
 # Fixtures are imported from test_vcs_merge, and some are overridden here.
 
 from collections.abc import Iterator
@@ -27,10 +27,12 @@ from test_vcs_merge import (
     act,
     approve,
     head_of,
+    host,
     merge,
     open_pull,
     pool,
     refused,
+    session,
     tokens_config,
     write_tokens,
 )
