@@ -66,6 +66,18 @@ function mailbox(view) {
   fill("mailbox", rows.length ? table(["Address", "Pending", "In flight", "Dead", "Consumed"], rows) : empty("No mail."), view.mailbox.truncated);
 }
 
+function replies(list) {
+  const body = $("mailbox").querySelector(".body");
+  body.append(el("h3", "Replies to the supervisor"));
+  if (!list.length) return body.append(empty("No replies."));
+  list.forEach((m) => {
+    const text = m.parts.map((p) => (p.text !== undefined ? p.text : JSON.stringify(p.data))).join("\n");
+    const item = el("div", null, "reply");
+    item.append(el("div", `${m.sender_id} to ${m.to.instance}, ${m.created_at}`, "muted"), el("div", text));
+    body.append(item);
+  });
+}
+
 function approvals(view) {
   const rows = view.approvals.items.map((a) => [a.request_id, a.operation, a.resource, a.state, a.task_id, a.expires_at]);
   fill("approvals", rows.length ? table(["Request", "Operation", "Resource", "State", "Task", "Expires"], rows) : empty("Nothing waits for approval."), view.approvals.truncated);
@@ -100,7 +112,7 @@ function roleChoices(view) {
   if (view.pools.some((p) => p.name === chosen)) select.value = chosen;
 }
 
-function render(view) {
+function render(view, list) {
   $("title").textContent = `${view.group} (${view.namespace})`;
   $("summary").textContent = `${view.state}; generation ${view.generation}, observed ${view.observed_generation}; as of ${view.as_of}`;
   roleChoices(view);
@@ -110,13 +122,19 @@ function render(view) {
   approvals(view);
   spend(view);
   journal(view);
+  replies(list);
+}
+
+async function read(path) {
+  const response = await fetch(path, { cache: "no-store" });
+  if (!response.ok) throw new Error((await response.json()).code);
+  return response.json();
 }
 
 async function refresh() {
   try {
-    const response = await fetch("/api/status", { cache: "no-store" });
-    if (!response.ok) throw new Error((await response.json()).code);
-    render(await response.json());
+    const [view, list] = await Promise.all([read("/api/status"), read("/api/replies")]);
+    render(view, list);
     $("error").textContent = "";
   } catch (error) {
     $("error").textContent = `Cannot read the team's status: ${error.message}`;
