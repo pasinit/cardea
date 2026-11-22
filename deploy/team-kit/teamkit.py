@@ -7,6 +7,7 @@
     python3 -I deploy/team-kit/teamkit.py pause   --host HOST.json
     python3 -I deploy/team-kit/teamkit.py resume  --host HOST.json
     python3 -I deploy/team-kit/teamkit.py stop    --host HOST.json
+    python3 -I deploy/team-kit/teamkit.py dashboard --host HOST.json [--port N]
 
 Everything host-specific comes from the private host file (`team.host.example.json`
 shows its shape): the namespace, the supervisor's identity, the repository alias and its
@@ -35,6 +36,8 @@ What each command does:
   until `resume`, which provisions it enabled and removes the record.
 - `stop` pauses, then deletes the group (its members drain; the collections and records
   stay, for the record).
+- `dashboard` serves a read-only page of the team overview on the loopback interface, with a
+  box to message a role as the supervisor (`dashboard.py`).
 """
 
 import argparse
@@ -794,7 +797,14 @@ def provisioning_fragment(host: dict[str, Any], *, paused: bool = False) -> dict
     ceiling for them."""
     namespace, _, supervisor, _ = _names(host)
     group = group_document(host)
-    rights = sorted({*SUPERVISOR_RIGHTS, *(g for p in group["spec"]["pools"] for g in p["grants"])})
+    # The supervisor may mail every role's pool: the dashboard's message box.
+    rights = sorted(
+        {
+            *SUPERVISOR_RIGHTS,
+            *(g for p in group["spec"]["pools"] for g in p["grants"]),
+            *_mail(_names(host)[1], *POOLS),
+        }
+    )
     expires = (datetime.now(UTC) + timedelta(days=int(host.get("grant_days", 14)))).isoformat()
     grant = {"namespace": namespace, "expires_at": expires}
     principal = {"kind": "human", **host["supervisor"], "disabled": paused}
@@ -1260,16 +1270,34 @@ def status(host: dict[str, Any], today: date | None = None) -> list[str]:
     return host_rules_note(host) + tokens + failure_lines(failures(view)) + summarise(view)
 
 
+def dashboard(host: dict[str, Any], port: int) -> None:
+    import importlib.util
+
+    path = Path(__file__).with_name("dashboard.py")
+    spec = importlib.util.spec_from_file_location("dashboard", path)
+    assert spec is not None and spec.loader is not None
+    page = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(page)
+    namespace, group, _, _ = _names(host)
+    kernel = client(host)
+    try:
+        page.serve(page.KernelBackend(kernel.request, namespace, group), port)
+    finally:
+        kernel.close()
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("render", "provision", "apply", "status", "pause", "resume", "stop"):
+    for name in ("render", "provision", "apply", "status", "pause", "resume", "stop", "dashboard"):
         command = commands.add_parser(name)
         command.add_argument("--host", type=Path, required=True, help="the private host file")
         if name == "render":
             command.add_argument("--out", type=Path, required=True)
         if name == "provision":
             command.add_argument("--paused", action="store_true")
+        if name == "dashboard":
+            command.add_argument("--port", type=int, default=8765)
         if name == "pause":
             command.add_argument("--reason", help="why, kept for `status` (no secrets)")
     args = parser.parse_args(argv)
@@ -1287,6 +1315,8 @@ def main(argv: list[str]) -> int:
         print("\n".join(apply(host)))
     elif args.command == "status":
         print("\n".join(status(host)))
+    elif args.command == "dashboard":
+        dashboard(host, args.port)
     elif args.command == "pause":
         runs = pause(host, args.reason)
         print(f"the supervisor is disabled; the kernel cancelled its {len(runs)} active run(s)")
