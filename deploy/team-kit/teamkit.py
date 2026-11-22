@@ -210,7 +210,17 @@ MAX_ITEMS_PER_DEVELOPER = 2
 MAX_START_REFUSALS = 3
 
 
-def developer_instructions(group: str) -> str:
+def merge_scenarios(host: dict[str, Any]) -> list[str]:
+    """The `env.try` scenarios that must pass on a pull request's head before vcs.merge.
+
+    Host file `env_try.merge_scenarios`, default `["try"]`; an empty list turns the check
+    off. The kernel records the run bound to the full head SHA (vcs `merge.env_try`), and
+    the developers hold `env.try` to make it.
+    """
+    return list((host.get("env_try") or {}).get("merge_scenarios", ["try"]))
+
+
+def developer_instructions(group: str, scenarios: list[str] | None = None) -> str:
     """What a developer does in one run, in order, until nothing is left for it.
 
     One run keeps going after a merge or a submit, so a ready item does not wait for the
@@ -220,12 +230,21 @@ def developer_instructions(group: str) -> str:
     `$member` is the member's own ID (the kernel fills it in per replica).
     """
     branch = f"agent/{group}/<record_id>-<claim_epoch>"
+    tried = (
+        "Before you merge, the kernel needs a passing env.try of the pull request's current "
+        f"head: call env.try with repo, commit (the full 40-character head SHA) and scenarios "
+        f"{', '.join(scenarios)}, and pass the same SHA as head_sha to vcs.merge. A new push "
+        "changes the head and needs a new run. If env.try fails, fix the change instead. "
+        if scenarios
+        else ""
+    )
     return (
         "You are a developer, member $member; your number n is the last part of that ID. "
         "Work in this run until nothing is left for you, in this order. "
         "(1) If you hold an approved item, merge its change with vcs.merge and move the item "
         "to done with the merge transition. "
-        "(2) If you hold an item with changes requested, read the review, change the code "
+        + tried
+        + "(2) If you hold an item with changes requested, read the review, change the code "
         "with a coding session, push and submit again. If you hold an item in progress "
         "that an earlier run did not submit, finish it as in (4). "
         "(3) Then take a ready item, unless you already hold "
@@ -449,6 +468,7 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
     per_run = float(budgets.get("max_cost_usd_per_run", 1.0))
     schedules = {**DEFAULT_SCHEDULES, **(host.get("schedules") or {})}
     scenarios = list((host.get("env_try") or {}).get("scenarios", ["try"]))
+    merge_check = merge_scenarios(host)
     email = bool((host.get("email") or {}).get("alias"))
     devs = developers(host)
     base = ["objects.read", "objects.write", "models.invoke", "mailbox.send", "mailbox.inbox"]
@@ -601,11 +621,12 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
                 "vcs.open_change",
                 "vcs.read_change",
                 "vcs.merge",
+                *(["env.try"] if merge_check else []),
                 f"repo:{repo}",
                 *_mail(group, "tl", "pe"),
             ],
             "run": run(
-                developer_instructions(group),
+                developer_instructions(group, merge_check),
                 [
                     "records.query",
                     "records.transition",
@@ -614,6 +635,7 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
                     "vcs.open_change",
                     "vcs.read_change",
                     "vcs.merge",
+                    *(["env.try"] if merge_check else []),
                 ],
                 int(timeouts["dev"]),
                 ("tl", "pe"),
@@ -750,7 +772,10 @@ def vcs_fragment(host: dict[str, Any]) -> dict[str, Any]:
         "allow_approve": [f"{group}.pe"],
     }
     if names.get("reviewer_login"):
-        fragment["merge"] = {"reviewer_login": names["reviewer_login"]}
+        fragment["merge"] = {
+            "reviewer_login": names["reviewer_login"],
+            "env_try": merge_scenarios(host),
+        }
     return fragment
 
 

@@ -226,6 +226,9 @@ class EvidenceQuery(Record):
     fields: Annotated[tuple[EvidencePath, ...], Field(max_length=8)] = ()
     # Which end of the history: the newest receipts, or the oldest (the first such call).
     order: Literal["newest", "oldest"] = "newest"
+    # A `match` whose pointer names an argument the call did not pass is left out, so the
+    # handler filters on the `fields` instead (for example a head the caller did not pin).
+    optional: bool = False
 
 
 class ReplyPolling(Record):

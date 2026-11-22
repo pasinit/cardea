@@ -635,7 +635,8 @@ class Vcs:
                     )
                 # 4. Every check run on the head succeeded.
                 runs = await host.check_runs(head)
-                _check_runs(runs)
+                tried = self.tried(repository, context, head)
+                _check_runs(runs, tried is not None)
                 # 5. The host can merge it.
                 if pull.get("mergeable") is not True:
                     # `null` while the host is still computing it: try again later.
@@ -660,9 +661,35 @@ class Vcs:
             "head_sha": head,
             "opened_receipt": str(opener.get("receipt_id")),
             "approval_receipt": str(at_head[0].get("receipt_id")),
+            **({"check_receipt": tried} if tried is not None else {}),
             "head_deleted": deleted,
             **self.waived(arguments["repository"]),
         }
+
+    def tried(self, alias: object, context: OperationContext, head: str) -> str | None:
+        """The receipt of the `env.try` check the host requires on this head, if any
+        (`merge.env_try`). The kernel recorded it, bound to the full head SHA, so a pull
+        request whose head changed has none until it is tried again. Refused when the host
+        requires the check and no successful, passing run of every scenario exists."""
+        assert self.config.merge is not None
+        scenarios = sorted(set(self.config.merge.env_try))
+        if not scenarios:
+            return None
+        for entry in context.evidence.get("tries") or ():
+            ran = _field(entry, "arguments/scenarios")
+            if (
+                _field(entry, "arguments/commit") == head
+                and _field(entry, "output/passed") is True
+                and isinstance(ran, list)
+                and set(scenarios) <= {str(s) for s in ran}
+            ):
+                return str(entry.get("receipt_id"))
+        raise OperationRejected(
+            f"No passing env.try on head {head} for scenarios {', '.join(scenarios)} "
+            f"(repo {alias}). Run env.try with commit {head}; that needs the grants "
+            f"env.try and repo:{alias}",
+            "merge_checks_missing",
+        )
 
     async def _delete_head(
         self, host: GitHub, pull: dict[str, Any], context: OperationContext, alias: object
@@ -859,9 +886,10 @@ def _host_approved(reviews: list[dict[str, Any]], login: str, head: str) -> bool
     )
 
 
-def _check_runs(runs: list[dict[str, Any]]) -> None:
-    """Every check run on the head completed with success, and there is at least one."""
-    if not runs:
+def _check_runs(runs: list[dict[str, Any]], tried: bool = False) -> None:
+    """Every check run on the head completed with success, and there is at least one,
+    unless the kernel's own `env.try` check passed on the head (`tried`)."""
+    if not runs and not tried:
         raise OperationRejected("No check ran on the head", "merge_checks_missing")
     pending = sorted(str(r.get("name")) for r in runs if r.get("status") != "completed")
     if pending:

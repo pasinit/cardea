@@ -22,7 +22,7 @@
         "sha": {"type": "string"},
         "head_sha": {"type": "string"},
         "opened_receipt": {"type": "string"},
-        "approval_receipt": {"type": "string"}, "head_deleted": {"type": "boolean"},
+        "approval_receipt": {"type": "string"}, "check_receipt": {"type": "string"}, "head_deleted": {"type": "boolean"},
         "host_rules": {"enum": ["required", "waived"]}, "waiver_reason": {"type": "string"}
       },
       "required": ["number", "merged", "sha", "head_sha"]
@@ -50,6 +50,13 @@
         "match": {"arguments/repository": "/repository", "arguments/number": "/number"},
         "equals": {"arguments/event": "APPROVE"},
         "fields": ["output/commit_id"]
+      },
+      {
+        "name": "tries",
+        "operation": "env.try",
+        "match": {"arguments/repo": "/repository", "arguments/commit": "/head_sha"},
+        "optional": true,
+        "fields": ["arguments/commit", "arguments/scenarios", "output/passed"]
       }
     ]
   }
