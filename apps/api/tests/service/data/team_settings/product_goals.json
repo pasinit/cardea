@@ -1,0 +1,49 @@
+{
+  "valid": {
+    "product_goals": {
+      "goals": "Help small teams ship.\n- Fast setup.",
+      "non_goals": "No mobile app."
+    }
+  },
+  "invalid": [
+    {
+      "settings": {
+        "product_goals": {}
+      },
+      "field": "product_goals.goals"
+    },
+    {
+      "settings": {
+        "product_goals": {
+          "non_goals": "x"
+        }
+      },
+      "field": "product_goals.goals"
+    },
+    {
+      "settings": {
+        "product_goals": {
+          "goals": "   "
+        }
+      },
+      "field": "product_goals.goals"
+    },
+    {
+      "settings": {
+        "product_goals": {
+          "goals": "ok",
+          "extra": "x"
+        }
+      },
+      "field": "product_goals.extra"
+    },
+    {
+      "settings": {
+        "product_goals": {
+          "goals": "bell\u0007"
+        }
+      },
+      "field": "product_goals.goals"
+    }
+  ]
+}

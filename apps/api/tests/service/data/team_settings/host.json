@@ -1,0 +1,35 @@
+{
+  "namespace": "dev",
+  "group": "dev-team",
+  "repository": "cardea",
+  "supervisor": {
+    "principal_id": "sup-dev",
+    "kind": "human"
+  },
+  "model": "claude-sonnet-4-5",
+  "developers": 2,
+  "product": {
+    "goals": "Original goals.",
+    "non_goals": "Original non-goals."
+  },
+  "budgets": {
+    "team": {
+      "runs": 30,
+      "usd": 20.0
+    },
+    "roles": {
+      "pm": {
+        "runs": 4
+      },
+      "dev": {
+        "runs": 14
+      }
+    },
+    "max_cost_usd_per_run": 1.0
+  },
+  "schedules": {
+    "pm": [
+      "0 9 * * 1-5"
+    ]
+  }
+}
