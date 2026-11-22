@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: help install acceptance-check error-codes try try-test try-check teams teams-test test api-test kernel-test standards-test m1-test m1-demo kernel-openapi spire-fit dbos-fit dbos-integration-fit temporal-fit absurd-fit hatchet-fit cel-fit kernel-schema kernel-demo lint lint-api fix-lint format typecheck typecheck-api check-uv
+.PHONY: help install acceptance-check error-codes try try-test try-check teams teams-test test api-test check check-test kernel-test standards-test m1-test m1-demo kernel-openapi spire-fit dbos-fit dbos-integration-fit temporal-fit absurd-fit hatchet-fit cel-fit kernel-schema kernel-demo lint lint-api fix-lint format typecheck typecheck-api check-uv
 
 API_DIR := apps/api
 UV ?= $(shell command -v uv 2>/dev/null || printf "%s/bin/uv" "$$(python3 -m site --user-base)")
@@ -12,6 +12,7 @@ help:
 	@printf "  make teams        Walk through ADR-034's software team and trading desk\n"
 	@printf "  make test         Run all available tests\n"
 	@printf "  make api-test     Run backend tests\n"
+	@printf "  make check        Run lint, typecheck and the tests that need no TCP loopback\n"
 	@printf "  make kernel-test  Run portable kernel contract tests\n"
 	@printf "  make standards-test Run identity, transport, and digest fit checks\n"
 	@printf "  make m1-test      Run authenticated daemon acceptance with real providers\n"
@@ -89,6 +90,13 @@ incident-demo-check: check-uv
 
 api-test: check-uv
 	cd $(API_DIR) && "$(UV)" run pytest
+
+# The `check` scenario of env.try: lint, typecheck and the tests that need no TCP loopback.
+check:
+	python3 packaging/check.py
+
+check-test: check-uv
+	cd $(API_DIR) && CARDEA_NO_LOOPBACK=1 "$(UV)" run pytest -m "not loopback" -q -rfE -p no:cacheprovider
 
 kernel-test: check-uv
 	cd $(API_DIR) && "$(UV)" run pytest tests/kernel

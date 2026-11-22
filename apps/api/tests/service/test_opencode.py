@@ -39,6 +39,9 @@ from cardea.service.models import AgentRunRequest, Permission, Principal, Provis
 from cardea.service.operations import Registry
 from cardea.service.tool_endpoint import ToolEndpoint
 
+# Binds or connects over TCP loopback: not run by `make check-test`.
+pytestmark = pytest.mark.loopback
+
 TRANSCRIPT = Path(__file__).parent / "data" / "opencode-1.18.35-run.ndjson"
 BINARY = os.environ.get("CARDEA_TEST_OPENCODE")
 needs_binary = pytest.mark.skipif(

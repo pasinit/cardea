@@ -252,6 +252,7 @@ emit("step_finish", {{"tokens": {{"input": 100, "output": 10, "reasoning": 0,
 """
 
 
+@pytest.mark.loopback
 def test_opencode_stderr_and_steps_are_logged_with_the_attempt(
     tmp_path: Path, logs: pytest.LogCaptureFixture
 ) -> None:
@@ -484,6 +485,7 @@ def test_a_crashed_session_worker_logs_a_scrubbed_tail(logs: pytest.LogCaptureFi
     assert any("auth_token=[redacted]" in line for line in tail)
 
 
+@pytest.mark.loopback
 def test_the_session_worker_writes_nothing_to_stderr(tmp_path: Path) -> None:
     # The unit duplicates the result file onto stderr: a log line there would corrupt it.
     binary = tmp_path / "opencode"

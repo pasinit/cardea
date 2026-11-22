@@ -61,6 +61,9 @@ files = ["src", "tests"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "loopback: binds or connects over TCP loopback; excluded from `make check-test` (env.try `check`)",
+]
 
 [tool.uv.sources]
 cardea-coding-ops = { path = "../../packages/cardea-coding-ops", editable = true }
