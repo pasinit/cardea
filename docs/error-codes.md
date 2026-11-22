@@ -44,7 +44,7 @@ errors answer 409. A request that fails schema validation answers
 | `collection_deleted` | 409 | This collection was deleted; choose a new name | `cardea.service.records` |
 | `collection_in_use` | 409 | Groups {…} still use this collection; remove it from them first | `cardea.service.records` |
 | `collection_mismatch` | 422 | Path and body collection names differ | `cardea.service.app` |
-| `collection_not_found` | 404, 422 | Collection {…} does not exist in this namespace under this supervisor; No accessible collection | `cardea.service.groups`, `cardea.service.records` |
+| `collection_not_found` | 404, 422 | Collection {…} does not exist in this namespace under this supervisor; No accessible collection | `cardea.service.groups`, `cardea.service.records`, `cardea.service.team_status` |
 | `collection_supervisor` | 403 | The caller must be the collection's supervisor; The collection belongs to another supervisor | `cardea.service.records` |
 | `content_gate_unavailable` | 503 | The content gate cannot run ({…}) | `cardea.service.content_gate` |
 | `context_not_read_only` | 422 | Context operations must be read-only | `cardea.service.operations` |
@@ -94,7 +94,7 @@ errors answer 409. A request that fails schema validation answers
 | `invalid_backup` | 400 | Use a standalone SQLite backup, not the active file; Wrong database application identity; Unsupported base schema (and 5 more) | `cardea.service.admin`, `cardea.service.maintenance` |
 | `invalid_checkpoint` | 409 | This store checkpoints only settled work. | `cardea.kernel.store` |
 | `invalid_credential` | 401 | Bound coordinator proof required; Bearer authentication is required; Credential has expired (and 2 more) | `cardea.runtime.a2a`, `cardea.service.app`, `cardea.service.auth` |
-| `invalid_cursor` | 400, 409 | Event cursor must be a nonnegative integer.; Cursor does not name a message; Cursor does not name an item of this list | `cardea.kernel.store`, `cardea.service.app`, `cardea.service.pages` |
+| `invalid_cursor` | 400, 409 | Event cursor must be a nonnegative integer.; Cursor does not name a message; Cursor does not name an item of this list (and 3 more) | `cardea.kernel.store`, `cardea.service.app`, `cardea.service.pages`, `cardea.service.team_status` |
 | `invalid_diff` | 422 | A hunk header is malformed; An added line is outside a file's hunk | `cardea.service.content_gate` |
 | `invalid_event` | 400 | Body is not a supported CloudEvents 1.0 event | `cardea.service.events` |
 | `invalid_host_usage` | 500 | Host usage exceeds its reserved allocation | `cardea.service.host_budget` |

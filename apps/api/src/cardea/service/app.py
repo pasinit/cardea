@@ -3,7 +3,7 @@
 import json
 import logging
 from hashlib import sha256
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import sqlalchemy as sa
 from fastapi import Depends, FastAPI, Header, Path, Query, Request
@@ -26,6 +26,7 @@ from cardea.service import (
     pages,
     records,
     spend,
+    team_status,
 )
 from cardea.service import events as intake
 from cardea.service import (
@@ -78,6 +79,12 @@ from cardea.service.responses import (
     RecordHistory,
     RunOutput,
     RunView,
+    StatusChanges,
+    StatusMail,
+    StatusRuns,
+    StatusSpend,
+    StatusStanding,
+    StatusWork,
     SystemView,
     TaskReceipt,
     TriggerList,
@@ -637,6 +644,80 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
         claimed records, mailbox counts, open approvals, spend and the latest journal
         events. The rights are those of `GET /v0.2/groups/{name}`."""
         return overview.overview(kernel, proof, namespace, name, events)
+
+    @app.get("/v0.2/groups/{name}/status/work", response_model=StatusWork)
+    def status_work(
+        name: GroupPath,
+        namespace: Namespace,
+        proof: Credential,
+        collection: Annotated[str | None, Query(pattern=f"^{COLLECTION_NAME}$")] = None,
+        state: Annotated[str | None, Query(max_length=64)] = None,
+        holder: Annotated[str | None, Query(max_length=128)] = None,
+        after: Annotated[int, Query(ge=0)] = 0,
+        limit: Annotated[int, Query(ge=1, le=100)] = 25,
+    ) -> dict[str, Any]:
+        """Read-only: the group's records by state and live holder, one page."""
+        return team_status.work(
+            kernel,
+            proof,
+            namespace,
+            name,
+            collection=collection,
+            state=state,
+            holder=holder,
+            after=after,
+            limit=limit,
+        )
+
+    @app.get("/v0.2/groups/{name}/status/runs", response_model=StatusRuns)
+    def status_runs(
+        name: GroupPath,
+        namespace: Namespace,
+        proof: Credential,
+        active: bool = False,
+        after: Annotated[str, Query(max_length=64)] = "",
+        limit: Annotated[int, Query(ge=1, le=100)] = 25,
+    ) -> dict[str, Any]:
+        """Read-only: the members' runs, newest first, with outcome and cost."""
+        return team_status.runs(
+            kernel, proof, namespace, name, active=active, after=after, limit=limit
+        )
+
+    @app.get("/v0.2/groups/{name}/status/mail", response_model=StatusMail)
+    def status_mail(
+        name: GroupPath,
+        namespace: Namespace,
+        proof: Credential,
+        after: Annotated[str, Query(max_length=64)] = "",
+        limit: Annotated[int, Query(ge=1, le=100)] = 25,
+    ) -> dict[str, Any]:
+        """Read-only: messages between the group's roles, newest first, without bodies."""
+        return team_status.mail(kernel, proof, namespace, name, after=after, limit=limit)
+
+    @app.get("/v0.2/groups/{name}/status/changes", response_model=StatusChanges)
+    def status_changes(
+        name: GroupPath,
+        namespace: Namespace,
+        proof: Credential,
+        state: Annotated[Literal["all", "open", "merged"], Query()] = "all",
+        after: Annotated[str, Query(max_length=256)] = "",
+        limit: Annotated[int, Query(ge=1, le=100)] = 25,
+    ) -> dict[str, Any]:
+        """Read-only: pull requests the group opened and their review state, from the
+        kernel's receipts."""
+        return team_status.changes(
+            kernel, proof, namespace, name, state=state, after=after, limit=limit
+        )
+
+    @app.get("/v0.2/groups/{name}/status/spend", response_model=StatusSpend)
+    def status_spend(name: GroupPath, namespace: Namespace, proof: Credential) -> dict[str, Any]:
+        """Read-only: spend against the group's, each pool's and the host's ceilings."""
+        return team_status.ceilings(kernel, proof, namespace, name)
+
+    @app.get("/v0.2/groups/{name}/status/standing", response_model=StatusStanding)
+    def status_standing(name: GroupPath, namespace: Namespace, proof: Credential) -> dict[str, Any]:
+        """Read-only: what is paused (group, members) and what host rules are waived."""
+        return team_status.standing(kernel, proof, namespace, name)
 
     @app.delete("/v0.2/groups/{name}", response_model=GroupDeleted)
     def delete_group(
