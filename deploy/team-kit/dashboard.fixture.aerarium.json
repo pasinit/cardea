@@ -1,0 +1,188 @@
+{
+  "schema_version": "0.2",
+  "group": "aerarium-team",
+  "namespace": "aerarium",
+  "state": "active",
+  "generation": 3,
+  "observed_generation": 3,
+  "as_of": "2026-11-21T09:30:00+00:00",
+  "cursor": 412,
+  "pools": [
+    {
+      "name": "pm",
+      "replicas": 1,
+      "members": [
+        {
+          "principal_id": "dev-team.pm.0",
+          "pool": "pm",
+          "ordinal": 0,
+          "state": "active",
+          "disabled": false,
+          "active_task_id": null,
+          "last_run": {
+            "task_id": "7f0c1d52-3a39-4d0e-9a53-0d3f6f1d1a01",
+            "outcome": "succeeded",
+            "failure_code": null,
+            "finished_at": "2026-11-21T09:05:00+00:00"
+          },
+          "claims": [],
+          "claims_truncated": 0
+        }
+      ]
+    },
+    {
+      "name": "dev",
+      "replicas": 2,
+      "members": [
+        {
+          "principal_id": "dev-team.dev.0",
+          "pool": "dev",
+          "ordinal": 0,
+          "state": "active",
+          "disabled": false,
+          "active_task_id": "7f0c1d52-3a39-4d0e-9a53-0d3f6f1d1a02",
+          "last_run": null,
+          "claims": [
+            "work/rec-0001"
+          ],
+          "claims_truncated": 0
+        },
+        {
+          "principal_id": "dev-team.dev.1",
+          "pool": "dev",
+          "ordinal": 1,
+          "state": "active",
+          "disabled": false,
+          "active_task_id": null,
+          "last_run": {
+            "task_id": "7f0c1d52-3a39-4d0e-9a53-0d3f6f1d1a03",
+            "outcome": "failed",
+            "failure_code": "run_timeout",
+            "finished_at": "2026-11-21T08:40:00+00:00"
+          },
+          "claims": [],
+          "claims_truncated": 0
+        }
+      ]
+    }
+  ],
+  "collections": [
+    {
+      "name": "work",
+      "status": "ok",
+      "by_state": {
+        "open": 3,
+        "in_progress": 1,
+        "done": 7
+      },
+      "total": 11,
+      "claimed": [
+        {
+          "record_id": "rec-0001",
+          "title": "Add retry to the importer",
+          "state": "in_progress",
+          "holder": "dev-team.dev.0",
+          "claim_epoch": 1,
+          "claimed_at": "2026-11-21T09:10:00+00:00",
+          "age_seconds": 1200,
+          "lease_expires_at": "2026-11-21T10:10:00+00:00"
+        }
+      ],
+      "truncated": 0
+    },
+    {
+      "name": "decisions",
+      "status": "ok",
+      "by_state": {},
+      "total": 0,
+      "claimed": [],
+      "truncated": 0
+    }
+  ],
+  "mailbox": {
+    "addresses": [
+      {
+        "address": "dev-team.dev",
+        "pending": 1,
+        "in_flight": 0,
+        "dead": 0,
+        "consumed": 5
+      },
+      {
+        "address": "dev-team.pm",
+        "pending": 0,
+        "in_flight": 0,
+        "dead": 1,
+        "consumed": 2
+      }
+    ],
+    "truncated": 0
+  },
+  "approvals": {
+    "items": [
+      {
+        "request_id": "apr-1",
+        "task_id": "7f0c1d52-3a39-4d0e-9a53-0d3f6f1d1a02",
+        "operation": "vcs.merge",
+        "resource": "repo:app",
+        "state": "pending",
+        "created_at": "2026-11-21T09:20:00+00:00",
+        "expires_at": "2026-11-21T21:20:00+00:00"
+      }
+    ],
+    "truncated": 0
+  },
+  "spend": {
+    "accounts": [
+      {
+        "account": "group",
+        "usd": 20.0,
+        "window": "day",
+        "window_ends_at": "2026-11-22T00:00:00+00:00",
+        "used_usd": 4.25,
+        "runs": 30,
+        "used_runs": 9
+      },
+      {
+        "account": "pool:dev",
+        "usd": null,
+        "window": "day",
+        "window_ends_at": "2026-11-22T00:00:00+00:00",
+        "used_usd": 2.5,
+        "runs": 14,
+        "used_runs": 5
+      }
+    ],
+    "expectations": [
+      {
+        "pool": "pm",
+        "window_key": "2026-11-20",
+        "outcome": "met",
+        "observed": 2,
+        "reported_at": "2026-11-21T00:00:00+00:00"
+      }
+    ],
+    "expectations_truncated": 0
+  },
+  "journal": {
+    "events": [
+      {
+        "cursor": 412,
+        "type": "cardea.mailbox.sent",
+        "producer_id": "dev-team.pm.0",
+        "task_id": "7f0c1d52-3a39-4d0e-9a53-0d3f6f1d1a01",
+        "subject": "dev-team.dev",
+        "at": "2026-11-21T09:06:00+00:00"
+      },
+      {
+        "cursor": 411,
+        "type": "cardea.record.transitioned",
+        "producer_id": "dev-team.dev.0",
+        "task_id": "7f0c1d52-3a39-4d0e-9a53-0d3f6f1d1a02",
+        "subject": "work/rec-0001",
+        "at": "2026-11-21T09:10:00+00:00"
+      }
+    ],
+    "truncated": 0
+  }
+}

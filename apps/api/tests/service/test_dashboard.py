@@ -74,9 +74,14 @@ class Connection:
 
 
 def call(
-    backend: Any, method: str, path: str, body: Any = None, headers: dict[str, str] | None = None
+    backend: Any,
+    method: str,
+    path: str,
+    body: Any = None,
+    headers: dict[str, str] | None = None,
+    build: Any = None,
 ) -> tuple[int, Any]:
-    httpd = dashboard().server(backend, 0)
+    httpd = (build or dashboard().server)(backend, 0)
     port = httpd.server_port
     data = b"" if body is None else json.dumps(body).encode()
     sent = {"Host": f"127.0.0.1:{port}", "Content-Length": str(len(data))}

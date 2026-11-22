@@ -9,12 +9,10 @@ permissions:
   contents: read
 
 jobs:
+  # Linux only: Cardea ships for Debian (ADR-018); a macOS run cost the most time and
+  # covered only local development.
   python:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
