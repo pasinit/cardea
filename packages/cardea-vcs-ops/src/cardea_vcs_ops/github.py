@@ -1,8 +1,8 @@
 """The GitHub REST calls the vcs operations need, over the kernel's pinned `httpx`.
 
-Four resources are enough (ADR-037, "Client library"): git refs, pull requests, issue
-comments and pull-request reviews. Each request carries the call's credential in the
-`Authorization` header and nowhere else.
+Four resources are enough (ADR-037, "Client library"): git refs, pull requests (with
+their changed files, for reviewers), issue comments and pull-request reviews. Each request
+carries the call's credential in the `Authorization` header and nowhere else.
 
 Errors: a 4xx answer means the host refused the request and nothing changed, so it is a
 `HostRefused` the operations turn into a definite failure. A duplicate pull request (422)
@@ -158,6 +158,11 @@ class GitHub:
         result: dict[str, Any] = response.json()
         return result
 
+    async def pull_files(self, number: int) -> list[dict[str, Any]]:
+        """The changed files with their patches. The host omits `patch` for binary files
+        and for very large diffs."""
+        return await self._list(f"/pulls/{number}/files")
+
     # Comments and reviews
 
     async def create_comment(self, number: int, body: str) -> dict[str, Any]:
@@ -195,10 +200,36 @@ class GitHub:
                 break
         return found
 
-    async def merge(self, number: int, sha: str) -> dict[str, Any]:
-        """Squash-merge, only if the head is still `sha` (the host answers 409 if not)."""
+    async def compare(self, base: str, head: str) -> dict[str, Any]:
+        """How `head` relates to `base` (`ahead_by`, `behind_by`, `base_commit`). One commit
+        per page: only the counts are read."""
         response = await self._request(
-            "PUT", f"/pulls/{number}/merge", json={"merge_method": "squash", "sha": sha}
+            "GET",
+            f"/compare/{quote(base, safe='/')}...{quote(head, safe='/')}",
+            params={"per_page": 1},
         )
         result: dict[str, Any] = response.json()
         return result
+
+    async def merge(self, number: int, sha: str, title: str, message: str) -> dict[str, Any]:
+        """Squash-merge, only if the head is still `sha` (the host answers 409 if not), with
+        `title` and `message` as the squash commit's subject and body."""
+        response = await self._request(
+            "PUT",
+            f"/pulls/{number}/merge",
+            json={
+                "merge_method": "squash",
+                "sha": sha,
+                "commit_title": title,
+                "commit_message": message,
+            },
+        )
+        result: dict[str, Any] = response.json()
+        return result
+
+    async def delete_branch(self, branch: str) -> bool:
+        """Delete a branch; False if the host has no such branch (already deleted)."""
+        response = await self._request(
+            "DELETE", f"/git/refs/heads/{quote(branch, safe='/')}", missing_ok=True
+        )
+        return response.status_code != 404

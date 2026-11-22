@@ -2,8 +2,9 @@
 
 `email.send` is an ADR-023 installed operation: the MCP tool descriptor in `descriptors/`
 plus in-process handlers under the `cardea.operations` entry-point group: the handler, its
-ADR-026 reconciler `email.find_sent`, and its reply poller `email.poll_replies`, which the
-kernel calls for each recent send (`replies` in the descriptor).
+ADR-026 reconciler `email.find_sent`, its reply poller `email.poll_replies`, which the
+kernel calls for each recent send (`replies` in the descriptor), and its inbound poller
+`email.poll_inbound` for new mail on no thread, which the host enables per inbox.
 
 The transport is pluggable behind one interface (`transport.Transport`): AgentMail's HTTP
 API or standard SMTP submission plus IMAP, chosen by the host configuration
@@ -25,7 +26,7 @@ from cardea.service.operations import (
     Reconciler,
     Reconciliation,
 )
-from cardea.service.replies import Polled
+from cardea.service.replies import Inbox, Polled
 from cardea_email_ops.config import load
 from cardea_email_ops.ops import Email
 
@@ -48,6 +49,7 @@ def handlers(email: Email) -> dict[str, Handler | Reconciler | Poller]:
         "email.send": email.send,
         "email.find_sent": email.find_sent,
         "email.poll_replies": email.poll_replies,
+        "email.poll_inbound": email.poll_inbound,
     }
 
 
@@ -75,3 +77,7 @@ async def find_sent(arguments: dict[str, JsonValue], ctx: OperationContext) -> R
 
 async def poll_replies(thread: dict[str, JsonValue]) -> Polled:
     return await _email().poll_replies(thread)
+
+
+async def poll_inbound(job: dict[str, JsonValue]) -> Inbox | None:
+    return await _email().poll_inbound(job)

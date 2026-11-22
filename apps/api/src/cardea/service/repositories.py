@@ -8,7 +8,14 @@ holds everything about one repository:
 - `gates`: the targets `code.session` runs, each `{name, argv, timeout_seconds?}`;
 - `branch_prefix`: where agent branches may go (default `agent/{group}/`);
 - `environment`: what `env.try` may run on a commit (ADR-038): the tier, the pinned
-  toolchain image and the scenario catalog. Its digest is part of `env.try`'s run key.
+  toolchain image and the scenario catalog. Its digest is part of `env.try`'s run key;
+- `host_rules`: `required` (the default) or `waived`, with a `waiver_reason`: whether the
+  host's own branch rules are part of the setup (ADR-037 amendment 2026-11-21). A waiver
+  is the host owner's explicit choice, for a host plan without rulesets; it is reported
+  by `vcs.check_repository` and on `vcs.*` receipts, and it changes no Cardea guard;
+- `require_up_to_date` (default false): `vcs.merge` refuses a pull request whose head does
+  not contain the base branch's current head (ADR-037 amendment 2026-11-22), the guard a
+  host's "require branches to be up to date" rule gives, for a repository without one.
 
 A call names only an alias, authorized by the `repo:<alias>` grant. The file holds no
 secret; it must still be a regular file that no one but its owner can change.
@@ -120,6 +127,9 @@ class Repository(Record):
     gates: Annotated[tuple[Gate, ...], Field(max_length=16)] = ()
     branch_prefix: Annotated[str, Field(strict=True, min_length=1, max_length=64)] = DEFAULT_PREFIX
     environment: Environment | None = None
+    host_rules: Literal["required", "waived"] = "required"
+    waiver_reason: Annotated[str, Field(strict=True, min_length=8, max_length=500)] | None = None
+    require_up_to_date: Annotated[bool, Field(strict=True)] = False
 
     @model_validator(mode="after")
     def prefix_names_the_group(self) -> Self:
@@ -130,6 +140,12 @@ class Repository(Record):
         host = (self.owner, self.name, self.api_url, self.git_url)
         if any(v is None for v in host) and any(v is not None for v in host):
             raise ValueError("owner, name, api_url and git_url go together")
+        if (self.host_rules == "waived") != (self.waiver_reason is not None):
+            raise ValueError("host_rules: waived needs a waiver_reason, and only it takes one")
+        if self.host_rules == "waived" and self.git_url is None:
+            raise ValueError("host_rules applies only to a repository vcs.* acts on")
+        if self.require_up_to_date and self.git_url is None:
+            raise ValueError("require_up_to_date applies only to a repository vcs.* acts on")
         return self
 
     @property

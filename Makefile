@@ -35,7 +35,10 @@ help:
 
 check-uv:
 	@test -x "$(UV)" || { \
-		printf "uv is required. Install it with: python3 -m pip install --user uv\n" >&2; \
+		printf "uv is required but was not found (looked for: %s).\n" "$(UV)" >&2; \
+		printf "  Install it:   python3 -m pip install --user uv\n" >&2; \
+		printf "  Then either put ~/.local/bin on PATH, or rerun make as it is (it also looks in the Python user base).\n" >&2; \
+		printf "  Or point at an existing uv:   make UV=/path/to/uv try\n" >&2; \
 		exit 1; \
 	}
 
@@ -192,8 +195,8 @@ m4-check: check-uv
 # pins its digest in the repository registry; the kit's timer refreshes it weekly.
 TRY_REGISTRY ?= /opt/cardea-code/repositories.json
 try-toolchain:
-	sudo python3 -I packaging/try_toolchain.py build --registry $(TRY_REGISTRY)
-	sudo python3 -I packaging/try_toolchain.py pin $(TRY_REGISTRY)
+	digest="$$(sudo python3 -I packaging/try_toolchain.py build --registry $(TRY_REGISTRY))" && \
+		sudo python3 -I packaging/try_toolchain.py pin $(TRY_REGISTRY) --sha256 "$$digest"
 
 .PHONY: acceptance-check
 # The Debian acceptance scripts (docs/acceptance/debian-adr-034-037.md): lint and types only;

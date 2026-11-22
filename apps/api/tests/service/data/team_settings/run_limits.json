@@ -1,0 +1,63 @@
+{
+  "valid": {
+    "run_limits": {
+      "team": 40,
+      "roles": {
+        "dev": 20,
+        "pm": 5
+      }
+    }
+  },
+  "invalid": [
+    {
+      "settings": {
+        "run_limits": {}
+      },
+      "field": "run_limits"
+    },
+    {
+      "settings": {
+        "run_limits": {
+          "team": 0
+        }
+      },
+      "field": "run_limits.team"
+    },
+    {
+      "settings": {
+        "run_limits": {
+          "team": true
+        }
+      },
+      "field": "run_limits.team"
+    },
+    {
+      "settings": {
+        "run_limits": {
+          "roles": {
+            "dev": 1.5
+          }
+        }
+      },
+      "field": "run_limits.roles.dev"
+    },
+    {
+      "settings": {
+        "run_limits": {
+          "roles": {
+            "designer": 3
+          }
+        }
+      },
+      "field": "run_limits.roles.designer"
+    },
+    {
+      "settings": {
+        "run_limits": {
+          "weekly": 3
+        }
+      },
+      "field": "run_limits.weekly"
+    }
+  ]
+}

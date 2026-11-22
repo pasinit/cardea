@@ -235,11 +235,17 @@ class ReplyPolling(Record):
     the last `window_days`, every `interval_seconds`. The poller returns the replies it
     accepts and the ones it drops; the kernel delivers accepted replies into the calling
     agent's mailbox as untrusted data and counts dropped ones without their content.
+
+    `inbound` (amendment 2026-11-21) names a second entry point, called once per interval
+    with the operation's recent threads. It reads new messages at the destination that are
+    on none of them, as host configuration allows, and returns a `replies.Inbox`: the ones
+    it accepts, delivered to a configured pool, and the ones it rejects (`replies.py`).
     """
 
     poller: HandlerName
     interval_seconds: Annotated[int, Field(strict=True, ge=60, le=86400)] = 300
     window_days: Annotated[int, Field(strict=True, ge=1, le=90)] = 14
+    inbound: HandlerName | None = None
 
 
 class RunWindow(Record):
@@ -393,7 +399,10 @@ class OperationDescriptor(Record):
         }
         if not self.cardea.max_artifact_bytes:
             unset.add("max_artifact_bytes")
-        exclude = {"cardea": unset} if unset else None
+        excluded: dict[str, Any] = dict.fromkeys(unset, True)
+        if self.cardea.replies is not None and self.cardea.replies.inbound is None:
+            excluded["replies"] = {"inbound"}  # added 2026-11-21
+        exclude = {"cardea": excluded} if excluded else None
         return sha256(rfc8785.dumps(self.model_dump(mode="json", exclude=exclude))).hexdigest()
 
 
@@ -441,6 +450,8 @@ class Registry:
                 names.add(descriptor.cardea.reconciler)
             if descriptor.cardea.replies is not None:
                 names.add(descriptor.cardea.replies.poller)
+                if descriptor.cardea.replies.inbound is not None:
+                    names.add(descriptor.cardea.replies.inbound)
         return names
 
     @classmethod
@@ -504,6 +515,16 @@ class Registry:
             return cast(Poller, self.handlers[replies.poller])
         except KeyError:
             raise Fault("operation_handler_missing", "Reply poller is not loaded", 503) from None
+
+    def inbound_poller(self, name: str) -> Poller | None:
+        """The inbound poller of an operation that declares one (amendment 2026-11-21)."""
+        replies = self.get(name).cardea.replies
+        if replies is None or replies.inbound is None:
+            return None
+        try:
+            return cast(Poller, self.handlers[replies.inbound])
+        except KeyError:
+            raise Fault("operation_handler_missing", "Inbound poller is not loaded", 503) from None
 
     def scope_key(
         self, name: str, namespace: str, context: str, arguments: Mapping[str, JsonValue]

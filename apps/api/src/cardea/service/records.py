@@ -23,6 +23,7 @@ from hashlib import sha256
 from typing import Annotated, Any, Literal, Self
 from uuid import uuid4
 
+import jsonpointer  # type: ignore[import-untyped]  # ships no type information
 import rfc8785
 import sqlalchemy as sa
 from jsonschema import Draft202012Validator
@@ -196,9 +197,17 @@ class CollectionSpec(Record):
             self.migrate,
             self.claims is not None,
         )
+        properties = self.json_schema.get("properties")
         for transition in self.transitions:
             # Compiles the gate's rule now, so its CEL limits are checked at apply.
             approval_rule("c", transition)
+            needs = transition.requires_receipt
+            for field in (needs.sets or {}) if needs is not None else ():
+                if not isinstance(properties, dict) or field not in properties:
+                    raise ValueError(
+                        f"Transition {transition.name} sets {field}, which the schema does not "
+                        "declare"
+                    )
         return self
 
     @model_validator(mode="after")
@@ -247,6 +256,8 @@ class CollectionDocument(Record):
             needs = transition.get("requires_receipt") if isinstance(transition, dict) else None
             if isinstance(needs, dict) and needs.get("result") is None:
                 needs.pop("result", None)  # added 2026-11-16 (ADR-038 Q3)
+            if isinstance(needs, dict) and needs.get("sets") is None:
+                needs.pop("sets", None)  # added 2026-11-21
         return spec
 
     @property
@@ -757,10 +768,21 @@ def check_condition(
         {"record": dict(record), "args": dict(args), "caller": dict(caller)},
         GUARD_VARIABLES,
     )
+    who = _who(caller)
     if error is not None:
-        raise OperationRejected(f"{label} guard failed to evaluate: {error}", "guard_refused")
+        raise OperationRejected(
+            f"{label} guard failed to evaluate for {who}: {error}", "guard_refused"
+        )
     if value is not True:
-        raise OperationRejected(f"{label} guard refused this call", "guard_refused")
+        raise OperationRejected(
+            f"{label} guard refused this call for {who}: {source[:120]}", "guard_refused"
+        )
+
+
+def _who(caller: Mapping[str, JsonValue]) -> str:
+    """The caller a refusal names: its principal, and its group pool when it has one."""
+    pool = caller.get("pool")
+    return f"{caller.get('id')} (pool {pool})" if pool else str(caller.get("id"))
 
 
 def _names_record(receipt: OperationReceipt, record_id: str, epoch: int) -> bool:
@@ -840,6 +862,28 @@ def check_receipt(
     return receipt_id
 
 
+def receipt_values(
+    conn: sa.Connection, need: ReceiptRequirement, receipt_id: str
+) -> dict[str, JsonValue]:
+    """The data fields `need.sets` takes from the cited call's output; fail closed."""
+    if not need.sets:
+        return {}
+    row = conn.exec_driver_sql(
+        "SELECT snapshot FROM operations WHERE receipt_id=?", (receipt_id,)
+    ).one()
+    receipt = OperationReceipt.model_validate_json(row[0])
+    output = receipt.result.get("output") if isinstance(receipt.result, dict) else None
+    values: dict[str, JsonValue] = {}
+    for field, pointer in need.sets.items():
+        try:
+            values[field] = jsonpointer.resolve_pointer(output, pointer)
+        except jsonpointer.JsonPointerException:
+            raise OperationRejected(
+                f"The cited call's output has no {pointer} for {field}", "receipt_result_refused"
+            ) from None
+    return values
+
+
 def check_result(source: str, receipt: OperationReceipt) -> None:
     """The cited call's output satisfies the requirement's `result` guard; fail closed."""
     output = receipt.result.get("output") if isinstance(receipt.result, dict) else None
@@ -861,7 +905,14 @@ def check_result(source: str, receipt: OperationReceipt) -> None:
 
 # Built-in operations that change a record; their reconciler reads the history.
 WRITES = frozenset(
-    {"records.create", "records.update", "records.claim", "records.release", "records.transition"}
+    {
+        "records.create",
+        "records.update",
+        "records.claim",
+        "records.release",
+        "records.force_release",
+        "records.transition",
+    }
 )
 
 
@@ -880,6 +931,69 @@ def caller_of(conn: sa.Connection, principal: str) -> dict[str, JsonValue]:
         "group": str(member[0]) if member else None,
         "pool": f"{member[0]}.{member[1]}" if member else None,
     }
+
+
+def _holds_collection_grant(policy: Policy, task_id: str, collection: str) -> bool:
+    """Whether the task's live ceiling holds any `record:<collection>/<action>` grant."""
+    prefix = record_grant(collection, "")
+    for grant in json.loads(policy.binding(task_id)["grants_json"]):
+        if not str(grant).startswith(prefix):
+            continue
+        try:
+            policy.ceiling(task_id, str(grant))
+        except Fault:
+            continue
+        return True
+    return False
+
+
+def _lacking(conn: sa.Connection, policy: Policy, task_id: str, grant: str, denied: Fault) -> str:
+    """Which grant a refused call lacked, where, and the caller's pool, for the message."""
+    holder = denied.details.get("holder")
+    text = f"{grant} is not held by the {holder}" if holder else f"{grant} is not held"
+    try:
+        caller = caller_of(conn, str(policy.binding(task_id)["agent_id"]))
+    except Fault:
+        return text
+    return f"{text}; caller {_who(caller)}"
+
+
+def _either(names: list[str]) -> str:
+    """`"a"`, `"a" or "b"`, `"a", "b" or "c"`."""
+    quoted = [f'"{n}"' for n in names]
+    return " or ".join(filter(None, (", ".join(quoted[:-1]), *quoted[-1:])))
+
+
+def unknown_transition(
+    conn: sa.Connection,
+    namespace: str,
+    spec: CollectionSpec,
+    collection: str,
+    record_id: str,
+    name: str,
+) -> OperationRejected:
+    """A name that is not a transition of the table, with what the caller can use instead:
+    the transition into a state it named, then the transitions from the record's state.
+    The agent sees the first 200 characters, so the hint comes first."""
+    row = _record_row(conn, namespace, collection, record_id)
+    state = None if row is None else row["state"]
+    allowed = [t.name for t in spec.transitions if state is None or state in t.from_]
+    tail = (
+        f"use {_either(allowed)}"
+        if state is None
+        else f'from state "{state}" use {_either(allowed)}'
+        if allowed
+        else f'no transition leaves state "{state}"'
+    )
+    if name in (spec.states or ()):
+        into = [t.name for t in spec.transitions if t.to == name]
+        lead = f"the transition into it is {_either(into)}" if into else "none leads into it"
+        return OperationRejected(
+            f'"{name}" is a state, not a transition; {lead}; {tail}', "transition_unknown"
+        )
+    return OperationRejected(
+        f'Collection {collection} has no transition "{name}"; {tail}', "transition_unknown"
+    )
 
 
 def claim_context(record_id: str, epoch: int) -> str:
@@ -1021,14 +1135,21 @@ def expire(
     reason: str,
     spec: "CollectionSpec | None" = None,
 ) -> None:
-    """Return a lapsed claim to the pool: holder cleared, epoch incremented, and the state
-    set to the acquiring transition's `on_claim_expiry`, with history and a journal event,
-    all in the caller's transaction."""
+    """Return a lapsed claim to the pool: holder cleared and epoch incremented, with
+    history and a journal event, all in the caller's transaction.
+
+    The acquiring transition's `on_claim_expiry` undoes the acquisition, so it applies only
+    while the record is still in that transition's target state. A record that later
+    transitions moved on (into review, approved) keeps its state, and with it the work
+    they recorded (ADR-034 amendment, 2026-11-22).
+    """
     old = record_view(row)
     acquired = (
         spec.transition(row["claim_transition"]) if spec and row["claim_transition"] else None
     )
-    state = acquired.on_claim_expiry if acquired and acquired.on_claim_expiry else old["state"]
+    state = old["state"]
+    if acquired is not None and acquired.on_claim_expiry and state == acquired.to:
+        state = acquired.on_claim_expiry
     new: dict[str, JsonValue] = {
         **old,
         "state": state,
@@ -1064,6 +1185,7 @@ class Records:
             "records.update": self.update,
             "records.claim": self.claim,
             "records.release": self.release,
+            "records.force_release": self.force_release,
             "records.claimed": self.claimed,
             "records.summary": self.summary,
             "records.transition": self.transition,
@@ -1087,6 +1209,42 @@ class Records:
             binding = policy.ceiling(context.task_id, record_grant(collection, action))
         except Fault as denied:
             raise OperationRejected(denied.message, denied.code) from None
+        row = _row(conn, context.namespace, collection)
+        if row is None:
+            raise OperationRejected("No such collection in this namespace", "collection_not_found")
+        spec = CollectionSpec.model_validate_json(row["spec_json"])
+        return spec, caller_of(conn, str(binding["agent_id"]))
+
+    def _authorize_transition(
+        self,
+        conn: sa.Connection,
+        context: OperationContext,
+        collection: str,
+        name: str,
+        record_id: str,
+    ) -> tuple[CollectionSpec, dict[str, JsonValue]]:
+        """`_authorize` for a transition, whose grant action is the transition's name.
+
+        Without the grant, a caller that holds some live grant on the collection learns
+        what is wrong when the name is not a transition of the table (a state name, a
+        typo); a caller with no grant on the collection learns nothing about its table.
+        """
+        policy = Policy(conn)
+        grant = record_grant(collection, name)
+        try:
+            binding = policy.ceiling(context.task_id, grant)
+        except Fault as denied:
+            row = _row(conn, context.namespace, collection)
+            if row is not None and _holds_collection_grant(policy, context.task_id, collection):
+                spec = CollectionSpec.model_validate_json(row["spec_json"])
+                if spec.transition(name) is None:
+                    raise unknown_transition(
+                        conn, context.namespace, spec, collection, record_id, name
+                    ) from None
+            raise OperationRejected(
+                f"{denied.message}: {_lacking(conn, policy, context.task_id, grant, denied)}",
+                denied.code,
+            ) from None
         row = _row(conn, context.namespace, collection)
         if row is None:
             raise OperationRejected("No such collection in this namespace", "collection_not_found")
@@ -1391,6 +1549,59 @@ class Records:
             )
         return {"record": new}
 
+    async def force_release(
+        self, arguments: dict[str, JsonValue], context: OperationContext
+    ) -> dict[str, JsonValue]:
+        """The collection's supervisor takes a record back from whoever holds it.
+
+        The epoch is incremented, so the old holder's later writes fail with `claim_lost`.
+        Authority is checked live in this call: the grant, the task's supervisor being the
+        collection's supervisor and that supervisor still holding `groups.manage`. A record
+        nobody holds is returned unchanged, without a new epoch or history row; a retry
+        with the same `client_key` returns the first result (ADR-026).
+        """
+        collection = str(arguments["collection"])
+        record_id = str(arguments["record_id"])
+        with self.database.engine.begin() as conn:
+            spec, _ = self._authorize(conn, context, collection, "force_release")
+            policy = Policy(conn)
+            # The caller is whoever submitted the task, not the agent running it.
+            principal = str(policy.binding(context.task_id)["supervisor_id"])
+            try:
+                if spec.supervisor != principal:
+                    raise Fault(
+                        "collection_supervisor", "Only the collection's supervisor may do this"
+                    )
+                policy.require(principal, context.namespace, "groups.manage")
+                policy.require("platform", context.namespace, "groups.manage")
+            except Fault as denied:
+                raise OperationRejected(denied.message, denied.code) from None
+            row = _record_row(conn, context.namespace, collection, record_id)
+            if row is None:
+                raise OperationRejected("No such record", "record_not_found")
+            old = record_view(row)
+            if row["holder"] is None:
+                return {"record": old}
+            at = now()
+            new: dict[str, JsonValue] = {
+                **old,
+                "holder": None,
+                "lease_expires_at": None,
+                "claim_epoch": int(row["claim_epoch"]) + 1,
+                "version": int(row["version"]) + 1,
+                "updated_at": at.isoformat(),
+            }
+            self._fence(conn, context)
+            write_claim(conn, row, new)
+            detail: dict[str, JsonValue] = {
+                "forced": True,
+                "reason": arguments["reason"],
+                "previous_holder": row["holder"],
+                "previous_epoch": row["claim_epoch"],
+            }
+            self._event(conn, context, principal, "released", old, new, detail, detail)
+        return {"record": new}
+
     async def claimed(
         self, arguments: dict[str, JsonValue], context: OperationContext
     ) -> dict[str, JsonValue]:
@@ -1499,12 +1710,11 @@ class Records:
         targs = arguments.get("args", {})
         assert isinstance(targs, dict)
         with self.database.engine.begin() as conn:
-            spec, caller = self._authorize(conn, context, collection, name)
+            spec, caller = self._authorize_transition(conn, context, collection, name, record_id)
             transition = spec.transition(name)
             if transition is None:
-                raise OperationRejected(
-                    f"Collection {collection} has no transition {name}", "transition_unknown"
-                )
+                # Granted a name the table does not have, e.g. one it used to.
+                raise unknown_transition(conn, context.namespace, spec, collection, record_id, name)
             row = _record_row(conn, context.namespace, collection, record_id)
             if row is None:
                 raise OperationRejected("No such record", "record_not_found")
@@ -1523,7 +1733,7 @@ class Records:
                     "transition_not_allowed",
                 )
             old = record_view(row)
-            check_condition(transition.guard, name, old, targs, caller)
+            check_condition(transition.guard, f"Transition {name}", old, targs, caller)
             new: dict[str, JsonValue] = {
                 **old,
                 "state": transition.to,
@@ -1565,9 +1775,19 @@ class Records:
                     record_id,
                     int(row["claim_epoch"]),
                 )
+                values = receipt_values(conn, transition.requires_receipt, receipt)
+                if values:
+                    data = old["data"]
+                    assert isinstance(data, dict)
+                    new["data"] = _data(spec, {**data, **values})
             write_claim(
                 conn, row, new, acquired, holder_event=actor in (row["holder"], new["holder"])
             )
+            if new["data"] != old["data"]:
+                conn.exec_driver_sql(
+                    "UPDATE records SET data_json=? WHERE seq=?",
+                    (json.dumps(new["data"]), row["seq"]),
+                )
             detail: dict[str, JsonValue] = {
                 "transition": name,
                 "from": old["state"],
@@ -1824,8 +2044,26 @@ DESCRIPTORS: tuple[OperationDescriptor, ...] = (
         reconciler="cardea.records.reconcile",
     ),
     _descriptor(
+        "records.force_release",
+        "Take a record back from its holder, as the collection's supervisor: the claim epoch "
+        "is incremented and the holder's later writes are refused. A record nobody holds is "
+        "left as it is (grant action: force_release)",
+        "effect",
+        {
+            "record_id": _RECORD_ID,
+            "reason": {"type": "string", "minLength": 1, "maxLength": 500},
+            # Retrying with the same key returns the first result (ADR-026).
+            "client_key": {"type": "string", "minLength": 1, "maxLength": 128},
+        },
+        ["record_id", "reason", "client_key"],
+        _ONE,
+        idempotency_scope=["/collection", "/client_key"],
+        reconciler="cardea.records.reconcile",
+    ),
+    _descriptor(
         "records.transition",
-        "Move a record along its collection's state machine (grant action: the transition's name)",
+        "Move a record along its collection's state machine by naming a transition of its table, "
+        "not the target state (grant action: the transition's name)",
         "effect",
         {
             "record_id": _RECORD_ID,

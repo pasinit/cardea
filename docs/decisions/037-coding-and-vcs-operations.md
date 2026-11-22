@@ -99,7 +99,7 @@ Compose existing pieces into one operations package, `vcs.*` and `code.*`, insta
 | Operation | Effect | Idempotency scope (ADR-026) | Reconciler (after `outcome_unknown`) |
 |---|---|---|---|
 | `code.session {repository, base_ref, task, task_key, harness?, model?, gates?}` | effect (publishes kernel objects; nothing leaves the host) | `/repository`, `/base_ref`, `/task_key` | the published change object exists for the call's effect key → applied; else not applied, so a retry runs a fresh session |
-| `vcs.read_change {repository, number}` | read | none | none |
+| `vcs.read_change {repository, number, diff?, diff_offset?, patch_offset?}` | read | none | none |
 | `vcs.push_branch {repository, branch, change, expected_head?}` | effect | `/repository`, `/branch`, `/change` | the branch's head on the host equals the change's head commit → applied |
 | `vcs.open_change {repository, head, base, title, body, draft?}` | effect | `/repository`, `/head` | `GET .../pulls?head=<owner>:<head>&state=all` returns the pull request → applied, with its number and URL |
 | `vcs.comment {repository, number, body, client_key}` | effect | `/repository`, `/number`, `/client_key` | a comment on the pull request carries the marker `cardea:<effect_key>` → applied |
@@ -528,3 +528,66 @@ All decided; the answers are in [Decided by the owner](#decided-by-the-owner-202
     - with an API key (`api_key`), it also passes `--bare`.
 
     Which should the first harness use: the subscription token without `--bare`, relying on those flags and on the fit test's evidence that repository hooks and MCP servers do not run, or an API key with `--bare`? Without `--bare`, Claude Code still reads the repository's `CLAUDE.md`. That is repository text the model reads, which is untrusted either way, and the fit test records whether the model follows it.
+
+## Amendment (2026-11-21): reviewers read the diff
+
+A dry run of the dev team showed the principal engineer could not review: `vcs.read_change` returned the description but no code, so every review requested changes "for lack of evidence". `vcs.read_change` gains `diff: true`, which adds a bounded diff of the pull request. There is no new operation: grants are unchanged (the operation's grant plus `repo:<alias>`), and so are its confined worker and the host permission (`pull_requests:read`).
+
+- **Shape.** `diff.files` lists the changed files: path, previous path, status, line counts and `binary`. It lists at most 100, within 12 KiB, and `files_truncated` and `files_total` say what was left out. `diff.patches` holds the patches of the files from `diff_offset` on, as the host gives them (hunks only). Each patch is capped at 12 KiB and all of them at 32 KiB. A cut patch ends with `[cardea: patch truncated, N of M bytes shown]` and has `truncated: true`. `next_offset` is the index to read from next, or `null` when every patch has been shown.
+- **Bounds.** Sizes are counted as the receipt records them (compact ASCII JSON, escapes included). Whatever the body and reviews take, the whole output stays within the receipt's 64 KiB recorded output, so one call fits a reviewer's context. At most 50 patches are returned per call.
+- **Binary and oversized files.** These are listed and never dumped. A patch the host omits is `omitted: "binary"` when it counts no lines, else `omitted: "too_large"`.
+- **Data, not instructions.** The body, reviews and patches are untrusted repository text. `diff.note` says so, and credential-shaped strings are replaced with `[redacted]`: the shapes `env.try` scrubs, not key-like assignments, so ordinary code reads unchanged. The team kit's principal engineer is told to read the whole diff, following `next_offset`, before reviewing, and to treat it as the author's data.
+- **Tests.** `test_vcs_diff.py` runs against the fake host, whose `pulls/<n>/files` is computed with git. It covers the file list and statuses, binary files, scrubbing, per-file truncation, paging until `next_offset` is `null` within the recorded-output cap, the file-list cap, and host-omitted patches.
+
+
+## Amendment (2026-11-21): merge commit text and merged branches
+
+- **Commit text.** `vcs.merge` passes the pull request's title with its number, `<title> (#<n>)`, as the squash commit's `commit_title`, and its description as `commit_message`. Before, the host used the branch's commit message, for example "code.session change".
+- **Merged agent branches are deleted.** After a successful merge, the head branch is deleted (`DELETE .../git/refs/heads/<branch>`) when it is under the caller's group's agent prefix. Other branches are left alone.
+  - Deletion is best effort and part of the merge's own receipt. The output reports `head_deleted`.
+  - A refused or failed deletion never fails a merge that already happened.
+  - `vcs.find_merge` reports whether the head branch is gone, which shows when an interrupted merge left it behind.
+
+## Amendment (2026-11-21): a host owner may waive the host's branch rules
+
+- **Requirement.** Some host plans offer no rulesets or branch protection. GitHub answers its rules API with 403 "Upgrade to GitHub Pro" for a private repository on a free plan. The owner decided that a team may develop such a repository on Cardea's own guards alone.
+- **Decision.** A repository registry entry may set `host_rules: "waived"` with a required `waiver_reason` (8–500 characters). The default is `required`. A waiver is accepted only on a repository `vcs.*` acts on, and a reason without a waiver is refused.
+- **What changes.**
+  - `vcs.check_repository` treats a 403 from the rules API as `rules_available: false`, not an error. That holds with or without a waiver.
+  - With a waiver, it reports `ready: true`, `host_rules: "waived"`, the reason, and the host-side checks that do not hold as `waived_checks` instead of `missing`. Without a waiver, those checks stay `missing` and the repository is not ready.
+  - The `vcs.push_branch` and `vcs.merge` receipts carry `host_rules: "waived"` and the reason.
+  - The team kit's `status` prints the waiver.
+  - Nothing is waived silently.
+- **What does not change.** Cardea enforces all of these itself, and each stays mandatory:
+  - the agent branch prefix `agent/<group>/` on every push and every pull request head;
+  - the content gate on every change and text that leaves the host;
+  - every condition of `vcs.merge`: the caller opened the pull request, an allowed pool's `APPROVE` receipt is at the current head, the configured reviewer login's approval of that head is on the host, every check run is green, and the host reports the pull request mergeable.
+- **What the waiver gives up.** The host no longer refuses a direct push to the default branch, a force push or a branch deletion made with the repository token. Only Cardea's workers stop those. The token must therefore stay kernel-only: in the vcs workers' credential, never in an agent's environment, a person's hands or a shared file. A leaked token is a direct write to the default branch.
+- **Tests** (`apps/api/tests/service/test_vcs_merge.py`):
+  - a 403 from the rules API leaves a required repository not ready and a waived one ready, with the reason and the waived checks;
+  - a waived repository still refuses a push outside the prefix, and a merge without approval, without green checks, or by someone other than the opener;
+  - the merge receipt records the waiver;
+  - the registry refuses a waiver without a reason, a reason without a waiver, and a waiver on a repository with no host.
+
+## Amendment (2026-11-22): reviewers read a large file whole
+
+- **Requirement.** Paging was per file, and each patch was cut at 12 KiB, so no call could show more of a file than its first 12 KiB. A principal engineer asked to review a pull request that adds a 59 KB file could not read most of it and gave no verdict.
+- **Decision.** `vcs.read_change` takes `patch_offset`, a byte offset in the scrubbed patch of the file at `diff_offset`. With it, the diff's cursor is the pair (file, byte):
+  - the first patch on the page starts at `patch_offset`, moved forward to a character boundary;
+  - a patch that does not fit is cut after its last whole line (mid-line only when a single line is longer than the room) and ends the page;
+  - a cut patch ends with `[cardea: patch continues, bytes A-B of M shown; read on with patch_offset B]`, has `truncated: true`, and every patch carries `patch_offset` (where its text starts) and `patch_bytes` (the whole patch's size);
+  - the diff reports `next_offset` and `next_patch_offset`. The next call passes them as `diff_offset` and `patch_offset`. Both are `null` when every patch has been shown whole.
+- **Unchanged.** A call without `patch_offset` behaves as before, byte for byte: each patch is cut at 12 KiB with the old marker, and `next_offset` moves to the next file. The bounds hold in both modes: 12 KiB per patch, 32 KiB of patches per call, at most 50 patches, and the whole output within the receipt's 64 KiB recorded output. The patch is scrubbed whole before it is sliced, so a credential is never split across pages. Grants, worker and host permission are unchanged. The descriptor changes (input and output schema, description), so its digest changes.
+- **Reviewers.** The descriptor and the team kit's principal engineer are told to pass `patch_offset: 0` and keep reading until `next_offset` is `null`.
+- **Tests** (`test_vcs_diff.py`): a 59 KB single-file patch, with escapes, multi-byte text and a credential, is reassembled over several calls exactly equal to the scrubbed host patch, with each page starting where the last stopped; many files mixing large, small and binary read with no gap or overlap; resumed pages cut on line boundaries; an offset inside a character or past the end; an old-style call keeps its shape and per-file paging; every page stays within the per-patch, per-call and recorded-output bounds.
+
+## Amendment (2026-11-22): merging needs an up-to-date branch where the registry says so
+
+- **Requirement.** Two pull requests each added a migration with the same revision. Each passed its checks on its own branch, both were approved and merged one after the other, and the default branch ended with two migration heads. The repository's host rules were waived (amendment 2026-11-21), so no host rule required branches to be up to date, and `vcs.merge` did not either: green checks at the reviewed head say nothing about that head combined with what merged since.
+- **Decision.** A repository registry entry may set `require_up_to_date: true` (default `false`, only on a repository `vcs.*` acts on). Then `vcs.merge` asks the host to compare the base branch with the pull request's head (`GET /repos/{owner}/{repo}/compare/{base}...{head}`) and refuses unless `behind_by` is 0, with `merge_behind_base` and nothing sent. The message tells the developer what to do: merge the latest base into the branch (no rebase, no force-push: agent pushes never force), push, wait for every check to pass at the new head, get a new approval of that head, then call `vcs.merge` again. A merge that passes records `up_to_date: true` and the `base_sha` compared against.
+- **Per repository, opt-in.** It lives in the registry, beside `host_rules`, because it is a property of one repository's setup, not of the vcs host configuration. Off, `vcs.merge` behaves exactly as before and makes no compare call. On a repository whose host rules are required, the host's own "require branches to be up to date" rule may already give this; the flag adds Cardea's check either way.
+- **Unchanged.** Every other condition still holds, in the same order: the caller opened the pull request, an allowed pool approved the current head, the configured reviewer's approval of that head is on the host, every check run on it succeeded, and the host reports it mergeable. Updating the branch moves the head, so the old approval and checks no longer count: the existing rules force the re-review and the new green run.
+- **Visible.** `vcs.check_repository` reports `require_up_to_date`. The team kit's `status` prints whether the guard is on or off, loudly when host rules are waived and the guard is off.
+- **Team kit.** The work collection gains `resubmit` (`approved` to `in_review`, by the holder, needing a `vcs.push_branch` receipt in the same run). On `merge_behind_base` the developer merges the base into its branch with a coding session (no rebase, no force-push), pushes to the same branch, resubmits, and merges once the principal engineer approves the new head and its checks are green.
+- **Limits.** The compare and the merge are two requests: a base that moves between them is not caught. The host's merge request is still bound to the head (`sha`), not to the base. That window is seconds, against hours between two merges in the incident.
+- **Tests** (`apps/api/tests/service/test_vcs_merge.py`, `test_team_kit.py`): a pull request behind its base is refused with the instructive message and nothing sent, then, brought up to date, needs a new approval and green checks and merges, recording the base; an up-to-date one merges with the guard on; with the guard off a branch behind its base merges as before with no compare call; the guard keeps the opener, approval and checks rules on a waived repository; `vcs.check_repository` reports the guard; the registry refuses the flag on a repository `vcs.*` does not act on; `status` prints the guard's state; the developer instructions name the refusal and `resubmit`.

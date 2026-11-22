@@ -32,7 +32,10 @@ def config(tmp_path: Path, **changes: object) -> ServiceConfig:
 
 
 def test_crash_recovery_and_authority_through_the_real_daemon() -> None:
-    result = run(say=lambda line: None)
+    lines: list[str] = []
+    result = run(say=lines.append)
+    assert any("UNENFORCED development identity" in line and "expected" in line for line in lines)
+    assert "[redacted]" not in "\n".join(lines)
     assert result["state"] == "succeeded"
     assert result["receipt_preserved_across_crash"] and result["outsider_denied"]
 

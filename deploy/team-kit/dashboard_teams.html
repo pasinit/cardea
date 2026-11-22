@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teams dashboard</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font: 14px/1.4 system-ui, sans-serif; margin: 1rem; color: #1b1f24; background: #fafafa; overflow-wrap: anywhere; }
+  h1 { font-size: 1.3rem; margin: 0 0 .75rem; }
+  h2 { font-size: 1.1rem; margin: 0 0 .25rem; }
+  h3 { font-size: .95rem; margin: 1rem 0 .3rem; border-bottom: 1px solid #d0d7de; }
+  #tabs { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: 1rem; }
+  #tabs button { font: inherit; padding: .35rem .7rem; border: 1px solid #d0d7de; border-radius: 6px; background: #fff; color: inherit; cursor: pointer; }
+  #tabs button[aria-selected="true"] { border-color: #1b1f24; font-weight: 600; }
+  .state { font-size: .8rem; margin-left: .4rem; padding: 0 .35rem; border-radius: 4px; border: 1px solid currentColor; }
+  .state-running { color: #1a7f37; }
+  .state-stalled { color: #b42318; }
+  .state-paused { color: #9a6700; }
+  .state-idle { color: #57606a; }
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: .2rem .6rem .2rem 0; vertical-align: top; }
+  th { font-weight: 600; color: #57606a; }
+  .muted { color: #57606a; }
+  .bad { color: #b42318; }
+  .filters { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: .75rem; }
+  .filters select, .filters input, .filters button { font: inherit; padding: .3rem .5rem; max-width: 100%; }
+  .filters input { flex: 1 1 12rem; min-width: 0; }
+  .message { background: #fff; border: 1px solid #d0d7de; border-radius: 6px; padding: .5rem .7rem; margin-bottom: .5rem; }
+  .message .head { color: #57606a; font-size: .85rem; }
+  .message pre { margin: .35rem 0 0; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
+  @media (max-width: 600px) { body { margin: .6rem; font-size: 15px; } .filters > * { flex: 1 1 100%; } }
+</style>
+</head>
+<body>
+<h1>Teams <span class="muted">(read-only)</span></h1>
+<div id="tabs" role="tablist">Loading…</div>
+<div id="team"></div>
+<h3>Mail</h3>
+<div id="mail"></div>
+<script src="/dashboard_teams.js"></script>
+</body>
+</html>

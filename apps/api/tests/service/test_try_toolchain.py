@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 import tarfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -196,6 +197,113 @@ def test_an_image_unpacks_read_only_under_its_digest_and_pins(tmp_path: Path) ->
     other = root / ("e" * 64)
     other.mkdir()
     assert module.prune(root, 0, "e" * 64, module.pinned(registry)) == []
+
+
+def week_image(path: Path, content: bytes, epoch: int) -> Path:
+    """A tarball as mmdebstrap writes one: every entry, `./` included, at SOURCE_DATE_EPOCH."""
+    with tarfile.open(path, "w") as archive:
+        top = tarfile.TarInfo("./")
+        top.type, top.mode, top.mtime = tarfile.DIRTYPE, 0o755, epoch
+        archive.addfile(top)
+        info = tarfile.TarInfo("usr/bin/tool")
+        info.size, info.mode, info.mtime = len(content), 0o755, epoch
+        archive.addfile(info, io.BytesIO(content))
+    return path
+
+
+def build_week(
+    module: ModuleType,
+    root: Path,
+    contents: list[bytes],
+    monkeypatch: pytest.MonkeyPatch,
+    keep: int = 2,
+    registry: Path | None = None,
+) -> list[str]:
+    """Run `build` once per content, all in the same ISO week (so the images' mtimes tie)."""
+    epoch = module.week_start(datetime(2026, 11, 18, tzinfo=UTC).timestamp())
+    monkeypatch.setattr(module.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(module.time, "time", lambda: epoch + 3600.0)
+    monkeypatch.setattr(module, "fetch_uv", lambda destination, epoch: destination / "uv")
+    digests = []
+    for content in contents:
+        monkeypatch.setattr(
+            module.subprocess,
+            "run",
+            lambda argv, env, check, c=content: week_image(Path(argv[-1]), c, epoch),
+        )
+        digests.append(module.build(root, keep, registry))
+    return digests
+
+
+def test_a_same_week_rebuild_is_pinned_and_kept_over_the_older_image(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = script()
+    root = tmp_path / "toolchain"
+    old, new = build_week(module, root, [b"old packages", b"new packages"], monkeypatch)
+    assert old != new
+    # On Linux both images keep the tarball's `./` date, SOURCE_DATE_EPOCH, so they tie and
+    # mtime alone cannot order them (the bug). Pin that here: some filesystems (APFS) touch
+    # a directory's mtime on rename.
+    tie = module.week_start(datetime(2026, 11, 18, tzinfo=UTC).timestamp())
+    for digest in (old, new):
+        os.utime(root / digest, (tie, tie))
+    assert module.latest(root) == new
+    assert [p.name for p in module.images_newest_first(root)] == [new, old]
+    # Pruning to one keeps the new image, not whichever the tie happened to favour.
+    assert module.prune(root, 1, new, set()) == [old]
+    assert module.latest(root) == new and module.builds(root).keys() == {new}
+
+
+def test_prune_never_removes_the_new_or_a_pinned_image(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = script()
+    root = tmp_path / "toolchain"
+    registry = tmp_path / "repositories.json"
+    registry.write_text(json.dumps({"repositories": {}}))
+    first, second = build_week(module, root, [b"first", b"second"], monkeypatch)
+    registry.write_text(
+        json.dumps({"repositories": {"app": {"environment": {"toolchain": {"sha256": first}}}}})
+    )
+    # keep=0: only the pinned first image and the newly built third survive.
+    (third,) = build_week(module, root, [b"third"], monkeypatch, keep=0, registry=registry)
+    survivors = {p.name for p in module.images_newest_first(root)}
+    assert survivors == {first, third} and second not in survivors
+    assert module.latest(root) == third
+
+
+def test_a_rebuild_of_an_existing_digest_becomes_the_newest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = script()
+    root = tmp_path / "toolchain"
+    first, second, again = build_week(module, root, [b"one", b"two", b"one"], monkeypatch, keep=5)
+    assert again == first and module.latest(root) == first
+    sequence = module.builds(root)
+    assert sequence[first] > sequence[second]
+
+
+def test_images_from_before_the_build_record_sort_oldest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = script()
+    root = tmp_path / "toolchain"
+    root.mkdir()
+    legacy = root / ("b" * 64)
+    legacy.mkdir()
+    (recorded,) = build_week(module, root, [b"recorded"], monkeypatch)
+    later = (root / recorded).stat().st_mtime + 10**6
+    os.utime(legacy, (later, later))  # even a later mtime does not outrank a recorded build
+    assert module.latest(root) == recorded
+    # The sequence is strictly increasing even if the clock steps back.
+    assert module.record_build(root, "c" * 64, now_ns=1) > module.builds(root)[recorded]
+
+
+def test_the_make_target_pins_the_digest_build_printed() -> None:
+    recipe = (ROOT / "Makefile").read_text().split("try-toolchain:\n", 1)[1].split("\n\n", 1)[0]
+    assert 'digest="$$(sudo python3 -I packaging/try_toolchain.py build' in recipe
+    assert '--sha256 "$$digest"' in recipe
 
 
 def test_the_kit_runs_env_try_in_the_try_profile() -> None:

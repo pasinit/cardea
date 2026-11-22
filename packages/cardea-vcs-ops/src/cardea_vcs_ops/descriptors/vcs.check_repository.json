@@ -2,7 +2,7 @@
   "tool": {
     "name": "vcs.check_repository",
     "title": "Check a repository's rules",
-    "description": "Report whether an allowed repository's rules are what an agent team relies on: the default branch needs a human's approving review, and branches may be pushed only under the agent prefix. Reports what is missing; changes nothing. Needs repo:<alias>.",
+    "description": "Report whether an allowed repository's rules are what an agent team relies on: the default branch needs a human's approving review, and branches may be pushed only under the agent prefix. Reports what is missing; changes nothing. Where the host owner waived the host's rules for the repository, it is ready on Cardea's own guards and says so, with the reason. It also reports require_up_to_date: whether vcs.merge refuses a pull request whose head does not contain the base branch's latest commit. Needs repo:<alias>.",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
@@ -31,7 +31,12 @@
           }
         },
         "missing": {"type": "array", "items": {"type": "string"}},
-        "not_checked": {"type": "array", "items": {"type": "string"}}
+        "not_checked": {"type": "array", "items": {"type": "string"}},
+        "host_rules": {"enum": ["required", "waived"]},
+        "waiver_reason": {"type": "string"},
+        "rules_available": {"type": "boolean"},
+        "require_up_to_date": {"type": "boolean"},
+        "waived_checks": {"type": "array", "items": {"type": "string"}}
       },
       "required": ["repository", "default_branch", "ready", "checks", "missing"]
     }

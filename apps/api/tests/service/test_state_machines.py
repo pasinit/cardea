@@ -22,8 +22,13 @@ from cardea.service.database import Database, Fault, borrow
 from cardea.service.kernel import Kernel, provision
 from cardea.service.models import RIGHTS, OperationTaskRequest, Provisioning, now
 from cardea.service.operation_runtime import OperationRuntime
-from cardea.service.operations import OperationContext, OperationDescriptor, Registry
-from cardea.service.records import CollectionDocument
+from cardea.service.operations import (
+    OperationContext,
+    OperationDescriptor,
+    OperationRejected,
+    Registry,
+)
+from cardea.service.records import CollectionDocument, check_condition
 from cardea.service.triggers import Scheduler
 
 TOKENS = {"runtime", "supervisor", "approver", "operator", "outsider"}
@@ -365,6 +370,72 @@ def test_guards_refuse_and_fail_closed(work: Kernel) -> None:
     assert stored(work, record["record_id"])["state"] == "open"
 
 
+def refusal(kernel: Kernel, record: dict[str, Any], transition: str, **changes: Any) -> str:
+    """The message of the last call's failure, after checking that it failed."""
+    state, _, code = move(kernel, record, transition, **changes)
+    assert state != "succeeded" and code is not None
+    with kernel.database.read() as conn:
+        snapshot = conn.exec_driver_sql(
+            "SELECT snapshot FROM operations ORDER BY rowid DESC LIMIT 1"
+        ).scalar_one()
+    failure = json.loads(snapshot)["failure"]
+    assert failure["code"] == code
+    # What the agent is told: the bounded summary of the handler's own message.
+    return f"{code}: {failure['details']['summary']}"
+
+
+def test_an_unknown_transition_lists_those_from_the_records_state(work: Kernel) -> None:
+    record = create(work)
+    assert refusal(work, record, "nope") == (
+        'transition_unknown: Collection work has no transition "nope"; from state "open" use '
+        '"triage" or "broken"'
+    )
+
+
+def test_a_state_name_points_to_the_transition_into_it(work: Kernel) -> None:
+    record = create(work)
+    assert refusal(work, record, "review") == (
+        'transition_unknown: "review" is a state, not a transition; the transition into it is '
+        '"submit"; from state "open" use "triage" or "broken"'
+    )
+    assert '"ready" is a state, not a transition; the transition into it is "triage" or ' in (
+        refusal(work, record, "ready")
+    )
+    # A name the caller is granted but the table lacks gets the same help.
+    provision(work.database, document((*SUPERVISOR, "record:work/open")), REGISTRY)
+    assert '"open" is a state, not a transition; none leads into it' in (
+        refusal(work, record, "open", grants=(*ALL, "record:work/open"))
+    )
+    assert stored(work, record["record_id"])["state"] == "open"
+
+
+def test_a_caller_without_a_grant_on_the_collection_learns_nothing_of_its_table(
+    work: Kernel,
+) -> None:
+    record = create(work)
+    message = refusal(work, record, "ready", grants=("record:orders/read",))
+    assert message == (
+        "task_grant_denied: Operation is outside explicit task grants: record:work/ready is "
+        "not held by the task; caller a1"
+    )
+    # A transition that exists but is not granted is still a permission refusal.
+    no_grant = tuple(g for g in ALL if g != "record:work/triage")
+    assert refusal(work, record, "triage", grants=no_grant, args={"priority": 1}) == (
+        "task_grant_denied: Operation is outside explicit task grants: record:work/triage is "
+        "not held by the task; caller a1"
+    )
+
+
+def test_a_guard_refusal_names_the_guard_and_the_caller(work: Kernel) -> None:
+    record = create(work)
+    assert refusal(work, record, "triage", args={"priority": 0}) == (
+        "guard_refused: Transition triage guard refused this call for a1: args.priority > 0"
+    )
+    caller: dict[str, JsonValue] = {"id": "a1", "group": "team", "pool": "team.builders"}
+    with pytest.raises(OperationRejected, match=r"for a1 \(pool team\.builders\): args\.x"):
+        check_condition("args.x == 1", "Transition triage", {}, {"x": 2}, caller)
+
+
 def test_transitions_are_history_and_cloudevents(work: Kernel) -> None:
     record = create(work)
     move(work, record, "triage", args={"priority": 1})
@@ -455,6 +526,28 @@ def test_an_expired_acquired_claim_returns_to_on_claim_expiry(work: Kernel) -> N
     assert move(work, record, "submit", claim_epoch=1)[2] == "transition_not_allowed"
     _, again, _ = move(work, record, "start", agent="a2")
     assert again is not None and again["claim"]["claim_epoch"] == 3
+
+
+def test_a_claim_that_lapses_after_later_transitions_keeps_the_state(work: Kernel) -> None:
+    """`on_claim_expiry` undoes the acquisition only while the record is where `start`
+    put it; a record submitted for review stays in review, without a holder."""
+    record = ready(work)
+    move(work, record, "start")
+    receipt = opened_change(work, record["record_id"])
+    _, output, code = move(work, record, "submit", claim_epoch=1, receipt_id=receipt)
+    assert output is not None, code
+    lease = stored(work, record["record_id"])["lease_expires_at"]
+    from datetime import datetime
+
+    after = datetime.fromisoformat(lease) + timedelta(seconds=60)
+    Scheduler(work, lambda: after).tick()
+    row = stored(work, record["record_id"])
+    assert (row["state"], row["holder"], row["claim_epoch"]) == ("review", None, 2)
+    expired = journal(work, "claim_expired")[-1]
+    assert expired["data"]["from"] == "review" and expired["data"]["to"] == "review"
+    # Anyone the guard allows may still close it: approve releases a claim no one holds.
+    _, done, code = move(work, record, "approve", agent="a2")
+    assert done is not None and done["record"]["state"] == "done", code
 
 
 # Receipt evidence
@@ -816,3 +909,70 @@ def test_a_requirement_without_a_result_guard_keeps_its_digest() -> None:
     assert isinstance(stored, list)
     assert all("result" not in json.dumps(t) for t in stored)
     assert plain.digest != guarded.digest
+
+
+def recording_spec(
+    sets: dict[str, str] | None, schema: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    spec = guarded_spec(None)
+    spec["schema"] = schema or {
+        "type": "object",
+        "properties": {"title": {"type": "string"}, "passed": {"type": "boolean"}},
+    }
+    if sets is not None:
+        spec["transitions"][-1]["requires_receipt"]["sets"] = sets
+    return spec
+
+
+def test_a_transition_records_values_from_its_cited_receipt(work: Kernel) -> None:
+    assert apply(work, "work", recording_spec({"passed": "/passed"})).status_code == 200
+    record = ready(work)
+    move(work, record, "start")
+    cited = ci_receipt(work, record["record_id"], passed=True)
+    state, output, _ = move(work, record, "submit", claim_epoch=1, receipt_id=cited)
+    assert state == "succeeded" and output is not None
+    assert output["record"]["data"] == {"title": "k1", "passed": True}
+    assert json.loads(stored(work, record["record_id"])["data_json"]) == {
+        "title": "k1",
+        "passed": True,
+    }
+
+
+def test_a_recorded_value_must_exist_and_match_the_schema(work: Kernel) -> None:
+    assert apply(work, "work", recording_spec({"passed": "/missing"})).status_code == 200
+    record = ready(work)
+    move(work, record, "start")
+    cited = ci_receipt(work, record["record_id"], passed=True)
+    missing = move(work, record, "submit", claim_epoch=1, receipt_id=cited)
+    assert missing[0] == "failed" and missing[2] == "receipt_result_refused"
+    # The schema still applies: a boolean is not a string.
+    mismatched = recording_spec(
+        {"passed": "/passed"},
+        {
+            "type": "object",
+            "properties": {"title": {"type": "string"}, "passed": {"type": "string"}},
+        },
+    )
+    assert apply(work, "work", mismatched).status_code == 200
+    refused = move(work, record, "submit", claim_epoch=1, receipt_id=cited)
+    assert refused[0] == "failed" and refused[2] == "record_invalid"
+    assert stored(work, record["record_id"])["state"] == "doing"
+
+
+def test_a_recorded_field_must_be_declared_at_apply(work: Kernel) -> None:
+    response = apply(work, "work", recording_spec({"undeclared": "/passed"}))
+    assert response.status_code == 422, response.json()
+
+
+def test_a_requirement_without_sets_keeps_its_digest() -> None:
+    plain = CollectionDocument.model_validate(
+        {"metadata": {"name": "work", "namespace": "test"}, "spec": recording_spec(None)}
+    )
+    recording = CollectionDocument.model_validate(
+        {
+            "metadata": {"name": "work", "namespace": "test"},
+            "spec": recording_spec({"passed": "/passed"}),
+        }
+    )
+    assert all("sets" not in json.dumps(t) for t in plain.spec_json()["transitions"])  # type: ignore[union-attr]
+    assert plain.digest != recording.digest

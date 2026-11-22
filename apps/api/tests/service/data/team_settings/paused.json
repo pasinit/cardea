@@ -1,0 +1,51 @@
+{
+  "valid": {
+    "paused": {
+      "paused": true,
+      "reason": "release freeze"
+    }
+  },
+  "invalid": [
+    {
+      "settings": {
+        "paused": {}
+      },
+      "field": "paused.paused"
+    },
+    {
+      "settings": {
+        "paused": {
+          "paused": "yes"
+        }
+      },
+      "field": "paused.paused"
+    },
+    {
+      "settings": {
+        "paused": {
+          "paused": false,
+          "reason": "why"
+        }
+      },
+      "field": "paused.reason"
+    },
+    {
+      "settings": {
+        "paused": {
+          "paused": true,
+          "reason": "  "
+        }
+      },
+      "field": "paused.reason"
+    },
+    {
+      "settings": {
+        "paused": {
+          "paused": true,
+          "reason": "a\u0007b"
+        }
+      },
+      "field": "paused.reason"
+    }
+  ]
+}

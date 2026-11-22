@@ -1,7 +1,9 @@
 """The transport interface every email adapter implements (ADR-039).
 
 `send` sends one message, `find_sent` looks for one an interrupted call may have sent,
-and `poll_replies` reads the replies on one thread Cardea created. Adapters read their
+`poll_replies` reads the replies on one thread Cardea created, and `poll_inbound` reads
+new messages from given addresses that are on no thread Cardea created (amendment
+2026-11-21). Adapters read their
 credential for each call and never put it in an exception, a return value or a log.
 
 Failures:
@@ -54,6 +56,10 @@ class Inbound:
     # aligned with it); False when the verdicts say it is not; None when unknown.
     authenticated: bool | None = None
     spam: bool = False
+    # The provider's thread (AgentMail), or empty where threads are headers (IMAP).
+    thread_id: str = ""
+    # The text's size before any shortening, in bytes, as the provider reports it.
+    size: int | None = None
 
 
 class Refused(Exception):
@@ -79,3 +85,7 @@ class Transport(Protocol):
     async def find_sent(self, effect_key: str) -> Sent | None: ...
 
     async def poll_replies(self, thread: Thread) -> list[Inbound]: ...
+
+    async def poll_inbound(
+        self, senders: tuple[str, ...], since: datetime, known: frozenset[str]
+    ) -> list[Inbound]: ...

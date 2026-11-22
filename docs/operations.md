@@ -166,6 +166,7 @@ One host-owner file, named by `CARDEA_REPOSITORIES`, lists the repository aliase
 - `owner`, `name`, `api_url`, `git_url`: where `vcs.*` pushes and opens changes. Give all four or none. An alias without them is read-only, and `vcs.*` treats it as unknown.
 - `gates`: the commands `code.session` runs on the change.
 - `branch_prefix` (default `agent/{group}/`): pushed branches must start with it.
+- `require_up_to_date` (default `false`): `vcs.merge` refuses a pull request whose head does not contain the base branch's current head (`merge_behind_base`). Only for an alias `vcs.*` acts on. Turn it on wherever the host's own rules do not require up-to-date branches, in particular with `host_rules: waived`.
 
 Callers need `repo:<alias>` to name an alias in either package.
 
@@ -184,13 +185,15 @@ The `cardea-vcs-ops` package installs `vcs.push_branch`, `vcs.open_change`, `vcs
   - an allowed pool's `vcs.review` APPROVE receipt is at the current head;
   - the host shows that reviewer account's approval of the head;
   - every check run on the head succeeded, with none pending;
+  - where the registry sets `require_up_to_date`, the host's compare of the base branch with the head shows the head is not behind (`behind_by == 0`); otherwise it is refused with `merge_behind_base` ([amendment 2026-11-22](decisions/037-coding-and-vcs-operations.md#amendment-2026-11-22-merging-needs-an-up-to-date-branch-where-the-registry-says-so)). The refusal tells the developer to bring the base into the branch, push, wait for green checks and a new approval at the new head, then merge again. The receipt then records `up_to_date: true` and the `base_sha` it compared against;
   - the host reports it mergeable.
 
   Each refusal has its own code (`merge_not_opener`, `merge_approval_stale`, `merge_checks_pending` and the others). An interrupted merge is `outcome_unknown` until the reconcile endpoint reads the pull request. Grant `vcs.merge` only to the pool whose members open the changes.
 - **Content gate.** Every push, pull request, comment and review passes the kernel's content gate first (ADR-037 slice 6): a push's added lines and commit messages, and every text field. Without a configured gate these operations refuse (`content_gate_unavailable`) and send nothing.
 - **Credentials.** `{"kind": "personal_access_token", "expires_on": "<YYYY-MM-DD>"}` is the provider for now (ADR-037 question 7): a fine-grained personal access token, limited to the registry's repositories, stored as the `vcs` profile's root-only credential file, which systemd loads into each worker unit. The worker reads it for each call and uses it only for that call's HTTP header and push. The kernel never reads it, and it never appears in arguments, tool results, receipts, the store, job documents or logs. From `expires_on` on, every call is refused with `credential_unavailable` and nothing is sent, so rotate it before then. `profile_credential` is the same without the expiry check, and the test provider (`{"kind": "test", "token": ...}`) is for fakes and tests. A GitHub App with per-call installation tokens is the documented upgrade and is not built. The token path has run against the fake host only: check `vcs.check_repository` and run the Debian checks before pointing a team at a real repository.
 - **Identities.** `{"kind": "personal_access_tokens", "tokens": {<name>: {"expires_on": ...}}, "default": <name>, "pools": {"<group>.<pool>": <name>}}` gives different callers different repository-host accounts. Each token is a named credential of the `vcs` profile (`credentials: {<name>: <path>}`). The worker picks one per call from the kernel-resolved member id, never from an argument. Use it for a reviewer pool whose approvals must come from an account other than the pull requests' author. As installed in the kit, `pools` is empty: everyone uses `github-author`.
-- **Readiness.** `vcs.check_repository` reports whether the repository's rules hold on the default branch: one approving review, approval of the last push, no force push and no deletion. It also reports whether pushes are allowed only under the agent prefix. It lists what is missing and changes nothing; check it before pointing a team at a repository.
+- **Reviewing.** `vcs.read_change` with `diff: true` also returns the pull request's diff ([ADR-037 amendment 2026-11-21](decisions/037-coding-and-vcs-operations.md#amendment-2026-11-21-reviewers-read-the-diff)). It lists the changed files, then gives per-file patches from `diff_offset`. Each patch is capped at 12 KiB and all of them at 32 KiB, and the whole output stays within the receipt's 64 KiB. Cut patches carry a truncation marker, `next_offset` pages through the rest, and binary or host-omitted files are listed, not shown. To read a large file whole, pass `patch_offset: 0` and then, on each call, `diff_offset: next_offset` and `patch_offset: next_patch_offset` until `next_offset` is `null` ([amendment 2026-11-22](decisions/037-coding-and-vcs-operations.md#amendment-2026-11-22-reviewers-read-a-large-file-whole)). Pages then cut on line boundaries and resume inside the same file; without `patch_offset`, each patch is cut at 12 KiB and paging moves to the next file, as before. Patches are untrusted data, with credential-shaped strings scrubbed. It needs no grant beyond `vcs.read_change` and `repo:<alias>`.
+- **Readiness.** `vcs.check_repository` reports whether the repository's rules hold on the default branch: one approving review, approval of the last push, no force push and no deletion. It also reports whether pushes are allowed only under the agent prefix. It also reports `require_up_to_date`, so a waiver with no up-to-date guard is visible; the team kit's `status` prints both. It lists what is missing and changes nothing; check it before pointing a team at a repository.
 - **Recovery.** An interrupted push, pull request, comment or review is `outcome_unknown`. `POST /v0.2/tasks/<id>/operations/<operation_id>/reconcile` reads the host (the branch head, the pull request for the head, or the comment or review marker) and settles it without sending again.
 
 ## Content gate
@@ -217,6 +220,13 @@ The `cardea-email-ops` package installs `email.send`, which lets an agent role e
   The key and password files are private files of their own, read for each call. [`examples/teams/dev-team/email.json`](../examples/teams/dev-team/email.json) shows the shape with placeholders.
 - **Authority.** A role needs `email.send` in its pool's grants and `run.operations` (the team definition). Which aliases it may write to, and how often, is set only in the host file. Anything else is refused before sending: `recipient_not_allowed`, `rate_limited`, `content_refused`, `credential_unavailable`, or `provider_refused` when the provider rejects the message.
 - **Replies.** The kernel polls each send of the last 14 days every 5 minutes (the descriptor's `replies`). No inbound endpoint or webhook is involved. A reply from the alias's address on that thread arrives in the sending member's mailbox, so give the pool `mailbox.inbox` context, and its next run reads it as untrusted data. A reply is accepted only when its sender is authenticated: a DMARC pass, or an SPF or DKIM pass aligned with its From domain, as reported by AgentMail or by the configured receiving server. Replies from anyone else, without an authenticated sender (`unauthenticated`, `authentication_unknown`), or marked spam, are dropped and counted. Their content is never stored or shown. Count them with `SELECT json_extract(payload,'$.reason'), COUNT(*) FROM events WHERE event_type='operation.reply_dropped' GROUP BY 1`. The poller logs only counts.
+- **Inbound mail (off by default).** To let a listed person email the team's inbox with a new message, not only a reply, add an `inbound` section to the host file: `{"from": [aliases], "deliver_to": {"namespace", "pool": "<group>.<pool>"}, "rate_limit": {"count", "window_days"}, "max_bytes" (default 8192), "window_days" (default 7)}`.
+  - **When it runs.** Each reply poll also reads new mail on no Cardea thread, but only from those aliases' addresses.
+  - **Accepted mail.** Mail that passes the same sender authentication goes once, keyed by its Message-ID, to the pool's mailbox as untrusted data from that alias, and wakes the pool like any mail. Its receipt is an `operation.inbound_delivered` journal row.
+  - **Rejected mail.** Another sender, an unauthenticated or unknown verdict, spam, text over `max_bytes`, or anything past the rate limit is never delivered. It is recorded once as `operation.inbound_dropped`, with the sender's domain and the reason only.
+  - **Counting rejections.** `SELECT json_extract(payload,'$.reason'), COUNT(*) FROM events WHERE event_type='operation.inbound_dropped' GROUP BY 1`.
+  - **Answering.** The role answers with `email.send` to the alias, which starts a new thread whose replies are polled as usual.
+  - **IMAP reads.** IMAP fetches only messages whose `From` names a configured address. AgentMail opens only those in full.
 - **Mailbox access.** With SMTP/IMAP, the operation reads only messages whose `In-Reply-To` or `References` name a Cardea Message-ID, in a folder opened read-only, and never changes a flag. A mailbox or app password usually grants the whole mailbox, so that narrowing is the only guard: prefer a dedicated mailbox. AgentMail gives the team its own inbox.
 - **Recovery.** An interrupted send is `outcome_unknown`. The reconciler looks for it at the provider without sending: by its label with AgentMail, or in `sent_folder` with IMAP. Without a `sent_folder`, an interrupted SMTP send stays uncertain until you settle it by hand.
 
@@ -244,6 +254,24 @@ The `cardea-env-ops` package installs `env.try` ([ADR-038](decisions/038-throwaw
   - An identical call while one runs is refused with `409 env_run_in_progress`; retry later.
 - **Toolchain.** `make try-toolchain` builds and pins the image; `cardea-try-toolchain.timer` refreshes it weekly.
 
+
+## Running checks from a developer session
+
+A developer session has no `uv`, `pytest`, `ruff` or `mypy`, and `pip` fails on the egress proxy's CA bundle. Do not work around either: do not install tools by hand, point `pip` at another index, disable certificate checks or widen the session's egress. The supported path is `env.try`, which runs the checks in the `try` profile with the pinned toolchain image (`uv` included) and the allow-listed package indexes.
+
+- **Scenarios.** The repository's `environment` catalog ([`cardea/repositories.json`](../deploy/small-host/cardea/repositories.json)) names one scenario per check:
+
+  | Scenario | Runs | Same as |
+  |---|---|---|
+  | `lint` | `make lint` | CI lint |
+  | `typecheck` | `make typecheck` | CI mypy |
+  | `api-test` | `make api-test` | the backend test suite |
+
+- **Run.** Push the work to a branch, then call `env.try` with `repo`, the branch head's full 40-hex `commit`, and `scenarios: ["lint", "typecheck", "api-test"]`. Read `passed` and each scenario's `log_tail` in the result. The session needs `env.try` and `repo:<alias>` in its ceiling; ask the supervisor if it lacks them.
+- **Targeted tests.** Callers send no command, so a session cannot pass a pytest path. For a narrower run, the host owner adds a scenario to the catalog with a fixed argv (for example `["/usr/bin/make", "kernel-test"]`). Run the full `api-test` before review.
+- **Cost.** Results are cached for 24 hours per commit and scenario set; commit again, or use `rerun: true` (3 a day), to run anew.
+- **Locally.** Where `uv` is installable (a workstation, not a confined session), `make lint`, `make typecheck` and `make api-test` run the same checks.
+- **Not available.** If the call answers `env_toolchain_missing` or `env_tier_unavailable`, the host has not completed [step 10](../deploy/small-host/README.md) (`make try-toolchain`); report it to the host owner, and state in the review that checks were not run.
 
 ## Retention and deletion
 

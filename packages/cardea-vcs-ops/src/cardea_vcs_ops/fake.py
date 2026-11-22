@@ -17,6 +17,11 @@ approve its own pull request. `checks` holds each commit's check runs. `PUT
 mergeable, and the base's `pull_request` rule holds: enough approvals of the current head
 by accounts other than the author.
 
+`pulls/<n>/files` lists a pull request's changed files as GitHub does, computed with git
+from the base and head branches (`patch` holds only the hunks and is omitted for binary
+files); `files` overrides it per pull request, for shapes git cannot produce cheaply, such
+as a file too large for the host to show.
+
 `fail_after` makes the fake apply a request and then drop the connection, the case that
 leaves an effect in doubt: for example `{"create_pull"}` creates the pull request and then
 raises `httpx.ConnectError`, as a crash after the host acted would look to the kernel.
@@ -54,6 +59,10 @@ class FakeRepository:
     rulesets: list[dict[str, Any]] = field(default_factory=list)
     # Commit SHA to its check runs: `{"name", "status", "conclusion"}`.
     checks: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    # Pull request number to its changed files, overriding the git-computed list.
+    files: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
+    # A plan without rulesets (a private repository on a free plan): the rules API is 403.
+    rules_unavailable: bool = False
 
     def pass_checks(self, sha: str, *names: str) -> None:
         self.checks[sha] = [
@@ -83,6 +92,79 @@ class FakeRepository:
             ):
                 found += [{**rule, "ruleset_id": number} for rule in ruleset["rules"]]
         return found
+
+    def changed_files(self, number: int) -> list[dict[str, Any]]:
+        if number in self.files:
+            return self.files[number]
+        pull = self.pull(number)
+        assert pull is not None
+        span = f"refs/heads/{pull['base']['ref']}...{pull['head']['sha']}"
+
+        def git(*args: str) -> str:
+            return subprocess.run(
+                ["git", "-C", str(self.path), *args], capture_output=True, text=True, check=True
+            ).stdout
+
+        statuses = {"A": "added", "M": "modified", "D": "removed", "R": "renamed"}
+        found = []
+        for line in git("diff", "--no-renames", "--numstat", span).splitlines():
+            added, deleted, path = line.split("\t", 2)
+            status = git("diff", "--no-renames", "--name-status", span, "--", path).split("\t")[0]
+            entry: dict[str, Any] = {
+                "filename": path,
+                "status": statuses.get(status[:1], "modified"),
+                "additions": 0 if added == "-" else int(added),
+                "deletions": 0 if deleted == "-" else int(deleted),
+            }
+            entry["changes"] = entry["additions"] + entry["deletions"]
+            if added != "-":
+                text = git("diff", "--no-renames", span, "--", path)
+                entry["patch"] = text[text.index("@@") :].rstrip("\n") if "@@" in text else ""
+            found.append(entry)
+        return found
+
+    def compare(self, base: str, head: str) -> dict[str, Any] | None:
+        """The host's compare of `base...head`, counted with git, or None if either is
+        unknown."""
+        base_sha = self.head(base) or self.commit(base)
+        head_sha = self.head(head) or self.commit(head)
+        if base_sha is None or head_sha is None:
+            return None
+        counted = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(self.path),
+                "rev-list",
+                "--left-right",
+                "--count",
+                f"{base_sha}...{head_sha}",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.split()
+        behind, ahead = int(counted[0]), int(counted[1])
+        status = (
+            "identical"
+            if not (ahead or behind)
+            else ("diverged" if ahead and behind else ("ahead" if ahead else "behind"))
+        )
+        return {
+            "status": status,
+            "ahead_by": ahead,
+            "behind_by": behind,
+            "base_commit": {"sha": base_sha},
+        }
+
+    def commit(self, sha: str) -> str | None:
+        found = subprocess.run(
+            ["git", "-C", str(self.path), "rev-parse", "--verify", "-q", f"{sha}^{{commit}}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return found.stdout.strip() or None
 
     def head(self, branch: str) -> str | None:
         found = subprocess.run(
@@ -160,10 +242,27 @@ class FakeGitHub:
                 200, json={"full_name": full, "default_branch": repo.default_branch}
             )
         if rest[:2] == ["rules", "branches"] and method == "GET":
+            if repo.rules_unavailable:
+                return httpx.Response(
+                    403,
+                    json={
+                        "message": "Upgrade to GitHub Pro or make this repository public to "
+                        "enable this feature."
+                    },
+                )
             page = int(request.url.params.get("page", "1"))
             rules = repo.rules_for("/".join(rest[2:])) if page == 1 else []
             return httpx.Response(200, json=rules)
         body = json.loads(request.content) if request.content else {}
+        if rest[:3] == ["git", "refs", "heads"] and method == "DELETE":
+            branch = "/".join(rest[3:])
+            if repo.head(branch) is None:
+                return httpx.Response(422, json={"message": "Reference does not exist"})
+            subprocess.run(
+                ["git", "-C", str(repo.path), "update-ref", "-d", f"refs/heads/{branch}"],
+                check=True,
+            )
+            return self._done("delete_branch", httpx.Response(204))
         if rest[:3] == ["git", "ref", "heads"] and method == "GET":
             sha = repo.head("/".join(rest[3:]))
             if sha is None:
@@ -181,6 +280,21 @@ class FakeGitHub:
             if pull is None:
                 return httpx.Response(404, json={"message": "Not Found"})
             return httpx.Response(200, json=pull)
+        if len(rest) == 3 and rest[0] == "pulls" and rest[2] == "files" and method == "GET":
+            number = int(rest[1])
+            if repo.pull(number) is None:
+                return httpx.Response(404, json={"message": "Not Found"})
+            page = int(request.url.params.get("page", "1"))
+            per = int(request.url.params.get("per_page", "30"))
+            items = repo.changed_files(number)
+            return httpx.Response(200, json=items[(page - 1) * per : page * per])
+        if len(rest) >= 2 and rest[0] == "compare" and method == "GET":
+            base, _, head = "/".join(rest[1:]).partition("...")
+            compared = repo.compare(base, head) if head else None
+            if compared is None:
+                return httpx.Response(404, json={"message": "Not Found"})
+            self.calls.append("compare")
+            return httpx.Response(200, json=compared)
         if len(rest) == 3 and rest[0] == "commits" and rest[2] == "check-runs" and method == "GET":
             page = int(request.url.params.get("page", "1"))
             runs = repo.checks.get(rest[1], []) if page == 1 else []
@@ -255,7 +369,15 @@ class FakeGitHub:
             ["git", "-C", str(repo.path), "update-ref", f"refs/heads/{pull['base']['ref']}", head],
             check=True,
         )
-        pull.update(merged=True, state="closed", merge_commit_sha=head, merged_by={"login": login})
+        pull.update(
+            merged=True,
+            state="closed",
+            merge_commit_sha=head,
+            merged_by={"login": login},
+            # The squash commit's subject and body as the merge request named them.
+            commit_title=body.get("commit_title"),
+            commit_message=body.get("commit_message"),
+        )
         answer = {"sha": head, "merged": True, "message": "Pull Request successfully merged"}
         return self._done("merge", httpx.Response(200, json=answer))
 

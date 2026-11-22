@@ -141,6 +141,7 @@ Installed input adapters publish events under their own scoped identities and st
 - **Journal triggers** (slice 7): kernel journal events in the group's namespace wake members, with no signature because the kernel is the sender.
 - **Spend** (slice 9): a reservation at admission against the group's and pool's windowed accounts, settled to reported cost. Unknown cost keeps its reservation. A windowed expectation's miss is reported by kernel mail and fails no run.
 - **Overview**: one read snapshot of a group for its supervisor.
+- **Status**: six paged, read-only sections of a group's state for its supervisor (work, runs, mail, changes, spend, standing), ADR-034 amendment 2026-11-21.
 
 [ADR-035](decisions/035-event-triggers.md) event triggers admit a run per signed inbound CloudEvent, deduplicated per (trigger, source, id), under the trigger's supervisor's live ceiling.
 

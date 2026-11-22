@@ -23,6 +23,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from types import TracebackType
 
+from cardea.runtime.harness import PROXY_VARIABLES
 from cardea_vcs_ops.credentials import Credential
 
 # Answers git's username and password prompts from the child's environment.
@@ -34,6 +35,8 @@ esac
 """
 SAFE = ("-c", "core.hooksPath=/dev/null", "-c", "credential.helper=")
 HOST = "refs/remotes/host"
+# System CA bundles remote git may use (Debian and derivatives first, then RHEL-like).
+CA_BUNDLES = ("/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-bundle.crt")
 
 
 class BundleInvalid(Exception):
@@ -42,6 +45,17 @@ class BundleInvalid(Exception):
 
 class PushRejected(Exception):
     """The host refused the push (for example not a fast-forward): nothing changed."""
+
+
+def ca_bundle() -> dict[str, str]:
+    """`GIT_SSL_CAINFO` for remote git: `SSL_CERT_FILE` if set, else the first system bundle
+    present. Inside a sandbox the bundle exists only if the worker binds it read-only
+    (`/etc/ssl/certs`); without one git keeps its default and TLS fails after CONNECT."""
+    named = os.environ.get("SSL_CERT_FILE")
+    for path in (named, *CA_BUNDLES) if named else CA_BUNDLES:
+        if Path(path).is_file():
+            return {"GIT_SSL_CAINFO": path}
+    return {}
 
 
 class Workspace:
@@ -97,6 +111,9 @@ class Workspace:
             "GIT_TERMINAL_PROMPT": "0",
             "GIT_CONFIG_NOSYSTEM": "1",
             "CARDEA_GIT_TOKEN": self._credential.token,
+            # Inside a confined worker the profile's egress proxy is the only route out.
+            **{name: os.environ[name] for name in PROXY_VARIABLES if name in os.environ},
+            **ca_bundle(),
         }
 
     def prepare(self) -> None:

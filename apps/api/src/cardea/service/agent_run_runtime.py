@@ -1105,11 +1105,7 @@ class AgentRunRuntime:
             output = str(rejected)
         except WorkerFailed as failed:
             # A confined worker started and gave no result (ADR-028).
-            log.warning(
-                "confined worker failed: %s",
-                failed.code,
-                extra={"task_id": task_id, "operation_id": operation_id, "code": failed.code},
-            )
+            confined.log_failure(failed, task_id=task_id, operation_id=operation_id)
             error = invocation.classify(failed, timeout)
             if effect:
                 self._mark_uncertain(task_id, lease_id, operation_id, error)

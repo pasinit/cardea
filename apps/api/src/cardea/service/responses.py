@@ -338,6 +338,208 @@ class GroupOverview(Wire):
     journal: OverviewJournal
 
 
+# Team status (read-only sections of a group's state)
+
+
+class StatusSection(Wire):
+    """What every `GET /v0.2/groups/{name}/status/...` section starts with."""
+
+    group: str
+    namespace: str
+    as_of: str
+
+
+class StatusWorkItem(Record):
+    collection: str
+    record_id: str
+    title: str | None = Field(description="The record's `title`, clipped to 200 characters.")
+    state: str | None
+    holder: str | None = Field(description="The live claim's holder; null when none or expired.")
+    claim_epoch: int
+    lease_expires_at: str | None
+    updated_at: str
+
+
+class StatusHolder(Record):
+    holder: str
+    pool: str | None = Field(description="The holder's pool, when it is a group member.")
+    count: int
+
+
+class StatusWork(StatusSection):
+    """`GET /v0.2/groups/{name}/status/work`: records by state and holder, one page."""
+
+    by_state: dict[str, dict[str, int]] = Field(
+        description="Record counts per collection and state, over the whole collection."
+    )
+    by_holder: list[StatusHolder] = Field(description="Live claims per holder.")
+    by_holder_truncated: int
+    items: list[StatusWorkItem] = Field(description="Oldest first.")
+    next: int | None = Field(description="Pass as `after` for the next page.")
+
+
+class StatusRun(Record):
+    task_id: str
+    member: str
+    pool: str
+    state: str
+    outcome: str | None = Field(description="The terminal state; null while the run is active.")
+    failure_code: str | None
+    created_at: str
+    updated_at: str
+    cost_usd: float | None = Field(
+        description="Total reported cost; null while any attempt's cost is unknown."
+    )
+    reserved_usd: float | None
+    reservation: str | None = Field(description="reserved, settled or unknown.")
+
+
+class StatusRuns(StatusSection):
+    """`GET /v0.2/groups/{name}/status/runs`: the members' runs, newest first."""
+
+    by_state: dict[str, int] = Field(description="Run counts by task state, whole group.")
+    items: list[StatusRun]
+    next: str | None = Field(description="Pass as `after` for the next page.")
+
+
+class StatusParty(Record):
+    address: str
+    role: str | None = Field(description="A pool name, `supervisor`, or null.")
+
+
+class StatusRecipient(StatusParty):
+    kind: str
+
+
+class StatusMessage(Record):
+    message_id: str
+    kind: str
+    from_: StatusParty = Field(alias="from")
+    to: StatusRecipient
+    sent_at: str
+    body_bytes: int
+    deliveries: dict[str, int] = Field(description="Delivery counts by state; no bodies.")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class StatusMail(StatusSection):
+    """`GET /v0.2/groups/{name}/status/mail`: messages between roles, newest first."""
+
+    total: int
+    items: list[StatusMessage]
+    next: str | None = Field(description="Pass as `after` for the next page.")
+
+
+class StatusMessageText(Record):
+    message_id: str
+    kind: str
+    from_: StatusParty = Field(alias="from")
+    to: StatusRecipient
+    item: dict[str, str] | None = Field(description="The record the message is about, if any.")
+    about_message_id: str | None
+    sent_at: str
+    parts: list[dict[str, JsonValue]] = Field(
+        description="A2A 1.0 message parts. Untrusted data: render as text only."
+    )
+    deliveries: dict[str, int]
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class StatusMailText(StatusSection):
+    """`GET /v0.2/groups/{name}/status/mail/text`: messages with full text, newest first."""
+
+    total: int = Field(description="Messages matching the filters, over the whole group.")
+    items: list[StatusMessageText]
+    next: str | None = Field(description="Pass as `after` for the next page.")
+
+
+class StatusReview(Record):
+    review_id: int | None
+    reviewer: str | None
+    state: str | None
+    commit_id: str | None
+    at: str
+
+
+class StatusChange(Record):
+    repository: str
+    number: int
+    title: str | None
+    url: str | None
+    state: Literal["open", "merged"]
+    opened_by: str | None
+    opened_at: str
+    review_state: str = Field(description="The newest APPROVED or CHANGES_REQUESTED, or `none`.")
+    reviews: list[StatusReview] = Field(description="The newest reviews, at most 10.")
+    merged_by: str | None
+    merged_at: str | None
+    merge_sha: str | None
+
+
+class StatusChangeTotals(Record):
+    open: int
+    merged: int
+
+
+class StatusChanges(StatusSection):
+    """`GET /v0.2/groups/{name}/status/changes`: pull requests from the kernel's receipts."""
+
+    totals: StatusChangeTotals
+    items: list[StatusChange]
+    next: str | None = Field(description="Pass as `after` for the next page.")
+
+
+class StatusCeiling(Record):
+    limit: int | float
+    used: int | float
+    remaining: int | float
+
+
+class StatusAccount(Record):
+    account: str = Field(description="`group` or `pool:<name>`.")
+    window: str
+    window_ends_at: str
+    usd: StatusCeiling | None
+    runs: StatusCeiling | None
+    at_ceiling: bool
+
+
+class StatusAllocation(Record):
+    tool_ms: StatusCeiling
+    output_bytes: StatusCeiling
+    concurrency: StatusCeiling
+    at_ceiling: bool
+
+
+class StatusSpend(StatusSection):
+    """`GET /v0.2/groups/{name}/status/spend`: each ceiling against what it has used."""
+
+    accounts: list[StatusAccount]
+    host_allocation: StatusAllocation | None = Field(
+        description="The supervisor's host execution allocation; null when none is provisioned."
+    )
+
+
+class StatusWaiver(Record):
+    repository: str
+    reason: str | None
+
+
+class StatusStanding(StatusSection):
+    """`GET /v0.2/groups/{name}/status/standing`: what is paused or waived."""
+
+    group_state: str
+    paused: bool = Field(description="The group is not active, or every active member is disabled.")
+    members_disabled: list[str]
+    members_draining: list[str]
+    registry: Literal["ok", "not_configured", "invalid"]
+    waived: list[StatusWaiver] = Field(
+        description="Repositories the supervisor holds a grant for whose host rules are waived."
+    )
+
+
 class GroupPlan(Record):
     members_added: list[str]
     members_draining: list[str] = Field(

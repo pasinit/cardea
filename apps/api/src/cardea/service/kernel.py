@@ -23,6 +23,7 @@ from cardea.service import (
     context_sources,
     host_budget,
     loopback,
+    mailbox,
     replies,
     spend,
 )
@@ -44,6 +45,7 @@ from cardea.service.mailbox import is_group_address as mailbox_address
 from cardea.service.models import (
     APPROVAL_OPERATIONS,
     DEFAULT_MAX_TASK_REQUEST_BYTES,
+    DISABLED_REQUEST_PREFIX,
     RECORD_GRANT_PREFIX,
     RECORD_OPERATIONS,
     AgentRunRequest,
@@ -318,7 +320,7 @@ def provision(
                             str(task_id),
                             str(namespace),
                             "host-admin",
-                            f"disabled.{revision}",
+                            f"{DISABLED_REQUEST_PREFIX}{revision}",
                             "cancel",
                         )
                 for row in pending:
@@ -365,13 +367,42 @@ def record_signal(
         raise Fault("task_terminal", "A terminal task cannot be resumed", 409)
     at = now()
     profile = for_runtime(task.runtime_id)
-    # An agent run waiting for approval has no attempt to stop (ADR-036 slice 4).
-    parked = profile.workflow == AGENT_RUN_WORKFLOW and task.state is TaskState.WAITING
-    if kind == "cancel" and (
-        parked
-        or (
-            not profile.runtime_cancels
-            and not (profile.runtime_cancels_running and task.state is TaskState.RUNNING)
+    # The run's runtime principal sends any dead-letter notice that settling causes.
+    runtime = conn.exec_driver_sql(
+        "SELECT runtime_id FROM task_bindings WHERE task_id=?", (task_id,)
+    ).scalar()
+    runtime = str(runtime or principal)
+    if (
+        kind == "cancel"
+        and task.state is TaskState.RUNNING
+        and not profile.owns_children
+        and task.lease is not None
+        and at >= task.lease.expires_at
+    ):
+        # An interrupted attempt nothing will resume before its runtime runs again (for
+        # example under a disabled supervisor): fence it now, as recovery would. Its calls
+        # are failed or left to reconcile; a task with nothing unresolved is queued again.
+        conn.exec_driver_sql(
+            "UPDATE effect_scopes SET state='unknown' WHERE task_id=? AND state='running'",
+            (task_id,),
+        )
+        task = tx.recover_task(task_id, expected_revision=task.revision, at=at)
+        mailbox.settle(conn, tx, task_id, task.state.value, runtime, at)
+    # An agent run waiting for approval has no attempt to stop (ADR-036 slice 4), and a
+    # queued task has none yet: no runtime needs to see the cancel first.
+    idle = task.state in {TaskState.QUEUED, TaskState.SUSPENDED} or (
+        profile.workflow == AGENT_RUN_WORKFLOW and task.state is TaskState.WAITING
+    )
+    if (
+        kind == "cancel"
+        # Recovery above may already have failed it (an effect left to reconcile).
+        and task.state not in TERMINAL
+        and (
+            idle
+            or (
+                not profile.runtime_cancels
+                and not (profile.runtime_cancels_running and task.state is TaskState.RUNNING)
+            )
         )
     ):
         tx.change_task(
@@ -381,6 +412,7 @@ def record_signal(
             lease_id=task.lease.lease_id if task.lease else None,
             at=at,
         )
+        mailbox.settle(conn, tx, task_id, TaskState.CANCELLED.value, runtime, at)
     event = tx.append_event(
         namespace=namespace,
         event_type=f"{kind}.{task_id}",

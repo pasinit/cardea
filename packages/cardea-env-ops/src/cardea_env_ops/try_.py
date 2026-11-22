@@ -42,6 +42,7 @@ from typing import Any
 from pydantic import JsonValue
 
 from cardea.hosts import isolation
+from cardea.runtime.harness import PROXY_VARIABLES
 from cardea.service import repositories
 from cardea.service.operations import OperationContext, OperationRejected, WithArtifacts
 
@@ -54,7 +55,7 @@ MAX_ARTIFACTS_TOTAL = 1024 * 1024
 MAX_ARTIFACT_FILES = 8
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
 BASE_PATH = "/usr/local/bin:/usr/bin:/bin"
-PROXY = ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy", "NO_PROXY", "no_proxy")
+PROXY = PROXY_VARIABLES
 # Never set for a scenario: anything that could carry a credential.
 CREDENTIAL_NAMES = re.compile(
     r"^(GH_|GITHUB_|GIT_|GITLAB_|GITEA_|AWS_|GOOGLE_|AZURE_)|TOKEN|SECRET|PASSWORD|"
@@ -62,7 +63,7 @@ CREDENTIAL_NAMES = re.compile(
 )
 # Credential-shaped strings scrubbed from log tails (ADR-026's summary rule).
 SECRET_SHAPES = re.compile(
-    r"(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,}|"
+    r"(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|\bsk-[A-Za-z0-9_-]{20,}|"
     r"AKIA[0-9A-Z]{16}|xox[abpr]-[A-Za-z0-9-]{10,}|"
     r"-----BEGIN [A-Z ]*PRIVATE KEY-----|(?i:bearer)\s+[A-Za-z0-9._~+/-]{16,}=*)"
 )

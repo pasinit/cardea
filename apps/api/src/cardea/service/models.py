@@ -79,6 +79,7 @@ RECORD_OPERATIONS: frozenset[str] = frozenset(
         "records.update",
         "records.claim",
         "records.release",
+        "records.force_release",
         "records.claimed",
         "records.transition",
     }
@@ -138,6 +139,11 @@ RIGHTS: tuple[Right, ...] = (
     "events.read",
     "tasks.submit",
 )
+
+
+# The request ID prefix of the cancels that disabling a supervisor records (the kill
+# switch, ADR-034 amendment); claim follow-ups wake holders those cancels interrupted.
+DISABLED_REQUEST_PREFIX = "disabled."
 
 
 def now() -> datetime:
@@ -990,7 +996,12 @@ class RunBounds(Record):
 
 class RunTemplate(Record):
     """A pool's ADR-027 agent-run template; the kernel fills in the member, namespace,
-    grants and per-slot identity."""
+    grants and per-slot identity.
+
+    In `instructions`, `$member`, `$pool` and `$group` stand for the member's principal ID,
+    its pool address and its group, as in trigger subjects, so one template can tell each
+    replica who it is (ADR-034 amendment, 2026-11-22).
+    """
 
     objective: Annotated[str, Field(strict=True, min_length=1, max_length=1024)] | None = None
     instructions: Annotated[str, Field(strict=True, min_length=1, max_length=65536)]
