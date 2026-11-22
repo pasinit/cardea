@@ -287,3 +287,40 @@ The owner answered every question as recommended.
 4. **Window and reruns.** Is a 24-hour default window right, and should `rerun` be limited per commit, to bound flaky-test churn?
 5. **Run table or ADR-026 amendment.** Is a small run table (item 4) acceptable, or should ADR-026 scopes be amended to allow reads with an expiry window?
 6. **Toolchain images.** Who builds and pins the toolchain root image (for example with `mmdebstrap` on Debian), and how often is it refreshed? Its digest is part of the run key.
+
+## Amendment (proposed, 2026-11-21): scenarios that need TCP loopback
+
+**Status: draft for the owner. Nothing here is implemented.**
+
+**Problem.** Some scenarios start servers on 127.0.0.1 and connect to them. Cardea's own `make teams` does: its harness reaches the agent run's tool endpoint, which an in-process kernel binds on `loopback.DEFAULT_HOST`. In the `try` profile that fails twice. The unit shares the host's network namespace with `IPAddressDeny=any` and `IPAddressAllow` set to the proxy's /32 only, so loopback is dropped. And `127.0.0.1` is not in `NO_PROXY`, so an HTTP client that honours the proxy variables sends the request to squid, which refuses it. `make try` is not affected: its daemon is reached over a Unix socket. Adding `localhost` to `IPAddressAllow` is ruled out, because it exposes the host's own loopback services, which ADR-028's fence exists to hide.
+
+**A constraint found while designing this.** The obvious single-unit fix is that the worker syncs dependencies with egress, then starts each scenario in a fresh network namespace whose `lo` is up (`bwrap --unshare-net`, or `unshare(CLONE_NEWUSER|CLONE_NEWNET)`). It is not available. The sandbox runs `bwrap --disable-userns --cap-drop ALL` (section 3, ADR-028), so code inside cannot create a user namespace, and without one it cannot create a network namespace. Relaxing `--disable-userns` would reopen the kernel's user-namespace attack surface to every commit's code. A systemd unit's network settings are fixed for its lifetime. So the network must change **between units**, not within one.
+
+### Option (a): two phases, two units, one per-call workspace
+
+One `env.try` call runs two confined jobs in sequence on the same disk-backed workspace (section 3's per-call workspace image, already the next planned slice):
+
+1. **`prepare`** (new, optional catalog field: `{argv, timeout_seconds}` steps, for example `["/usr/local/bin/uv", "sync", "--locked", "--project", "apps/api"]`). It runs in today's `try` profile: `allow_list` egress through the proxy to the package indexes, nothing else.
+2. **Scenarios** run in a new profile, for example `try-local`, with a new ADR-028 network policy `loopback_only`: `PrivateNetwork=yes`, which gives a private namespace whose `lo` systemd brings up, plus `AF_INET`/`AF_INET6` and the network system calls. No proxy, no egress and no `IPAddressAllow`. The host's loopback and abstract Unix sockets are invisible, because abstract sockets are per network namespace.
+
+- **Isolation.** The scenarios, the code most under the commit's control, lose all egress. Today they have the proxy. Only the `prepare` steps (and any build backends they run) keep proxy egress, the same as today. Both units keep every other ADR-028 property. Each phase's network setting is a plain systemd property that the existing launcher tests can pin.
+- **How uv's state crosses.** The workspace is bound at the same absolute path in both units (for example `/run/cardea/workspace`), so the checkout's `.venv` and its absolute paths stay valid. `UV_CACHE_DIR` lives in the workspace too, on the same filesystem, so uv hard-links rather than copies. The scenario phase gets `UV_OFFLINE=1` and no proxy variables: `uv run --locked` then checks the lock offline and uses the synced environment, or fails at once instead of trying the network. `UV_FROZEN` is not set, because uv refuses it together with `--locked`, which the Makefile passes. The workspace is deleted after phase 2, so nothing crosses calls. The only state crossing the boundary is the same commit's own output, so the trust level is unchanged.
+- **Run key and reuse.** The `prepare` steps are part of the catalog entry, so the catalog digest covers them. The environment digest gains the second profile's digest. Reuse is unchanged: one call, one receipt, the same 24-hour window. A catalog without `prepare` keeps its run key and runs as today, single unit and `try` profile. The output records each phase's outcome and the scenarios' `network: "loopback_only"`.
+- **Effort.** Medium:
+  - the helper's per-call workspace image (planned anyway);
+  - the `loopback_only` policy in `launcher.py`, with tests;
+  - the env.try executor dispatching two jobs per call, with a phase-1 failure reported as `prepare` failing and scenarios `not_run`;
+  - the catalog schema;
+  - a Debian acceptance phase: a scenario binds 127.0.0.1 and reaches it, and it cannot reach the proxy, a host loopback listener or the network. `make teams` passes.
+
+### Option (b): a separate tier
+
+Scenarios that need loopback declare a new tier, served by its own worker and `loopback_only` profile. Its isolation is the same as (a)'s phase 2. The difference is dependencies: a single unit with no egress has to get them from somewhere that outlives the call. The candidates are:
+- a host-owned, cross-run uv cache or wheelhouse, written by some egress job and read by the tier. This is the shared build cache this ADR leaves out of scope, with its poisoning analysis: sdist builds run commit-controlled code into it, and its contents sit outside the run key, so the same key could give different results;
+- a per-repository environment baked into the toolchain image. It goes stale as soon as a commit changes its dependencies, and it couples the weekly image to every repository's lock.
+
+The other path is to stage the environment as kernel inputs, but those are capped at 16 MiB, far below a typical venv. Effort is a new worker and profile plus the cache's lifecycle, GC and poisoning controls. That is more than (a), and the isolation is weaker across runs.
+
+### Recommendation
+
+**(a).** It is the only option that keeps "each run starts clean": nothing crosses calls, and the run key stays complete. It also tightens isolation for the common case, because scenario code loses egress. It reuses the per-call workspace image this ADR already plans, and it adds one ADR-028 network policy rather than a second dependency path. Order: the workspace image, then `loopback_only`, then `prepare` and two-job dispatch. Until then, a repository can make such scenarios work by not needing TCP: for example, Cardea's examples could serve the tool endpoint over a Unix socket. That is a per-repository workaround, not a host policy change.
