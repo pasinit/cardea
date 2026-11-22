@@ -25,6 +25,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Protocol
+from urllib.parse import parse_qs, urlsplit
 
 HERE = Path(__file__).resolve().parent
 LOOPBACK = "127.0.0.1"
@@ -35,6 +36,11 @@ MAX_REPLIES = 20
 MAIL_PAGE = 50
 MAX_MAIL_PAGES = 20
 IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+TEAM = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+ITEM = re.compile(r"^[a-z][a-z0-9_-]{0,63}/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+CURSOR = re.compile(r"^[0-9a-f-]{36}$")
+MAIL_FILTERS = {"team", "member", "item", "after", "limit"}
+MAIL_LIMIT = 20
 STATIC = {
     "/": ("dashboard.html", "text/html; charset=utf-8"),
     "/dashboard.js": ("dashboard.js", "text/javascript; charset=utf-8"),
@@ -58,6 +64,45 @@ class Backend(Protocol):
     def replies(self) -> list[dict[str, Any]]: ...
 
     def send(self, role: str, text: str, client_key: str) -> dict[str, Any]: ...
+
+    def mail(self, query: dict[str, Any]) -> dict[str, Any]: ...
+
+
+def mail_query(raw: str) -> dict[str, Any]:
+    """A mail request's filters, checked: `team`, `member`, `item`, `after` and `limit` only."""
+    try:
+        found = parse_qs(raw, keep_blank_values=True, strict_parsing=bool(raw))
+    except ValueError:
+        raise DashboardError("invalid_query") from None
+    if set(found) - MAIL_FILTERS or any(len(v) != 1 for v in found.values()):
+        raise DashboardError("invalid_query")
+    query: dict[str, Any] = {k: v[0] for k, v in found.items() if v[0]}
+    for key, pattern in (("team", TEAM), ("member", IDENTIFIER), ("item", ITEM), ("after", CURSOR)):
+        if key in query and not pattern.match(query[key]):
+            raise DashboardError("invalid_query")
+    limit = query.get("limit", str(MAIL_LIMIT))
+    if not (limit.isascii() and limit.isdigit() and 1 <= int(limit) <= 50):
+        raise DashboardError("invalid_query")
+    query["limit"] = int(limit)
+    return query
+
+
+def team_state(view: dict[str, Any]) -> str:
+    """`paused`, `running`, `stalled` or `idle`, from one overview.
+
+    Paused: the group is not active, or every member is disabled. Running: a member has a run
+    in progress. Stalled: nothing runs, yet mail waits, mail was dead-lettered or a claim is
+    held. Otherwise idle.
+    """
+    members_ = [m for pool in view.get("pools", []) for m in pool["members"]]
+    if view.get("state") != "active" or (members_ and all(m["disabled"] for m in members_)):
+        return "paused"
+    if any(m["active_task_id"] for m in members_):
+        return "running"
+    mail = view.get("mailbox", {}).get("addresses", [])
+    if any(a["pending"] or a["dead"] for a in mail) or any(m["claims"] for m in members_):
+        return "stalled"
+    return "idle"
 
 
 def roles(view: dict[str, Any]) -> list[str]:
@@ -88,6 +133,9 @@ class FixtureBackend:
         if self.sent.setdefault(client_key, message) != message:
             raise DashboardError("request_conflict", 409)
         return {"message_id": f"fixture-{len(self.sent)}", "to": {"pool": f"{group}.{role}"}}
+
+    def mail(self, query: dict[str, Any]) -> dict[str, Any]:
+        return {"total": 0, "items": [], "next": None}
 
 
 class KernelBackend:
@@ -120,6 +168,16 @@ class KernelBackend:
             if not after:
                 break
         return found[-MAX_REPLIES:][::-1]
+
+    def mail(self, query: dict[str, Any]) -> dict[str, Any]:
+        """One page of the team's mail with full text; the kernel refuses a non-supervisor."""
+        params = {k: v for k, v in query.items() if k in MAIL_FILTERS - {"team"}}
+        page: dict[str, Any] = self.request(
+            "GET",
+            f"/groups/{self.group}/status/mail/text",
+            params={"namespace": self.namespace, **params},
+        )
+        return page
 
     def send(self, role: str, text: str, client_key: str) -> dict[str, Any]:
         sent: dict[str, Any] = self.request(
@@ -197,6 +255,9 @@ def handler(
 
         def do_GET(self) -> None:
             def get() -> None:
+                url = urlsplit(self.path)
+                if url.path == "/api/mail":
+                    return self.json(HTTPStatus.OK, backend.mail(mail_query(url.query)))
                 if self.path in static:
                     name, kind = static[self.path]
                     return self.reply(HTTPStatus.OK, (HERE / name).read_bytes(), kind)
