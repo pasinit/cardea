@@ -31,6 +31,9 @@ LOOPBACK = "127.0.0.1"
 DEFAULT_PORT = 8765
 MAX_MESSAGE_CHARS = 4000
 MAX_BODY_BYTES = 16384
+MAX_REPLIES = 20
+MAIL_PAGE = 50
+MAX_MAIL_PAGES = 20
 IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 STATIC = {
     "/": ("dashboard.html", "text/html; charset=utf-8"),
@@ -52,6 +55,8 @@ class DashboardError(Exception):
 class Backend(Protocol):
     def overview(self) -> dict[str, Any]: ...
 
+    def replies(self) -> list[dict[str, Any]]: ...
+
     def send(self, role: str, text: str, client_key: str) -> dict[str, Any]: ...
 
 
@@ -59,15 +64,23 @@ def roles(view: dict[str, Any]) -> list[str]:
     return [str(pool["name"]) for pool in view.get("pools", [])]
 
 
+def members(view: dict[str, Any]) -> set[str]:
+    return {str(m["principal_id"]) for pool in view.get("pools", []) for m in pool["members"]}
+
+
 class FixtureBackend:
     """Serves a recorded overview; a message is recorded here and goes nowhere."""
 
-    def __init__(self, view: dict[str, Any]) -> None:
+    def __init__(self, view: dict[str, Any], replies: list[dict[str, Any]] | None = None) -> None:
         self.view = view
+        self.recorded = replies or []
         self.sent: dict[str, dict[str, Any]] = {}
 
     def overview(self) -> dict[str, Any]:
         return self.view
+
+    def replies(self) -> list[dict[str, Any]]:
+        return self.recorded[:MAX_REPLIES]
 
     def send(self, role: str, text: str, client_key: str) -> dict[str, Any]:
         group = self.view["group"]
@@ -88,6 +101,25 @@ class KernelBackend:
             "GET", f"/groups/{self.group}/overview", params={"namespace": self.namespace}
         )
         return view
+
+    def replies(self) -> list[dict[str, Any]]:
+        """The newest messages a group member sent to an instance, as the supervisor sees them."""
+        group = members(self.overview())
+        found: list[dict[str, Any]] = []
+        after = ""
+        for _ in range(MAX_MAIL_PAGES):
+            page: dict[str, Any] = self.request(
+                "GET",
+                "/mailbox",
+                params={"namespace": self.namespace, "after": after, "limit": MAIL_PAGE},
+            )
+            found += [
+                m for m in page["messages"] if m["sender_id"] in group and "instance" in m["to"]
+            ]
+            after = page.get("next") or ""
+            if not after:
+                break
+        return found[-MAX_REPLIES:][::-1]
 
     def send(self, role: str, text: str, client_key: str) -> dict[str, Any]:
         sent: dict[str, Any] = self.request(
@@ -165,6 +197,8 @@ def handler(backend: Backend, port: int) -> type[BaseHTTPRequestHandler]:
                     return self.reply(HTTPStatus.OK, (HERE / name).read_bytes(), kind)
                 if self.path == "/api/status":
                     return self.json(HTTPStatus.OK, backend.overview())
+                if self.path == "/api/replies":
+                    return self.json(HTTPStatus.OK, backend.replies())
                 self.json(HTTPStatus.NOT_FOUND, {"code": "not_found"})
 
             self.guarded(get)

@@ -13,9 +13,12 @@ from fastapi.testclient import TestClient
 from test_mailboxes import kernel, session, team
 from test_team_kit import example, kit
 
+from cardea.service import mailbox
 from cardea.service.app import create_app
 from cardea.service.client import ClientError
+from cardea.service.database import borrow
 from cardea.service.kernel import Kernel
+from cardea.service.models import now
 from cardea.service.responses import GroupOverview
 
 __all__ = ["kernel", "session"]  # the fixtures the tests below ask for
@@ -208,6 +211,36 @@ def test_the_kernel_decides_whether_the_caller_may_mail_a_role(kernel: Kernel) -
             "SELECT count(*) FROM mailbox_messages WHERE client_key='dash-2'"
         ).scalar()
     assert count == 0
+
+
+def test_replies_to_the_supervisor_are_the_newest_from_group_members(kernel: Kernel) -> None:
+    team(kernel)
+    backend = dashboard().KernelBackend(Supervisor(kernel, "supervisor").request, "test", "team")
+    member = sorted(dashboard().members(backend.overview()))[0]
+    with kernel.database.engine.begin() as conn, borrow(conn) as tx:
+        for sender, to, text in [
+            *[(member, {"instance": "supervisor"}, f"reply {n}") for n in range(23)],
+            (member, {"pool": "team.dev"}, "to the pool"),
+            ("supervisor", {"instance": member}, "from the supervisor"),
+        ]:
+            mailbox.send(
+                conn,
+                tx,
+                namespace="test",
+                sender_id=sender,
+                supervisor_id="supervisor",
+                to=mailbox.Address(**to),
+                parts=[{"text": text}],
+                runtime_id="runtime",
+                at=now(),
+                from_kernel=True,  # lets the test address the supervisor, as a notice may
+            )
+    status, replies = call(backend, "GET", "/api/replies")
+    assert status == 200 and len(replies) == 20
+    texts = [m["parts"][0]["text"] for m in replies]
+    assert texts == [f"reply {n}" for n in range(22, 2, -1)]
+    assert {m["sender_id"] for m in replies} == {member}
+    assert call(dashboard().FixtureBackend(fixture()), "GET", "/api/replies") == (200, [])
 
 
 def test_the_team_supervisor_may_mail_every_role() -> None:
