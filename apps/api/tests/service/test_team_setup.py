@@ -3,6 +3,7 @@ fresh host, a repeated run changes nothing, a killed run resumes at its step, an
 step prints its verify result. The host is simulated; nothing here runs on Debian."""
 
 import importlib.util
+import io
 import json
 import os
 import re
@@ -570,3 +571,160 @@ def test_the_cli_plan_and_apply_print_per_step_lines(
     assert setup.main(["apply", "--host", str(rig.host_path)]) == 1
     assert "01 team-host: FAILED" in capsys.readouterr().out
     assert os.path.exists(rig.base / "state/state.json")
+
+
+# Setup 2/2: secrets entered once, never echoed, with expiry tracking.
+
+SECRET = "ghp_TOPSECRETVALUE123"
+
+
+def prompting(rig: Rig, **source: Any) -> Any:
+    kit = setup.load_kit()
+    layout = setup.Layout(rig.host, kit)
+    asked: list[str] = []
+
+    def prompt(label: str) -> str:
+        asked.append(label)
+        return SECRET
+
+    store = setup.PromptingSecretStore(
+        layout.secret_files(),
+        setup.InputSecretSource(prompt=prompt, interactive=lambda: True, **source),
+        layout.secret_meta,
+        rig.fake,
+        layout.secret_expiries(),
+    )
+    store.asked = asked
+    rig.store = store
+    return store
+
+
+def test_secrets_are_prompted_once_stored_0600_and_never_leak(
+    rig: Rig, capsys: pytest.CaptureFixture[str]
+) -> None:
+    store = prompting(rig)
+    assert rig.apply() is True, "\n".join(rig.lines)
+    # Each secret was asked for once, and is stored owner-only.
+    assert sorted(store.asked) == sorted(f"{n} (input hidden): " for n in store.files)
+    for path in store.files.values():
+        assert path.read_text() == SECRET + "\n"
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(rig.context().layout.secret_meta.stat().st_mode) == 0o600
+    # The value is in none of: printed lines, captured streams, state, expiry record.
+    streams = capsys.readouterr()
+    assert SECRET not in streams.out + streams.err + "\n".join(rig.lines)
+    state = (rig.base / "state/state.json").read_text()
+    assert SECRET not in state
+    assert SECRET not in store.meta.read_text()
+    # A re-run neither prompts nor changes anything.
+    store.asked.clear()
+    before = snapshot(rig.base)
+    rig.lines.clear()
+    assert rig.apply() is True
+    assert store.asked == []
+    assert snapshot(rig.base) == before
+
+
+def test_redaction_scrubs_a_value_from_output_and_state(rig: Rig) -> None:
+    store = prompting(rig)
+    store.provide("vcs:github")
+    assert store.redact(f"boom {SECRET} boom") == "boom [redacted] boom"
+    state = setup.State(rig.base / "state/s.json", rig.fake, store.redact)
+    state.mark("tokens", "failed", f"curl said {SECRET}")
+    assert SECRET not in (rig.base / "state/s.json").read_text()
+
+
+def test_plan_never_prompts_or_writes(rig: Rig) -> None:
+    store = prompting(rig)
+    before = snapshot(rig.base)
+    rig.plan()
+    assert store.asked == []
+    assert snapshot(rig.base) == before
+
+
+def test_expired_and_near_expiry_tokens_are_reported_by_verify(rig: Rig) -> None:
+    store = prompting(rig)
+    assert rig.apply() is True
+    meta = store.meta
+    for days, word in ((-1, "expired on"), (3, "expires on")):
+        recorded = {
+            name: (datetime.now(UTC) + timedelta(days=days)).date().isoformat()
+            for name in store.files
+            if name.startswith("vcs:")
+        }
+        meta.write_text(json.dumps(recorded))
+        verdict = setup.steps()[STEP_NAMES.index("tokens")].verify(rig.context())
+        assert verdict.ok is False and word in verdict.detail
+    # Near expiry, a run asks for the replacement token once and stores its new expiry.
+    store.asked.clear()
+    store.expiries = {n: (datetime.now(UTC) + timedelta(days=90)).date() for n in store.files}
+    rig.lines.clear()
+    assert rig.apply() is True, "\n".join(rig.lines)
+    assert len(store.asked) == 2
+
+
+def test_a_new_token_that_is_already_expired_is_refused(rig: Rig) -> None:
+    store = prompting(rig)
+    store.expiries["vcs:github"] = datetime.now(UTC).date() - timedelta(days=1)
+    with pytest.raises(setup.SecretUnavailable, match="not in the future"):
+        store.provide("vcs:github")
+    assert not store.files["vcs:github"].exists()
+
+
+def test_sources_file_stdin_and_no_terminal(tmp_path: Path) -> None:
+    token = tmp_path / "token"
+    token.write_text(SECRET + "\n")
+    source = setup.InputSecretSource(
+        {"a": token}, "b", io.StringIO("from stdin\n"), interactive=lambda: False
+    )
+    assert source.read("a").strip() == SECRET
+    assert source.read("b").strip() == "from stdin"
+    with pytest.raises(setup.SecretUnavailable, match="--secret-file c=PATH"):
+        source.read("c")
+
+
+def test_the_cli_reads_secret_options_and_never_prints_them(
+    rig: Rig, capsys: pytest.CaptureFixture[str]
+) -> None:
+    layout = setup.Layout(rig.host, setup.load_kit())
+    files = layout.secret_files()
+    args = ["apply", "--host", str(rig.host_path)]
+    for name in files:
+        source = rig.base / f"in-{name.replace(':', '-')}"
+        source.write_text(SECRET + "\n")
+        args += ["--secret-file", f"{name}={source}"]
+    # The first step fails on the real system before anything runs, but the store is built
+    # and output goes through it; a bad option is refused outright.
+    rig.host["credentials"]["reviewer_login"] = "x.example"
+    rig.host_path.write_text(json.dumps(rig.host))
+    assert setup.main(args) == 1
+    streams = capsys.readouterr()
+    assert SECRET not in streams.out + streams.err
+    with pytest.raises(SystemExit):
+        setup.main([*args, "--expires-on", "vcs:github=not-a-date"])
+
+
+def test_a_secret_from_a_file_or_stdin_is_stored_0600_with_its_expiry_and_never_echoed(
+    rig: Rig, capsys: pytest.CaptureFixture[str]
+) -> None:
+    token = rig.base / "token-in"
+    token.write_text(SECRET + "\n")
+    store = prompting(
+        rig, files={"vcs:github": token}, stdin_name="email:key", stdin=io.StringIO("mail-secret\n")
+    )
+    store.expiries = {"vcs:github": datetime.now(UTC).date() + timedelta(days=90)}
+    for name in ("vcs:github", "email:key"):
+        assert store.status(name).ok is False
+        store.provide(name)
+        assert store.status(name).ok is True
+        assert stat.S_IMODE(store.files[name].stat().st_mode) == 0o600
+    assert store.files["vcs:github"].read_text() == SECRET + "\n"
+    assert store.files["email:key"].read_text() == "mail-secret\n"
+    # Only the expiry is recorded, and only for the secret that was given one.
+    recorded = json.loads(store.meta.read_text())
+    assert list(recorded) == ["vcs:github"]
+    assert SECRET not in store.meta.read_text() and "mail-secret" not in store.meta.read_text()
+    assert store.asked == []
+    assert store.redact(f"{SECRET} and mail-secret") == "[redacted] and [redacted]"
+    streams = capsys.readouterr()
+    assert SECRET not in streams.out + streams.err
