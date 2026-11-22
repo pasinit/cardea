@@ -106,9 +106,11 @@ def test_many_failures_are_capped_so_the_summary_fits_the_tail(
     module = runner()
     lines = "".join(f"FAILED tests/t.py::test_{n:03d} - x\\n" for n in range(60))
     assert module.main([("test", python(f"print('{lines}', end='')\nraise SystemExit(1)"))]) == 1
-    tail = capsys.readouterr().out[-TAIL:]
-    assert "tests/t.py::test_019" in tail and "tests/t.py::test_020" not in tail
-    assert "... and 40 more" in tail and tail.endswith("check: FAIL (exit 1)\n")
+    out = capsys.readouterr().out
+    summary = out[out.rindex("== check summary ==") :]
+    assert len(summary) <= TAIL
+    assert "tests/t.py::test_019" in summary and "tests/t.py::test_020" not in summary
+    assert "... and 40 more" in summary and summary.endswith("check: FAIL (exit 1)\n")
 
 
 def test_a_step_that_cannot_start_fails_the_run(capsys: pytest.CaptureFixture[str]) -> None:
