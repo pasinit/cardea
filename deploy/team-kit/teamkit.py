@@ -40,6 +40,7 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -871,7 +872,9 @@ def check_placeholders(host: dict[str, Any]) -> None:
         raise HostError("the host file still holds placeholder values at " + ", ".join(found))
 
 
-def provision(host: dict[str, Any], *, paused: bool) -> Path:
+def provision(
+    host: dict[str, Any], *, paused: bool, runner: Callable[..., Any] = subprocess.run
+) -> Path:
     check_placeholders(host)
     if not paused:
         check_walls(host)
@@ -889,16 +892,16 @@ def provision(host: dict[str, Any], *, paused: bool) -> Path:
     # The kernel's own CLI, from the kit's environment (`python -I -m cardea.service`).
     cardea = list(settings.get("cardea", [*KIT_PYTHON, "-I", "-m", "cardea.service"]))
     config = settings.get("config", "/etc/cardea/config.json")
-    subprocess.run([*cardea, "provision", "--config", config, str(out)], check=True)
+    runner([*cardea, "provision", "--config", config, str(out)], check=True)
     return out
 
 
-def apply(host: dict[str, Any]) -> list[str]:
+def apply(host: dict[str, Any], connect: Callable[[dict[str, Any]], Any] = client) -> list[str]:
     check_placeholders(host)
     check_walls(host)
     namespace, group, _, _ = _names(host)
     done = []
-    kernel = client(host)
+    kernel = connect(host)
     try:
         for document in (work_collection(host), decisions_collection(host)):
             name = document["metadata"]["name"]

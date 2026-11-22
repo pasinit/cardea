@@ -24,6 +24,8 @@ A transition that needs evidence cites a receipt. `submit` needs the run's `vcs.
 
 ## What the host needs first
 
+`teamsetup.py plan --host $H` checks every item below and the setup steps that follow from them; `apply` does what it can. The list stays the reference. See [team kit](../../deploy/team-kit/README.md).
+
 - The kernel installed and running with host execution: [deploy/small-host/README.md](../../deploy/small-host/README.md), section 4.
   - The `vcs` and `try` profiles (steps 9 and 10) and `code.session` (step 8).
   - The repository alias in the registry, with its `environment` catalog.
