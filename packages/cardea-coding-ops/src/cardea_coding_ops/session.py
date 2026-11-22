@@ -53,7 +53,12 @@ PATH = "/usr/local/bin:/usr/bin:/bin"
 CREDENTIAL_NAMES = re.compile(
     r"^(GH_|GITHUB_|GIT_|GITLAB_|GITEA_)|ASKPASS|CREDENTIAL|^SSH_AUTH_SOCK$|^NETRC$"
 )
-AUTHOR = ["-c", "user.name=cardea", "-c", "user.email=code-session@cardea.invalid"]
+# Identity for commits the session (or the harness) makes comes from the worker's environment,
+# never from the repository or a global git configuration; these defaults name no person.
+IDENTITY_NAME = "CARDEA_GIT_NAME"
+IDENTITY_EMAIL = "CARDEA_GIT_EMAIL"
+DEFAULT_NAME = "cardea"
+DEFAULT_EMAIL = "code-session@cardea.invalid"
 
 
 def _config() -> dict[str, Any]:
@@ -79,6 +84,11 @@ def environment(scratch: Path, passthrough: list[str] | None = None) -> dict[str
         "GIT_CONFIG_GLOBAL": os.devnull,
         "GIT_TERMINAL_PROMPT": "0",
     }
+    name = os.environ.get(IDENTITY_NAME) or DEFAULT_NAME
+    email = os.environ.get(IDENTITY_EMAIL) or DEFAULT_EMAIL
+    for role in ("AUTHOR", "COMMITTER"):
+        env[f"GIT_{role}_NAME"] = name
+        env[f"GIT_{role}_EMAIL"] = email
     for name in passthrough or ():
         if CREDENTIAL_NAMES.search(name):
             raise OperationRejected(f"the harness may not receive {name}")
@@ -328,22 +338,32 @@ def session(
         )
 
     _git(repo, env, "add", "--all")
-    changed = bool(_git(repo, env, "status", "--porcelain").strip())
+    # Uncommitted edits become one commit; commits the harness made itself (a rebase, a merge)
+    # count too, so "changed" is whether HEAD moved, not whether the tree is dirty.
+    if _git(repo, env, "status", "--porcelain").strip():
+        _git(repo, env, "commit", "--quiet", "--no-verify", "-m", "code.session change")
+    current = _git(repo, env, "rev-parse", "HEAD").strip()
+    changed = current != base_sha
     head_sha: str | None = None
     files = insertions = deletions = 0
     diff = ""
     bundle = b""
     if changed:
-        _git(repo, env, *AUTHOR, "commit", "--quiet", "--no-verify", "-m", "code.session change")
-        head_sha = _git(repo, env, "rev-parse", "HEAD").strip()
+        head_sha = current
         for line in _git(repo, env, "diff", "--numstat", base_sha, head_sha).splitlines():
             added, removed, _ = line.split("\t", 2)
             files += 1
             insertions += int(added) if added.isdigit() else 0
             deletions += int(removed) if removed.isdigit() else 0
         diff = _git(repo, env, "diff", base_sha, head_sha)
+        # An explicit branch ref at the head (the harness may have left HEAD detached or on
+        # another branch), and no dependence on an `origin/<base>` ref the clone may lack.
+        branch = f"refs/heads/{base_ref}"
+        _git(repo, env, "update-ref", branch, head_sha)
         target = scratch / BUNDLE
-        _git(repo, env, "bundle", "create", "--quiet", str(target), f"{base_sha}..HEAD")
+        _git(
+            repo, env, "bundle", "create", "--quiet", str(target), branch, "HEAD", f"^{base_sha}"
+        )
         bundle = target.read_bytes()
     # Fixed before any gate runs: the gates check the change, they must not change it.
     # Nothing the harness (or a program its checkout made git run) left may outlive this.

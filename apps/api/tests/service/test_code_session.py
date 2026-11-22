@@ -817,3 +817,82 @@ def test_a_gate_that_changes_the_checkout_is_refused(
     settled = receipt(kernel, task_id)
     assert settled.failure is not None and settled.failure.code == "gate_changed_checkout"
     assert stored_objects(kernel, task_id) == 0
+
+
+# code.session: a harness that commits for itself
+
+COMMITTING = """
+import subprocess, sys, pathlib
+def git(*args):
+    subprocess.run(["git", *args], check=True)
+mode = sys.argv[1]
+# Whatever tracking ref the clone made is gone, as in a sandbox that never had one.
+subprocess.run(["git", "update-ref", "-d", "refs/remotes/origin/main"], check=False)
+if mode == "none":
+    sys.exit(0)
+if mode == "rebase":
+    git("checkout", "-q", "-b", "work")
+    for name in ("a", "b"):
+        pathlib.Path(name + ".txt").write_text(name + "\\n")
+        git("add", name + ".txt"); git("commit", "-q", "-m", name)
+    git("checkout", "-q", "main")
+    pathlib.Path("m.txt").write_text("m\\n")
+    git("add", "m.txt"); git("commit", "-q", "-m", "m")
+    git("checkout", "-q", "work")
+    git("rebase", "-q", "main")
+    git("checkout", "-q", "--detach")
+if mode == "merge":
+    git("checkout", "-q", "-b", "side")
+    pathlib.Path("side.txt").write_text("s\\n")
+    git("add", "side.txt"); git("commit", "-q", "-m", "side")
+    git("checkout", "-q", "main")
+    pathlib.Path("main.txt").write_text("m\\n")
+    git("add", "main.txt"); git("commit", "-q", "-m", "main")
+    git("merge", "-q", "--no-ff", "-m", "merge", "side")
+"""
+
+
+def run_session(tmp_path: Path, source: Path, mode: str) -> tuple[dict[str, Any], Path]:
+    from cardea_coding_ops import session as coding
+
+    script = tmp_path / "committing.py"
+    script.write_text(COMMITTING)
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    config = {"harness": {"argv": [sys.executable, str(script), mode]}}
+    entries = {"app": {"source": str(source), "gates": []}}
+    config["repositories"] = entries
+    arguments = {"repository": "app", "base_ref": "main", "task": "go"}
+    result = coding.session(arguments, config, scratch)
+    return result, scratch
+
+
+@pytest.mark.parametrize("mode", ["rebase", "merge"])
+def test_commits_the_harness_made_itself_are_bundled(
+    tmp_path: Path, source: Path, mode: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # No identity anywhere: not in the repository, the global configuration or the host.
+    for name in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "EMAIL"):
+        monkeypatch.delenv(name, raising=False)
+    result, _ = run_session(tmp_path, source, mode)
+    output = result.output
+    assert output["changed"] is True
+    assert output["head_sha"] and output["head_sha"] != output["base_sha"]
+    bundle = result.artifacts["change.bundle"]
+    (tmp_path / "out.bundle").write_bytes(bundle)
+    check = tmp_path / "check"
+    git(tmp_path, "clone", "--quiet", str(source), str(check))
+    git(check, "bundle", "verify", str(tmp_path / "out.bundle"))
+    git(check, "fetch", "--quiet", str(tmp_path / "out.bundle"), "HEAD:refs/heads/change")
+    assert git(check, "rev-parse", "change").strip() == output["head_sha"]
+    heads = git(check, "bundle", "list-heads", str(tmp_path / "out.bundle"))
+    assert "refs/heads/main" in heads
+    if mode == "merge":
+        assert len(git(check, "rev-list", "--merges", "change", "^main").split()) == 1
+    assert output["files_changed"] == (3 if mode == "rebase" else 2)
+    assert "cardea.invalid" in git(check, "log", "-1", "--format=%ae", "change")
+
+
+def test_an_unchanged_checkout_reports_no_change(tmp_path: Path, source: Path) -> None:
+    result, _ = run_session(tmp_path, source, "none")
+    assert result["changed"] is False and result["head_sha"] is None
