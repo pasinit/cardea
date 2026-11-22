@@ -25,11 +25,11 @@ so a drifted step is repaired and a repeated run on a converged host changes not
 
 Secrets (the repository tokens and the email credential) are behind `SecretStore`. This
 module only asks whether a secret is present and usable and, when it is not, asks the store
-to `provide` it. `FileSecretStore` provides nothing: it names the file to create. `PromptingSecretStore`, used
-by the command, takes a missing, expired or near-expiry secret once from `--secret-file`,
-`--secret-stdin` or a prompt without echo, writes it `0600`, records its expiry date (never
-the value) beside the state, and scrubs every value it handled from output and state. `plan`
-never prompts. A stored, valid secret is not asked for again.
+to `provide` it. `FileSecretStore` provides nothing: it names the file to create.
+`PromptingSecretStore`, used by the command, takes a missing, expired or near-expiry secret
+once from `--secret-file`, `--secret-stdin` or a prompt without echo, writes it `0600`,
+records its expiry date (never the value) beside the state, and scrubs every value it handled
+from output and state. `plan` never prompts. A stored, valid secret is not asked for again.
 
 The runbook's "What the host needs first" is the list of checks below:
 - the kernel installed and running with host execution: steps `workers`, `kernel`;
@@ -176,7 +176,9 @@ class InputSecretSource:
             try:
                 return self.files[name].read_text()
             except OSError as error:
-                raise SecretUnavailable(f"{name}: cannot read {self.files[name]}: {error}") from None
+                raise SecretUnavailable(
+                    f"{name}: cannot read {self.files[name]}: {error}"
+                ) from None
         if name == self.stdin_name:
             return str(self.stdin.read())
         if self.interactive():
@@ -1670,7 +1672,10 @@ def main(argv: list[str]) -> int:
     if args.command == "apply":
         try:
             expiries.update(
-                {n: date.fromisoformat(v) for n, v in named(args.expires_on, "--expires-on").items()}
+                {
+                    n: date.fromisoformat(v)
+                    for n, v in named(args.expires_on, "--expires-on").items()
+                }
             )
         except ValueError as error:
             raise SystemExit(f"--expires-on: {error}") from None
