@@ -10,6 +10,7 @@ import os
 import socket
 import tempfile
 from collections.abc import Callable, Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -36,6 +37,18 @@ def pytest_configure(config: pytest.Config) -> None:
             **GIT_IDENTITY,
         }
     )
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Mark the tests listed in `loopback_tests.txt` as `loopback`: they run an agent run or
+    operation whose tool endpoint or content gate binds TCP loopback (ADR-027). One list
+    instead of a decorator in every file; a test that needs TCP and is on neither fails by
+    name under `make check-test`."""
+    path = Path(__file__).parent / "loopback_tests.txt"
+    listed = set(path.read_text().split()) if path.exists() else set()
+    for item in items:
+        if item.nodeid.removeprefix("tests/").split("[")[0] in listed:
+            item.add_marker(pytest.mark.loopback)
 
 
 @pytest.fixture(autouse=True)
