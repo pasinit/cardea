@@ -40,6 +40,7 @@ Rules checked here, before any network call:
 """
 
 import asyncio
+import logging
 import os
 import re
 from collections.abc import Mapping
@@ -66,6 +67,8 @@ from cardea_vcs_ops.credentials import (
 )
 from cardea_vcs_ops.git import BundleInvalid, Pusher, PushRejected, Workspace, push
 from cardea_vcs_ops.github import DuplicatePull, GitHub, HostRefused
+
+log = logging.getLogger(__name__)
 
 BRANCH = re.compile(r"^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$")
 MAX_BODY = 4096
@@ -299,6 +302,7 @@ class Vcs:
                     name=str(entry.name),
                     api_url=str(entry.api_url),
                     git_url=str(entry.git_url),
+                    source=None if entry.source is None else str(entry.source),
                 )
                 if entry is not None and entry.hosted
                 else None
@@ -438,7 +442,9 @@ class Vcs:
                 async with GitHub(repository, credential, self.transport) as host:
                     current = await host.branch_head(branch)
                 if current == head:
-                    # Already there (an earlier attempt or another task): nothing to send.
+                    # Already there (an earlier attempt or another task): nothing to send,
+                    # but the mirror may still lag.
+                    await self.refresh_source(workspace, repository, branch)
                     return done
                 expected = arguments.get("expected_head")
                 if expected is not None and current != expected:
@@ -450,7 +456,20 @@ class Vcs:
                 raise OperationRejected(str(refused), "host_refused") from None
             except PushRejected as rejected:
                 raise OperationRejected(str(rejected), "push_rejected") from None
+            await self.refresh_source(workspace, repository, branch)
         return done
+
+    async def refresh_source(
+        self, workspace: Workspace, repository: Repository, branch: str
+    ) -> None:
+        """Mirror the pushed head into the repository's `source`, so `code.session` sees it.
+        Best effort: the host already has the head, so a failure is logged, not raised."""
+        if repository.source is None:
+            return
+        try:
+            await asyncio.to_thread(workspace.refresh, repository.source, branch)
+        except (RuntimeError, OSError) as failed:
+            log.warning("source_refresh_failed: branch %s: %s", branch, failed)
 
     async def find_branch(
         self, arguments: dict[str, JsonValue], context: OperationContext
