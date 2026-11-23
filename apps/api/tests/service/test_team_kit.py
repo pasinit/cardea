@@ -74,7 +74,7 @@ def test_the_example_renders_valid_documents(tmp_path: Path) -> None:
     # The principal engineer and the team lead share the review queue.
     assert vcs["allow_approve"] == ["dev-team.pe", "dev-team.tl"]
     email = json.loads((tmp_path / "email.team.json").read_text())
-    assert set(email["roles"]) == {"dev-team.pm", "dev-team.ux"}
+    assert set(email["roles"]) == {f"dev-team.{p}" for p in ("pm", "tl", "pe", "ux")}
     assert all(r["recipients"] == ["client"] for r in email["roles"].values())
 
 
@@ -99,14 +99,14 @@ def test_the_triggers_are_the_planned_ones() -> None:
     # The team lead reviews too: woken by a pull request opened, after its mail trigger.
     assert kinds("tl")[-2] == mail
     assert {"exact": {"recordstate": "in_review"}} in kinds("tl")[-1]["filters"]
-    # Only developers merge; only the PE approves, citing an approving review.
+    # Developers and the team lead merge, the PE and the UX designer do not.
     assert "vcs.merge" in pools["dev"]["grants"] and "vcs.merge" not in pools["pe"]["grants"]
     work = kit().work_collection(example())
     approve = next(t for t in work["spec"]["transitions"] if t["name"] == "approve")
     assert approve["requires_receipt"]["result"] == "result.state == 'APPROVED'"
 
 
-def test_developers_get_env_try_by_default_and_not_when_nothing_needs_it() -> None:
+def test_developers_get_env_try_and_its_instructions_follow_the_host_options() -> None:
     def dev(host: dict[str, Any]) -> dict[str, Any]:
         pools = {p["name"]: p for p in kit().group_document(host)["spec"]["pools"]}
         pool: dict[str, Any] = pools["dev"]
@@ -115,10 +115,11 @@ def test_developers_get_env_try_by_default_and_not_when_nothing_needs_it() -> No
     # The merge check defaults to the "try" scenario, so developers get env.try.
     default = {k: v for k, v in example().items() if k != "env_try"}
     assert "env.try" in dev(default)["grants"]
+    # Every role holds env.try; with no merge check the developer is not told to run it.
     without = {**example(), "env_try": {"scenarios": ["try"], "merge_scenarios": []}}
-    assert "env.try" not in dev(without)["grants"]
-    assert "env.try" not in dev(without)["run"]["operations"]
-    assert "env.try" not in dev(without)["run"]["instructions"]
+    assert "env.try" in dev(without)["grants"]
+    assert "env.try" in dev(without)["run"]["operations"]
+    assert "Before you merge" not in dev(without)["run"]["instructions"]
     with_check = {**example(), "env_try": {"scenarios": ["try"], "dev_scenarios": ["check"]}}
     pool = dev(with_check)
     assert "env.try" in pool["grants"] and "env.try" in pool["run"]["operations"]
@@ -126,13 +127,14 @@ def test_developers_get_env_try_by_default_and_not_when_nothing_needs_it() -> No
     assert 'scenarios ["check"]' in pool["run"]["instructions"]
 
 
-def test_the_pe_gets_env_try_only_with_pe_scenarios() -> None:
+def test_the_pe_runs_named_scenarios_only_with_pe_scenarios() -> None:
     def pe(host: dict[str, Any]) -> dict[str, Any]:
         pools = {p["name"]: p for p in kit().group_document(host)["spec"]["pools"]}
         pool: dict[str, Any] = pools["pe"]
         return pool
 
-    assert "env.try" not in pe(example())["grants"]
+    assert "env.try" in pe(example())["grants"]
+    assert "scenarios [" not in pe(example())["run"]["instructions"]
     host = {**example(), "env_try": {"scenarios": ["try"], "pe_scenarios": ["screenshots"]}}
     pool = pe(host)
     assert "env.try" in pool["grants"] and "env.try" in pool["run"]["operations"]
@@ -325,18 +327,30 @@ def test_the_email_policy_is_rendered_only_when_the_pm_may_email() -> None:
     plain = pools_of(document)["pm"]
     assert "email.send" not in plain["grants"] and "email.send" not in plain["run"]["operations"]
     assert "email" not in plain["run"]["instructions"].lower()
-    # Nobody but the product manager and the UX designer may email the client.
+    # The developers may not email the client; every other role may, and is told when.
     others = pools_of(example())
-    for name in ("tl", "dev", "pe"):
+    for name in ("dev",):
         assert "email.send" not in others[name]["grants"], name
         assert "email.send" not in others[name]["run"]["operations"], name
         assert "email.send" not in others[name]["run"]["instructions"], name
+    for name in ("pm", "tl", "pe", "ux"):
+        assert "email.send" in others[name]["grants"], name
+        assert "email.send" in others[name]["run"]["operations"], name
+        assert "email.send to `client`" in others[name]["run"]["instructions"], name
+        assert "never a status report" in others[name]["run"]["instructions"], name
+    assert "cannot settle it; otherwise decide" in " ".join(
+        others["tl"]["run"]["instructions"].split()
+    )
+    assert "costly to undo" in others["pe"]["run"]["instructions"]
     ux = others["ux"]
     assert "email.send" in ux["grants"] and "email.send" in ux["run"]["operations"]
     assert "email.send to `client`" in ux["run"]["instructions"]
     assert "the team's pick" in ux["run"]["instructions"]
     assert "never a status report" in ux["run"]["instructions"]
-    assert "email.send" not in pools_of(document)["ux"]["grants"]
+    without = pools_of(document)
+    for name in ("pm", "tl", "pe", "ux"):
+        assert "email.send" not in without[name]["grants"], name
+        assert "email" not in without[name]["run"]["instructions"].lower(), name
 
 
 def test_the_email_rate_limit_is_a_host_setting() -> None:
@@ -1094,7 +1108,7 @@ def test_run_timeouts_must_fit_the_session_wall_time(tmp_path: Path) -> None:
     assert module.wall_problems(fitted) == []
     group = module.group_document(fitted)
     bounds = {p["name"]: p["run"]["bounds"]["timeout_seconds"] for p in group["spec"]["pools"]}
-    assert bounds == {"pm": 1800, "tl": 900, "dev": 1700, "pe": 1800, "ux": 1800}
+    assert bounds == {"pm": 1800, "tl": 1800, "dev": 1700, "pe": 1800, "ux": 1800}
     # Without a readable workers file the check cannot run and refuses nothing.
     assert module.wall_problems({**example(), "workers_config": str(tmp_path / "none")}) == []
 
@@ -1292,16 +1306,21 @@ def test_mock_rounds_by_email_gate_the_item_on_a_recorded_approval(tmp_path: Pat
     assert "leave the item `open` until one exists" in tl and "Mock approved:" in tl
     pe = " ".join(pools["pe"]["run"]["instructions"].split())
     assert "end `against mock v<N>`" in pe and "do not approve" in pe
-    # Only the UX designer is told to email besides the PM; it may not approve or move items.
+    # The UX designer may not approve, merge or move items; only it is told about mock rounds.
     assert not {"vcs.merge", "record:work/approve", "record:work/triage"} & set(ux["grants"])
-    assert "email.send" not in tl and "email.send" not in pe
+    assert "Mock rounds" not in tl and "Mock rounds" not in pe
     # The email host file gets its own role entry, with its own limit.
     roles = module.email_fragment(document)["roles"]
     assert roles["dev-team.ux"] == {
         "recipients": ["client"],
         "rate_limit": {"count": 10, "window_days": 7},
     }
-    assert roles["dev-team.pm"]["rate_limit"] == {"count": 10, "window_days": 1}
+    for pool in ("pm", "tl", "pe"):
+        assert roles[f"dev-team.{pool}"] == {
+            "recipients": ["client"],
+            "rate_limit": {"count": 10, "window_days": 1},
+        }
+    assert set(roles) == {f"dev-team.{pool}" for pool in ("pm", "tl", "pe", "ux")}
     document["email"] = {**document["email"], "mock_rate_limit": {"count": 2, "window_days": 1}}
     fragment = module.email_fragment(document)["roles"]
     assert fragment["dev-team.ux"]["rate_limit"] == {"count": 2, "window_days": 1}
@@ -1770,11 +1789,166 @@ def test_the_team_lead_and_the_principal_engineer_share_the_review_queue() -> No
     # Split by position so they do not review the same pull request twice.
     assert "at odd positions" in tl["run"]["instructions"]
     assert "at even positions" in pe["run"]["instructions"]
-    assert "vcs.merge" not in tl["grants"]
     guards = {t["name"]: t.get("guard") for t in kit().work_transitions("dev-team")}
     for name in ("approve", "request_changes"):
         assert guards[name] == "caller.pool in ['dev-team.pe', 'dev-team.tl']"
     assert guards["triage"] == "caller.pool == 'dev-team.tl'"
+
+
+# Each role's rendered grants, exactly (the base rights and the per-developer mail aside).
+CODE = {"code.session", "vcs.push_branch", "vcs.open_change"}
+EXPECTED_GRANTS = {
+    "pm": {
+        "record:work/create",
+        "record:work/read",
+        "vcs.read_branch",
+        "vcs.list_changes",
+        "env.try",
+        "email.send",
+        "repo:cardea",
+        "mail:dev-team.tl",
+        "mail:dev-team.ux",
+    },
+    "tl": {
+        "record:work/create",
+        "record:work/read",
+        "record:work/update",
+        "record:work/triage",
+        "record:work/cancel",
+        "record:work/approve",
+        "record:work/request_changes",
+        "record:decisions/create",
+        "record:decisions/read",
+        "vcs.read_change",
+        "vcs.review",
+        "vcs.comment",
+        "vcs.merge",
+        "env.try",
+        "email.send",
+        "repo:cardea",
+        *CODE,
+        "mail:dev-team.pm",
+        "mail:dev-team.pe",
+        "mail:dev-team.ux",
+    },
+    "dev": {
+        "record:work/read",
+        "record:work/start",
+        "record:work/submit",
+        "record:work/resubmit",
+        "record:work/merge",
+        "vcs.read_change",
+        "vcs.merge",
+        "env.try",
+        "repo:cardea",
+        *CODE,
+        "mail:dev-team.tl",
+        "mail:dev-team.pe",
+    },
+    "pe": {
+        "record:work/read",
+        "record:work/approve",
+        "record:work/request_changes",
+        "record:decisions/create",
+        "record:decisions/read",
+        "vcs.read_change",
+        "vcs.review",
+        "vcs.comment",
+        "env.try",
+        "email.send",
+        "repo:cardea",
+        "mail:dev-team.tl",
+    },
+    "ux": {
+        "record:work/read",
+        "record:work/create",
+        "record:work/update",
+        "record:decisions/create",
+        "record:decisions/read",
+        "vcs.read_change",
+        "vcs.review",
+        "vcs.comment",
+        "env.try",
+        "email.send",
+        "repo:cardea",
+        *CODE,
+        "mail:dev-team.tl",
+        "mail:dev-team.pe",
+        "mail:dev-team.pm",
+    },
+}
+
+
+def test_the_rendered_group_grants_exactly_this_per_role() -> None:
+    document = example()
+    assert document["repository"] == "cardea"
+    base = {"objects.read", "objects.write", "models.invoke", "mailbox.send", "mailbox.inbox"}
+    base |= {f"mail:{document['supervisor']['principal_id']}"}
+    pools = pools_of(document)
+    for name, expected in EXPECTED_GRANTS.items():
+        grants = set(pools[name]["grants"])
+        grants -= base | {g for g in grants if g.startswith(("mail:dev-team.dev.", "harness:"))}
+        assert grants == expected, (name, grants ^ expected)
+        # What a role is told it may call never exceeds what it is granted.
+        operations = set(pools[name]["run"]["operations"]) - {
+            "records.query",
+            "records.create",
+            "records.update",
+            "records.transition",
+            "mailbox.send",
+        }
+        assert operations <= grants, (name, operations - grants)
+    # The developers' own mail addresses are granted to the roles that answer them.
+    for name in ("tl", "pe", "ux"):
+        assert {"mail:dev-team.dev.0", "mail:dev-team.dev.1"} <= set(pools[name]["grants"])
+    # Without email, nobody holds email.send; the rest is unchanged.
+    del document["email"]
+    for name, pool in pools_of(document).items():
+        assert "email.send" not in pool["grants"], name
+        assert "env.try" in pool["grants"], name
+
+
+def test_the_ux_designer_builds_mocks_only_under_docs_mocks_and_cannot_merge() -> None:
+    ux = pools_of(example())["ux"]
+    text = " ".join(ux["run"]["instructions"].split())
+    assert "You may change only files under `docs/mocks/`" in text
+    assert "`agent/dev-team/mock-<record_id>-v<N>`" in text
+    assert "scenario `screenshots`" in text
+    assert "you cannot merge" in text
+    assert {"code.session", "vcs.push_branch", "vcs.open_change"} <= set(ux["run"]["operations"])
+    assert "vcs.merge" not in ux["grants"] and "vcs.merge" not in ux["run"]["operations"]
+
+
+def test_the_team_lead_codes_under_the_developers_guards() -> None:
+    pools = pools_of(example())
+    tl, dev = pools["tl"], pools["dev"]
+    assert {
+        "code.session",
+        "vcs.push_branch",
+        "vcs.open_change",
+        "vcs.read_change",
+        "vcs.merge",
+        "env.try",
+        "repo:cardea",
+    } <= set(tl["grants"])
+    assert {g for g in dev["grants"] if g.startswith(("vcs.", "repo:"))} <= set(tl["grants"])
+    text = " ".join(tl["run"]["instructions"].split())
+    assert "only the member that opened a pull request may merge it" in text
+    assert "rather than approving your own change" in text
+    assert "env.try of the head on try" in text and "head_sha" in text
+
+
+def test_mail_between_the_roles_keeps_the_loop_guard() -> None:
+    pools = pools_of(example())
+    # The team lead may mail the UX designer and the UX designer the product manager,
+    # at pool addresses only; no role is granted the whole developer pool.
+    assert "mail:dev-team.ux" in pools["tl"]["grants"]
+    assert "mail:dev-team.pm" in pools["ux"]["grants"]
+    assert all("mail:dev-team.dev" not in p["grants"] for p in pools.values())
+    assert "never to acknowledge a message" in pools["tl"]["run"]["instructions"]
+    assert "never to acknowledge a message" in pools["ux"]["run"]["instructions"]
+    for name in ("tl", "ux"):
+        assert "mail only the developer holding it" in pools[name]["run"]["instructions"]
 
 
 def test_drain_removes_every_trigger_and_waits_for_the_runs_to_finish() -> None:
