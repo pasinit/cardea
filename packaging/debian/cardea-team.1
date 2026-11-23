@@ -1,0 +1,147 @@
+.TH CARDEA\-TEAM 1 "2026" "cardea-kernel" "Cardea"
+.SH NAME
+cardea team \- run, watch and change an agent dev team on this host
+.SH SYNOPSIS
+.B cardea team
+.I command
+[\fIarguments\fR]
+.SH DESCRIPTION
+.B cardea team
+is the team kit's command line, a subcommand group of
+.BR cardea (1).
+It acts as the team's supervisor. The supervisor's identity is bound to the
+.B cardea-kernel
+account, so the command runs its work as that account through
+.BR sudo (8):
+a narrow rule in
+.I /etc/sudoers.d/cardea-team
+lets members of the group
+.B cardea-operators
+run one fixed program,
+.IR /usr/libexec/cardea-team ,
+as
+.BR cardea-kernel ,
+with no arguments (the request is sent on its standard input).
+You do not type
+.B sudo
+yourself. Add a person to the group with
+.BR "adduser NAME cardea-operators" ;
+the membership lets that person act as the team's supervisor.
+.PP
+Nothing in the command decides what is allowed. Each read and write goes to the kernel as the
+supervisor, and the kernel checks the supervisor's live authority, as it does for the dashboard.
+The code run is the code of the installed kernel (\fI/usr/lib/cardea/teamkit\fR, beside
+\fI/usr/lib/cardea/cardea\fR), not a source checkout. Output never includes a credential.
+.PP
+The host file is
+.IR /etc/cardea/team.host.json .
+It must be readable by
+.BR cardea-kernel .
+Its
+.B provisioning.out
+should be in a directory that account can write, for example
+.IR /var/lib/cardea/team/provision.json ,
+and the host file itself writable by that account for
+.BR set .
+.SH COMMANDS
+.TP
+.B status
+The team's members and their runs, work by state, mail, approvals, spend against its ceilings,
+token expiry dates and the last failed runs. While the team is paused: why, and the failures
+recorded then.
+.TP
+.BR pause " [\fIreason\fR]"
+The kill switch. Provisions the supervisor disabled, so the kernel cancels every unfinished run
+and nothing is admitted until
+.BR resume .
+The reason is one plain line, kept for
+.BR status ;
+never put a secret in it.
+.TP
+.B resume
+Provisions the supervisor enabled; triggers admit again.
+.TP
+.B stop
+Pauses the team and deletes its agent group; the collections and records stay. Asks for
+confirmation first.
+.TP
+.B apply
+Puts the work and decisions collections and the agent group to the kernel.
+.TP
+.BR render " [\fB\-\-out\fR \fIDIR\fR]"
+Shows the documents the team is made of, for review, or writes them to
+.I DIR
+(private files, written as you).
+.TP
+.BR provision " [\fB\-\-paused\fR]"
+Merges the team's principals and grants into the base provisioning document and provisions it.
+.B \-\-paused
+writes the supervisor disabled.
+.TP
+.B settings
+The settings in force in plain words: run and spend limits, schedules, email limit,
+developers, model, and the size of the product goals. Credentials are not shown.
+.TP
+.BR set " \fIkey\fR \fIvalue\fR [\fB\-\-yes\fR] [\fB\-\-dry\-run\fR]"
+Changes one setting. It shows what would change and a confirmation prompt, then applies exactly
+what was shown (render, provision, apply, and an audit line). The checks are those of the
+dashboard's Settings page.
+.B \-\-dry\-run
+stops after the preview;
+.B \-\-yes
+skips the prompt. Keys:
+.RS
+.TP
+.B runs.team, runs.\fIrole\fR
+Runs a day (role: pm, tl, dev or pe).
+.TP
+.B usd.team, usd.per_run, usd.\fIrole\fR
+Dollars a day, and the most one run may cost.
+.TP
+.B schedule.\fIrole\fR
+Cron schedules separated by ';', or 'none'.
+.TP
+.B email.rate_limit
+Emails to the client, COUNT/DAYS, for example 10/1.
+.TP
+.B developers
+How many developers.
+.TP
+.B model
+The model name.
+.TP
+.B goals, non_goals
+The product's goals. A value of '@FILE' reads that file as you; '\-' reads standard input.
+.RE
+.TP
+.BR mail " \fItarget\fR \fItext\fR"
+Sends a message as the supervisor. The target is
+.BR tl ,
+.BR pm ,
+.BR pe ,
+.B ux
+(that role's pool) or
+.B dev.N
+(developer N, counting from dev.0). Put
+.B \-\-
+before a text that starts with a dash.
+.TP
+.BR "mail list" " [\fB\-\-member\fR \fIID\fR] [\fB\-\-item\fR \fICOLLECTION/ID\fR] [\fB\-\-limit\fR \fIN\fR] [\fB\-\-after\fR \fICURSOR\fR]"
+Reads the team's mail, newest first, with full text. The text is the team's: control characters
+in it are replaced before it is shown.
+.SH EXIT STATUS
+0 on success; 1 when a command is refused or fails (the reason is printed), or a confirmation is
+declined; 2 on a usage error.
+.SH FILES
+.TP
+.I /etc/cardea/team.host.json
+The host file (see the team kit's example).
+.TP
+.I /etc/sudoers.d/cardea-team
+The sudoers rule.
+.TP
+.I /usr/libexec/cardea-team
+The helper that runs as cardea-kernel.
+.SH SEE ALSO
+.BR cardea (1),
+.BR sudoers (5)

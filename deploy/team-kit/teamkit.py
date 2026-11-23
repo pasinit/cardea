@@ -47,6 +47,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -56,6 +57,11 @@ POOLS = ("pm", "tl", "dev", "pe", "ux")
 # The only pools that may email the owner (recipient alias): the developers are not granted it.
 EMAIL_POOLS = ("pm", "tl", "pe", "ux")
 KIT_PYTHON = ("/opt/cardea/apps/api/.venv/bin/python",)
+# The Debian package ships this kit beside the kernel's own code (`cardea team`). A copy run
+# from there provisions with the installed `cardea`, never with a checkout's environment
+# that a host file names: the team commands and the running kernel are the same code.
+PACKAGED_DIR = Path("/usr/lib/cardea/teamkit")
+PACKAGED_CARDEA = ("/usr/bin/cardea",)
 # Rights every team supervisor needs besides the pools' grants (ADR-034, ADR-027).
 SUPERVISOR_RIGHTS = (
     "groups.manage",
@@ -105,6 +111,11 @@ _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 
 class HostError(ValueError):
     """The host file is missing something the kit needs."""
+
+
+def packaged() -> bool:
+    """Whether this copy of the kit is the one the Debian package installed."""
+    return Path(__file__).resolve().parent == PACKAGED_DIR
 
 
 def _schema() -> Any:
@@ -1257,12 +1268,14 @@ def provisioning_fragment(host: dict[str, Any], *, paused: bool = False) -> dict
     ceiling for them."""
     namespace, _, supervisor, _ = _names(host)
     group = group_document(host)
-    # The supervisor may mail every role's pool: the dashboard's message box.
+    # The supervisor may mail every role's pool (the dashboard's message box) and each
+    # developer by its own address (`cardea team mail dev.N`).
     rights = sorted(
         {
             *SUPERVISOR_RIGHTS,
             *(g for p in group["spec"]["pools"] for g in p["grants"]),
             *_mail(_names(host)[1], *POOLS),
+            *(f"mail:{member}" for member in developers(host)),
         }
     )
     expires = (datetime.now(UTC) + timedelta(days=int(host.get("grant_days", 14)))).isoformat()
@@ -1479,7 +1492,11 @@ def provision(
     staged.chmod(0o600)
     os.replace(staged, out)
     # The kernel's own CLI, from the kit's environment (`python -I -m cardea.service`).
-    cardea = list(settings.get("cardea", [*KIT_PYTHON, "-I", "-m", "cardea.service"]))
+    cardea = list(
+        PACKAGED_CARDEA
+        if packaged()
+        else settings.get("cardea", [*KIT_PYTHON, "-I", "-m", "cardea.service"])
+    )
     config = settings.get("config", "/etc/cardea/config.json")
     runner([*cardea, "provision", "--config", config, str(out)], check=True)
     return out
@@ -1501,6 +1518,43 @@ def apply(host: dict[str, Any], connect: Callable[[dict[str, Any]], Any] = clien
     finally:
         kernel.close()
     return done
+
+
+def drained_document(host: dict[str, Any]) -> dict[str, Any]:
+    """The group document with every pool's triggers removed: nothing new is admitted, and
+    the runs already admitted go on to the end. `apply` puts the triggers back."""
+    document = group_document(host)
+    for pool in document["spec"]["pools"]:
+        pool["triggers"] = []
+    return document
+
+
+def drain(
+    host: dict[str, Any],
+    wait_seconds: float = 2700.0,
+    poll_seconds: float = 10.0,
+    connect: Callable[[dict[str, Any]], Any] = client,
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> list[str]:
+    """Stop admitting new runs without cancelling any, and wait until none is left (a deploy
+    can then restart the kernel without stranding a run). Returns the runs still unfinished
+    when `wait_seconds` ran out, an empty list when the team is idle. Undo with `apply`."""
+    namespace, group, _, _ = _names(host)
+    kernel = connect(host)
+    try:
+        kernel.request("PUT", f"/groups/{group}", json=drained_document(host))
+        deadline = clock() + wait_seconds
+        while True:
+            view = kernel.request(
+                "GET", f"/groups/{group}/overview", params={"namespace": namespace}
+            )
+            left = running(view)
+            if not left or clock() >= deadline:
+                return left
+            sleep(poll_seconds)
+    finally:
+        kernel.close()
 
 
 def overview(host: dict[str, Any]) -> dict[str, Any]:
@@ -1777,6 +1831,7 @@ def main(argv: list[str]) -> int:
         "resume",
         "stop",
         "dashboard",
+        "drain",
     ):
         command = commands.add_parser(name)
         command.add_argument("--host", type=Path, required=True, help="the private host file")
@@ -1788,6 +1843,8 @@ def main(argv: list[str]) -> int:
             command.add_argument("--port", type=int, default=8765)
         if name == "pause":
             command.add_argument("--reason", help="why, kept for `status` (no secrets)")
+        if name == "drain":
+            command.add_argument("--wait", type=float, default=2700.0, help="seconds")
     args = parser.parse_args(argv)
     host = load_host(args.host)
     if args.command == "render":
@@ -1815,6 +1872,13 @@ def main(argv: list[str]) -> int:
     elif args.command == "resume":
         resume(host)
         print("the supervisor is enabled; triggers admit again")
+    elif args.command == "drain":
+        left = drain(host, wait_seconds=args.wait)
+        if left:
+            print(f"draining: no new runs; {len(left)} still running after {args.wait:.0f} s")
+            print("\n".join(f"  {run}" for run in left))
+            return 3
+        print("drained: no run is active and none is admitted; `apply` resumes admissions")
     elif args.command == "stop":
         runs, problem = stop(host)
         if problem:

@@ -1,0 +1,10 @@
+[Unit]
+Description=Cardea: check for a new main commit to deploy
+
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec=10min
+Persistent=false
+
+[Install]
+WantedBy=timers.target
