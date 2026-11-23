@@ -149,11 +149,13 @@ def test_only_the_groups_supervisor_gets_through(
         assert preview(backend, {"developers": 3}) == refused
         assert apply(backend, {"developers": 3}, "0" * 64) == refused
     assert env.path.read_bytes() == before and env.provisioned == [] and env.audit() == []
-    # The supervisor is let through, and refused the moment the kernel disables them.
+    # The supervisor is let through. Once the kernel disables them (a paused team) the preview
+    # still reads, as the overview does, but the apply's own writes are refused.
     backend = page_backend(env, overview(kernel, "sup-eng"))
     token = preview(backend, {"developers": 3})[1]["confirm"]
     with kernel.database.engine.begin() as conn:
         conn.exec_driver_sql("UPDATE principals SET disabled=1 WHERE principal_id='sup-eng'")
+    assert preview(backend, {"developers": 3})[0] == 200
     assert apply(backend, {"developers": 3}, token) == (403, {"code": "principal_disabled"})
     assert env.path.read_bytes() == before and env.audit() == []
 

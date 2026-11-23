@@ -127,6 +127,12 @@ class TeamsBackend:
         with ThreadPoolExecutor(max_workers=max(1, len(self.sources))) as pool:
             return {"teams": list(pool.map(self.one, self.sources))}
 
+    def status(self) -> dict[str, Any]:
+        return self.overview()
+
+    def replies(self) -> list[dict[str, Any]]:
+        return []
+
     def send(self, role: str, text: str, client_key: str) -> dict[str, Any]:
         raise DashboardError("read_only", 405)
 
