@@ -717,11 +717,14 @@ def _mail_trigger() -> dict[str, Any]:
 
 
 def _created_trigger() -> dict[str, Any]:
+    # Named: it is optional, and an unnamed trigger's ID is its position, which would shift
+    # the ux schedules' IDs when it comes and goes (the kernel refuses a kind change).
     return {
+        "name": "created",
         "event": {
             "types": ["cardea.record.created"],
             "filters": [{"prefix": {"subject": "work/"}}],
-        }
+        },
     }
 
 
@@ -951,7 +954,7 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
                     }
                 ],
             ),
-            # Trigger ids are positional, so optional schedules come after the fixed
+            # Unnamed trigger ids are positional, so optional schedules come after the fixed
             # triggers: adding one must not change an existing trigger's kind.
             "triggers": [
                 _state_trigger(state="ready"),

@@ -7,11 +7,14 @@ import time
 from collections.abc import Iterator
 from datetime import date, timedelta
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 
 import pytest
 from cardea_coding_ops import descriptors as coding_descriptors
+from cardea_email_ops import Email
+from cardea_email_ops import descriptors as email_descriptors
+from cardea_email_ops import handlers as email_handlers
 from cardea_env_ops import descriptors as env_descriptors
 from cardea_vcs_ops import in_process_descriptors
 from mcp.client.session import ClientSession
@@ -393,7 +396,13 @@ def registry() -> Registry:
         ),
         transport=FakeGitHub(Path("/nonexistent")).transport(),
     )
-    return Registry((*in_process_descriptors(), *confined, *env_descriptors()), vcs.handlers())
+    # The team's mail operations are installed so its policy provisions; no mail is sent here.
+    stub = SimpleNamespace(send=None, find_sent=None, poll_replies=None, poll_inbound=None)
+    mail = cast(Email, stub)
+    return Registry(
+        (*in_process_descriptors(), *confined, *env_descriptors(), *email_descriptors()),
+        {**vcs.handlers(), **email_handlers(mail)},
+    )
 
 
 @pytest.fixture
@@ -653,6 +662,10 @@ def test_a_refused_repository_call_records_the_missing_grant(
 
 
 def provision_team(kernel: Kernel, *, paused: bool) -> None:
+    provision_team_for(kernel, host(), paused=paused)
+
+
+def provision_team_for(kernel: Kernel, document: dict[str, Any], *, paused: bool = False) -> None:
     module = kit()
     base = {
         "principals": [
@@ -667,9 +680,9 @@ def provision_team(kernel: Kernel, *, paused: bool) -> None:
         "permissions": [],
         "platform": [],
     }
-    fragment = module.provisioning_fragment(host(), paused=paused)
-    document = module.merge_provisioning(base, fragment, "dev")
-    provision(kernel.database, Provisioning.model_validate(document), kernel.operations)
+    fragment = module.provisioning_fragment(document, paused=paused)
+    merged = module.merge_provisioning(base, fragment, "dev")
+    provision(kernel.database, Provisioning.model_validate(merged), kernel.operations)
 
 
 def test_disabling_the_supervisor_cancels_its_unfinished_runs(
@@ -1679,3 +1692,49 @@ def test_the_pm_relays_owner_replies_to_the_ux_designer() -> None:
     del document["email"]
     bare = {p["name"]: p for p in module.group_document(document)["spec"]["pools"]}
     assert "mail:dev-team.ux" not in bare["pm"]["grants"]
+
+
+def test_turning_on_email_keeps_the_ux_schedule_trigger_ids(
+    team: tuple[Kernel, FakeSession],
+) -> None:
+    """The layout before the ux `created` trigger, then the current one: the schedules keep
+    their IDs, because the kernel refuses a trigger's change of kind."""
+    kernel, _ = team
+    module = kit()
+    document = {**host(), "email": example()["email"], "schedules": {"ux": ["0 9 * * 1-5"]}}
+    provision_team_for(kernel, document)
+    current = module.group_document(document)
+    older = json.loads(json.dumps(current))
+    for pool in older["spec"]["pools"]:
+        pool["triggers"] = [t for t in pool["triggers"] if t.get("name") != "created"]
+    assert older != current
+
+    def trigger_kinds() -> dict[str, str]:
+        with kernel.database.read() as conn:
+            return {
+                str(i): str(k)
+                for i, k in conn.exec_driver_sql(
+                    "SELECT trigger_id, kind FROM triggers WHERE trigger_id LIKE 'dev-team.ux.%' "
+                    "AND removed=0"
+                )
+            }
+
+    def apply_layout(layout: dict[str, Any]) -> None:
+        apply(
+            kernel,
+            kernel.auth.validate("sup-dev"),
+            "dev-team",
+            AgentGroup.model_validate(layout),
+            False,
+        )
+
+    apply_layout(older)
+    before = trigger_kinds()
+    assert before["dev-team.ux.0.t3"] == "time" and "dev-team.ux.0.created" not in before
+    apply_layout(current)
+    after = trigger_kinds()
+    assert after["dev-team.ux.0.t3"] == "time"
+    assert after["dev-team.ux.0.created"] == "journal"
+    assert {k: v for k, v in after.items() if k != "dev-team.ux.0.created"} == before
+    apply_layout(older)  # and back: the optional trigger is removed, the others stay
+    assert trigger_kinds() == before
