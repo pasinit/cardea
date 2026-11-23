@@ -110,6 +110,7 @@ def test_scale_down_drains_idle_members_highest_ordinal_first(kernel: Kernel) ->
     assert live_triggers(kernel) == ["desk.worker.0.t0", "desk.worker.1.t0"]
 
 
+@pytest.mark.loopback
 def test_a_busy_member_finishes_its_run_until_the_drain_timeout(
     kernel: Kernel, session: Any
 ) -> None:
@@ -273,6 +274,7 @@ def delete(kernel: Kernel, name: str = "desk", **params: Any) -> Any:
     )
 
 
+@pytest.mark.loopback
 def test_deleting_a_group_drains_every_member(kernel: Kernel, session: Any) -> None:
     put(kernel, manifest(pool(replicas=2, drain_timeout_seconds=60)))
     task_id = run_for(kernel, "desk.worker.0")

@@ -18,6 +18,8 @@ from pydantic import SecretStr
 
 from cardea.service.operations import OperationContext, OperationRejected
 
+pytestmark = pytest.mark.loopback
+
 NUMBER = 1
 
 

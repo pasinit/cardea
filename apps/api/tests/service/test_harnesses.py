@@ -329,6 +329,7 @@ def output(kernel: Kernel, task_id: str) -> dict[str, Any]:
         return cast(dict[str, Any], json.loads(tx.read_object(task.verification.artifacts[0])))
 
 
+@pytest.mark.loopback
 def test_a_run_uses_the_selected_harness_and_model(
     kernel: Kernel, sessions: dict[str, FakeSession]
 ) -> None:
@@ -342,6 +343,7 @@ def test_a_run_uses_the_selected_harness_and_model(
     assert (document["harness"], document["model"]) == ("glm", "qwen3:8b")
 
 
+@pytest.mark.loopback
 def test_a_run_without_a_harness_gets_the_namespace_default(
     kernel: Kernel, sessions: dict[str, FakeSession]
 ) -> None:
@@ -378,6 +380,7 @@ def test_harness_grant_needs_supervisor_policy(kernel: Kernel) -> None:
     assert denied.value.code == "authority_denied"
 
 
+@pytest.mark.loopback
 def test_revoking_the_harness_stops_the_run(
     kernel: Kernel, sessions: dict[str, FakeSession]
 ) -> None:

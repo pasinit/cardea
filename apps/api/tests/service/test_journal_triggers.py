@@ -113,6 +113,7 @@ def admitted(kernel: Kernel, agent: str = "team.dev.0") -> list[str]:
         ]
 
 
+@pytest.mark.loopback
 def test_mail_to_a_member_wakes_it_once(kernel: Kernel, session: runs.FakeSession) -> None:
     team(kernel)
     post(kernel, {"instance": "team.dev.0"})
@@ -135,6 +136,7 @@ def test_mail_to_a_member_wakes_it_once(kernel: Kernel, session: runs.FakeSessio
     assert admitted(kernel) == [task_id]
 
 
+@pytest.mark.loopback
 def test_pool_mail_wakes_every_member_subscribed_to_its_pool(kernel: Kernel) -> None:
     team(kernel)
     post(kernel, {"pool": "team.dev"})
@@ -142,6 +144,7 @@ def test_pool_mail_wakes_every_member_subscribed_to_its_pool(kernel: Kernel) -> 
     assert len(admitted(kernel, "team.dev.0")) == len(admitted(kernel, "team.dev.1")) == 1
 
 
+@pytest.mark.loopback
 def test_a_burst_coalesces_into_the_unstarted_run(
     kernel: Kernel, session: runs.FakeSession
 ) -> None:
@@ -159,6 +162,7 @@ def test_a_burst_coalesces_into_the_unstarted_run(
     assert admitted(kernel) == [task_id]
 
 
+@pytest.mark.loopback
 def test_mail_coalesced_into_a_started_run_gets_one_follow_up(
     kernel: Kernel, session: runs.FakeSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -196,6 +200,7 @@ def test_mail_coalesced_into_a_started_run_gets_one_follow_up(
     assert [r["state"] for r in mail_rows(kernel)] == ["consumed"] * 3
 
 
+@pytest.mark.loopback
 def test_a_crash_around_the_commit_never_double_admits(kernel: Kernel) -> None:
     team(kernel)
     post(kernel, {"instance": "team.dev.0"})
@@ -219,6 +224,7 @@ def test_a_crash_around_the_commit_never_double_admits(kernel: Kernel) -> None:
     assert len(admitted(kernel)) == 1 and deliveries(kernel) == [("admitted", None)]
 
 
+@pytest.mark.loopback
 def test_revoking_the_ceiling_stops_admissions(kernel: Kernel) -> None:
     team(kernel)
     granted = tuple(
@@ -254,6 +260,7 @@ def test_revoking_the_ceiling_stops_admissions(kernel: Kernel) -> None:
     assert deliveries(kernel) == [("refused", "authority_denied")]
 
 
+@pytest.mark.loopback
 def test_a_member_does_not_wake_itself(kernel: Kernel, session: runs.FakeSession) -> None:
     team(kernel)
 
@@ -275,6 +282,7 @@ def test_a_member_does_not_wake_itself(kernel: Kernel, session: runs.FakeSession
     assert len(admitted(kernel, "team.dev.1")) == 1
 
 
+@pytest.mark.loopback
 def test_include_own_lets_a_member_subscribe_to_its_own_events(
     kernel: Kernel, session: runs.FakeSession
 ) -> None:
@@ -284,6 +292,7 @@ def test_include_own_lets_a_member_subscribe_to_its_own_events(
     assert len(admitted(kernel)) == 1
 
 
+@pytest.mark.loopback
 def test_failed_runs_redeliver_without_waking_anyone(
     kernel: Kernel, session: runs.FakeSession
 ) -> None:
