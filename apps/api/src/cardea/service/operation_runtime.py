@@ -547,7 +547,11 @@ class OperationRuntime:
                     at=now(),
                     failure=KernelFailure(
                         code=failure.code,
-                        message="Operation task could not complete",
+                        message=(
+                            f"Operation task could not complete: {failure.describe()}"
+                            if failure.reason == "denied"
+                            else "Operation task could not complete"
+                        ),
                         retryable=failure.retryable,
                         details=failure.details(),
                     )

@@ -35,6 +35,9 @@
     "scenarios": [
       "try",
       "teams"
+    ],
+    "merge_scenarios": [
+      "try"
     ]
   },
   "budgets": {

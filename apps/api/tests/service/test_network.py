@@ -39,6 +39,9 @@ from cardea.service.models import (
 )
 from cardea.service.server import bind_network, serve_listeners, tls_context
 
+# Binds or connects over TCP loopback: not run by `make check-test`.
+pytestmark = pytest.mark.loopback
+
 
 class FakeClient:
     def __init__(self, **kwargs: Any) -> None:

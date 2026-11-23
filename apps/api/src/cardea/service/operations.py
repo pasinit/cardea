@@ -226,6 +226,9 @@ class EvidenceQuery(Record):
     fields: Annotated[tuple[EvidencePath, ...], Field(max_length=8)] = ()
     # Which end of the history: the newest receipts, or the oldest (the first such call).
     order: Literal["newest", "oldest"] = "newest"
+    # A `match` whose pointer names an argument the call did not pass is left out, so the
+    # handler filters on the `fields` instead (for example a head the caller did not pin).
+    optional: bool = False
 
 
 class ReplyPolling(Record):
@@ -312,6 +315,9 @@ class Binding(Record):
     replies: ReplyPolling | None = None
     # Read operations only: reuse a settled run of the same inputs (ADR-038).
     run_window: RunWindow | None = None
+    # Names the argument holding a record ID: the kernel links the result to that record,
+    # needing `record:<collection>/attach` live (`evidence_links`).
+    attach_record: Pointer | None = None
 
     @model_validator(mode="after")
     def effect_only(self) -> Self:
@@ -394,6 +400,7 @@ class OperationDescriptor(Record):
                 ("evidence", self.cardea.evidence),
                 ("replies", self.cardea.replies),
                 ("run_window", self.cardea.run_window),
+                ("attach_record", self.cardea.attach_record),
             )
             if value is None
         }

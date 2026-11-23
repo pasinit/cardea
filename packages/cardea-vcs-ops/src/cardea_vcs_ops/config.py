@@ -140,6 +140,9 @@ class MergeConfig(Record):
     # The repository-host account whose approval at the head is required, besides the
     # kernel's own `vcs.review` receipt: the identity the reviewer pool's token acts as.
     reviewer_login: Name
+    # Scenarios of `env.try` that must have passed on exactly the head being merged, as the
+    # kernel recorded it (ADR-038). Empty: only the host's own check runs count.
+    env_try: Annotated[tuple[Name, ...], Field(max_length=8)] = ()
 
 
 # Providers whose secret lives outside the configuration file, so the file may be shared.

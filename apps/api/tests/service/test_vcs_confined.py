@@ -42,6 +42,9 @@ from cardea.service.kernel import Kernel
 from cardea.service.operation_runtime import OperationRuntime
 from cardea.service.operations import OperationRejected, Registry
 
+# Binds or connects over TCP loopback: not run by `make check-test`.
+pytestmark = pytest.mark.loopback
+
 # The worker commands a host owner installs: the handler, then its reconciler.
 WORKERS = {
     "vcs-push-branch": ["vcs.push_branch", "vcs.find_branch"],

@@ -80,6 +80,13 @@ MAX_PATH = 200
 MAX_PATCH = 12288
 MAX_DIFF_BYTES = 32768
 MAX_PATCHES = 50
+# Check runs on the head, for `vcs.read_change` (`checks`): what failed and why, as CI's
+# annotations say it (packaging/ci_annotate.py), since agents cannot read job logs.
+MAX_CHECKS = 30
+MAX_ANNOTATIONS = 5
+MAX_ANNOTATION = 4096
+# All annotations together, so the diff keeps most of the recorded output.
+MAX_ANNOTATION_BYTES = 12288
 # Credential-shaped strings scrubbed from host text returned to an agent: the shapes
 # `env.try` scrubs from log tails (ADR-026's summary rule). Shapes, not assignments, so
 # ordinary code such as `password = form["password"]` reads unchanged.
@@ -660,7 +667,8 @@ class Vcs:
                     )
                 # 4. Every check run on the head succeeded.
                 runs = await host.check_runs(head)
-                _check_runs(runs)
+                tried = self.tried(arguments["repository"], context, head)
+                _check_runs(runs, tried is not None)
                 # 5. The host can merge it.
                 if pull.get("mergeable") is not True:
                     # `null` while the host is still computing it: try again later.
@@ -685,10 +693,36 @@ class Vcs:
             "head_sha": head,
             "opened_receipt": str(opener.get("receipt_id")),
             "approval_receipt": str(at_head[0].get("receipt_id")),
+            **({"check_receipt": tried} if tried is not None else {}),
             "head_deleted": deleted,
             **({} if base_sha is None else {"up_to_date": True, "base_sha": base_sha}),
             **self.waived(arguments["repository"]),
         }
+
+    def tried(self, alias: object, context: OperationContext, head: str) -> str | None:
+        """The receipt of the `env.try` check the host requires on this head, if any
+        (`merge.env_try`). The kernel recorded it, bound to the full head SHA, so a pull
+        request whose head changed has none until it is tried again. Refused when the host
+        requires the check and no successful, passing run of every scenario exists."""
+        assert self.config.merge is not None
+        scenarios = sorted(set(self.config.merge.env_try))
+        if not scenarios:
+            return None
+        for entry in context.evidence.get("tries") or ():
+            ran = _field(entry, "arguments/scenarios")
+            if (
+                _field(entry, "arguments/commit") == head
+                and _field(entry, "output/passed") is True
+                and isinstance(ran, list)
+                and set(scenarios) <= {str(s) for s in ran}
+            ):
+                return str(entry.get("receipt_id"))
+        raise OperationRejected(
+            f"No passing env.try on head {head} for scenarios {', '.join(scenarios)} "
+            f"(repo {alias}). Run env.try with commit {head}; that needs the grants "
+            f"env.try and repo:{alias}",
+            "merge_checks_missing",
+        )
 
     async def _delete_head(
         self, host: GitHub, pull: dict[str, Any], context: OperationContext, alias: object
@@ -762,6 +796,7 @@ class Vcs:
                 reviews = await host.reviews(number)
                 comments = await host.comments(number)
                 files = await host.pull_files(number) if with_diff else None
+                checks = await _checks(host, str(pull["head"]["sha"]))
             except HostRefused as refused:
                 raise OperationRejected(str(refused), "host_refused") from None
         body, truncated = _bounded(pull.get("body"), MAX_BODY)
@@ -786,6 +821,7 @@ class Vcs:
                 for r in reviews[-20:]
             ],
             "comments": len(comments),
+            "checks": checks,
         }
         if files is not None:
             # What the rest of the read leaves of the recorded output, less the key's room.
@@ -908,11 +944,44 @@ async def _up_to_date(host: GitHub, base: str, head: str) -> str:
 PASSING = {"success", "neutral", "skipped"}
 
 
-def _check_runs(runs: list[dict[str, Any]]) -> None:
-    """Every check run on the head completed and passed, and there is at least one. The
-    refusal names the checks. A run that waits for a maintainer to approve it
-    (`action_required`) is its own refusal: no review can unblock it, so it says who can."""
-    if not runs:
+async def _checks(host: GitHub, sha: str) -> list[JsonValue]:
+    """The head's check runs, failed ones first, each failed one with CI's annotations:
+    bounded, credential shapes scrubbed. Annotations are untrusted text, like a body."""
+    runs = await host.check_runs(sha)
+    runs.sort(key=lambda r: r.get("status") == "completed" and r.get("conclusion") in PASSING)
+    checks: list[JsonValue] = []
+    room = MAX_ANNOTATION_BYTES
+    for run in runs[:MAX_CHECKS]:
+        status, conclusion = str(run.get("status", "")), run.get("conclusion")
+        check: dict[str, JsonValue] = {
+            "name": str(run.get("name", "")),
+            "status": status,
+            "conclusion": None if conclusion is None else str(conclusion),
+            "url": str(run.get("html_url", "")),
+        }
+        failed = status == "completed" and conclusion not in PASSING
+        counted = (run.get("output") or {}).get("annotations_count")
+        if failed and counted and run.get("id") and room > 0:
+            kept: list[JsonValue] = []
+            for note in await host.annotations(int(run["id"])):
+                if note.get("annotation_level") != "failure" or len(kept) == MAX_ANNOTATIONS:
+                    continue
+                message = _clip(_bounded(note.get("message"), MAX_ANNOTATION)[0], room)[0]
+                kept.append({"title": _bounded(note.get("title"), 200)[0], "message": message})
+                room -= _size(message)
+                if room <= 0:
+                    break
+            check["annotations"] = kept
+        checks.append(check)
+    return checks
+
+
+def _check_runs(runs: list[dict[str, Any]], tried: bool = False) -> None:
+    """Every check run on the head completed and passed, and there is at least one,
+    unless the kernel's own `env.try` check passed on the head (`tried`). A run that waits
+    for a maintainer to approve it (`action_required`) is its own refusal: no review can
+    unblock it, so it says who can."""
+    if not runs and not tried:
         raise OperationRejected("No check ran on the head", "merge_checks_missing")
     pending = sorted(str(r.get("name")) for r in runs if r.get("status") != "completed")
     if pending:

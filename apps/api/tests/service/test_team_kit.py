@@ -92,6 +92,26 @@ def test_the_triggers_are_the_planned_ones() -> None:
     assert approve["requires_receipt"]["result"] == "result.state == 'APPROVED'"
 
 
+def test_developers_get_env_try_by_default_and_not_when_nothing_needs_it() -> None:
+    def dev(host: dict[str, Any]) -> dict[str, Any]:
+        pools = {p["name"]: p for p in kit().group_document(host)["spec"]["pools"]}
+        pool: dict[str, Any] = pools["dev"]
+        return pool
+
+    # The merge check defaults to the "try" scenario, so developers get env.try.
+    default = {k: v for k, v in example().items() if k != "env_try"}
+    assert "env.try" in dev(default)["grants"]
+    without = {**example(), "env_try": {"scenarios": ["try"], "merge_scenarios": []}}
+    assert "env.try" not in dev(without)["grants"]
+    assert "env.try" not in dev(without)["run"]["operations"]
+    assert "env.try" not in dev(without)["run"]["instructions"]
+    with_check = {**example(), "env_try": {"scenarios": ["try"], "dev_scenarios": ["check"]}}
+    pool = dev(with_check)
+    assert "env.try" in pool["grants"] and "env.try" in pool["run"]["operations"]
+    assert "Before every submit, run env.try" in pool["run"]["instructions"]
+    assert 'scenarios ["check"]' in pool["run"]["instructions"]
+
+
 def test_developer_and_pe_schedules_are_opt_in() -> None:
     def crons(host: dict[str, Any], name: str) -> list[str]:
         pools = {p["name"]: p for p in kit().group_document(host)["spec"]["pools"]}

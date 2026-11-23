@@ -204,6 +204,14 @@ class GitHub:
                 break
         return found
 
+    async def annotations(self, check_run_id: int) -> list[dict[str, Any]]:
+        """A check run's annotations, first page only (CI attaches at most a few)."""
+        response = await self._request(
+            "GET", f"/check-runs/{int(check_run_id)}/annotations", params={"per_page": 50}
+        )
+        found: list[dict[str, Any]] = response.json()
+        return found
+
     async def compare(self, base: str, head: str) -> dict[str, Any]:
         """How `head` relates to `base` (`ahead_by`, `behind_by`, `base_commit`). One commit
         per page: only the counts are read."""
