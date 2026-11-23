@@ -313,6 +313,9 @@ class Binding(Record):
     # Argument values that identify one external effect (ADR-026). Within one idempotency
     # context, a second invocation with the same values returns the first receipt's result.
     idempotency_scope: Annotated[tuple[Pointer, ...], Field(max_length=16)] | None = None
+    # Scope pointers a call may omit (email attachments, ADR-039): an absent one adds
+    # nothing, so a call without it keeps the key it had before the field existed.
+    idempotency_optional: Annotated[tuple[Pointer, ...], Field(max_length=16)] | None = None
     # Entry point that observes destination state to settle an uncertain effect.
     reconciler: HandlerName | None = None
     # Default approval rules (ADR-036); a host rule for a namespace replaces them. None, like
@@ -344,6 +347,8 @@ class Binding(Record):
             self.idempotency_scope is not None or self.reconciler or self.replies
         ):
             raise ValueError("Read operations have no effect scope, reconciler or replies")
+        if set(self.idempotency_optional or ()) - set(self.idempotency_scope or ()):
+            raise ValueError("idempotency_optional names pointers outside idempotency_scope")
         if self.replies is not None and self.executor is not None:
             raise ValueError("Only in-process operations declare a reply poller")
         if (self.handler is None) == (self.executor is None):
@@ -416,6 +421,7 @@ class OperationDescriptor(Record):
                 ("approval", self.cardea.approval),
                 ("resource", self.cardea.resource),
                 ("inputs", self.cardea.inputs),
+                ("idempotency_optional", self.cardea.idempotency_optional),
                 ("evidence", self.cardea.evidence),
                 ("replies", self.cardea.replies),
                 ("run_window", self.cardea.run_window),
@@ -556,7 +562,8 @@ class Registry:
         self, name: str, namespace: str, context: str, arguments: Mapping[str, JsonValue]
     ) -> str | None:
         """Digest identifying one external effect, or None when no scope is declared."""
-        scope = self.get(name).cardea.idempotency_scope
+        cardea = self.get(name).cardea
+        scope = cardea.idempotency_scope
         if scope is None:
             return None
         values = []
@@ -564,6 +571,8 @@ class Registry:
             try:
                 values.append(jsonpointer.resolve_pointer(dict(arguments), pointer))
             except jsonpointer.JsonPointerException:
+                if pointer in (cardea.idempotency_optional or ()):
+                    continue
                 raise Fault(
                     "invalid_arguments", "Arguments lack a declared idempotency field", 422
                 ) from None

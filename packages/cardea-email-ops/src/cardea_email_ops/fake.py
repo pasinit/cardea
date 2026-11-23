@@ -143,6 +143,7 @@ class FakeAgentMail:
                 "to": body["to"],
                 "subject": body["subject"],
                 "text": body["text"],
+                "attachments": body.get("attachments", []),
             }
         )
         self.sends += 1

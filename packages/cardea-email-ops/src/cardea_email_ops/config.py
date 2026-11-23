@@ -116,6 +116,15 @@ class RateLimit(Record):
     window_days: Annotated[int, Field(strict=True, ge=1, le=90)]
 
 
+class AttachmentLimits(Record):
+    """What `email.send` may attach. The hard ceilings keep a call's arguments (base64 of
+    every attachment, in the receipt) within the receipt's 64 KiB document."""
+
+    max_count: Annotated[int, Field(strict=True, ge=1, le=5)] = 3
+    max_file_bytes: Annotated[int, Field(strict=True, ge=1, le=32768)] = 24576
+    max_total_bytes: Annotated[int, Field(strict=True, ge=1, le=32768)] = 32768
+
+
 class RoleConfig(Record):
     recipients: Annotated[tuple[Alias, ...], Field(min_length=1, max_length=32)]
     rate_limit: RateLimit
@@ -154,6 +163,7 @@ class EmailConfig(Record):
     roles: dict[Role, RoleConfig]
     # Reply text kept for the agent; longer replies are shortened and marked.
     max_reply_bytes: Annotated[int, Field(strict=True, ge=256, le=12288)] = 8192
+    attachments: AttachmentLimits = AttachmentLimits()
     inbound: InboundConfig | None = None
 
     @model_validator(mode="after")
