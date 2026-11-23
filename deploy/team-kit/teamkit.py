@@ -798,6 +798,7 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
                 "vcs.read_change",
                 "vcs.review",
                 "vcs.comment",
+                "env.try",
                 f"repo:{repo}",
                 *_mail(group, "tl"),
                 *(f"mail:{member}" for member in devs),

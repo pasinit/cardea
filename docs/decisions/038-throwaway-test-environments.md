@@ -296,3 +296,7 @@ The owner answered every question as recommended.
 - **Only the links change.** Holder, lease, claim epoch, state and data stay as they were. The version moves and a history and journal `updated` event is written, so a writer with an older copy gets `version_conflict` instead of erasing the link.
 - **Idempotency.** The link's `external_id` is the call's idempotency context, or the producing receipt's ID without one. A second call with the same key adds nothing. A result answered from the run window links the receipt that produced it.
 - **Limit.** A record with 32 links refuses the attach (`record_invalid`).
+
+## Note 2026-11-23: the `screenshots` scenario
+
+The `screenshots` scenario (`make screenshots`, `packaging/screenshots.py`) serves the dashboard fixture in the loopback phase and renders it with the toolchain image's headless Chromium at 390px and 1280px. It changes no confinement, JIT or egress rule, and needs no new role: the PE already holds `env.try`. `--js-flags=--jitless` is optional and has not been verified on a Debian host. The test that runs real Chromium is skipped where none is installed. Whether the screenshots render correctly under the unit's confinement is not checked here; the host owner or the PE confirms it with one `env.try` run of `["screenshots"]` after the first image build.
