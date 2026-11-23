@@ -222,11 +222,20 @@ used by the examples.
 |---|---|---|
 | `approve_refused` | APPROVE reviews are not allowed on this host | `cardea_vcs_ops.ops` |
 | `artifact_refused` | — | `cardea.service.kernel` |
+| `attachment_external_reference` | The HTML attachment must be self-contained | `cardea_email_ops.attachments` |
+| `attachment_invalid` | An attachment needs a unique plain filename that matches its content type; An attachment's data is not valid base64 | `cardea_email_ops.attachments` |
+| `attachment_too_large` | An attachment may be 1 to {…} bytes | `cardea_email_ops.attachments` |
+| `attachment_type_mismatch` | The attachment is not HTML text; The attachment is not a PNG image | `cardea_email_ops.attachments` |
+| `attachments_too_large` | Attachments may total {…} bytes | `cardea_email_ops.attachments` |
+| `attachments_too_many` | At most {…} attachments are allowed | `cardea_email_ops.attachments` |
 | `bad_cursor` | cursor is not one this operation returned | `cardea.service.records` |
 | `branch_moved` | The branch moved since the caller read it | `cardea_vcs_ops.ops` |
 | `branch_not_allowed` | Only agent-group members push branches or open changes; Branches must be named {…}<name> | `cardea_vcs_ops.ops` |
 | `branch_unknown` | No branch {…} | `cardea_vcs_ops.ops` |
 | `call_abandoned` | — | `cardea.service.invocation` |
+| `change_exists` | Work record {…} already has an open pull request: #{…} ({…}, branch {…}). Push further commits to that branch instead of opening a second change. | `cardea_vcs_ops.ops` |
+| `change_head_missing` | the record already has pull request #{…} ({…}), but its branch {…} is not in the repository source; no session was started from {…} so as not to begin a second change | `cardea_coding_ops.session` |
+| `change_head_stale` | the repository source is behind pull request #{…}: branch {…} does not contain {…}, the head last pushed for the record; no session was started from an older head | `cardea_coding_ops.session` |
 | `change_invalid` | The change bundle was not staged | `cardea_vcs_ops.ops` |
 | `checkpoint_missing` | Completed work has no resumable checkpoint. | `cardea.kernel.store` |
 | `claim_limit` | The holder already has {…} claim(s); the collection allows {…} | `cardea.service.records` |

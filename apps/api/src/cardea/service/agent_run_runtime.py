@@ -1031,7 +1031,13 @@ class AgentRunRuntime:
                 if key in refused.details
             }
             activity.tool_refused(name, refused.code, kind=kind, **missing)
-            return Outcome(refused.code, refused.message)
+            # The role learns which grant it lacked, as a record refusal says (ADR-034).
+            lacked = (
+                f": {missing['grant']} is not held by the {missing['holder']}"
+                if refused.code == "task_grant_denied" and len(missing) == 2
+                else ""
+            )
+            return Outcome(refused.code, refused.message + lacked)
         activity = self._current(task_id)
         if admitted.deduplicated is not None:
             activity.event(

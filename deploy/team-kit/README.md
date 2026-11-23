@@ -1,6 +1,6 @@
 # Team kit: an agent dev team on a host
 
-This kit builds a generic, configuration-driven dev team from [`examples/teams/dev-team`](../../examples/teams/README.md). It has four roles: a product manager, a team lead, developers and a principal engineer. They work on one repository through `code.session`, `vcs.*`, `env.try` and the kernel's records, mail and spend ceilings.
+This kit builds a generic, configuration-driven dev team from [`examples/teams/dev-team`](../../examples/teams/README.md). It has five roles: a product manager, a team lead, developers, a principal engineer and a UX designer. They work on one repository through `code.session`, `vcs.*`, `env.try` and the kernel's records, mail and spend ceilings.
 
 - `teamkit.py`: the `render`, `provision`, `apply`, `status`, `pause`, `resume` and `stop` commands.
 - `dashboard.py`, `dashboard.html`, `dashboard.js`: the read-only team dashboard, below.
@@ -16,12 +16,13 @@ Further host-file fields:
 - **`product`:** the product's goals, which the product manager works to: `goals` (text) or `goals_file` (a path, relative to the host file), and optional `non_goals`. Together they are at most 8 KiB of UTF-8, non-empty, with no control characters except newlines and tabs; `load_host` refuses anything else. They come from the private host file only, never from the repository; the example's goals are placeholders to replace. With goals:
   - the PM tests the product against them and files failures and gaps. It also designs and decides new features itself, without waiting for approval, and files each one as a work item stating the user problem, the proposed behaviour and acceptance criteria. Without `product`, the PM only tests and files what fails;
   - the team lead gets the goals' first lines (at most 1 KiB) to prioritise by.
-- **`email`:** with an `alias` (for example `client`), the PM is granted `email.send` to that alias at the `rate_limit` (default 3 every 7 days, enforced by the email host file). Its instructions then carry the email policy:
-  - only a genuine preference question the goals do not settle ("X or Y?"), short, with the options and its own choice;
+- **`email`:** with an `alias` (for example `client`), the PM and the UX designer, and no other role, are granted `email.send` to that alias at the `rate_limit` (a host setting `{"count", "window_days"}`, count 1–1000 and window 1–90 days, refused otherwise; default 10 a day, the example's value; enforced by the email host file, which `render` writes with a role entry for each of the two pools). Their instructions then carry the email policy:
+  - an owner email is a question: a genuine preference question the goals do not settle ("X or Y?"), short, with the options and the team's pick;
   - a reply is optional input that arrives in its mailbox on a later run, and never blocks work;
-  - never status reports, summaries or anything the goals already decide.
+  - never a status report, summary or anything the goals already decide.
 
   Without `email`, neither the grant nor the policy is rendered.
+- **UX designer (`ux`):** designs every page, following UX practice and the existing app's style. For a UI item it writes an `Approved mock v<N>` (phone 390px and desktop) into the item's body; it files UX items with screenshots; and it reviews every pull request that changes the UI by running `env.try` (the `scenarios`) on the head and looking at the screenshots at both widths. It posts `REQUEST_CHANGES` (`UX REVIEW: CHANGES`) unless it has seen the page at both widths matching the approved mock, and then a `COMMENT` review `UX REVIEW: PASS <full head sha>`. It holds no approve, transition or merge grant. The PE's instructions forbid approving a UI pull request without a pass at its current head. Its reviews use the reviewer credential (`credentials.pools`), but not `allow_approve`. The scenarios must produce the screenshots; the settings page does not yet list this role. `vcs.json` and the host file's `budgets.roles` and `run_timeouts` accept `ux`.
 - **Mail:** each role's grants are pool addresses (`mail:<group>.<pool>`). The team lead and the PE are the exception for developers: they get each developer's own address (`mail:<group>.dev.<n>`) instead of the developer pool. Each role's instructions list exactly the addresses it holds, so no role mails an address it is not granted.
 - **`repositories_config`** (default `/opt/cardea-code/repositories.json`): the host's repository registry. `status` reads it only to report a waiver of the host's branch rules and whether merging needs an up-to-date branch, described next.
 

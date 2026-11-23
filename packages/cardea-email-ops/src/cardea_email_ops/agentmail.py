@@ -14,6 +14,7 @@ Inbound mail is polled, never pushed: the host needs no public endpoint or webho
 official Python SDK is not used: see ADR-039 for why.
 """
 
+import base64
 import logging
 from datetime import datetime
 from email.utils import parseaddr
@@ -97,6 +98,20 @@ class AgentMail:
                         "subject": message.subject,
                         "text": message.body,
                         "labels": [label(message.effect_key)],
+                        **(
+                            {
+                                "attachments": [
+                                    {
+                                        "filename": a.filename,
+                                        "content_type": a.content_type,
+                                        "content": base64.b64encode(a.content).decode(),
+                                    }
+                                    for a in message.attachments
+                                ]
+                            }
+                            if message.attachments
+                            else {}
+                        ),
                     },
                 )
             except (httpx.ConnectError, httpx.ConnectTimeout):
