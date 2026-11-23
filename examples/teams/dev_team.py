@@ -783,6 +783,8 @@ def rehearse(world: World) -> dict[str, Any]:
     assert "start_refused" in race and state == "succeeded"
     assert claim_holders(world)[item] == [f"{GROUP}.dev.0"]
 
+    # The kernel refuses an approval until every check on the head has passed.
+    ci(world, number, "success")
     reviewed: dict[str, Any] = {}
     _, out = run(world, f"{GROUP}.principal.0", review(item, number, reviewed))
     assert "review_id" in reviewed["review"], reviewed
@@ -856,6 +858,7 @@ def rehearse(world: World) -> dict[str, Any]:
     assert "review_id" in reviewed_by, reviewed_by
     assert "approve_refused" in security["approve_attempt"]["error"], security
     print("  security.0 was refused APPROVE (only the principal pool may approve) and commented")
+    ci(world, third_number, "success")
     final: dict[str, Any] = {}
     _, out = run(world, f"{GROUP}.principal.0", review(third, third_number, final))
     print(f"  {third} went dev.1 -> security.0 review -> principal: {out['record']['state']}")

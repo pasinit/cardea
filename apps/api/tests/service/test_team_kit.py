@@ -92,13 +92,16 @@ def test_the_triggers_are_the_planned_ones() -> None:
     assert approve["requires_receipt"]["result"] == "result.state == 'APPROVED'"
 
 
-def test_developers_run_env_try_before_submitting_only_when_the_host_names_scenarios() -> None:
+def test_developers_get_env_try_by_default_and_not_when_nothing_needs_it() -> None:
     def dev(host: dict[str, Any]) -> dict[str, Any]:
         pools = {p["name"]: p for p in kit().group_document(host)["spec"]["pools"]}
         pool: dict[str, Any] = pools["dev"]
         return pool
 
-    without = {**example(), "env_try": {"scenarios": ["try"]}}
+    # The merge check defaults to the "try" scenario, so developers get env.try.
+    default = {k: v for k, v in example().items() if k != "env_try"}
+    assert "env.try" in dev(default)["grants"]
+    without = {**example(), "env_try": {"scenarios": ["try"], "merge_scenarios": []}}
     assert "env.try" not in dev(without)["grants"]
     assert "env.try" not in dev(without)["run"]["operations"]
     assert "env.try" not in dev(without)["run"]["instructions"]
@@ -808,6 +811,16 @@ def test_submit_records_the_pull_request_and_reviews_drive_the_item(
         )
     pe = next(p for p in kit().group_document(host())["spec"]["pools"] if p["name"] == "pe")
     assert "data.change" in pe["run"]["instructions"]
+
+
+def test_the_pe_approves_only_over_passing_checks() -> None:
+    """The kernel refuses the approval (test_vcs_approve_checks.py); the instructions tell
+    the PE what to do in each case."""
+    pools = kit().group_document(host())["spec"]["pools"]
+    text = " ".join(next(p for p in pools if p["name"] == "pe")["run"]["instructions"].split())
+    assert "every check on the pull request's head has passed" in text
+    assert "approve_checks_pending" in text and "wait for your next run" in text
+    assert "name the failing check" in text and "or say that no check ran" in text
 
 
 @pytest.mark.loopback

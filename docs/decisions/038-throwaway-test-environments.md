@@ -287,3 +287,12 @@ The owner answered every question as recommended.
 4. **Window and reruns.** Is a 24-hour default window right, and should `rerun` be limited per commit, to bound flaky-test churn?
 5. **Run table or ADR-026 amendment.** Is a small run table (item 4) acceptable, or should ADR-026 scopes be amended to allow reads with an expiry window?
 6. **Toolchain images.** Who builds and pins the toolchain root image (for example with `mmdebstrap` on Debian), and how often is it refreshed? Its digest is part of the run key.
+
+## Amendment 2026-11-22: `record_id` attaches the result to the work item
+
+`env.try` with `record_id` makes the kernel add one link to that record: `rel: env.try`, `observed_state` `pass` or `fail`, and a `url` carrying the full 40-character commit, the scenarios and the receipt ID (`cardea://env.try/<commit>?receipt=<id>&scenarios=a,b`). The descriptor opts in with `attach_record` (a pointer to the record ID argument); the agent never writes the link (`service/evidence_links.py`).
+
+- **Grant.** `record:<collection>/attach`, in the caller's live ceiling. It is checked at admission, so nothing runs without it, and again when the result is recorded. The refusal names the grant. `attach` is a reserved action, so a transition cannot take the name.
+- **Only the links change.** Holder, lease, claim epoch, state and data stay as they were. The version moves and a history and journal `updated` event is written, so a writer with an older copy gets `version_conflict` instead of erasing the link.
+- **Idempotency.** The link's `external_id` is the call's idempotency context, or the producing receipt's ID without one. A second call with the same key adds nothing. A result answered from the run window links the receipt that produced it.
+- **Limit.** A record with 32 links refuses the attach (`record_invalid`).

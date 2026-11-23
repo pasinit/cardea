@@ -114,6 +114,7 @@ def kernel_for(
     monkeypatch: pytest.MonkeyPatch,
     registry: Registry,
     operation: str = "code.session",
+    extra: tuple[str, ...] = (),
 ) -> Kernel:
     monkeypatch.setattr(handlers, "DBOSClient", FakeClient)
     monkeypatch.setattr(confined, "POLL_SECONDS", 0.02)
@@ -123,6 +124,12 @@ def kernel_for(
     monkeypatch.setattr(operation_runtime, "LEASE_MARGIN", 0.3)
     db = Database(tmp_path / "data")
     db.migrate()
+    provision(db, document(operation, extra), registry)
+    return Kernel(db, cast(Authentication, Auth()), operations=registry, workers=Workers(host))
+
+
+def document(operation: str, extra: tuple[str, ...] = ()) -> Provisioning:
+    """The supervisor's and the platform's authority for one operation and its extras."""
     granted = tuple(
         Permission(
             principal_id="supervisor",
@@ -131,7 +138,7 @@ def kernel_for(
             delegate=True,
             expires_at=now() + timedelta(hours=1),
         )
-        for right in (*RIGHTS, operation, "repo:app")
+        for right in (*RIGHTS, operation, "repo:app", *extra)
     )
     principals = tuple(
         Principal(
@@ -143,16 +150,11 @@ def kernel_for(
         )
         for p in ("runtime", "supervisor", "outsider")
     ) + (Principal(principal_id="agent", kind="agent", runtime_id="runtime"),)
-    provision(
-        db,
-        Provisioning(
-            principals=principals,
-            permissions=granted,
-            platform=tuple(p.model_copy(update={"principal_id": "platform"}) for p in granted),
-        ),
-        registry,
+    return Provisioning(
+        principals=principals,
+        permissions=granted,
+        platform=tuple(p.model_copy(update={"principal_id": "platform"}) for p in granted),
     )
-    return Kernel(db, cast(Authentication, Auth()), operations=registry, workers=Workers(host))
 
 
 def submit(
@@ -161,6 +163,7 @@ def submit(
     arguments: dict[str, Any],
     key: str = "one",
     grants: tuple[str, ...] | None = None,
+    idempotency_context: str | None = None,
 ) -> str:
     if grants is None:
         # `code.session` needs the repository's `repo:<alias>` grant (ADR-037).
@@ -172,6 +175,7 @@ def submit(
             "agent_id": "agent",
             "namespace": "test",
             "objective": "One long call",
+            "idempotency_context": idempotency_context,
             "operation": operation,
             "arguments": arguments,
             "grants": ["objects.read", "objects.write", operation, *grants],
