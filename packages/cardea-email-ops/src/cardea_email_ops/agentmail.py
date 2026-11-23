@@ -6,7 +6,7 @@ Endpoints (https://docs.agentmail.to/api-reference, read 2026-11-17), base
   with the same key within 24 hours returns the first message and sends nothing;
 - `GET /inboxes/{inbox_id}/messages?labels=...` to find a send by the label it carries;
 - `GET /inboxes/{inbox_id}/threads/{thread_id}` for the messages on one thread;
-- `GET /inboxes/{inbox_id}/messages?labels=received&after=...&limit=50` and
+- `GET /inboxes/{inbox_id}/messages?labels=received&limit=50` and
   `GET /inboxes/{inbox_id}/messages/{message_id}` for inbound mail on no Cardea thread
   (amendment 2026-11-21). Only messages from an allowed address are read in full.
 
@@ -153,11 +153,8 @@ class AgentMail:
         async with self._client() as client:
             token: str | None = None
             for _ in range(MAX_PAGES):
-                params: dict[str, Any] = {
-                    "labels": "received",
-                    "after": _stamp(since),
-                    "limit": LIST_LIMIT,
-                }
+                # The provider answers 400 to `after`: the window is applied below.
+                params: dict[str, Any] = {"labels": "received", "limit": LIST_LIMIT}
                 if token:
                     params["page_token"] = token
                 response = await client.get(f"/inboxes/{self.inbox}/messages", params=params)
@@ -239,13 +236,11 @@ class AgentMail:
 def _after(stamp: object, since: datetime) -> bool:
     """Whether a provider timestamp is at or after `since`; an unreadable one counts."""
     try:
-        return datetime.fromisoformat(str(stamp)) >= since
-    except (ValueError, TypeError):
+        moment = datetime.fromisoformat(str(stamp))
+    except ValueError:
         return True
-
-
-def _stamp(moment: datetime) -> str:
-    """UTC ISO 8601 with a `Z` suffix and whole seconds (rounded down, so none is missed)."""
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=UTC)
-    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if since.tzinfo is None:
+        since = since.replace(tzinfo=UTC)
+    return moment >= since

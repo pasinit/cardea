@@ -1223,25 +1223,25 @@ def test_inbound_poll_sends_only_query_parameters_the_provider_accepts(email: Em
     assert reply.text == "Yes, go ahead." and reply.authenticated is True
     listed = [r for r in seen if r.url.path.endswith("/messages")]
     assert [r.url.params["labels"] for r in listed] == ["received"]
-    # The window and page size go to the provider: UTC, whole seconds, a `Z` suffix.
-    assert [r.url.params["after"] for r in listed] == ["2026-11-01T00:00:00Z"]
-    assert [r.url.params["limit"] for r in listed] == ["50"]
+    # Only labels and page size go to the provider; the window is applied client-side.
+    assert [dict(r.url.params) for r in listed] == [{"labels": "received", "limit": "50"}]
 
 
-def test_the_after_parameter_is_utc_whole_seconds_with_z(email: Email) -> None:
+def test_the_window_is_applied_client_side_in_any_timezone(email: Email) -> None:
     transport = email.transport
     assert isinstance(transport, AgentMail)
-    seen: list[str] = []
-
-    def answer(request: httpx.Request) -> httpx.Response:
-        seen.append(request.url.params["after"])
-        return httpx.Response(200, json={"messages": []})
-
-    adapter = AgentMail(transport.config, httpx.MockTransport(answer))
+    listing = {
+        "messages": [
+            {"message_id": "m", "timestamp": "2026-11-22T10:30:05.5Z", "from": "x@y.invalid"}
+        ]
+    }
+    adapter = AgentMail(
+        transport.config, httpx.MockTransport(lambda r: httpx.Response(200, json=listing))
+    )
     plus_two = timezone(timedelta(hours=2))
-    asyncio.run(poll(adapter, datetime(2026, 11, 22, 12, 30, 5, 987654, tzinfo=plus_two)))
-    asyncio.run(poll(adapter, datetime(2026, 11, 22, 12, 30, 5, 999999)))
-    assert seen == ["2026-11-22T10:30:05Z", "2026-11-22T12:30:05Z"]
+    # 12:30:05+02:00 is 10:30:05Z: the message at 10:30:05.5Z is in; a naive since is UTC.
+    assert len(asyncio.run(poll(adapter, datetime(2026, 11, 22, 12, 30, 5, tzinfo=plus_two)))) == 1
+    assert len(asyncio.run(poll(adapter, datetime(2026, 11, 22, 10, 30, 6)))) == 0
 
 
 def test_a_400_reports_its_masked_body_cut_to_500_characters(
