@@ -113,6 +113,8 @@ def test_the_preview_diffs_each_setting_against_the_host_file(
     assert changes["schedules.pm"] == (["0 9 * * 1-5"], ["0 10 * * 1-5"])
     assert changes["schedules.dev"] == ([], ["*/30 * * * *"])
     assert changes["developers"] == (2, 4)
+    assert changes["email_rate_limit.count"] == (10, 20)
+    assert changes["email_rate_limit.window_days"] == (1, 2)
     assert changes["model"] == ("claude-sonnet-4-5", "claude-opus-5-5")
     assert changes["product_goals.goals"][0] == "Original goals."
     assert changes["product_goals.non_goals"][1] == "No mobile app."
@@ -239,3 +241,46 @@ def test_the_example_host_file_can_be_previewed(settings: ModuleType, tmp_path: 
     shutil.copy(kit / "team.host.example.json", copy)
     result = settings.preview(copy, {"developers": 5}, paused=False)
     assert [(c["from"], c["to"]) for c in result["changes"]] == [(2, 5)]
+
+
+def test_the_email_rate_limit_is_a_setting_the_kit_applies(
+    settings: ModuleType, host_file: Path
+) -> None:
+    wanted = {"email_rate_limit": {"count": 25, "window_days": 3}}
+    changed = settings.apply_to(json.loads(host_file.read_text()), settings.validate(wanted))
+    assert changed["email"] == {"alias": "client", "rate_limit": {"count": 25, "window_days": 3}}
+    kit = settings._kit()
+    assert kit.email_limit(changed) == {"count": 25, "window_days": 3}
+    assert kit.email_fragment({**changed, "namespace": "dev"})["roles"]["dev-team.pm"][
+        "rate_limit"
+    ] == {"count": 25, "window_days": 3}
+    # The UX designer's own limit is a separate host setting and is left alone.
+    assert kit.mock_email_limit(changed) == {"count": 10, "window_days": 7}
+
+
+def test_the_current_email_rate_limit_falls_back_to_the_kits_default(
+    settings: ModuleType, host_file: Path
+) -> None:
+    kit = settings._kit()
+    document = json.loads(host_file.read_text())
+    assert settings.current(document, kit, paused=False)["email_rate_limit"] == {
+        "count": 10,
+        "window_days": 1,
+    }
+    document["email"]["rate_limit"] = {"count": 4, "window_days": 2}
+    assert settings.current(document, kit, paused=False)["email_rate_limit"] == {
+        "count": 4,
+        "window_days": 2,
+    }
+    del document["email"]
+    assert settings.current(document, kit, paused=False)["email_rate_limit"]["count"] == 10
+
+
+def test_an_email_rate_limit_without_an_email_alias_is_a_problem(
+    settings: ModuleType, host_file: Path
+) -> None:
+    document = json.loads(host_file.read_text())
+    del document["email"]
+    host_file.write_text(json.dumps(document))
+    result = settings.preview(host_file, {"email_rate_limit": {"count": 5, "window_days": 1}})
+    assert any("email.alias" in problem for problem in result["problems"])

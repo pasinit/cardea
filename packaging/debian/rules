@@ -29,6 +29,8 @@ override_dh_builddeb:
 
 execute_after_dh_install:
 	install -D -m 0755 src/cardea/hosts/launcher.py debian/cardea-kernel/usr/libexec/cardea-host
+	install -D -m 0755 debian/cardea-team debian/cardea-kernel/usr/libexec/cardea-team
+	install -D -m 0440 debian/cardea-team.sudoers debian/cardea-kernel/etc/sudoers.d/cardea-team
 
 execute_after_dh_virtualenv:
 	debian/cardea-kernel/opt/venvs/cardea-kernel/bin/python debian/inventory.py > debian/cardea-kernel/usr/share/doc/cardea-kernel/dependency-inventory.json

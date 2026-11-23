@@ -77,6 +77,8 @@ Steps, as root, on the dev host:
 
 Every `teamkit.py` command below runs as `cardea-kernel`, with the kernel's Python: `sudo -u cardea-kernel /opt/cardea/apps/api/.venv/bin/python -I deploy/team-kit/teamkit.py ...`. `provision` writes under `/etc/cardea`, so give that account write access to the document it writes (`provisioning.out`), or run `provision` as root with the same Python.
 
+On a host installed from the `cardea-kernel` package, `cardea team` runs the same commands as a plain user in the `cardea-operators` group, through a sudoers rule that allows only `/usr/libexec/cardea-team` as `cardea-kernel`: `cardea team status`, `pause [reason]`, `resume`, `stop`, `apply`, `render`, `provision`, `settings`, `set <key> <value>` (shows the difference, asks, applies exactly what it showed, with the dashboard Settings' validation and audit) and `mail <tl|pm|pe|ux|dev.N> <text>` / `mail list`. It uses `/etc/cardea/team.host.json`. See `man cardea-team` and [packaging](../../packaging/README.md#run-the-dev-team-cardea-team). The `teamkit.py` commands below are the same code run from a checkout.
+
 ## Start
 
 ```sh

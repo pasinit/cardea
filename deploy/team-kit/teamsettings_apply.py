@@ -143,12 +143,28 @@ def _failure(error: Exception) -> str:
     return type(error).__name__ + (f" ({code})" if isinstance(code, str) else "")
 
 
-def _write_host(path: Path, document: dict[str, Any]) -> None:
+def _write_bytes(path: Path, data: bytes) -> None:
+    """Replace `path` with `data`: staged beside it and renamed over it, so a reader never sees
+    half a file. When the directory cannot be written (the host file sits in a root-owned
+    /etc/cardea and only the file is the caller's) the file is rewritten in place instead,
+    which needs write access to the file alone."""
     mode = path.stat().st_mode & 0o777
     staged = path.with_name(f".{path.name}.{os.getpid()}")
-    staged.write_text(json.dumps(document, indent=2) + "\n")
-    staged.chmod(mode)
-    os.replace(staged, path)
+    try:
+        staged.write_bytes(data)
+        staged.chmod(mode)
+        os.replace(staged, path)
+    except OSError:
+        staged.unlink(missing_ok=True)
+        with path.open("r+b") as stream:
+            stream.write(data)
+            stream.truncate()
+            stream.flush()
+            os.fsync(stream.fileno())
+
+
+def _write_host(path: Path, document: dict[str, Any]) -> None:
+    _write_bytes(path, (json.dumps(document, indent=2) + "\n").encode())
 
 
 def apply_settings(
@@ -273,10 +289,7 @@ def _restore(kit: ModuleType, host_path: Path, original: bytes, paused: bool) ->
     is done if the file was never replaced. True when the old settings are in force."""
     try:
         if host_path.read_bytes() != original:
-            staged = host_path.with_name(f".{host_path.name}.{os.getpid()}")
-            staged.write_bytes(original)
-            staged.chmod(host_path.stat().st_mode & 0o777)
-            os.replace(staged, host_path)
+            _write_bytes(host_path, original)
             kit.provision(kit.load_host(host_path), paused=paused)
         return True
     except Exception:

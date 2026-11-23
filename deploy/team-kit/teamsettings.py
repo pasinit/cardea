@@ -8,6 +8,7 @@ A settings document names only the settings to change:
      "paused": {"paused": true, "reason": "release freeze"},
      "schedules": {"pm": ["0 9 * * 1-5"]},
      "developers": 3,
+     "email_rate_limit": {"count": 10, "window_days": 1},
      "model": "claude-sonnet-4-5",
      "product_goals": {"goals": "...", "non_goals": "..."}}
 
@@ -36,6 +37,8 @@ MAX_USD = 1e6
 MAX_DEVELOPERS = 64
 MAX_SCHEDULES = 32
 MAX_MODEL = 128
+MAX_EMAIL_COUNT = 1000
+MAX_EMAIL_WINDOW_DAYS = 90
 MAX_REASON = 200
 MAX_PRODUCT_BYTES = 8192
 _CRON = re.compile(r"[0-9*,/\- ]{1,64}")
@@ -49,6 +52,7 @@ SETTINGS = (
     "paused",
     "schedules",
     "developers",
+    "email_rate_limit",
     "model",
     "product_goals",
 )
@@ -165,6 +169,20 @@ def _developers(value: object, path: str) -> int:
     return value
 
 
+def _email_rate_limit(value: object, path: str) -> dict[str, int]:
+    found = _object(value, path, ("count", "window_days"))
+    top = {"count": MAX_EMAIL_COUNT, "window_days": MAX_EMAIL_WINDOW_DAYS}
+    out: dict[str, int] = {}
+    for key, limit in top.items():
+        if key not in found:
+            raise SettingsError(f"{path}.{key} is required")
+        number = found[key]
+        if isinstance(number, bool) or not isinstance(number, int) or not 1 <= number <= limit:
+            raise SettingsError(f"{path}.{key} must be a whole number from 1 to {limit}")
+        out[key] = number
+    return out
+
+
 def _model(value: object, path: str) -> str:
     if not isinstance(value, str) or not value or len(value) > MAX_MODEL:
         raise SettingsError(f"{path} must be a model name of at most {MAX_MODEL} characters")
@@ -189,6 +207,7 @@ _CHECKS = {
     "paused": _paused,
     "schedules": _schedules,
     "developers": _developers,
+    "email_rate_limit": _email_rate_limit,
     "model": _model,
     "product_goals": _product_goals,
 }
@@ -240,6 +259,7 @@ def current(host: dict[str, Any], kit: ModuleType, *, paused: bool) -> dict[str,
         "paused": {"paused": paused},
         "schedules": {r: list(schedules.get(r, [])) for r in POOLS},
         "developers": int(host.get("developers", 2)),
+        "email_rate_limit": kit.email_limit(host),
         "model": host.get("model"),
         "product_goals": {k: shown[k] for k in ("goals", "non_goals") if k in shown},
     }
@@ -275,6 +295,8 @@ def apply_to(host: dict[str, Any], settings: dict[str, Any]) -> dict[str, Any]:
         _put(out, ("schedules", role), crons)
     if "developers" in settings:
         out["developers"] = settings["developers"]
+    if "email_rate_limit" in settings:
+        _put(out, ("email", "rate_limit"), dict(settings["email_rate_limit"]))
     if "model" in settings:
         out["model"] = settings["model"]
     if "product_goals" in settings:
@@ -329,6 +351,8 @@ def preview(host_path: Path, settings: object, *, paused: bool | None = None) ->
     except ValueError as error:
         problems.append(str(error))
     problems += _budget_problems(changed.get("budgets") or {})
+    if "email_rate_limit" in wanted and not (host.get("email") or {}).get("alias"):
+        problems.append("email.alias is not set: the email rate limit would apply to nothing")
     if "product_goals" in wanted and "product" in host and "goals_file" in host["product"]:
         problems.append("product.goals_file is replaced by inline goals")
     after = copy.deepcopy(before)

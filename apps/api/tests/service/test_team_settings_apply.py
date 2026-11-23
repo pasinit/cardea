@@ -308,3 +308,64 @@ def test_the_command_previews_then_applies(
 def test_the_model_module_still_holds_no_kernel_calls() -> None:
     source = (Path(sys.modules["test_team_schema"].KIT) / "teamsettings.py").read_text()
     assert "provision(" not in source.replace("provisioning", "")
+
+
+def test_a_host_file_in_an_unwritable_directory_is_rewritten_in_place(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`/etc/cardea` is root's: the kernel account owns the host file but cannot create or rename
+    files beside it, so the file is rewritten where it is."""
+    path = env.path
+    path.chmod(0o640)
+    before = path.stat()
+
+    def refuse(*_: Any) -> None:
+        raise PermissionError("the directory is not writable")
+
+    monkeypatch.setattr(env.module.os, "replace", refuse)
+    found = env.confirmed({"developers": 3, "email_rate_limit": {"count": 20, "window_days": 2}})
+    assert found["status"] == "applied"
+    assert env.host()["developers"] == 3
+    assert env.host()["email"]["rate_limit"] == {"count": 20, "window_days": 2}
+    after = path.stat()
+    assert (after.st_ino, after.st_mode & 0o777) == (before.st_ino, 0o640)
+    assert not [p for p in path.parent.iterdir() if p.name.startswith(".team.host.json")]
+
+
+def test_a_refused_change_is_put_back_in_place_too(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = env.path.read_bytes()
+    inode = env.path.stat().st_ino
+
+    def refuse(*_: Any) -> None:
+        raise PermissionError("the directory is not writable")
+
+    monkeypatch.setattr(env.module.os, "replace", refuse)
+    env.refuse = "PUT"
+    with pytest.raises(env.module.ApplyError, match="the old settings are back"):
+        env.confirmed(CHANGE)
+    assert env.path.read_bytes() == original and env.path.stat().st_ino == inode
+    assert [e["outcome"] for e in env.audit()] == ["started", "refused"]
+
+
+def test_a_host_file_that_cannot_be_written_at_all_is_reported_and_left_alone(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = env.path.read_bytes()
+
+    def refuse(*_: Any) -> None:
+        raise PermissionError("no")
+
+    real_open = Path.open
+
+    def open_path(self: Path, mode: str = "r", *args: Any, **kwargs: Any) -> Any:
+        if mode == "r+b":
+            raise PermissionError("no")
+        return real_open(self, mode, *args, **kwargs)
+
+    monkeypatch.setattr(env.module.os, "replace", refuse)
+    monkeypatch.setattr(Path, "open", open_path)
+    with pytest.raises(env.module.ApplyError, match="PermissionError"):
+        env.confirmed({"developers": 3})
+    assert env.path.read_bytes() == original

@@ -1,0 +1,132 @@
+.TH CARDEA-TEAM 1 "2026-11-23" "cardea-kernel" "Cardea"
+.SH NAME
+cardea-team \- run the Cardea agent dev team from the command line
+.SH SYNOPSIS
+.B cardea team
+[\fB\-\-host\fR \fIFILE\fR]
+.I COMMAND
+[\fIARGUMENTS\fR]
+.br
+.B cardea team \-\-help
+.SH DESCRIPTION
+.B cardea team
+runs a deployed agent dev team (the team kit, ADR-034) as its supervisor: it shows the team's
+state, pauses and resumes it, changes its settings and mails its roles. The commands are the
+team kit's own, installed under
+.IR /usr/lib/cardea/teamkit ;
+the kernel's code does the work, and the kernel alone decides whether the supervisor may.
+.PP
+It works as a plain user. Every command acts through the team's host file, so it runs as the
+.B cardea\-kernel
+account that owns that file and the supervisor's identity. A member of the
+.B cardea\-operators
+group is let through by one rule in
+.IR /etc/sudoers.d/cardea\-team ,
+which allows only the root-owned helper
+.I /usr/libexec/cardea\-team
+to run as
+.BR cardea\-kernel ,
+with no arguments. The request is sent on the helper's standard input. The helper reads only the
+fixed host file
+.IR /etc/cardea/team.host.json ;
+\fB\-\-host\fR is honoured only when the caller already is
+.BR cardea\-kernel .
+.SH COMMANDS
+.TP
+.B status
+The team overview: members and their runs, work by state, mail, approvals, spend and run ceilings,
+when the credentials expire, and the last failed runs. While the team is paused it prints the
+pause reason and the failures recorded then.
+.TP
+\fBpause\fR [\fIreason\fR]
+Cancel every unfinished run and admit nothing until
+.BR resume .
+The reason is kept for
+.BR status ;
+put no secret in it.
+.TP
+.B resume
+Enable the supervisor again, so triggers admit.
+.TP
+.B stop
+Pause, then delete the group; its members drain. Collections and records stay.
+.TP
+.B apply
+Put the collections and the group to the kernel as the supervisor.
+.TP
+\fBrender\fR [\fB\-\-out\fR \fIDIR\fR]
+Write the documents the team is made of, for review. The default directory is
+.IR /var/lib/cardea/team/rendered ;
+through the helper, only directories below
+.I /var/lib/cardea/team
+are accepted.
+.TP
+\fBprovision\fR [\fB\-\-paused\fR]
+Merge the team's principals and grants into the provisioning document and provision the kernel
+with it. Refused while the team is paused unless \fB\-\-paused\fR is given.
+.TP
+\fBsettings\fR [\fB\-\-json\fR]
+Show the settings as they are now: run limits, spend limits, pause, schedules, developers,
+email rate limit, model and product goals (goals by size only).
+.TP
+\fBset\fR [\fB\-y\fR] [\fB\-\-confirm\fR \fITOKEN\fR] \fIKEY\fR \fIVALUE\fR
+Change one setting. The change is validated as the dashboard Settings page validates it, the
+difference is shown, and you are asked before anything is applied. What is applied is exactly
+what was shown: if the host file changed in between, nothing is applied.
+.B \-y
+applies without asking; \fB\-\-confirm\fR applies a preview whose token an earlier run printed.
+.I KEY
+is a setting field such as
+.BR developers ,
+.BR model ,
+.BR run_limits.team ,
+.BR run_limits.roles.dev ,
+.BR spend_limits.per_run_usd ,
+.BR email_rate_limit.count ,
+.BR schedules.pm ,
+.BR paused ,
+.BR product_goals.goals .
+.I VALUE
+is JSON (a number, true, false, a list or an object); text settings take the text as it is;
+a schedule is cron expressions separated by semicolons. Every attempt is recorded in the team's
+settings audit.
+.TP
+\fBmail\fR \fITARGET\fR \fITEXT\fR
+Mail a role, as the supervisor.
+.I TARGET
+is
+.BR tl ,
+.BR pm ,
+.BR pe ,
+.B ux
+or
+.BI dev. N
+for the developer numbered from 0.
+.TP
+\fBmail list\fR [\fB\-\-member\fR \fIID\fR] [\fB\-\-item\fR \fICOLLECTION/ID\fR] [\fB\-\-after\fR \fICURSOR\fR] [\fB\-\-limit\fR \fIN\fR]
+List the team's mail, newest first.
+.SH FILES
+.TP
+.I /etc/cardea/team.host.json
+The host file: the namespace, the supervisor's identity, the repository, credential names, model
+and budgets (an example is in
+.IR /usr/share/doc/cardea\-kernel/team.host.example.json ).
+Keep it owned by
+.B cardea\-kernel
+and private (mode 0600); it may sit in the root-owned
+.IR /etc/cardea ,
+where a settings change rewrites it in place.
+.TP
+.I /var/lib/cardea/team
+Where the kit keeps the provisioning document it writes, the pause record and the settings
+audit, unless the host file's \fBprovisioning\fR section says otherwise.
+.TP
+.I /etc/sudoers.d/cardea\-team
+The one rule: members of \fBcardea\-operators\fR may run \fI/usr/libexec/cardea\-team\fR as
+\fBcardea\-kernel\fR, with no arguments.
+.SH EXIT STATUS
+0 on success; 1 when the command or the kernel refused; 2 for a usage error or a change left
+unconfirmed.
+.SH SEE ALSO
+.BR cardea (1),
+.IR /usr/share/doc/cardea\-kernel/README.md

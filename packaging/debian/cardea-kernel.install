@@ -6,3 +6,5 @@ debian/config.example.json usr/share/doc/cardea-kernel
 requirements.txt usr/share/doc/cardea-kernel
 uv.lock usr/share/doc/cardea-kernel
 source-manifest.json usr/share/doc/cardea-kernel
+teamkit/*.py usr/lib/cardea/teamkit
+teamkit/team.host.example.json usr/share/doc/cardea-kernel

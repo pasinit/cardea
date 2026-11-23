@@ -25,6 +25,14 @@ def stage(destination: Path, uv: str) -> None:
         destination / "debian",
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
+    # The team kit's modules: `cardea team` runs the kit's own code (cardea.service.team_cli).
+    teamkit = destination / "teamkit"
+    teamkit.mkdir()
+    for path in sorted((ROOT / "deploy/team-kit").glob("*.py")):
+        shutil.copyfile(path, teamkit / path.name)
+    shutil.copyfile(
+        ROOT / "deploy/team-kit/team.host.example.json", teamkit / "team.host.example.json"
+    )
     shutil.copyfile(ROOT / "apps/api/uv.lock", destination / "uv.lock")
     with (destination / "requirements.txt").open("w") as requirements:
         subprocess.run(
@@ -47,7 +55,7 @@ def stage(destination: Path, uv: str) -> None:
         if path.is_file()
     }
     (destination / "source-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    for name in ("rules", "cardea", "cardea-kernel.postinst", "cardea-kernel.prerm"):
+    for name in ("rules", "cardea", "cardea-team", "cardea-kernel.postinst", "cardea-kernel.prerm"):
         (destination / "debian" / name).chmod(0o755)
 
 

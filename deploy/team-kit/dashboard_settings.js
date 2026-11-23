@@ -65,6 +65,7 @@ function build() {
     ...group("Pause", pauseBox, field("paused.reason", "Reason (when pausing)", "line")),
     ...group("Schedules (one cron expression per line)", ...ROLES.map((r) => field(`schedules.${r}`, r, "text"))),
     ...group("Team", field("developers", "Developers", "number"), field("model", "Model", "line")),
+    ...group("Email rate limit", field("email_rate_limit.count", "Emails per window", "number"), field("email_rate_limit.window_days", "Window (days)", "number")),
     ...group("Product", field("product_goals.goals", "Goals", "text"), field("product_goals.non_goals", "Non-goals", "text")),
   );
 }
@@ -86,6 +87,8 @@ function fill(settings) {
   inputs["paused.paused"].checked = settings.paused.paused;
   set("paused.reason", "");
   set("developers", settings.developers);
+  set("email_rate_limit.count", settings.email_rate_limit.count);
+  set("email_rate_limit.window_days", settings.email_rate_limit.window_days);
   set("model", settings.model);
   set("product_goals.goals", settings.product_goals.goals);
   set("product_goals.non_goals", settings.product_goals.non_goals);
@@ -120,6 +123,11 @@ function changes() {
     out.paused = paused && reason ? { paused, reason } : { paused };
   }
   num("developers", current.developers, (v) => (out.developers = v));
+  const email = current.email_rate_limit;
+  const count = inputs["email_rate_limit.count"].value.trim();
+  const days = inputs["email_rate_limit.window_days"].value.trim();
+  const limit = { count: count === "" ? email.count : Number(count), window_days: days === "" ? email.window_days : Number(days) };
+  if (limit.count !== email.count || limit.window_days !== email.window_days) out.email_rate_limit = limit;
   const model = inputs.model.value.trim();
   if (model && model !== current.model) out.model = model;
   const goals = inputs["product_goals.goals"].value;

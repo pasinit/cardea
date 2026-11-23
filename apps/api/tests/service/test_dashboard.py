@@ -262,3 +262,16 @@ def test_the_team_supervisor_may_mail_every_role() -> None:
     group = host.get("group", "dev-team")
     assert {f"mail:{group}.{pool}" for pool in module.POOLS} <= rights
     assert re.fullmatch(r"[a-z0-9.-]+", group)
+
+
+def test_the_team_supervisor_may_mail_each_developer_on_its_own() -> None:
+    """`cardea team mail dev.N` addresses one developer, which needs its own grant."""
+    module = kit()
+    host = {**example(), "developers": 3}
+    rights = {p["operation"] for p in module.provisioning_fragment(host)["permissions"]}
+    group = host.get("group", "dev-team")
+    assert {f"mail:{group}.dev.{n}" for n in range(3)} <= rights
+    assert f"mail:{group}.dev.3" not in rights
+    assert {f"mail:{group}.dev.{n}" for n in range(3)} <= {
+        p["operation"] for p in module.provisioning_fragment(host)["platform"]
+    }

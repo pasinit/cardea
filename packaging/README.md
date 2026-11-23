@@ -35,6 +35,12 @@ The supported execution profile is deliberately narrow: Debian 13 amd64, a Debia
 
 `cardea --help` exposes the existing authenticated client and administrative commands. The service uses isolated Python imports from root-owned `/usr/lib/cardea`; it does not load code from the caller's working directory or `PYTHONPATH`.
 
+## Run the dev team: `cardea team`
+
+The package ships the team kit's modules (`/usr/lib/cardea/teamkit`, an example host file in `/usr/share/doc/cardea-kernel`) and `cardea team` (`man cardea-team`, `cardea team --help`): `status`, `pause [reason]`, `resume`, `stop`, `apply`, `render`, `provision`, `settings`, `set <key> <value>` and `mail <tl|pm|pe|ux|dev.N> <text>` / `mail list`. It works as a plain user. The commands run as the supervisor, so they run as `cardea-kernel`: `/etc/sudoers.d/cardea-team` lets the `cardea-operators` group (created by the postinst) run only the root-owned `/usr/libexec/cardea-team`, with no arguments, as `cardea-kernel`. The request goes on the helper's standard input, and the helper reads only `/etc/cardea/team.host.json`; `--host` is honoured only for a caller that already is `cardea-kernel`. Add an operator with `adduser NAME cardea-operators`.
+
+Create the host file from the example, owned by `cardea-kernel`, mode `0600`. It may sit in the root-owned `/etc/cardea`: `set` then rewrites it in place. The kit keeps the provisioning document, the pause record and the settings audit in `/var/lib/cardea/team` (created by the postinst) unless the host file's `provisioning` section names other paths. Authority is the kernel's: an operator who may run the helper still needs the supervisor's live authority for every change.
+
 ## Operate and upgrade
 
 Use `systemctl status cardea-kernel` for process state. The authenticated `/v0.2/system` response reports enabled profiles; task receipts/events remain the source of execution evidence. Do not export raw journald logs or configuration as a supposedly redacted support bundle. `/usr/share/doc/cardea-kernel/dependency-inventory.json.gz` records dependency versions and declared license metadata; their installed license files remain in the environment. This is an inventory, not a license or vulnerability audit. Cardea is licensed under [Apache-2.0](../LICENSE) (declared 2026-10-10); this package is still a pre-release for the fixed profile, not a supported public release.

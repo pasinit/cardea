@@ -90,7 +90,13 @@ DEFAULT_BUDGETS: dict[str, Any] = {
     },
     "max_cost_usd_per_run": 1.0,
 }
-
+# Where `provision` reads and writes when the host file's `provisioning` section omits a key.
+PROVISIONING_DEFAULTS: dict[str, Any] = {
+    "base": "/etc/cardea/provision.base.json",
+    "out": "/etc/cardea/provision.json",
+    "config": "/etc/cardea/config.json",
+    "cardea": [*KIT_PYTHON, "-I", "-m", "cardea.service"],
+}
 
 DEFAULT_BRANCH = "main"
 # Days before `credentials.expires_on` from which `status` flags the tokens (`warn_days`
@@ -1165,6 +1171,8 @@ def provisioning_fragment(host: dict[str, Any], *, paused: bool = False) -> dict
             *SUPERVISOR_RIGHTS,
             *(g for p in group["spec"]["pools"] for g in p["grants"]),
             *_mail(_names(host)[1], *POOLS),
+            # ... and each developer on its own (`cardea team mail dev.N`).
+            *(f"mail:{member}" for member in developers(host)),
         }
     )
     expires = (datetime.now(UTC) + timedelta(days=int(host.get("grant_days", 14)))).isoformat()
@@ -1369,8 +1377,8 @@ def provision(
         check_walls(host)
     namespace = str(host["namespace"])
     settings = host.get("provisioning") or {}
-    base = Path(settings.get("base", "/etc/cardea/provision.base.json"))
-    out = Path(settings.get("out", "/etc/cardea/provision.json"))
+    base = Path(settings.get("base", PROVISIONING_DEFAULTS["base"]))
+    out = Path(settings.get("out", PROVISIONING_DEFAULTS["out"]))
     document = merge_provisioning(
         json.loads(base.read_text()),
         provisioning_fragment(host, paused=paused),
@@ -1381,8 +1389,8 @@ def provision(
     staged.chmod(0o600)
     os.replace(staged, out)
     # The kernel's own CLI, from the kit's environment (`python -I -m cardea.service`).
-    cardea = list(settings.get("cardea", [*KIT_PYTHON, "-I", "-m", "cardea.service"]))
-    config = settings.get("config", "/etc/cardea/config.json")
+    cardea = list(settings.get("cardea", PROVISIONING_DEFAULTS["cardea"]))
+    config = settings.get("config", PROVISIONING_DEFAULTS["config"])
     runner([*cardea, "provision", "--config", config, str(out)], check=True)
     return out
 
@@ -1498,7 +1506,7 @@ def pause_record_path(host: dict[str, Any]) -> Path:
     kit already writes as root. The kernel cannot answer while the supervisor is disabled,
     so `status` reads this instead."""
     _, group, _, _ = _names(host)
-    out = Path((host.get("provisioning") or {}).get("out", "/etc/cardea/provision.json"))
+    out = Path((host.get("provisioning") or {}).get("out", PROVISIONING_DEFAULTS["out"]))
     return out.with_name(f"{group}.pause.json")
 
 

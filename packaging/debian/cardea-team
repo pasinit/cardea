@@ -1,0 +1,5 @@
+#!/bin/sh
+# Run by members of cardea-operators as cardea-kernel, through sudo and with no arguments
+# (/etc/sudoers.d/cardea-team). The request arrives on standard input; the host file is the
+# fixed /etc/cardea/team.host.json. Root-owned: nothing here may be changed by the caller.
+exec /opt/venvs/cardea-kernel/bin/python -I /usr/lib/cardea/main.py team --helper
