@@ -578,6 +578,7 @@ class RecordSession:
         return SessionResult(text="Created one record.", is_error=False, cost_usd=0.01, turns=2)
 
 
+@pytest.mark.loopback
 def test_agent_runs_use_record_grants_on_the_tool_endpoint(items: Kernel) -> None:
     from cardea.service.agent_run_runtime import AgentRunRuntime
     from cardea.service.models import AgentRunRequest

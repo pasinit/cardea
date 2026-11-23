@@ -467,6 +467,7 @@ def member_tasks(kernel: Kernel) -> list[str]:
         ]
 
 
+@pytest.mark.loopback
 def test_an_idle_holder_keeps_its_claim_until_follow_ups_run_out(
     desk: tuple[Kernel, Any],
 ) -> None:
@@ -521,6 +522,7 @@ def test_an_idle_holder_keeps_its_claim_until_follow_ups_run_out(
     assert json.loads(parts)[1]["data"]["reason"] == "followups_exhausted"
 
 
+@pytest.mark.loopback
 def test_a_failing_holder_loses_its_claim_within_lease_and_a_tick(
     desk: tuple[Kernel, Any],
 ) -> None:
@@ -641,6 +643,7 @@ def test_the_fencing_default_keeps_the_digest(kernel: Kernel) -> None:
     assert changed["spec"]["claims"]["fence_writes"] is False
 
 
+@pytest.mark.loopback
 def test_an_event_only_holder_keeps_its_claim_through_follow_ups(
     desk: tuple[Kernel, Any],
 ) -> None:
@@ -728,6 +731,7 @@ def test_an_attempt_after_a_failed_one_does_not_extend_the_claim(items: Kernel) 
         assert renewal_allowed(items, record_id), progress
 
 
+@pytest.mark.loopback
 def test_a_holder_whose_attempts_all_fail_loses_the_claim_within_the_bound(
     desk: tuple[Kernel, Any],
 ) -> None:

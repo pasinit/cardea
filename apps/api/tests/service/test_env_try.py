@@ -227,6 +227,7 @@ def output(settled: Any) -> dict[str, Any]:
     return result
 
 
+@pytest.mark.loopback
 def test_a_passing_and_a_failing_commit(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:
@@ -256,6 +257,7 @@ def test_a_passing_and_a_failing_commit(
     assert (failed["scenarios"][0]["outcome"], failed["scenarios"][0]["exit_code"]) == ("fail", 3)
 
 
+@pytest.mark.loopback
 def test_the_same_inputs_return_the_same_result_without_running(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:
@@ -278,6 +280,7 @@ def test_the_same_inputs_return_the_same_result_without_running(
     assert run["rerun_of"] == first.receipt_id
 
 
+@pytest.mark.loopback
 def test_a_changed_catalog_is_a_different_run(
     env_kernel: tuple[Kernel, EnvHost],
     repo: dict[str, Any],
@@ -291,6 +294,7 @@ def test_a_changed_catalog_is_a_different_run(
     assert output(again)["cached"] is False and len(host.started) == started + 1
 
 
+@pytest.mark.loopback
 def test_forced_reruns_are_limited_per_commit_and_day(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:
@@ -319,6 +323,7 @@ def submit_and_run(kernel: Kernel, key: str, **arguments: Any) -> str:
     return state
 
 
+@pytest.mark.loopback
 def test_an_identical_call_while_one_runs_is_refused(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:
@@ -339,6 +344,7 @@ def test_an_identical_call_while_one_runs_is_refused(
     assert call(kernel, "third", commit=repo["good"], scenarios=["try"])[0] == "succeeded"
 
 
+@pytest.mark.loopback
 def test_a_failed_run_is_not_reused(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:
@@ -349,6 +355,7 @@ def test_a_failed_run_is_not_reused(
         assert conn.exec_driver_sql("SELECT COUNT(*) FROM env_runs").scalar_one() == 0
 
 
+@pytest.mark.loopback
 @pytest.mark.parametrize(
     ("arguments", "code"),
     [
@@ -424,6 +431,7 @@ def test_artifact_paths_outside_the_checkout_are_refused_in_the_registry(path: s
         Scenario.model_validate({"argv": ["/bin/true"], "artifacts": [path]})
 
 
+@pytest.mark.loopback
 def test_only_a_passing_run_satisfies_the_records_guard(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:
@@ -527,6 +535,7 @@ LINUX = pytest.mark.skipif(
 )
 
 
+@pytest.mark.loopback
 @LINUX
 def test_a_scenario_cannot_write_the_workers_result(
     hostile_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
@@ -542,6 +551,7 @@ def test_a_scenario_cannot_write_the_workers_result(
     assert tried and all(v not in {"written", "read"} for v in tried.values()), tried
 
 
+@pytest.mark.loopback
 @LINUX
 def test_a_detached_background_process_does_not_outlive_its_scenario(
     hostile_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
@@ -569,6 +579,7 @@ def _cmdline(path: Path) -> bytes:
         return b""
 
 
+@pytest.mark.loopback
 @LINUX
 def test_a_scenario_that_kills_the_worker_gets_no_result(
     hostile_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
@@ -580,6 +591,7 @@ def test_a_scenario_that_kills_the_worker_gets_no_result(
 
 
 # The loopback phase (ADR-038 amendment, 2026-11-22).
+@pytest.mark.loopback
 def test_a_loopback_scenario_runs_in_a_second_phase_after_its_fetch(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:
@@ -612,6 +624,7 @@ def test_a_loopback_scenario_runs_in_a_second_phase_after_its_fetch(
     assert len(host.started) == 2
 
 
+@pytest.mark.loopback
 def test_a_failed_dependency_fetch_reports_the_scenario_without_a_second_phase(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:
@@ -628,6 +641,7 @@ def test_a_failed_dependency_fetch_reports_the_scenario_without_a_second_phase(
     assert host.starts == [("try", None)]
 
 
+@pytest.mark.loopback
 def test_other_scenarios_run_in_one_phase_as_before(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:
@@ -637,6 +651,7 @@ def test_other_scenarios_run_in_one_phase_as_before(
     assert host.starts == [("try", None)]
 
 
+@pytest.mark.loopback
 def test_a_host_without_the_loopback_phase_refuses_a_loopback_scenario(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo: dict[str, Any]
 ) -> None:

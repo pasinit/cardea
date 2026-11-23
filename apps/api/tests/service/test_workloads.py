@@ -293,6 +293,7 @@ def test_expectations_must_name_exposed_operations() -> None:
         run_request(expect=[{"operation": "mail.other"}])
 
 
+@pytest.mark.loopback
 def test_unmet_expectation_retries_then_succeeds(
     kernel: Kernel, tools: Tools, session: FakeSession
 ) -> None:
@@ -307,6 +308,7 @@ def test_unmet_expectation_retries_then_succeeds(
     assert len(tools.sent) == 1
 
 
+@pytest.mark.loopback
 def test_unmet_expectation_fails_after_last_attempt(
     kernel: Kernel, tools: Tools, session: FakeSession
 ) -> None:
@@ -320,6 +322,7 @@ def test_unmet_expectation_fails_after_last_attempt(
         assert cast(Any, tx.get_task(task_id).failure).code == "expectation_unmet"
 
 
+@pytest.mark.loopback
 def test_exceeded_expectation_fails_immediately(
     kernel: Kernel, tools: Tools, session: FakeSession
 ) -> None:
@@ -341,6 +344,7 @@ async def sends_then_stalls(client: ClientSession, request: SessionRequest) -> S
     return SessionResult(text="", is_error=True, stop_reason="error_max_turns")
 
 
+@pytest.mark.loopback
 def test_deduplicated_retry_counts_as_one_applied_effect(
     kernel: Kernel, tools: Tools, session: FakeSession
 ) -> None:
@@ -363,6 +367,7 @@ def test_deduplicated_retry_counts_as_one_applied_effect(
     assert sends[1].result is not None and sends[1].result["deduplicated"] is True
 
 
+@pytest.mark.loopback
 def test_deduplicated_call_does_not_satisfy_a_second_required_effect(
     kernel: Kernel, tools: Tools, session: FakeSession
 ) -> None:
@@ -378,6 +383,7 @@ def test_deduplicated_call_does_not_satisfy_a_second_required_effect(
         assert cast(Any, tx.get_task(task_id).failure).code == "expectation_unmet"
 
 
+@pytest.mark.loopback
 def test_distinct_effects_across_attempts_still_exceed_the_expectation(
     kernel: Kernel, tools: Tools, session: FakeSession
 ) -> None:
@@ -399,6 +405,7 @@ def test_distinct_effects_across_attempts_still_exceed_the_expectation(
 # Run evidence
 
 
+@pytest.mark.loopback
 def test_run_view_shows_calls_output_and_evidence(
     kernel: Kernel, tools: Tools, session: FakeSession
 ) -> None:
@@ -438,6 +445,7 @@ def test_run_view_shows_calls_output_and_evidence(
 # Typed responses keep the wire shape
 
 
+@pytest.mark.loopback
 def test_typed_responses_match_what_the_handlers_return(
     kernel: Kernel,
     tools: Tools,

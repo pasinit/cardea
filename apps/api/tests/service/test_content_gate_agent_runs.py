@@ -36,6 +36,8 @@ from cardea.service.models import (
 )
 from cardea.service.operations import OperationContext, OperationDescriptor, Registry
 
+pytestmark = pytest.mark.loopback
+
 PUSH = OperationDescriptor.model_validate(
     {
         "tool": {

@@ -21,6 +21,8 @@ from cardea.service.app import create_app
 from cardea.service.kernel import Kernel
 from cardea.service.models import AgentGroup
 
+pytestmark = pytest.mark.loopback
+
 __all__ = ["setup"]
 
 

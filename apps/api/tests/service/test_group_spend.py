@@ -91,6 +91,7 @@ def test_group_ceiling_refuses_the_third_concurrent_admission(kernel: Kernel) ->
     ]
 
 
+@pytest.mark.loopback
 def test_unused_reservation_is_released_and_unknown_cost_is_kept(
     kernel: Kernel, session: FakeSession
 ) -> None:
@@ -135,6 +136,7 @@ def test_pool_ceiling_is_its_own_account(kernel: Kernel) -> None:
     assert group_window is None and pool_window.startswith("week:Europe/Rome:")
 
 
+@pytest.mark.loopback
 def test_runs_outside_groups_record_cost_and_reserve_nothing(
     kernel: Kernel, session: FakeSession
 ) -> None:
@@ -196,6 +198,7 @@ def supervisor_mail(kernel: Kernel) -> list[list[dict[str, Any]]]:
     return [json.loads(r[0]) for r in found]
 
 
+@pytest.mark.loopback
 def test_window_close_mails_the_supervisor_once(
     kernel: Kernel, session: FakeSession, today: datetime
 ) -> None:
@@ -247,6 +250,7 @@ def stopped_mail(kernel: Kernel) -> list[dict[str, Any]]:
     ]
 
 
+@pytest.mark.loopback
 def test_a_retry_does_not_start_once_the_account_is_spent(
     kernel: Kernel, session: FakeSession
 ) -> None:
@@ -269,6 +273,7 @@ def test_a_retry_does_not_start_once_the_account_is_spent(
     assert rows(kernel, "SELECT state,cost_usd FROM spend_reservations") == [("settled", 1.0)]
 
 
+@pytest.mark.loopback
 def test_a_retry_with_room_left_still_runs(kernel: Kernel, session: FakeSession) -> None:
     put(kernel, spending({"usd": 1.0, "window": "day"}, attempts=2))
     task_id = admit(kernel, "desk.worker.0")
@@ -293,6 +298,7 @@ def approvals_document() -> Any:
     return Provisioning.model_validate(document)
 
 
+@pytest.mark.loopback
 def test_an_approval_continuation_does_not_start_once_the_account_is_spent(
     kernel: Kernel, session: FakeSession
 ) -> None:
@@ -327,6 +333,7 @@ def test_an_approval_continuation_does_not_start_once_the_account_is_spent(
     assert notice["task_id"] == task_id
 
 
+@pytest.mark.loopback
 def test_windowed_any_of_is_met_by_one_alternative(
     kernel: Kernel, session: FakeSession, today: datetime
 ) -> None:
