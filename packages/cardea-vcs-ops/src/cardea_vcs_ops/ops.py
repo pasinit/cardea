@@ -961,7 +961,7 @@ def check_state(runs: list[dict[str, Any]]) -> str:
         return "none"
     if any(r.get("status") != "completed" for r in runs):
         return "pending"
-    if any(r.get("conclusion") not in PASSED for r in runs):
+    if any(r.get("conclusion") not in PASSING for r in runs):
         return "failing"
     return "passing"
 
