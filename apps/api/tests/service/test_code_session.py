@@ -914,3 +914,149 @@ def test_an_unchanged_checkout_reports_no_change(
     monkeypatch.delenv("CARDEA_REPOSITORIES", raising=False)
     output, bundle = run_session(tmp_path, source, "none")
     assert output["changed"] is False and output["head_sha"] is None and not bundle
+
+
+# A record that already has a change: the session starts from that change's head
+
+RECORD = "rec-" + "c" * 32
+
+
+def put_branch(source: Path, tmp_path: Path, branch: str, name: str) -> str:
+    """A commit adding `name` on top of `main`, pushed to `branch` of the bare source."""
+    work = tmp_path / f"work-{branch.replace('/', '-')}"
+    git(tmp_path, "clone", "--quiet", str(source), str(work))
+    git(work, "checkout", "--quiet", "-b", "pushed")
+    (work / name).write_text(name)
+    git(work, "add", name)
+    git(work, "commit", "--quiet", "-m", name)
+    git(work, "push", "--quiet", str(source), f"pushed:refs/heads/{branch}")
+    return git(work, "rev-parse", "HEAD").strip()
+
+
+def evidence_for(branch: str, pushed: str | None, record_id: str = RECORD) -> dict[str, Any]:
+    """The `changes` and `pushes` evidence as the kernel builds it from receipts."""
+
+    def entry(**fields: Any) -> dict[str, Any]:
+        return {
+            "receipt_id": "r",
+            "agent_id": "eng.dev.0",
+            "group": "eng",
+            "at": now().isoformat(),
+            "fields": {"arguments/repository": "app", "arguments/record_id": record_id, **fields},
+        }
+
+    found: dict[str, Any] = {
+        "changes": (
+            entry(
+                **{
+                    "output/number": 7,
+                    "output/url": "https://github.test/acme/app/pull/7",
+                    "output/head": branch,
+                }
+            ),
+        )
+    }
+    if pushed:
+        found["pushes"] = (entry(**{"arguments/branch": branch, "arguments/head": pushed}),)
+    return found
+
+
+def session_for(
+    tmp_path: Path, source: Path, evidence: dict[str, Any], record_id: str | None = RECORD
+) -> tuple[dict[str, Any], bytes]:
+    from cardea_coding_ops.session import session
+
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    script = tmp_path / "harness.py"
+    script.write_text(HARNESS)
+    config: dict[str, Any] = {
+        "harness": {"argv": [sys.executable, str(script)]},
+        "repositories": {"app": {"source": str(source), "gates": []}},
+    }
+    arguments: dict[str, Any] = {
+        "repository": "app",
+        "base_ref": "main",
+        "task": json.dumps({"write": {"second.txt": "second\n"}}),
+    }
+    if record_id:
+        arguments["record_id"] = record_id
+    result = session(arguments, config, scratch, evidence=evidence)
+    assert isinstance(result, WithArtifacts)
+    return result.output, result.artifacts["change.bundle"]
+
+
+def test_a_session_for_a_record_with_a_change_starts_from_its_current_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: Path
+) -> None:
+    monkeypatch.delenv("CARDEA_REPOSITORIES", raising=False)
+    branch = "agent/eng/work"
+    tip = put_branch(source, tmp_path, branch, "first.txt")
+    main = git(source, "rev-parse", "main").strip()
+    # The kernel saw an older push to the branch; the source holds that and more.
+    output, bundle = session_for(tmp_path, source, evidence_for(branch, main))
+    assert output["base_sha"] == tip != main
+    assert output["starting_from"] == {
+        "branch": branch,
+        "number": 7,
+        "url": "https://github.test/acme/app/pull/7",
+    }
+    assert output["changed"] is True and "second.txt" in output["diff_excerpt"]
+    assert "first.txt" not in output["diff_excerpt"]  # only what this session added
+    # The bundle sits on the change's head, so `vcs.push_branch` can extend the same branch.
+    (tmp_path / "change.bundle").write_bytes(bundle)
+    check = tmp_path / "check"
+    git(tmp_path, "clone", "--quiet", "--branch", branch, str(source), str(check))
+    git(check, "bundle", "verify", str(tmp_path / "change.bundle"))
+    git(check, "fetch", "--quiet", str(tmp_path / "change.bundle"), "HEAD:refs/heads/change")
+    assert git(check, "show", "change:first.txt") == "first.txt"
+    assert git(check, "show", "change:second.txt") == "second\n"
+    assert git(check, "rev-parse", "change~1").strip() == tip
+
+
+def test_a_session_without_a_change_for_its_record_starts_from_base_ref(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: Path
+) -> None:
+    monkeypatch.delenv("CARDEA_REPOSITORIES", raising=False)
+    branch = "agent/eng/work"
+    tip = put_branch(source, tmp_path, branch, "first.txt")
+    main = git(source, "rev-parse", "main").strip()
+    # No record named, or evidence for another record: the change is not this session's.
+    cases = {"unnamed": (None, RECORD), "other": (RECORD, "rec-" + "d" * 32)}
+    for name, (record_id, evidenced) in cases.items():
+        directory = tmp_path / name
+        directory.mkdir()
+        output, _ = session_for(directory, source, evidence_for(branch, tip, evidenced), record_id)
+        assert output["base_sha"] == main and output["starting_from"] is None
+
+
+def test_a_session_is_refused_rather_than_started_from_an_older_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: Path
+) -> None:
+    from cardea.service.operations import OperationRejected
+
+    monkeypatch.delenv("CARDEA_REPOSITORIES", raising=False)
+    behind = tmp_path / "behind"
+    behind.mkdir()
+    branch = "agent/eng/work"
+    put_branch(source, tmp_path, branch, "first.txt")
+    # The kernel saw a push the source does not hold yet: the mirror is behind the change.
+    with pytest.raises(OperationRejected) as stale:
+        session_for(behind, source, evidence_for(branch, "f" * 40))
+    assert stale.value.code == "change_head_stale" and "#7" in str(stale.value)
+    # The change's branch is not in the source at all: no fallback to base_ref either.
+    missing = tmp_path / "missing"
+    missing.mkdir()
+    with pytest.raises(OperationRejected) as gone:
+        session_for(missing, source, evidence_for("agent/eng/other", None))
+    assert gone.value.code == "change_head_missing" and "#7" in str(gone.value)
+
+
+def test_code_session_declares_its_record_evidence() -> None:
+    declared = json.loads(DESCRIPTOR.read_text())
+    queries = {q["name"]: q for q in declared["cardea"]["evidence"]}
+    assert queries["changes"]["operation"] == "vcs.open_change"
+    assert queries["pushes"]["operation"] == "vcs.push_branch"
+    assert all(q["match"] == {"arguments/record_id": "/record_id"} for q in queries.values())
+    assert all(q["optional"] for q in queries.values())
+    OperationDescriptor.model_validate(declared)

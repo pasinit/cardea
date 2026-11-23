@@ -328,9 +328,13 @@ def test_only_the_tries_evidence_is_optional() -> None:
     # Every other evidence query still requires the arguments it matches on.
     assert EvidenceQuery(name="x", operation="y.z", match={"arguments/a": "/a"}).optional is False
     queries = {
-        query.name: query.optional
+        (descriptor.name, query.name): query.optional
         for descriptor in in_process_descriptors()
         for query in descriptor.cardea.evidence or ()
     }
-    assert queries.pop("tries") is True
+    # vcs.open_change's `existing` lookup is optional because a first-time
+    # open has no prior record to find; it is idempotency evidence, not a gate.
+    assert queries.pop(("vcs.open_change", "existing")) is True
+    # merge's `tries` evidence is optional only for changes without a try.
+    assert queries.pop(("vcs.merge", "tries")) is True
     assert queries and not any(queries.values())
