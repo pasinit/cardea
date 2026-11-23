@@ -49,6 +49,9 @@ PACKAGES = (
     "python3-venv",
     "curl",
     "xz-utils",
+    # Headless browser for the `screenshots` scenario; the unit stays as confined as before.
+    "chromium",
+    "fonts-dejavu-core",
 )
 # uv for repositories whose scenarios run through it (Cardea's own `make try`, `make teams`).
 UV_VERSION = "0.13.7"  # released 2026-11-03; Apache-2.0 OR MIT

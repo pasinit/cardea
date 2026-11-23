@@ -1,0 +1,10 @@
+{
+  "title": "Weekly orders",
+  "recorded": "2026-11-20",
+  "orders": [
+    {"id": "A-1001", "customer": "Northwind", "total": "120.50", "status": "shipped"},
+    {"id": "A-1002", "customer": "Contoso", "total": "75.00", "status": "pending"},
+    {"id": "A-1003", "customer": "Fabrikam", "total": "310.25", "status": "shipped"},
+    {"id": "A-1004", "customer": "Tailspin", "total": "42.80", "status": "refunded"}
+  ]
+}

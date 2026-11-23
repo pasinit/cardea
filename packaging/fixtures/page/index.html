@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orders</title>
+<style>
+  body { font: 16px/1.4 sans-serif; margin: 0; color: #1b1f24; background: #f6f8fa; }
+  header { padding: 16px; background: #24292f; color: #fff; }
+  main { padding: 16px; max-width: 960px; margin: 0 auto; }
+  table { width: 100%; border-collapse: collapse; background: #fff; }
+  th, td { padding: 8px; text-align: left; border-bottom: 1px solid #d0d7de; }
+  @media (max-width: 480px) { th:nth-child(2), td:nth-child(2) { display: none; } }
+</style>
+</head>
+<body>
+<header><h1 id="title">Loading…</h1></header>
+<main><table><thead><tr><th>Order</th><th>Customer</th><th>Total</th><th>Status</th></tr></thead>
+<tbody id="rows"></tbody></table></main>
+<script>
+fetch("data.json").then((r) => r.json()).then((data) => {
+  document.getElementById("title").textContent = data.title + " (recorded " + data.recorded + ")";
+  const rows = document.getElementById("rows");
+  for (const o of data.orders) {
+    const tr = document.createElement("tr");
+    for (const v of [o.id, o.customer, o.total, o.status]) {
+      const td = document.createElement("td");
+      td.textContent = v;
+      tr.appendChild(td);
+    }
+    rows.appendChild(tr);
+  }
+});
+</script>
+</body>
+</html>
