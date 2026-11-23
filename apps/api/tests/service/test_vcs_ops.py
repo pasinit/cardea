@@ -1244,3 +1244,65 @@ def test_without_a_source_nothing_is_refreshed(
     with Workspace(b"", "0" * 40, "x", Credential(TOKEN, datetime.now(UTC))) as workspace:
         asyncio.run(plain.refresh_source(workspace, plain.repository("cardea"), "b"))
     assert called == []
+
+
+@pytest.mark.loopback
+def test_a_fast_forward_push_moves_the_source_mirror_to_the_new_head(
+    host: FakeGitHub,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    session: FakeSession,
+    vcs: Vcs,
+) -> None:
+    """The mirror is where `code.session` clones from: after a second, fast-forward push to
+    a branch, a session on that branch must start from the new head, not the old one."""
+    repo = host.repositories["acme/cardea"]
+    mirror = tmp_path / "mirror.git"
+    subprocess.run(["git", "init", "--bare", "-q", str(mirror)], check=True)
+    work = tmp_path / "ff"
+    subprocess.run(["git", "init", "-q", "-b", "main", str(work)], check=True)
+    (work / "base.txt").write_text("base\n")
+    fixture_git(work, "add", ".")
+    fixture_git(work, "commit", "-q", "-m", "Base")
+    fixture_git(work, "push", "-q", str(repo.path), "main")
+    fixture_git(work, "push", "-q", str(mirror), "main")
+    branch = "agent/eng/ff"
+    kernel = build_kernel(
+        tmp_path,
+        monkeypatch,
+        session,
+        Registry(in_process(), mirrored(host, tmp_path, str(mirror)).handlers()),
+    )
+    try:
+        heads = []
+        for name in ("one", "two"):
+            base = fixture_git(work, "rev-parse", "HEAD")
+            (work / f"{name}.txt").write_text(f"{name}\n")
+            fixture_git(work, "add", ".")
+            fixture_git(work, "commit", "-q", "-m", name)
+            head = fixture_git(work, "rev-parse", "HEAD")
+            target = tmp_path / f"{name}.bundle"
+            fixture_git(work, "bundle", "create", "-q", str(target), f"{base}..HEAD")
+            content = target.read_bytes()
+            with kernel.database.engine.begin() as conn, borrow(conn) as tx:
+                stored = tx.put_object(
+                    ResourceRef(namespace="eng", resource_id=f"ff-{name}"),
+                    content,
+                    expected_version=0,
+                    producer_id="supervisor",
+                    at=now(),
+                )
+            args = {
+                "repository": "cardea",
+                "branch": branch,
+                "change": stored.model_dump(mode="json"),
+                "head": head,
+            }
+            _, state, (pushed,) = run_calls(kernel, session, [("vcs-push_branch", args)])
+            assert state == "succeeded" and not pushed.is_error, text(pushed)
+            heads.append(head)
+    finally:
+        kernel.database.close()
+    assert repo.head(branch) == heads[1]
+    mirrored_head = fixture_git(mirror, "rev-parse", f"refs/heads/{branch}")
+    assert mirrored_head == heads[1] != heads[0]
