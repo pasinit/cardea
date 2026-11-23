@@ -41,6 +41,15 @@ Further host-file fields:
 
 - **Transitions in the instructions:** every role step that moves an item names the exact call, for example `records.transition with collection "work" and transition "triage"`. The names come from the work collection's own table (`work_transitions`), so renaming or removing a transition fails the render. The team lead is also told that a field, priority or label saying "ready" moves nothing.
 
+## Changing team settings
+
+`teamsettings_apply.py --host HOST.json --settings CHANGE.json` previews a settings change (`teamsettings.py` names the settings) and prints a confirmation token; it changes nothing. Run it again with `--confirm TOKEN` to apply exactly what was previewed (a moved host file or a different change makes the token stale).
+
+- **Path:** the new host file is rendered and validated first, the supervisor's standing is read live from the kernel, then the host file is replaced, `provision` runs and `apply` puts the group as the supervisor, where the kernel checks authority on every write. A refusal puts the old host file back (byte for byte) and provisions the old team again. Pause and resume go through `pause` and `resume`; while paused, other settings wait for a resume.
+- **Audit:** `<group>.settings-audit.jsonl` beside the provisioning file (mode 0600) gets a `started` line before any change (no entry, no change) and an `applied` or `refused` line after: who (the supervisor, or the caller's name), when, and each field's before and after. Goals are recorded by size and digest.
+- **Idempotent:** a change already in effect changes and records nothing.
+- **Secrets:** outside the settings; a document naming one is refused, and failures are reported by exception type and kernel error code only.
+
 How to run it day to day is in the [runbook](../../docs/runbooks/dev-team.md).
 
 ## Repositories without host rules

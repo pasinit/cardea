@@ -99,7 +99,7 @@ check:
 	python3 packaging/check.py
 
 check-test: check-uv
-	cd $(API_DIR) && CARDEA_NO_LOOPBACK=1 "$(UV)" run pytest -m "not loopback" -q -rfE -p no:cacheprovider
+	cd $(API_DIR) && CARDEA_NO_LOOPBACK=1 "$(UV)" run pytest -m "not loopback" -q -rfE --tb=short -p no:cacheprovider
 
 kernel-test: check-uv
 	cd $(API_DIR) && "$(UV)" run pytest tests/kernel
