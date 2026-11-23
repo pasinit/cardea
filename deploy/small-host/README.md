@@ -245,3 +245,21 @@ docker compose -f docker-compose.yml -f docker-compose.cardea.yml up -d
 - With confined workers: `systemctl list-units 'cardea-host-*'` shows one unit per running worker, and none after a run.
 - From the Telos container: a request to `https://CARDEA_PRIVATE_IP:8443/v0.2/system` using the token file gets 200; without the token it gets 401.
 - `GET /v0.2/triggers` lists `telos.<routine-id>` triggers within a minute of Telos starting.
+
+## Unattended updates
+
+`cardea/cardea-update.py` (with `cardea-update.service` and `cardea-update.timer`, every 10
+minutes) deploys the newest `main` commit once every GitHub check on it has passed:
+
+- **Hot** (team kit, role instructions, dashboard pages, operation workers, docs): check out,
+  reinstall ops packages installed as copies, add new descriptors, worker profiles and
+  workers, re-apply the team. No restart, no run cancelled. The kernel reads the helper's
+  worker profiles again every minute, so a changed profile needs no restart either.
+- **Restart** (kernel code and dependencies, operation descriptors): `teamkit.py drain`
+  first (no new runs; the running ones finish), then the same steps, a kernel restart and
+  `apply`, which admits again.
+- **Owner approval**: a change to the host helper or to `deploy/small-host` (what runs as
+  root) waits until the script is run with `--approve`.
+
+It then checks the kernel, the helper and the team's status and goes back to the previous
+commit if any check fails. Each run appends a JSON line to `/var/log/cardea-update.log`.
