@@ -1191,3 +1191,35 @@ def test_a_successful_call_logs_nothing(
         thread = Thread(sent.thread_id, sent.message_id, datetime.now(UTC))
         asyncio.run(transport.poll_replies(thread))
     assert not [r for r in caplog.records if r.name == ROUTES]
+
+
+AGENTMAIL_FIXTURES = Path(__file__).parent / "data" / "agentmail"
+LIST_PARAMS = {"labels", "limit", "page_token"}
+
+
+def test_inbound_poll_sends_only_query_parameters_the_provider_accepts(email: Email) -> None:
+    """Recorded AgentMail bodies (list and get-message) served by a provider that answers 400
+    to any query parameter outside the documented, plain set, as the real one did."""
+    transport = email.transport
+    assert isinstance(transport, AgentMail)
+    listing = (AGENTMAIL_FIXTURES / "list_received.json").read_text()
+    message = (AGENTMAIL_FIXTURES / "message_owner_reply.json").read_text()
+    seen: list[httpx.Request] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        path = request.url.raw_path.decode()
+        assert path.startswith(f"/v0/inboxes/{INBOX_ID}/messages")
+        if set(request.url.params) - LIST_PARAMS:
+            return httpx.Response(400, json={"name": "ValidationError"})
+        if path.endswith("/messages"):
+            return httpx.Response(200, text=listing, headers={"content-type": "application/json"})
+        return httpx.Response(200, text=message, headers={"content-type": "application/json"})
+
+    adapter = AgentMail(transport.config, httpx.MockTransport(answer))
+    since = datetime(2026, 11, 1, tzinfo=UTC)
+    (reply,) = asyncio.run(poll(adapter, since))
+    assert reply.reply_id == "<owner-reply-1@mail.invalid>"
+    assert reply.text == "Yes, go ahead." and reply.authenticated is True
+    listed = [r for r in seen if r.url.path.endswith("/messages")]
+    assert [r.url.params["labels"] for r in listed] == ["received"]

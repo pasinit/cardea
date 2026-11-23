@@ -6,7 +6,7 @@ Endpoints (https://docs.agentmail.to/api-reference, read 2026-11-17), base
   with the same key within 24 hours returns the first message and sends nothing;
 - `GET /inboxes/{inbox_id}/messages?labels=...` to find a send by the label it carries;
 - `GET /inboxes/{inbox_id}/threads/{thread_id}` for the messages on one thread;
-- `GET /inboxes/{inbox_id}/messages?labels=received&after=...` and
+- `GET /inboxes/{inbox_id}/messages?labels=received` and
   `GET /inboxes/{inbox_id}/messages/{message_id}` for inbound mail on no Cardea thread
   (amendment 2026-11-21). Only messages from an allowed address are read in full.
 
@@ -129,11 +129,9 @@ class AgentMail:
         async with self._client() as client:
             token: str | None = None
             for _ in range(MAX_PAGES):
-                params: dict[str, Any] = {
-                    "labels": "received",
-                    "after": since.isoformat(),
-                    "limit": 100,
-                }
+                # No `after`: the window is applied below (`_after`), so the query stays
+                # to the plain parameters `find_sent` already sends successfully.
+                params: dict[str, Any] = {"labels": "received", "limit": 100}
                 if token:
                     params["page_token"] = token
                 response = await client.get(f"/inboxes/{self.inbox}/messages", params=params)
