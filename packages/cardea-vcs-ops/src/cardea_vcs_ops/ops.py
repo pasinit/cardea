@@ -40,8 +40,10 @@ Rules checked here, before any network call:
 """
 
 import asyncio
+import logging
 import os
 import re
+import subprocess
 from collections.abc import Mapping
 from typing import Any
 
@@ -66,6 +68,8 @@ from cardea_vcs_ops.credentials import (
 )
 from cardea_vcs_ops.git import BundleInvalid, Pusher, PushRejected, Workspace, push
 from cardea_vcs_ops.github import DuplicatePull, GitHub, HostRefused
+
+logger = logging.getLogger(__name__)
 
 BRANCH = re.compile(r"^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$")
 MAX_BODY = 4096
@@ -405,6 +409,21 @@ class Vcs:
         credential = await self.credential(repository, context, permissions)
         return GitHub(repository, credential, self.transport)
 
+    async def refresh_mirror(
+        self, alias: object, repository: Repository, credential: Credential
+    ) -> None:
+        """Bring the alias's read-only mirror up to date after an effect, with the call's
+        own credential, so `env.try` can check out the pushed head. Best effort: the effect
+        is done, so a mirror that cannot be written or fetched never fails the call."""
+        if self.registry is None or str(alias) not in self.registry.repositories:
+            return
+        source = self.registry.repositories[str(alias)].source
+        with Workspace(b"", "", repository.git_url, credential) as workspace:
+            try:
+                await asyncio.to_thread(workspace.refresh, source)
+            except (RuntimeError, OSError, subprocess.SubprocessError):
+                logger.warning("could not refresh the mirror for %s", alias)
+
     # vcs.push_branch
 
     async def push_branch(
@@ -437,6 +456,7 @@ class Vcs:
                     current = await host.branch_head(branch)
                 if current == head:
                     # Already there (an earlier attempt or another task): nothing to send.
+                    await self.refresh_mirror(arguments["repository"], repository, credential)
                     return done
                 expected = arguments.get("expected_head")
                 if expected is not None and current != expected:
@@ -448,6 +468,7 @@ class Vcs:
                 raise OperationRejected(str(refused), "host_refused") from None
             except PushRejected as rejected:
                 raise OperationRejected(str(rejected), "push_rejected") from None
+        await self.refresh_mirror(arguments["repository"], repository, credential)
         return done
 
     async def find_branch(
@@ -485,7 +506,8 @@ class Vcs:
         self.check_branch(head, context, arguments["repository"])
         title, body = str(arguments["title"]), str(arguments.get("body") or "")
         self.gate(context, "vcs.open_change", texts={"title": title, "body": body})
-        async with await self.client(repository, context, "pull_requests:write") as host:
+        credential = await self.credential(repository, context, ("pull_requests:write",))
+        async with GitHub(repository, credential, self.transport) as host:
             try:
                 pull = await host.create_pull(head, base, title, body, bool(arguments.get("draft")))
             except DuplicatePull:
@@ -498,6 +520,7 @@ class Vcs:
                 pull = existing
             except HostRefused as refused:
                 raise OperationRejected(str(refused), "host_refused") from None
+        await self.refresh_mirror(arguments["repository"], repository, credential)
         return self._change(pull)
 
     async def find_change(

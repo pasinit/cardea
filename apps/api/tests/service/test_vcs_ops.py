@@ -352,6 +352,40 @@ def test_push_open_comment_review_and_read(
     assert len(host.calls) == pushes
 
 
+def test_a_push_and_a_pull_request_refresh_the_env_mirror(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, vcs: Vcs, tmp_path: Path
+) -> None:
+    """`env.try` clones the registry's `source`; the host-side fetch makes the pushed head
+    known there, using the call's credential, and nothing else."""
+    assert vcs.registry is not None
+    mirror = tmp_path / "mirror.git"
+    subprocess.run(["git", "init", "--bare", "-q", str(mirror)], check=True)
+    entry = vcs.registry.repositories["cardea"]
+    vcs.registry.repositories["cardea"] = entry.model_copy(update={"source": str(mirror)})
+    change = make_change(kernel, tmp_path)
+    branch = "agent/eng/mirrored"
+    _, state, results = run_calls(
+        kernel,
+        session,
+        [
+            ("vcs-push_branch", {"repository": "cardea", "branch": branch, **change}),
+            (
+                "vcs-open_change",
+                {"repository": "cardea", "head": branch, "base": "main", "title": "Mirror"},
+            ),
+        ],
+    )
+    assert state == "succeeded", [text(r) for r in results]
+
+    def known(sha: str) -> bool:
+        found = subprocess.run(["git", "-C", str(mirror), "cat-file", "-e", f"{sha}^{{commit}}"])
+        return found.returncode == 0
+
+    assert known(change["head"]) and not known("f" * 40)
+    # The token never lands in the mirror's configuration.
+    assert TOKEN not in (mirror / "config").read_text()
+
+
 # Refusals before any network call
 
 

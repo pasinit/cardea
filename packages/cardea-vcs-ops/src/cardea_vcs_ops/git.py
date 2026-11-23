@@ -162,6 +162,21 @@ class Workspace:
             # Exit status only: git's stderr may quote the remote; never repeat it.
             raise RuntimeError(f"git push failed with status {pushed.returncode}")
 
+    def refresh(self, mirror: str) -> None:
+        """Fetch the host's branch and pull request heads into the bare `mirror`, so
+        `env.try` (which clones the mirror) knows the commit just pushed."""
+        fetched = subprocess.run(
+            ["git", *SAFE, "--git-dir", mirror, "fetch", "-q", "--no-tags", self.git_url]
+            + ["+refs/heads/*:refs/heads/*", "+refs/pull/*/head:refs/pull/*/head"],
+            cwd=self.work,
+            env=self._environment(),
+            capture_output=True,
+            timeout=120,
+            check=False,
+        )
+        if fetched.returncode != 0:
+            raise RuntimeError(f"git fetch into the mirror failed with status {fetched.returncode}")
+
 
 Pusher = Callable[[Workspace, str], Awaitable[None]]
 
