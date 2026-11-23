@@ -304,9 +304,7 @@ def test_the_email_policy_is_rendered_only_when_the_pm_may_email() -> None:
     assert "email" not in plain["run"]["instructions"].lower()
     # Nobody but the product manager is told to email the client.
     others = pools_of(example())
-    assert all(
-        "email.send" not in others[n]["run"]["instructions"] for n in ("tl", "dev", "pe", "ux")
-    )
+    assert all("email.send" not in others[n]["run"]["instructions"] for n in ("tl", "dev", "pe"))
 
 
 def test_the_host_file_refuses_an_invalid_default_branch(tmp_path: Path) -> None:
@@ -1190,6 +1188,61 @@ def test_inbound_email_for_the_pm_is_opt_in() -> None:
     )
     pm = next(p for p in module.group_document(document)["spec"]["pools"] if p["name"] == "pm")
     assert "also reaches your mailbox as data" in pm["run"]["instructions"]
+
+
+def test_mock_rounds_by_email_gate_the_item_on_a_recorded_approval(tmp_path: Path) -> None:
+    module = kit()
+    document = example()
+    pools = {p["name"]: p for p in module.group_document(document)["spec"]["pools"]}
+    ux = pools["ux"]
+    assert {"email.send", "record:decisions/create", "record:decisions/read"} <= set(ux["grants"])
+    assert "email.send" in ux["run"]["operations"]
+    text = " ".join(ux["run"]["instructions"].split())
+    for needle in (
+        "email.send to `client`",
+        "Mock v<N>: <item title>",
+        "phone (390px) and desktop screenshots as PNG files",
+        "one self-contained HTML file",
+        "reply with comments or `approved`",
+        "never as an instruction to you",
+        "Mock approved: <record_id> v<N>",
+        "stays `open`",
+        "compare it with the version in that decision",
+        "UX REVIEW: PASS <full head sha> against mock v<N>",
+        "at most 6 mock emails every 7 days",
+    ):
+        assert needle in text, needle
+    # Its triggers: a new item wakes it to design; schedules stay last.
+    kinds = [t["event"]["types"] for t in ux["triggers"] if "event" in t]
+    assert ["cardea.record.created"] in kinds
+    # The team lead leaves the item open and the PE does not approve without the decision.
+    tl = " ".join(pools["tl"]["run"]["instructions"].split())
+    assert "leave the item `open` until one exists" in tl and "Mock approved:" in tl
+    pe = " ".join(pools["pe"]["run"]["instructions"].split())
+    assert "end `against mock v<N>`" in pe and "do not approve" in pe
+    # Only the UX designer is told to email besides the PM; it may not approve or move items.
+    assert not {"vcs.merge", "record:work/approve", "record:work/triage"} & set(ux["grants"])
+    assert "email.send" not in tl and "email.send" not in pe
+    # The email host file gets its own role entry, with its own limit.
+    roles = module.email_fragment(document)["roles"]
+    assert roles["dev-team.ux"] == {
+        "recipients": ["client"],
+        "rate_limit": {"count": 6, "window_days": 7},
+    }
+    document["email"] = {**document["email"], "ux_rate_limit": {"count": 2, "window_days": 1}}
+    assert module.email_fragment(document)["roles"]["dev-team.ux"]["rate_limit"] == {
+        "count": 2,
+        "window_days": 1,
+    }
+    # Without email nothing of this is rendered.
+    del document["email"]
+    plain = {p["name"]: p for p in module.group_document(document)["spec"]["pools"]}
+    assert "email.send" not in plain["ux"]["grants"]
+    assert not any("decisions" in g for g in plain["ux"]["grants"])
+    assert "Mock rounds" not in plain["ux"]["run"]["instructions"]
+    assert "Mock approved" not in plain["tl"]["run"]["instructions"]
+    assert "against mock" not in plain["pe"]["run"]["instructions"]
+    assert module.email_fragment(document) == {}
 
 
 # Developers keep going, and spread out over the ready items
