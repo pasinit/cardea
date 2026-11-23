@@ -43,6 +43,9 @@
         "base_sha": {
           "type": "string"
         },
+        "base_checked": {
+          "type": "boolean"
+        },
         "head_sha": {
           "type": [
             "string",

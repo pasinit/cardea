@@ -280,6 +280,7 @@ used by the examples.
 | `merge_not_open` | Only an open, ready pull request can merge | `cardea_vcs_ops.ops` |
 | `merge_not_opened` | No vcs.open_change receipt for this pull request | `cardea_vcs_ops.ops` |
 | `merge_not_opener` | Only the member that opened the pull request may merge it | `cardea_vcs_ops.ops` |
+| `mirror_stale` | the mirror is stale: {…} is at {…} on the repository host, but the mirror has {…}, and the host's commits could not be fetched ({…}); the host owner must refresh the mirror, or let the worker read the host's git endpoint | `cardea_coding_ops.session` |
 | `operation_failed` | no result within {…} s; {…} (HTTP {…}) | `cardea.service.invocation` |
 | `operation_outcome_unknown` | Interrupted operation; no replay | `cardea.service.invocation` |
 | `operation_rejected` | — | `cardea.service.invocation` |

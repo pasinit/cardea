@@ -3,7 +3,10 @@
 One call, no state kept between calls:
 
 1. clone `base_ref` of the repository named by its alias from the host owner's read-only
-   source into a scratch directory, with every git hook and global configuration off;
+   source into a scratch directory, with every git hook and global configuration off. Where
+   the registry names the repository's host, first ask the host's public read endpoint, with
+   no credential, for `base_ref`'s head, and make the checkout exactly that commit (see
+   `checkout_base`);
 2. run the configured headless coding agent (the harness) in the checkout, with the task;
 3. commit what it changed, bundle the commits from `base_ref` and summarize the diff;
 4. run each configured gate in the checkout and record its exit status and output tail;
@@ -30,8 +33,11 @@ import re
 import shutil
 import subprocess
 import tempfile
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from pydantic import JsonValue
 
@@ -282,7 +288,149 @@ def repository_entry(alias: str, config: dict[str, Any]) -> dict[str, Any] | Non
     entry = registry.repositories.get(alias)
     if entry is None:
         return None
-    return {"source": entry.source, "gates": entry.gate_documents()}
+    return {
+        "source": entry.source,
+        "gates": entry.gate_documents(),
+        **{k: getattr(entry, k) for k in HOST_FIELDS if getattr(entry, k) is not None},
+    }
+
+
+HOST_FIELDS = ("owner", "name", "api_url", "git_url")
+RESOLVE_TIMEOUT = 20
+MAX_RESOLVE_BYTES = 65536
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+
+def resolve_head(repository: dict[str, Any], base_ref: str) -> str | None:
+    """`base_ref`'s head commit as the repository host's public read endpoint reports it, or
+    None when it cannot be told: the registry names no host, the repository is not public
+    (the request carries no credential, so the host answers 404), or the endpoint cannot be
+    reached. The caller then keeps the mirror's answer, unchecked, as before."""
+    if not all(repository.get(k) for k in ("owner", "name", "api_url")):
+        return None
+    url = (
+        f"{str(repository['api_url']).rstrip('/')}/repos/{quote(str(repository['owner']))}"
+        f"/{quote(str(repository['name']))}/git/ref/heads/{quote(base_ref, safe='/')}"
+    )
+    # Only these headers: never an Authorization header, whatever the worker's environment
+    # holds. A redirect is not followed, so the request cannot be sent anywhere else.
+    request = urllib.request.Request(
+        url,
+        headers={"Accept": "application/vnd.github+json", "User-Agent": "cardea-code-session"},
+    )
+    try:
+        with urllib.request.build_opener(_NoRedirect).open(request, timeout=RESOLVE_TIMEOUT) as r:
+            sha = json.loads(r.read(MAX_RESOLVE_BYTES))["object"]["sha"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return sha if isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", sha) else None
+
+
+def _fetch_protocols(url: str) -> list[str]:
+    """Git options that let a fetch use only the transport `url` names: https from the host,
+    or a local path (a mirror on this machine); nothing that could carry a credential."""
+    if url.startswith("https://"):
+        allowed = "https"
+    elif url.startswith("/"):
+        allowed = "file"
+    else:
+        raise OperationRejected("the repository's git_url must be an https URL or a local path")
+    return ["-c", "protocol.allow=never", "-c", f"protocol.{allowed}.allow=always"]
+
+
+def _clone(args: list[str], source: object, repo: Path, scratch: Path, env: dict[str, str]) -> bool:
+    done = subprocess.run(
+        [
+            "git",
+            "-c",
+            "core.hooksPath=" + os.devnull,
+            "clone",
+            "--quiet",
+            "--no-hardlinks",
+            "--single-branch",
+            *args,
+            str(source),
+            str(repo),
+        ],
+        cwd=scratch,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+    )
+    return done.returncode == 0
+
+
+def checkout_base(
+    repository: dict[str, Any], base_ref: str, scratch: Path, repo: Path, env: dict[str, str]
+) -> tuple[str, bool]:
+    """Clone `base_ref` into `repo`; return its commit and whether the repository host
+    confirmed that commit (False: no public read endpoint answered, so the mirror's word
+    stands, as it did before).
+
+    The mirror is kept current from outside the sandbox and can lag behind the host: a branch
+    pushed since its last refresh is missing or behind, and a follow-up change built on it
+    cannot fast-forward the branch. So where the registry names the host, `base_ref`'s head
+    is asked of the host's public read endpoint and, if the mirror is not at it, fetched from
+    the host's `git_url` over the same unauthenticated read path (confinement is unchanged:
+    the worker's profile already allows the host's read endpoint for a public repository, and
+    the worker holds no repository-host credential). If that commit still cannot be had, the
+    call is refused with `mirror_stale`: a change on a stale base is worse than no change.
+    """
+    resolved = resolve_head(repository, base_ref)
+    source = repository["source"]
+    mirror_head: str | None = None
+    if _clone(["--branch", base_ref], source, repo, scratch, env):
+        mirror_head = _git(repo, env, "rev-parse", "HEAD").strip()
+    elif resolved is None:
+        raise OperationRejected(f"base_ref {base_ref} could not be checked out")
+    else:
+        # Not in the mirror yet, as a branch pushed since its refresh: take the mirror's
+        # default branch for its objects, so that only the newer commits are fetched.
+        shutil.rmtree(repo, ignore_errors=True)
+        if not _clone(["--no-checkout"], source, repo, scratch, env):
+            raise OperationRejected(f"base_ref {base_ref} could not be checked out")
+    if resolved is None or mirror_head == resolved:
+        return mirror_head or _git(repo, env, "rev-parse", "HEAD").strip(), resolved is not None
+
+    def stale(why: str) -> OperationRejected:
+        return OperationRejected(
+            f"the mirror is stale: {base_ref} is at {resolved} on the repository host, but the "
+            f"mirror has {mirror_head or 'no such branch'}, and the host's commits could not "
+            f"be fetched ({why}); the host owner must refresh the mirror, or let the worker "
+            "read the host's git endpoint",
+            "mirror_stale",
+        )
+
+    git_url = repository.get("git_url")
+    if not git_url:
+        raise stale("the registry has no git_url")
+    try:
+        _git(
+            repo,
+            env,
+            *_fetch_protocols(str(git_url)),
+            "-c",
+            "credential.helper=",
+            "fetch",
+            "--quiet",
+            "--no-tags",
+            str(git_url),
+            f"+refs/heads/{base_ref}:refs/cardea/base",
+        )
+        fetched = _git(repo, env, "rev-parse", "refs/cardea/base").strip()
+    except (RuntimeError, OperationRejected, subprocess.TimeoutExpired):
+        raise stale("the fetch failed") from None
+    if fetched != resolved:
+        raise stale("the branch moved while it was being fetched; retry")
+    _git(repo, env, "checkout", "--quiet", "--force", "-B", base_ref, fetched)
+    _git(repo, env, "update-ref", "-d", "refs/cardea/base")
+    return fetched, True
 
 
 def session(
@@ -298,31 +446,8 @@ def session(
         raise OperationRejected(f"repository {alias} is not allowed on this host")
     base_ref = str(arguments["base_ref"])
     env = environment(scratch)
+    base_sha, base_checked = checkout_base(repository, base_ref, scratch, scratch / "repo", env)
     repo = scratch / "repo"
-    clone = subprocess.run(
-        [
-            "git",
-            "-c",
-            "core.hooksPath=" + os.devnull,
-            "clone",
-            "--quiet",
-            "--no-hardlinks",
-            "--single-branch",
-            "--branch",
-            base_ref,
-            str(repository["source"]),
-            str(repo),
-        ],
-        cwd=scratch,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=300,
-        check=False,
-    )
-    if clone.returncode:
-        raise OperationRejected(f"base_ref {base_ref} could not be checked out")
-    base_sha = _git(repo, env, "rev-parse", "HEAD").strip()
 
     harness = config.get("harness", {})
     timeout = float(harness.get("timeout_seconds", DEFAULT_HARNESS_TIMEOUT))
@@ -431,6 +556,9 @@ def session(
         "repository": alias,
         "base_ref": base_ref,
         "base_sha": base_sha,
+        # Whether the repository host's public read endpoint confirmed base_sha as the head
+        # of base_ref (false: unreachable or not public, so the mirror's word stood).
+        "base_checked": base_checked,
         "head_sha": head_sha,
         "changed": changed,
         "files_changed": files,
