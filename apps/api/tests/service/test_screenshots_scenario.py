@@ -73,6 +73,7 @@ def test_the_catalog_names_screenshots_as_a_loopback_scenario_with_both_artifact
     assert workers["profiles"]["try-loopback"]["network"] == {"policy": "loopback"}
 
 
+@pytest.mark.loopback
 def test_the_runner_serves_the_fixture_and_writes_both_widths(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -100,6 +101,7 @@ def test_chromium_is_confined_to_the_loopback_host() -> None:
     assert "--window-size=390,844" in argv and argv[-1] == "http://127.0.0.1:1/"
 
 
+@pytest.mark.loopback
 def test_the_server_is_loopback_only_and_serves_the_fixture() -> None:
     module = runner()
     server = module.serve(ROOT / "packaging" / "screenshot_fixture")
