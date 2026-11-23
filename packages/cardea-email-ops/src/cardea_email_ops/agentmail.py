@@ -15,7 +15,8 @@ official Python SDK is not used: see ADR-039 for why.
 """
 
 import logging
-from datetime import datetime
+import re
+from datetime import UTC, datetime
 from email.utils import parseaddr
 from typing import Any
 from urllib.parse import quote
@@ -33,17 +34,33 @@ LIST = "GET /inboxes/{inbox_id}/messages"
 MESSAGE = "GET /inboxes/{inbox_id}/messages/{message_id}"
 THREAD = "GET /inboxes/{inbox_id}/threads/{thread_id}"
 MAX_PAGES = 5
+BODY_LIMIT = 500
 # Responses that mean the request was refused before anything was sent. 409 is not one:
 # it means this idempotency key already sent a different request, so an earlier attempt
 # may have sent; the call stays uncertain and the reconciler decides.
 DEFINITE = {400, 401, 403, 404, 413, 422, 429}
 
 
+def _redacted(response: httpx.Response) -> str:
+    """The response body, shortened, with the request's credential removed."""
+    try:
+        text = response.text
+    except (httpx.ResponseNotRead, UnicodeDecodeError):
+        return "<unreadable>"
+    header = response.request.headers.get("authorization", "") if response.request else ""
+    token = header.removeprefix("Bearer ").strip()
+    if token:
+        text = text.replace(token, "[redacted]")
+    text = re.sub(r"(?i)(bearer\s+)[^\s\"']+", r"\1[redacted]", text)
+    return text[:BODY_LIMIT]
+
+
 def _failure(response: httpx.Response, route: str) -> str:
-    """Log a failed call and return its message. Only the status and the route template
-    are reported: the URL names the inbox and the provider's message may echo the request."""
+    """Log a failed call and return its message. The returned message carries only the
+    status and the route template (the URL names the inbox). The log line also carries
+    the provider's body, redacted of credentials, so a rejected request can be diagnosed."""
     message = f"AgentMail answered HTTP {response.status_code} for {route}"
-    logger.warning(message)
+    logger.warning("%s: %s", message, _redacted(response))
     return message
 
 
@@ -131,7 +148,7 @@ class AgentMail:
             for _ in range(MAX_PAGES):
                 params: dict[str, Any] = {
                     "labels": "received",
-                    "after": since.isoformat(),
+                    "after": _stamp(since),
                     "limit": 100,
                 }
                 if token:
@@ -210,6 +227,13 @@ class AgentMail:
                 )
             )
         return found
+
+
+def _stamp(moment: datetime) -> str:
+    """An RFC 3339 UTC timestamp ending in `Z`, so the query value has no `+`."""
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return moment.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 def _after(stamp: object, since: datetime) -> bool:

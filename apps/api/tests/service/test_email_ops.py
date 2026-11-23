@@ -11,7 +11,7 @@ import json
 import os
 import time
 from collections.abc import Iterator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from itertools import count
 from pathlib import Path
 from typing import Any, cast
@@ -1116,7 +1116,8 @@ def test_imap_inbound_mail_past_the_rate_limit_is_rejected(
     assert tally.delivered == 2 and tally.dropped == {"rate_limited": 1}
 
 
-# AgentMail failures are logged and raised by status and route template only
+# AgentMail failures are raised by status and route template only; the log adds the
+# provider's body with credentials redacted
 
 ROUTES = "cardea.email_ops.agentmail"
 LEAK = "leak-" + INBOX_ID
@@ -1140,9 +1141,12 @@ def failing(email: Email, status: int, only: str = "") -> AgentMail:
 def assert_reported(caplog: pytest.LogCaptureFixture, error: Exception, expected: str) -> None:
     assert str(error) == expected
     (record,) = [r for r in caplog.records if r.name == ROUTES]
-    assert record.levelname == "WARNING" and record.getMessage() == expected
+    assert record.levelname == "WARNING" and record.getMessage().startswith(f"{expected}: ")
+    # The body is logged so a rejected request can be diagnosed, but never the credential.
+    assert LEAK in record.getMessage() and API_KEY not in caplog.text
+    assert "[redacted]" in record.getMessage()
     for secret in (API_KEY, INBOX_ID, LEAK, CLIENT, "m-1", "t-1"):
-        assert secret not in caplog.text and secret not in str(error)
+        assert secret not in str(error)
 
 
 @pytest.mark.parametrize("status", [400, 401, 403, 404, 413, 422, 429, 409, 500, 503])
@@ -1178,6 +1182,25 @@ def test_a_failed_read_reports_only_the_status_and_route(
 
 def poll(adapter: AgentMail, since: datetime) -> Any:
     return adapter.poll_inbound((CLIENT,), since, frozenset())
+
+
+def test_the_inbound_poll_sends_a_percent_encoded_utc_query(
+    email: Email, provider: FakeAgentMail
+) -> None:
+    transport = email.transport
+    assert isinstance(transport, AgentMail)
+    since = datetime(2026, 11, 23, 9, 30, 15, 123456, tzinfo=UTC)
+    asyncio.run(poll(transport, since))
+    (request,) = [r for r in provider.requests if r.url.path.endswith("/messages")]
+    query = request.url.query.decode()
+    assert "+" not in query and "%2B" not in query
+    assert request.url.params["after"] == "2026-11-23T09:30:15.123456Z"
+    # A non-UTC offset is converted, never sent with a raw `+`.
+    provider.requests.clear()
+    local = datetime(2026, 11, 23, 11, 0, tzinfo=timezone(timedelta(hours=2)))
+    asyncio.run(poll(transport, local))
+    assert provider.requests[0].url.params["after"] == "2026-11-23T09:00:00Z"
+    assert "+" not in provider.requests[0].url.query.decode()
 
 
 def test_a_successful_call_logs_nothing(
