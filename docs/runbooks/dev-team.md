@@ -169,7 +169,7 @@ The `work` and `decisions` collections stay, for the record. Delete them with `D
 4. **The PM's runs.**
    - Each slot made an `env.try` receipt for main's head, and each failure became a work item.
    - Each feature item states a user problem, the proposed behaviour and acceptance criteria within the goals.
-   - Any email to the client is one short preference question ("X or Y?"), never a status report. A reply arrives in the PM's mailbox and is optional; work never waited for it.
+   - Only the PM and the UX designer email the client. Any such email is one short preference question ("X or Y?") with the options and the team's pick, never a status report. The host's `email.rate_limit` (default 10 a day) bounds the PM's; `email.mock_rate_limit` (default 10 every 7 days, validated the same way) bounds the UX designer's, which also covers mock emails. The owner's replies to a mock arrive at the PM (with `email.inbound`), who relays them to the UX designer by mail. A reply arrives in the sender's mailbox and is optional; work never waited for it.
    - To change direction, edit `product` in the host file and `apply` again.
 5. **Credentials.** No token expires within a week (`expires_on` in the vcs host file). No grant expires before the next `provision`.
 6. **The host.**

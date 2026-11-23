@@ -27,8 +27,8 @@
   "email": {
     "alias": "client",
     "rate_limit": {
-      "count": 3,
-      "window_days": 7
+      "count": 10,
+      "window_days": 1
     }
   },
   "env_try": {
