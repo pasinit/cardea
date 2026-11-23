@@ -161,7 +161,7 @@ CONNECT = (
     "    with socket.socket() as s:\n"
     "        try:\n"
     "            s.connect(('127.0.0.1', 9))\n"
-    "        except ConnectionRefusedError:\n"
+    "        except OSError:  # refused, or no loopback at all; the guard raises RuntimeError\n"
     "            pass\n"
 )
 

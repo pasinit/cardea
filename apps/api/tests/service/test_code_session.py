@@ -665,11 +665,12 @@ def test_a_setting_that_disagrees_with_the_profile_is_refused_before_anything_ru
 
 
 def test_dependency_settings_are_checked(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cardea_coding_ops.session import dependency_env, fixed_env
+    from cardea_coding_ops.session import PROXY_NAMES, dependency_env, fixed_env
 
     from cardea.service.operations import OperationRejected
 
-    for name in ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy", "CARDEA_REGISTRIES"):
+    # Every proxy variable, as a sandbox may set NO_PROXY and the like beside the proxies.
+    for name in (*PROXY_NAMES, "CARDEA_REGISTRIES"):
         monkeypatch.delenv(name, raising=False)
     # Not told by the helper (no networked unit): the cache is the only option.
     assert dependency_env({}) == {} and dependency_env({"dependencies": "cache"}) == {}
@@ -824,6 +825,7 @@ def test_a_gate_that_kills_the_worker_reports_nothing(
         "'commit', '-qm', 'gate commit'])",
     ],
 )
+@pytest.mark.loopback
 def test_a_gate_that_changes_the_checkout_is_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: Path, script: str
 ) -> None:

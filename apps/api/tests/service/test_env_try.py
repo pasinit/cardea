@@ -769,6 +769,7 @@ def attach_call(
     return state, failure.message if failure is not None else ""
 
 
+@pytest.mark.loopback
 def test_the_result_is_linked_to_the_item_without_touching_its_claim(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:
@@ -793,6 +794,7 @@ def test_the_result_is_linked_to_the_item_without_touching_its_claim(
     assert [link["observed_state"] for link in stored(kernel)["links"]] == ["pass", "fail"]
 
 
+@pytest.mark.loopback
 def test_a_role_without_the_grant_is_refused_naming_it_and_nothing_runs(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:
@@ -808,6 +810,7 @@ def test_a_role_without_the_grant_is_refused_naming_it_and_nothing_runs(
     assert call(kernel, "plain", commit=repo["good"], scenarios=["try"])[0] == "succeeded"
 
 
+@pytest.mark.loopback
 def test_authority_is_read_live_when_the_result_is_recorded(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -826,6 +829,7 @@ def test_authority_is_read_live_when_the_result_is_recorded(
     assert stored(kernel)["links"] == []
 
 
+@pytest.mark.loopback
 def test_a_repeated_idempotency_key_adds_one_entry(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:
@@ -841,6 +845,7 @@ def test_a_repeated_idempotency_key_adds_one_entry(
     assert entry["external_id"] == "one-key"
 
 
+@pytest.mark.loopback
 def test_a_cached_result_is_linked_to_another_item_by_its_own_receipt(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:
