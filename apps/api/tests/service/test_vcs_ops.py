@@ -1014,3 +1014,22 @@ def test_a_record_with_an_open_pull_request_cannot_open_another_on_a_different_h
     )
     assert not free.is_error and free.structured_content["number"] != first
     assert not bare.is_error and bare.structured_content["number"] == first
+
+
+@pytest.mark.loopback
+def test_a_closed_pull_request_does_not_hold_the_record(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path
+) -> None:
+    first = open_pull(kernel, session, tmp_path, name="one")
+    change = make_change(kernel, tmp_path, message="Second")
+    run_calls(
+        kernel,
+        session,
+        [("vcs-push_branch", {"repository": "cardea", "branch": "agent/eng/two", **change})],
+    )
+    run_calls(kernel, session, [open_for(RECORD, "agent/eng/one")])
+    closing = host.repositories["acme/cardea"].pull(first)
+    assert closing is not None
+    closing["state"] = "closed"
+    _, _, (second,) = run_calls(kernel, session, [open_for(RECORD, "agent/eng/two")])
+    assert not second.is_error and second.structured_content["number"] != first
