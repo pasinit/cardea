@@ -655,11 +655,12 @@ def test_a_setting_that_disagrees_with_the_profile_is_refused_before_anything_ru
 
 
 def test_dependency_settings_are_checked(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cardea_coding_ops.session import dependency_env, fixed_env
+    from cardea_coding_ops.session import PROXY_NAMES, dependency_env, fixed_env
 
     from cardea.service.operations import OperationRejected
 
-    for name in ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy", "CARDEA_REGISTRIES"):
+    # The host (a confined worker) may set any of these; the test sets what it needs.
+    for name in (*PROXY_NAMES, "CARDEA_REGISTRIES"):
         monkeypatch.delenv(name, raising=False)
     # Not told by the helper (no networked unit): the cache is the only option.
     assert dependency_env({}) == {} and dependency_env({"dependencies": "cache"}) == {}

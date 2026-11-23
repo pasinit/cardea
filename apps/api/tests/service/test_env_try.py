@@ -514,6 +514,7 @@ def _cmdline(path: Path) -> bytes:
 
 
 @LINUX
+@pytest.mark.loopback
 def test_a_scenario_that_kills_the_worker_gets_no_result(
     hostile_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:
