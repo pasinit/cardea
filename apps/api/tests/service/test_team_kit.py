@@ -69,7 +69,8 @@ def test_the_example_renders_valid_documents(tmp_path: Path) -> None:
     }
     assert vcs["allow_approve"] == ["dev-team.pe"]
     email = json.loads((tmp_path / "email.team.json").read_text())
-    assert email["roles"]["dev-team.pm"]["recipients"] == ["client"]
+    assert set(email["roles"]) == {"dev-team.pm", "dev-team.ux"}
+    assert all(r["recipients"] == ["client"] for r in email["roles"].values())
 
 
 def test_the_triggers_are_the_planned_ones() -> None:
@@ -297,16 +298,50 @@ def test_the_email_policy_is_rendered_only_when_the_pm_may_email() -> None:
     text = pm["run"]["instructions"]
     assert "email.send to `client`" in text and '"X or Y?"' in text
     assert "never wait for it and never let it block work" in text
-    assert "Never email status reports" in text and "at most 3 emails every 7 days" in text
+    assert "never a status report" in text and "the team's pick" in text
+    assert "at most 10 emails every 1 days" in text
     del document["email"]
     plain = pools_of(document)["pm"]
     assert "email.send" not in plain["grants"] and "email.send" not in plain["run"]["operations"]
     assert "email" not in plain["run"]["instructions"].lower()
-    # Nobody but the product manager is told to email the client.
+    # Nobody but the product manager and the UX designer may email the client.
     others = pools_of(example())
-    assert all(
-        "email.send" not in others[n]["run"]["instructions"] for n in ("tl", "dev", "pe", "ux")
-    )
+    for name in ("tl", "dev", "pe"):
+        assert "email.send" not in others[name]["grants"], name
+        assert "email.send" not in others[name]["run"]["operations"], name
+        assert "email.send" not in others[name]["run"]["instructions"], name
+    ux = others["ux"]
+    assert "email.send" in ux["grants"] and "email.send" in ux["run"]["operations"]
+    assert "email.send to `client`" in ux["run"]["instructions"]
+    assert "the team's pick" in ux["run"]["instructions"]
+    assert "never a status report" in ux["run"]["instructions"]
+    assert "email.send" not in pools_of(document)["ux"]["grants"]
+
+
+def test_the_email_rate_limit_is_a_host_setting() -> None:
+    document = example()
+    document["email"] = {**document["email"], "rate_limit": {"count": 4, "window_days": 2}}
+    fragment = kit().email_fragment(document)
+    expected = {"count": 4, "window_days": 2}
+    assert all(r["rate_limit"] == expected for r in fragment["roles"].values())
+    assert "at most 4 emails every 2 days" in pools_of(document)["ux"]["run"]["instructions"]
+    del document["email"]["rate_limit"]
+    assert kit().email_fragment(document)["roles"]["dev-team.pm"]["rate_limit"]["count"] == 10
+
+
+@pytest.mark.parametrize(
+    "limit",
+    [{"count": 0, "window_days": 1}, {"count": 10}, {"count": "10", "window_days": 1}, 5]
+    + [{"count": 10, "window_days": 91}, {"count": True, "window_days": 1}],
+)
+def test_the_email_rate_limit_must_be_valid(tmp_path: Path, limit: object) -> None:
+    module = kit()
+    document = example()
+    document["email"] = {**document["email"], "rate_limit": limit}
+    path = tmp_path / "team.host.json"
+    path.write_text(json.dumps(document))
+    with pytest.raises(module.HostError, match="email.rate_limit"):
+        module.load_host(path)
 
 
 def test_the_host_file_refuses_an_invalid_default_branch(tmp_path: Path) -> None:
@@ -1040,8 +1075,8 @@ def test_every_role_may_mail_and_answer_the_supervisor() -> None:
         assert "A message from the supervisor is from the owner" in text, pool["name"]
         assert f'a reply to the supervisor, `{{"instance": "{supervisor}"}}`' in text
     pm = pools_of(document)["pm"]["run"]["instructions"]
-    assert "asks for a status report: then email one short report" in pm
-    assert "at most 3 emails every 7 days" in pm
+    assert "never a status report" in pm
+    assert "at most 10 emails every 1 days" in pm
 
 
 def test_roles_are_told_the_addresses_they_may_mail() -> None:
