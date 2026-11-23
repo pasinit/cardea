@@ -972,6 +972,12 @@ class GroupEventMatch(Record):
 
 
 class GroupTrigger(Record):
+    # A named trigger's ID is `<member>.<name>`; an unnamed one's is `<member>.t<n>`, `n`
+    # counting the unnamed triggers only. A trigger's kind is immutable, so a name keeps an
+    # optional trigger's ID from shifting the others' when it comes and goes.
+    name: (
+        Annotated[str, Field(strict=True, pattern=r"^(?!t[0-9]+$)[a-z][a-z0-9-]{0,23}$")] | None
+    ) = None
     schedule: GroupSchedule | None = None
     event: GroupEventMatch | None = None
 
@@ -1152,6 +1158,13 @@ class GroupPool(Record):
     def distinct_grants(self) -> Self:
         if len(set(self.grants)) != len(self.grants):
             raise ValueError("A pool repeats a grant")
+        return self
+
+    @model_validator(mode="after")
+    def distinct_trigger_names(self) -> Self:
+        names = [t.name for t in self.triggers if t.name is not None]
+        if len(set(names)) != len(names):
+            raise ValueError("A pool repeats a trigger name")
         return self
 
 

@@ -534,3 +534,35 @@ def test_groups_reference_existing_collections_of_their_supervisor(kernel: Kerne
             dry_run=False,
         )
     assert put(kernel, other)["change"] == "created"
+
+
+def test_a_named_trigger_does_not_shift_the_unnamed_ones(kernel: Kernel) -> None:
+    hourly = {"schedule": {"cron": "0 * * * *", "timezone": "UTC", "misfire": "skip"}}
+    daily = {"schedule": {"cron": "0 9 * * *", "timezone": "UTC", "misfire": "skip"}}
+    woken = {"name": "woken", "event": {"types": ["cardea.record.created"]}}
+    one = {"replicas": 1}
+    put(kernel, manifest(pool(triggers=[hourly, daily], **one)))
+    # Added before the unnamed triggers: they keep their IDs, kinds and definitions.
+    added = put(kernel, manifest(pool(triggers=[woken, hourly, daily], **one)))["plan"]
+    assert added["triggers_installed"] == ["desk.worker.0.woken"]
+    assert added["triggers_updated"] == [] and added["triggers_removed"] == []
+    # Dropped again: only the named trigger goes.
+    dropped = put(kernel, manifest(pool(triggers=[hourly, daily], **one)))["plan"]
+    assert dropped["triggers_removed"] == ["desk.worker.0.woken"]
+    assert rows(kernel, "SELECT trigger_id FROM triggers WHERE removed=0 ORDER BY 1") == [
+        ("desk.worker.0.t0",),
+        ("desk.worker.0.t1",),
+    ]
+
+
+@pytest.mark.parametrize("name", ["t0", "T", "a_b", "1a"])
+def test_trigger_names_cannot_collide_with_positional_ids(name: str) -> None:
+    trigger = {"name": name, "event": {"types": ["x"]}}
+    with pytest.raises(ValueError):
+        AgentGroup.model_validate(manifest(pool(triggers=[trigger])))
+
+
+def test_trigger_names_are_distinct_within_a_pool() -> None:
+    trigger = {"name": "a", "event": {"types": ["x"]}}
+    with pytest.raises(ValueError):
+        AgentGroup.model_validate(manifest(pool(triggers=[trigger, trigger])))
