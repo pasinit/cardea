@@ -65,8 +65,6 @@ class Repository(Record):
     api_url: Annotated[str, Field(strict=True, pattern=r"^(https://|http://127\.0\.0\.1)")]
     # Where branches are pushed, for example `https://github.com/<owner>/<name>.git`.
     git_url: Annotated[str, Field(strict=True, min_length=1, max_length=512)]
-    # The read-only mirror `code.session` clones, a local path; a push is mirrored there.
-    source: Annotated[str, Field(strict=True, min_length=1, max_length=512)] | None = None
 
 
 class FixedTokenConfig(Record):
