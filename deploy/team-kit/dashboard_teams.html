@@ -23,6 +23,16 @@
   th, td { text-align: left; padding: .2rem .6rem .2rem 0; vertical-align: top; }
   th { font-weight: 600; color: #57606a; }
   .muted { color: #57606a; }
+  .small { font-size: .8rem; margin: 0 0 .3rem; }
+  .banner { display: flex; gap: .75rem; align-items: flex-start; margin: .5rem 0 1rem; padding: .75rem 1rem; border: 1px solid #9a6700; border-left-width: 6px; border-radius: 6px; background: #fff4d6; color: #3d2f00; }
+  .banner h2 { margin: 0 0 .25rem; font-size: 1.1rem; color: inherit; }
+  .banner p { margin: 0 0 .25rem; }
+  .banner-error { flex-direction: column; border-color: #b42318; background: #ffebe9; color: #5c0f0a; }
+  .pause-icon { display: inline-flex; gap: 4px; flex: none; width: 24px; height: 24px; padding: 3px 4px; }
+  .pause-icon span { flex: 1; background: #3d2f00; border-radius: 1px; }
+  button { font: inherit; }
+  .retry { min-height: 44px; min-width: 44px; padding: .5rem 1rem; border: 1px solid #b42318; border-radius: 6px; background: #fff; color: #5c0f0a; cursor: pointer; }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px solid #0969da; outline-offset: 2px; }
   .bad { color: #b42318; }
   .filters { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: .75rem; }
   .filters select, .filters input, .filters button { font: inherit; padding: .3rem .5rem; max-width: 100%; }
@@ -30,14 +40,20 @@
   .message { background: #fff; border: 1px solid #d0d7de; border-radius: 6px; padding: .5rem .7rem; margin-bottom: .5rem; }
   .message .head { color: #57606a; font-size: .85rem; }
   .message pre { margin: .35rem 0 0; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
-  @media (max-width: 600px) { body { margin: .6rem; font-size: 15px; } .filters > * { flex: 1 1 100%; } }
+  @media (max-width: 600px) {
+    body { margin: 0; padding: 16px; font-size: 15px; }
+    #tabs button, .filters select, .filters input, .filters button { min-height: 44px; }
+    #tabs button { flex: 1 1 100%; text-align: left; }
+    .filters > * { flex: 1 1 100%; }
+  }
 </style>
 </head>
 <body>
 <h1>Teams <span class="muted">(read-only)</span></h1>
-<div id="tabs" role="tablist">Loading…</div>
-<div id="team"></div>
+<div id="tabs" role="tablist"></div>
+<div id="team"><div class="banner" role="status">Checking team status…</div></div>
 <h3>Mail</h3>
+<p id="mail-note" class="muted small" hidden>Read-only while paused</p>
 <div id="mail"></div>
 <script src="/dashboard_teams.js"></script>
 </body>

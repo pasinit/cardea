@@ -13,8 +13,9 @@ write path here. The sections read what the kernel already stores and call no ou
 service: `changes` is what the kernel's own `vcs.*` receipts record, not the host's live view,
 and message bodies and record data beyond a clipped title are never returned.
 
-A team paused by disabling its supervisor refuses this API like every other (the supervisor
-has no live authority); `standing` reports what a still-readable team has paused or waived.
+A team paused by disabling its supervisor stays readable here, and in the overview, by that
+supervisor: the same ownership and live `groups.manage` checks apply, only the disabled flag
+is not a refusal, because these routes change nothing. Every other route still refuses it.
 """
 
 import json
@@ -61,9 +62,7 @@ def _check(conn: sa.Connection, proof: Proof, namespace: str, name: str) -> tupl
 
     principal = proof.resolve(conn)
     _owned(conn, principal, namespace, name)
-    policy = Policy(conn)
-    policy.principal(principal)
-    policy.require(principal, namespace, "groups.manage")
+    Policy(conn).require_paused_read(principal, namespace, "groups.manage")
     spec_json = conn.exec_driver_sql(
         "SELECT spec_json FROM agent_groups WHERE namespace=? AND name=?", (namespace, name)
     ).scalar_one()

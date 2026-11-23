@@ -186,12 +186,84 @@ def test_the_mail_view_is_refused_to_anyone_but_the_groups_supervisor(
     for who in ("sup-desk", "runtime"):
         status, body = mail(eng(kernel, who), team="eng")
         assert (status, body) == (404, {"code": "group_not_found"})
-    # Authority is checked live: a supervisor disabled since the page opened is refused.
+    # Authority is checked live: a supervisor whose grant lapsed since the page opened is refused.
     backend = eng(kernel)
     assert mail(backend, team="eng")[0] == 200
     with kernel.database.engine.begin() as conn:
+        conn.exec_driver_sql("DELETE FROM policies WHERE principal_id='sup-eng'")
+    assert mail(backend, team="eng") == (403, {"code": "authority_denied"})
+
+
+@pytest.mark.loopback
+def test_a_paused_team_is_still_readable_by_its_supervisor(team: tuple[Kernel, str, str]) -> None:
+    kernel, _, _ = team
+    backend = eng(kernel)
+    with kernel.database.engine.begin() as conn:
         conn.exec_driver_sql("UPDATE principals SET disabled=1 WHERE principal_id='sup-eng'")
-    assert mail(backend, team="eng") == (403, {"code": "principal_disabled"})
+    assert mail(backend, team="eng")[0] == 200
+    status, body = call(backend, "GET", "/api/status")
+    found = body["teams"][0]
+    assert status == 200 and "error" not in found and found["view"]["group"] == "eng-team"
+    # Others stay refused, and so does a write by the disabled supervisor.
+    for who in ("sup-desk", "runtime"):
+        assert mail(eng(kernel, who), team="eng") == (404, {"code": "group_not_found"})
+    with kernel.database.engine.begin() as conn:
+        conn.exec_driver_sql("DELETE FROM policies WHERE principal_id='sup-eng'")
+    assert mail(backend, team="eng") == (403, {"code": "authority_denied"})
+
+
+def paused_backend(**extra: Any) -> Any:
+    record = {"paused_at": "2026-11-23T14:05:00+00:00", "reason": "budget review", **extra}
+    view = fixture()
+    for pool in view["pools"]:
+        for member in pool["members"]:
+            member["disabled"] = True
+    return teams().TeamsBackend({"dev": lambda: view}, pauses={"dev": lambda: record})
+
+
+@pytest.mark.loopback
+def test_a_paused_team_carries_its_pause_since_and_reason() -> None:
+    _, body = call(paused_backend(), "GET", "/api/status")
+    found = body["teams"][0]
+    assert found["state"] == "paused" and "view" in found
+    assert found["pause"] == {"since": "2026-11-23T14:05:00+00:00", "reason": "budget review"}
+    _, body = call(paused_backend(reason=None), "GET", "/api/status")
+    assert body["teams"][0]["pause"]["reason"] is None
+    _, body = call(paused_backend(reason="principal_disabled"), "GET", "/api/status")
+    assert body["teams"][0]["pause"]["reason"] == "The team has been paused by the owner."
+    assert "host" not in json.dumps(body) and TOKEN not in json.dumps(body)
+
+
+@pytest.mark.loopback
+def test_a_kernel_that_refuses_a_paused_team_still_shows_it_paused() -> None:
+    refused = type("Refused", (Exception,), {"code": "principal_disabled"})()
+    backend = teams().TeamsBackend({"dev": raising(refused)})
+    _, body = call(backend, "GET", "/api/status")
+    assert body["teams"][0] == {
+        "name": "dev",
+        "state": "paused",
+        "pause": {"since": None, "reason": "The team has been paused by the owner."},
+    }
+
+
+def test_the_page_has_the_paused_banner_states_and_phone_layout() -> None:
+    script = (KIT / "dashboard_teams.js").read_text()
+    page = (KIT / "dashboard_teams.html").read_text()
+    for text in (
+        "Team paused",
+        "Read-only while paused",
+        "Work and mail below are the last known state. Nothing is being processed.",
+        "not given",
+        "We could not load the team status. Try again in a moment.",
+        "Try again",
+        "No work items.",
+        "No messages.",
+    ):
+        assert text in script
+    assert "Checking team status…" in page and 'role="status"' in page
+    assert 'setAttribute("role", "status")' in script and 'el("time"' in script
+    assert "innerHTML" not in script and "Cannot read this team's" not in script
+    assert "min-height: 44px" in page and ":focus-visible" in page and "padding: 16px" in page
 
 
 @pytest.mark.loopback

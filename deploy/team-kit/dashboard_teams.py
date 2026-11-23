@@ -69,6 +69,19 @@ base = load("dashboard")
 DashboardError = base.DashboardError
 
 
+# Plain words for the codes a pause can leave behind; the page never shows a raw code.
+PLAIN_REASONS = {"principal_disabled": "The team has been paused by the owner."}
+MAX_REASON = 200
+
+
+def plain_reason(value: object) -> str | None:
+    """The pause reason as a sentence, or None when it is missing or not text."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    return PLAIN_REASONS.get(text, text[:MAX_REASON])
+
+
 def error_code(error: Exception) -> str:
     """The kernel's error code only: never the exception text, which could carry anything."""
     code = getattr(error, "code", None)
@@ -87,16 +100,36 @@ class TeamsBackend:
         mails: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] | None = None,
         hosts: dict[str, Path] | None = None,
         connect: Callable[[dict[str, Any]], Any] | None = None,
+        pauses: dict[str, Callable[[], dict[str, Any]]] | None = None,
     ) -> None:
         self.sources, self.mails = sources, mails or {}
+        self.pauses = pauses or {}
         self.hosts, self.connect = hosts or {}, connect
+
+    def pause(self, name: str, code: str | None = None) -> dict[str, Any]:
+        """Since when and why a team is paused, as text: the host's pause record, best effort.
+        The record's path and the host file's credentials are never part of it."""
+        try:
+            record = self.pauses[name]() if name in self.pauses else {}
+        except Exception:
+            record = {}
+        since = record.get("paused_at")
+        reason = plain_reason(record.get("reason")) or plain_reason(code)
+        return {"since": since if isinstance(since, str) else None, "reason": reason}
 
     def one(self, name: str) -> dict[str, Any]:
         try:
             view = self.sources[name]()
-            return {"name": name, "state": base.team_state(view), "view": view}
+            state = base.team_state(view)
+            found: dict[str, Any] = {"name": name, "state": state, "view": view}
+            if state == "paused":
+                found["pause"] = self.pause(name)
+            return found
         except Exception as error:  # an unreachable team must not hide the others
-            return {"name": name, "error": error_code(error)}
+            code = error_code(error)
+            if code == "principal_disabled":  # a kernel that still refuses a paused team
+                return {"name": name, "state": "paused", "pause": self.pause(name, code)}
+            return {"name": name, "error": code}
 
     def overview(self) -> dict[str, Any]:
         with ThreadPoolExecutor(max_workers=max(1, len(self.sources))) as pool:
@@ -209,6 +242,12 @@ def kernel_source(
     return read, read_mail
 
 
+def pause_source(host_file: Path) -> Callable[[], dict[str, Any]]:
+    kit = load("teamkit")
+    host = kit.load_host(host_file)
+    return lambda: dict(kit.read_pause_record(host))
+
+
 def fixture_source(path: Path) -> Callable[[], dict[str, Any]]:
     view = json.loads(path.read_text())
     return lambda: view
@@ -233,6 +272,7 @@ def main(argv: list[str]) -> int:
                 {n: read for n, (read, _) in kernels.items()},
                 {n: mail for n, (_, mail) in kernels.items()},
                 dict(read_teams(args.teams)),
+                pauses={n: pause_source(h) for n, h in read_teams(args.teams)},
             )
         else:
             pairs = [item.partition("=") for item in args.fixtures]

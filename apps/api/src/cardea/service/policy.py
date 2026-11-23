@@ -76,7 +76,14 @@ class Policy:
             raise Fault("principal_disabled", "Principal is unknown or disabled")
         return row
 
-    def require(self, principal: str, namespace: str, operation: str, mode: str = "allow") -> None:
+    def require(
+        self,
+        principal: str,
+        namespace: str,
+        operation: str,
+        mode: str = "allow",
+        check_disabled: bool = True,
+    ) -> None:
         if (
             self.recovery_prefix
             and operation not in {"tasks.inspect", "objects.read", "events.read"}
@@ -85,12 +92,31 @@ class Policy:
             raise Fault(
                 "restored_scope_sealed", "New execution requires a fresh recovery namespace"
             )
-        self._current_authority(principal, namespace, operation, mode)
+        self._current_authority(principal, namespace, operation, mode, check_disabled)
+
+    def require_paused_read(self, principal: str, namespace: str, operation: str) -> None:
+        """`require` for a read-only view of a team whose supervisor may be disabled (paused).
+
+        The principal must still exist and its grant must still be live; only the disabled flag
+        is not a refusal, so the owner can see what a pause left behind. Nothing here admits a
+        run or a write: every caller is a GET that changes no state.
+        """
+        row = self.conn.exec_driver_sql(
+            "SELECT 1 FROM principals WHERE principal_id=?", (principal,)
+        ).first()
+        if row is None:
+            raise Fault("principal_disabled", "Principal is unknown or disabled")
+        self.require(principal, namespace, operation, check_disabled=False)
 
     def _current_authority(
-        self, principal: str, namespace: str, operation: str, mode: str = "allow"
+        self,
+        principal: str,
+        namespace: str,
+        operation: str,
+        mode: str = "allow",
+        check_disabled: bool = True,
     ) -> None:
-        if principal != "platform":
+        if principal != "platform" and check_disabled:
             self.principal(principal)
         if not self.enforcer.enforce(principal, namespace, operation, mode):
             raise Fault("authority_denied", "Current authority does not permit this operation")
