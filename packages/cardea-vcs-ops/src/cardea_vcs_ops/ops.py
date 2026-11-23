@@ -28,7 +28,9 @@ Rules checked here, before any network call:
 - the repository is an alias from host configuration (its `repo:<alias>` grant is checked
   by the kernel, from the descriptor's `resource`);
 - a pushed branch, and a pull request's head, start with the caller's group prefix;
-- `APPROVE` reviews are refused unless the host owner allows them;
+- `APPROVE` reviews are refused unless the host owner allows them and every check run on
+  the pull request's head passed (`approve_checks_missing|pending|action_required|failed`,
+  naming the checks);
 - `vcs.merge` needs the kernel's own receipts: the caller opened the pull request, and an
   allowed pool approved its current head (ADR-037 amendment 2026-11-17);
 - where the registry sets `require_up_to_date`, `vcs.merge` also needs the head to contain
@@ -85,7 +87,6 @@ MAX_ANNOTATIONS = 5
 MAX_ANNOTATION = 4096
 # All annotations together, so the diff keeps most of the recorded output.
 MAX_ANNOTATION_BYTES = 12288
-PASSED = ("success", "skipped", "neutral")
 # Credential-shaped strings scrubbed from host text returned to an agent: the shapes
 # `env.try` scrubs from log tails (ADR-026's summary rule). Shapes, not assignments, so
 # ordinary code such as `password = form["password"]` reads unchanged.
@@ -555,11 +556,20 @@ class Vcs:
                 "APPROVE reviews are not allowed on this host", "approve_refused"
             )
         self.gate(context, "vcs.review", texts={"review": body})
+        number = int(str(arguments["number"]))
         async with await self.client(repository, context, "pull_requests:write") as host:
+            head = None
+            if event == "APPROVE":
+                # Kernel-enforced, not left to the reviewer's instructions: an approval
+                # needs every check run on the head to have succeeded. The review is pinned
+                # to the head that was checked, so a push in between cannot inherit it.
+                try:
+                    head = str((await host.pull(number))["head"]["sha"])
+                    _approval_checks(await host.check_runs(head))
+                except HostRefused as refused:
+                    raise OperationRejected(str(refused), "host_refused") from None
             try:
-                made = await host.create_review(
-                    int(str(arguments["number"])), event, f"{body}\n\n{marker(context)}"
-                )
+                made = await host.create_review(number, event, f"{body}\n\n{marker(context)}", head)
             except HostRefused as refused:
                 raise OperationRejected(str(refused), "host_refused") from None
         return {
@@ -930,11 +940,15 @@ async def _up_to_date(host: GitHub, base: str, head: str) -> str:
     return str((compared.get("base_commit") or {}).get("sha") or "")
 
 
+# The host counts these conclusions as passing for a required check.
+PASSING = {"success", "neutral", "skipped"}
+
+
 async def _checks(host: GitHub, sha: str) -> list[JsonValue]:
     """The head's check runs, failed ones first, each failed one with CI's annotations:
     bounded, credential shapes scrubbed. Annotations are untrusted text, like a body."""
     runs = await host.check_runs(sha)
-    runs.sort(key=lambda r: r.get("status") == "completed" and r.get("conclusion") in PASSED)
+    runs.sort(key=lambda r: r.get("status") == "completed" and r.get("conclusion") in PASSING)
     checks: list[JsonValue] = []
     room = MAX_ANNOTATION_BYTES
     for run in runs[:MAX_CHECKS]:
@@ -945,7 +959,7 @@ async def _checks(host: GitHub, sha: str) -> list[JsonValue]:
             "conclusion": None if conclusion is None else str(conclusion),
             "url": str(run.get("html_url", "")),
         }
-        failed = status == "completed" and conclusion not in PASSED
+        failed = status == "completed" and conclusion not in PASSING
         counted = (run.get("output") or {}).get("annotations_count")
         if failed and counted and run.get("id") and room > 0:
             kept: list[JsonValue] = []
@@ -963,8 +977,10 @@ async def _checks(host: GitHub, sha: str) -> list[JsonValue]:
 
 
 def _check_runs(runs: list[dict[str, Any]], tried: bool = False) -> None:
-    """Every check run on the head completed with success, and there is at least one,
-    unless the kernel's own `env.try` check passed on the head (`tried`)."""
+    """Every check run on the head completed and passed, and there is at least one,
+    unless the kernel's own `env.try` check passed on the head (`tried`). A run that waits
+    for a maintainer to approve it (`action_required`) is its own refusal: no review can
+    unblock it, so it says who can."""
     if not runs and not tried:
         raise OperationRejected("No check ran on the head", "merge_checks_missing")
     pending = sorted(str(r.get("name")) for r in runs if r.get("status") != "completed")
@@ -972,11 +988,27 @@ def _check_runs(runs: list[dict[str, Any]], tried: bool = False) -> None:
         raise OperationRejected(
             f"Checks still running: {', '.join(pending)[:200]}", "merge_checks_pending"
         )
-    failed = sorted(str(r.get("name")) for r in runs if r.get("conclusion") != "success")
+    waiting = sorted(str(r.get("name")) for r in runs if r.get("conclusion") == "action_required")
+    if waiting:
+        raise OperationRejected(
+            f"Checks wait for a maintainer to approve their run: {', '.join(waiting)[:200]}. "
+            "Neither a review nor a retry starts them; ask the supervisor.",
+            "merge_checks_action_required",
+        )
+    failed = sorted(str(r.get("name")) for r in runs if r.get("conclusion") not in PASSING)
     if failed:
         raise OperationRejected(
             f"Checks did not succeed: {', '.join(failed)[:200]}", "merge_checks_failed"
         )
+
+
+def _approval_checks(runs: list[dict[str, Any]]) -> None:
+    """The same rule for an approval, refused as `approve_checks_<why>`."""
+    try:
+        _check_runs(runs)
+    except OperationRejected as refused:
+        code = refused.code.replace("merge_", "approve_", 1)
+        raise OperationRejected(str(refused), code) from None
 
 
 def _rule(rules: list[dict[str, Any]], kind: str) -> dict[str, Any] | None:

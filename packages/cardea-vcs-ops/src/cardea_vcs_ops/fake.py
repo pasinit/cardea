@@ -335,7 +335,7 @@ class FakeGitHub:
                 item["state"] = {"REQUEST_CHANGES": "CHANGES_REQUESTED", "APPROVE": "APPROVED"}.get(
                     body["event"], "COMMENTED"
                 )
-                item["commit_id"] = pull["head"]["sha"]
+                item["commit_id"] = body.get("commit_id") or pull["head"]["sha"]
             store.setdefault(number, []).append(item)
             kind = "create_comment" if rest[2] == "comments" else "create_review"
             return self._done(kind, httpx.Response(200, json=item))
