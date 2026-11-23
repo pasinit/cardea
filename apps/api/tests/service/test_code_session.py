@@ -241,7 +241,12 @@ def source(tmp_path: Path) -> Path:
 
 
 def coding_config(
-    tmp_path: Path, source: Path, gate_exit: int = 0, legacy: bool = False, **harness: Any
+    tmp_path: Path,
+    source: Path,
+    gate_exit: int = 0,
+    legacy: bool = False,
+    git_url: str | None = None,
+    **harness: Any,
 ) -> Path:
     """`code.session`'s own file (the harness) and the host's repository registry beside it
     (`repositories.json`, ADR-037). `legacy` puts the repositories in the coding file
@@ -254,7 +259,9 @@ def coding_config(
         {"name": "lint", "argv": [sys.executable, str(scripts / "gate.py"), "0"]},
         {"name": "test", "argv": [sys.executable, str(scripts / "gate.py"), str(gate_exit)]},
     ]
-    entries = {"app": {"source": str(source), "gates": gates}}
+    entries: dict[str, Any] = {"app": {"source": str(source), "gates": gates}}
+    if git_url is not None:
+        entries["app"].update(owner="o", name="app", api_url="https://api.invalid", git_url=git_url)
     config: dict[str, Any] = {
         "harness": {
             "argv": [sys.executable, str(scripts / "harness.py")],
@@ -278,9 +285,10 @@ def coding_kernel(
     source: Path,
     gate_exit: int = 0,
     wall_seconds: int = 3600,
+    git_url: str | None = None,
     **binding: Any,
 ) -> tuple[Kernel, LocalHost]:
-    config = coding_config(tmp_path, source, gate_exit)
+    config = coding_config(tmp_path, source, gate_exit, git_url=git_url)
     host = LocalHost(
         profiles(wall_seconds),
         {
@@ -330,6 +338,55 @@ def test_a_session_returns_a_bounded_receipt_and_the_change_as_objects(
     git(check, "bundle", "verify", str(tmp_path / "change.bundle"))
     git(check, "fetch", "--quiet", str(tmp_path / "change.bundle"), "HEAD:refs/heads/change")
     assert git(check, "show", "change:src/app.py") == "print('hello')\n"
+
+
+def advance_host(tmp_path: Path, source: Path) -> tuple[Path, str]:
+    """The repository host: a copy of the mirror plus one fast-forward push the mirror
+    has not caught up with. Returns its path and the new head of `main`."""
+    host = tmp_path / "host.git"
+    git(tmp_path, "clone", "--quiet", "--bare", str(source), str(host))
+    work = tmp_path / "pusher"
+    git(tmp_path, "clone", "--quiet", str(host), str(work))
+    (work / "pushed.txt").write_text("pushed\n")
+    git(work, "add", "pushed.txt")
+    git(work, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "pushed")
+    git(work, "push", "--quiet", "origin", "HEAD:main")
+    return host, git(work, "rev-parse", "HEAD").strip()
+
+
+@pytest.mark.loopback
+def test_a_session_starts_from_the_hosts_live_base_not_the_lagging_mirror(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: Path
+) -> None:
+    host, pushed = advance_host(tmp_path, source)
+    stale = git(source, "rev-parse", "main").strip()
+    assert stale != pushed
+    kernel, _ = coding_kernel(tmp_path, monkeypatch, source, git_url=str(host))
+    task_id = submit(kernel, "code.session", change({"src/app.py": "print('hello')\n"}))
+    assert OperationRuntime(kernel).execute(task_id) == "succeeded"
+    output = receipt(kernel, task_id).result["output"]
+    assert output["base_sha"] == pushed and output["base_source"] == "live"
+    # The mirror is read-only to the session: it was not advanced.
+    assert git(source, "rev-parse", "main").strip() == stale
+    # So the change fast-forwards the pushed branch.
+    (bundle,) = output["artifacts"]
+    (tmp_path / "change.bundle").write_bytes(artifacts.read(kernel.database, bundle))
+    check = tmp_path / "check"
+    git(tmp_path, "clone", "--quiet", str(host), str(check))
+    git(check, "fetch", "--quiet", str(tmp_path / "change.bundle"), "HEAD:refs/heads/change")
+    git(check, "merge-base", "--is-ancestor", pushed, "change")
+
+
+@pytest.mark.loopback
+def test_an_unreachable_host_leaves_the_mirror_commit_and_says_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: Path
+) -> None:
+    kernel, _ = coding_kernel(tmp_path, monkeypatch, source, git_url=str(tmp_path / "missing.git"))
+    task_id = submit(kernel, "code.session", change({"src/app.py": "print('hello')\n"}))
+    assert OperationRuntime(kernel).execute(task_id) == "succeeded"
+    output = receipt(kernel, task_id).result["output"]
+    assert output["base_sha"] == git(source, "rev-parse", "main").strip()
+    assert output["base_source"] == "mirror"
 
 
 @pytest.mark.loopback

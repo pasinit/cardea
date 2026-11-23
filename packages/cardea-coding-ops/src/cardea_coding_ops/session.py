@@ -4,6 +4,9 @@ One call, no state kept between calls:
 
 1. clone `base_ref` of the repository named by its alias from the host owner's read-only
    source into a scratch directory, with every git hook and global configuration off;
+   then, when the alias names its repository host (`git_url`), move that checkout to the
+   host's current `base_ref` with an anonymous read-only fetch, because the mirror only
+   catches up on a timer and can lag a push (the mirror is never written);
 2. run the configured headless coding agent (the harness) in the checkout, with the task;
 3. commit what it changed, bundle the commits from `base_ref` and summarize the diff;
 4. run each configured gate in the checkout and record its exit status and output tail;
@@ -282,7 +285,34 @@ def repository_entry(alias: str, config: dict[str, Any]) -> dict[str, Any] | Non
     entry = registry.repositories.get(alias)
     if entry is None:
         return None
-    return {"source": entry.source, "gates": entry.gate_documents()}
+    return {"source": entry.source, "gates": entry.gate_documents(), "git_url": entry.git_url}
+
+
+def refresh_base(repository: dict[str, Any], base_ref: str, repo: Path, scratch: Path) -> str:
+    """Move the fresh clone to the repository host's live `base_ref`; returns `live` or
+    `mirror`. The fetch is anonymous (no credential is ever in this environment) and goes
+    only into the scratch checkout; a host that cannot be reached or read leaves the
+    mirror's commit, and the output says so."""
+    git_url = repository.get("git_url")
+    if not isinstance(git_url, str) or not git_url:
+        return "mirror"
+    env = environment(scratch)
+    env.update({name: os.environ[name] for name in PROXY_VARIABLES if name in os.environ})
+    try:
+        _git(
+            repo,
+            env,
+            "fetch",
+            "--quiet",
+            "--no-tags",
+            git_url,
+            f"+refs/heads/{base_ref}:refs/cardea/live-base",
+        )
+        live = _git(repo, env, "rev-parse", "--verify", "refs/cardea/live-base^{commit}").strip()
+        _git(repo, env, "reset", "--quiet", "--hard", live)
+    except (RuntimeError, subprocess.TimeoutExpired):
+        return "mirror"
+    return "live"
 
 
 def session(
@@ -322,6 +352,7 @@ def session(
     )
     if clone.returncode:
         raise OperationRejected(f"base_ref {base_ref} could not be checked out")
+    base_source = refresh_base(repository, base_ref, repo, scratch)
     base_sha = _git(repo, env, "rev-parse", "HEAD").strip()
 
     harness = config.get("harness", {})
@@ -431,6 +462,7 @@ def session(
         "repository": alias,
         "base_ref": base_ref,
         "base_sha": base_sha,
+        "base_source": base_source,
         "head_sha": head_sha,
         "changed": changed,
         "files_changed": files,

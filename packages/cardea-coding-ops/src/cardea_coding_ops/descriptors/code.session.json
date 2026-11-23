@@ -43,6 +43,12 @@
         "base_sha": {
           "type": "string"
         },
+        "base_source": {
+          "enum": [
+            "live",
+            "mirror"
+          ]
+        },
         "head_sha": {
           "type": [
             "string",
