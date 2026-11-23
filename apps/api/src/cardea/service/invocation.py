@@ -197,6 +197,8 @@ def _evidence(
         values: list[object] = [query.operation, namespace]
         for path, pointer in query.match.items():
             wanted = _argument(arguments, pointer)
+            if wanted is None and query.optional:
+                continue
             if not isinstance(wanted, str | int | bool):
                 raise Fault(
                     "invalid_arguments", f"Evidence argument {pointer} must be a scalar", 422

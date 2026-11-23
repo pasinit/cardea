@@ -254,7 +254,19 @@ MAX_ITEMS_PER_DEVELOPER = 2
 MAX_START_REFUSALS = 3
 
 
-def developer_instructions(group: str, scenarios: list[str] | None = None) -> str:
+def merge_scenarios(host: dict[str, Any]) -> list[str]:
+    """The `env.try` scenarios that must pass on a pull request's head before vcs.merge.
+
+    Host file `env_try.merge_scenarios`, default `["try"]`; an empty list turns the check
+    off. The kernel records the run bound to the full head SHA (vcs `merge.env_try`), and
+    the developers hold `env.try` to make it.
+    """
+    return list((host.get("env_try") or {}).get("merge_scenarios", ["try"]))
+
+
+def developer_instructions(
+    group: str, scenarios: list[str] | None = None, merge_check: list[str] | None = None
+) -> str:
     """What a developer does in one run, in order, until nothing is left for it.
 
     One run keeps going after a merge or a submit, so a ready item does not wait for the
@@ -264,15 +276,25 @@ def developer_instructions(group: str, scenarios: list[str] | None = None) -> st
     `$member` is the member's own ID (the kernel fills it in per replica).
 
     With `scenarios` (host option `env_try.dev_scenarios`), a developer runs them with
-    env.try on the pushed head before it submits, so CI is not its test loop.
+    env.try on the pushed head before it submits, so CI is not its test loop. With
+    `merge_check` (host option `env_try.merge_scenarios`), it also runs those before vcs.merge.
     """
     branch = f"agent/{group}/<record_id>-<claim_epoch>"
+    tried = (
+        "Before you merge, the kernel needs a passing env.try of the pull request's current "
+        f"head: call env.try with repo, commit (the full 40-character head SHA) and scenarios "
+        f"{', '.join(merge_check)}, and pass the same SHA as head_sha to vcs.merge. A new push "
+        "changes the head and needs a new run. If env.try fails, fix the change instead. "
+        if merge_check
+        else ""
+    )
     return (
         "You are a developer, member $member; your number n is the last part of that ID. "
         "Work in this run until nothing is left for you, in this order. "
         "(1) If you hold an approved item, merge its change with vcs.merge, then move the "
         f"item to done with {call('merge')} (with your claim_epoch). "
-        "Do the same for an approved item no one holds "
+        + tried
+        + "Do the same for an approved item no one holds "
         "(its claim lapsed after the review): vcs.merge refuses with merge_not_opener "
         "unless you opened its pull request, and then the item is its opener's to merge, "
         "so leave it. "
@@ -563,6 +585,7 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
     per_run = float(budgets.get("max_cost_usd_per_run", 1.0))
     schedules = {**DEFAULT_SCHEDULES, **(host.get("schedules") or {})}
     scenarios = list((host.get("env_try") or {}).get("scenarios", ["try"]))
+    merge_check = merge_scenarios(host)
     # Opt-in: scenarios developers run on their pushed head before submitting.
     dev_scenarios = list((host.get("env_try") or {}).get("dev_scenarios", []))
     email = bool((host.get("email") or {}).get("alias"))
@@ -731,12 +754,12 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
                 "vcs.open_change",
                 "vcs.read_change",
                 "vcs.merge",
-                *(["env.try"] if dev_scenarios else []),
+                *(["env.try"] if merge_check or dev_scenarios else []),
                 f"repo:{repo}",
                 *_mail(group, "tl", "pe"),
             ],
             "run": run(
-                developer_instructions(group, dev_scenarios),
+                developer_instructions(group, dev_scenarios, merge_check),
                 [
                     "records.query",
                     "records.transition",
@@ -745,7 +768,7 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
                     "vcs.open_change",
                     "vcs.read_change",
                     "vcs.merge",
-                    *(["env.try"] if dev_scenarios else []),
+                    *(["env.try"] if merge_check or dev_scenarios else []),
                 ],
                 int(timeouts["dev"]),
                 ("tl", "pe"),
@@ -899,7 +922,10 @@ def vcs_fragment(host: dict[str, Any]) -> dict[str, Any]:
         "allow_approve": [f"{group}.pe"],
     }
     if names.get("reviewer_login"):
-        fragment["merge"] = {"reviewer_login": names["reviewer_login"]}
+        fragment["merge"] = {
+            "reviewer_login": names["reviewer_login"],
+            "env_try": merge_scenarios(host),
+        }
     return fragment
 
 

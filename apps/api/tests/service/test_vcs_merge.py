@@ -511,7 +511,7 @@ def test_evidence_queries_keep_old_digests_and_reject_bad_paths() -> None:
     from cardea.service.operations import EvidenceQuery, OperationDescriptor
 
     (merging,) = [d for d in descriptors() if d.name == "vcs.merge"]
-    assert [q.name for q in merging.cardea.evidence or ()] == ["opened", "approvals"]
+    assert [q.name for q in merging.cardea.evidence or ()] == ["opened", "approvals", "tries"]
     plain = merging.model_dump(mode="json")
     del plain["cardea"]["evidence"]
     without = OperationDescriptor.model_validate(plain)

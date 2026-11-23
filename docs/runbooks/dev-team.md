@@ -162,7 +162,7 @@ The `work` and `decisions` collections stay, for the record. Delete them with `D
 1. **Status.** Members are idle or on one run each. No item has been `in_progress` longer than its lease. The spend accounts are under their ceilings, or the supervisor has a notice.
 2. **Supervisor inbox.** Check the ceiling, claim and expectation notices.
 3. **Pull requests.**
-   - Each merged change has the PE's approval at its head, and passing checks.
+   - Each merged change has the PE's approval at its head, and passing checks. With `env_try.merge_scenarios` in the host file (default `try`), the checks are a successful `env.try` receipt for the head SHA; `merge_checks_missing` means none exists.
    - Each open one is moving: reviewed, changed or merged within a day.
    - Nothing was pushed outside `agent/<group>/`.
 4. **The PM's runs.**
