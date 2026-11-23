@@ -533,7 +533,9 @@ def item(kernel: Kernel) -> None:
     """A claimed work item in progress, inserted directly: only its links may change."""
     with kernel.database.engine.begin() as conn:
         conn.exec_driver_sql(
-            "INSERT INTO collections VALUES ('test','work','supervisor',1,'{}','x','t','t')"
+            "INSERT INTO collections(namespace,name,supervisor_id,generation,spec_json,"
+            "spec_digest,created_at,updated_at) "
+            "VALUES ('test','work','supervisor',1,'{}','x','t','t')"
         )
         conn.exec_driver_sql(
             "INSERT INTO records(namespace,collection,record_id,data_json,labels_json,links_json,"
