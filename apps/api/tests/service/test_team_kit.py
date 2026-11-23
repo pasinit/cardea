@@ -78,6 +78,8 @@ def test_the_triggers_are_the_planned_ones() -> None:
 
     assert kinds("pm")[:2] == ["0 9 * * 1-5", "0 15 * * 1-5"]  # twice a day
     assert "env.try" in pools["pm"]["run"]["operations"]
+    assert "vcs.list_changes" in pools["pm"]["run"]["operations"]
+    assert "vcs.list_changes" in pools["pm"]["grants"]
     assert kinds("tl")[0] == "30 8 * * 1-5"
     assert kinds("tl")[1]["types"] == ["cardea.record.created"]
     dev = kinds("dev")
