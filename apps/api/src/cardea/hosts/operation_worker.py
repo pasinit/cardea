@@ -116,6 +116,7 @@ def run(handler: Any, document: dict[str, Any]) -> dict[str, Any]:
         slot_time=recorded.get("slot_time"),
         group=recorded.get("group"),
         inputs=inputs,
+        previous=recorded.get("previous"),
         # Receipts the kernel found for the descriptor's evidence queries (ADR-037).
         evidence={
             str(name): tuple(entries) for name, entries in (recorded.get("evidence") or {}).items()

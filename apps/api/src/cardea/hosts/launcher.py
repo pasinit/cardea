@@ -126,7 +126,9 @@ QUEUE_TIMEOUT = (1, 3600)
 DEFAULT_QUEUE_TIMEOUT = 600
 # `public_web`: any public destination through the proxy, which must refuse non-public
 # addresses (private, loopback, link-local, CGNAT, multicast, reserved); there is no host list.
-NETWORK = {"none", "model_api_only", "allow_list", "public_web"}
+# `loopback`: a private network namespace with TCP on its own loopback and no other route:
+# no proxy, no address of the host, nothing outside (ADR-038 amendment, 2026-11-22).
+NETWORK = {"none", "model_api_only", "allow_list", "public_web", "loopback"}
 HOSTNAME = r"(\*\.)?[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+"
 # Package registries a profile may reach for dependencies (ADR-037 question 8): exact
 # hostnames only, reached over TLS on port 443. No wildcard, no port, no IP address (the
@@ -147,6 +149,7 @@ RESERVED_ENV = {
     "CARDEA_CREDENTIAL",
     "CARDEA_CREDENTIALS",
     "CARDEA_INPUTS",
+    "CARDEA_WORKSPACE",
     "CARDEA_REGISTRIES",
     "NO_PROXY",
 }
@@ -154,6 +157,10 @@ RESERVED_ENV = {
 # so `code.session` can refuse a configuration that claims fewer than the network allows.
 REGISTRIES_ENV = "CARDEA_REGISTRIES"
 CREDENTIAL = "/run/cardea/credential"
+# A job's workspace (ADR-038 amendment): a size-capped tmpfs the helper mounts under the
+# job's staging, bound writable here, which a later `loopback` job may inherit.
+WORKSPACE = "/work"
+WORKSPACE_MB = (1, 8192)
 # A profile's named credentials (ADR-037 amendment 2026-11-17): one file per name here.
 CREDENTIALS = "/run/cardea/credentials"
 CREDENTIAL_PATH = r"/etc/cardea/credentials/[a-z0-9-]{1,64}"
@@ -188,6 +195,8 @@ def validate_profile(entry: object) -> dict[str, Any]:
         "queue_timeout_seconds",
         "input_kb",
         "kernel_callback",
+        "workspace_mb",
+        "inherit_workspace",
     }
     if not {*LIMITS, "network"} <= set(entry) <= {*LIMITS, "network", *optional}:
         raise ValueError("invalid_profile")
@@ -209,6 +218,19 @@ def validate_profile(entry: object) -> dict[str, Any]:
     callback = entry.get("kernel_callback", False)
     declared = entry["network"] if isinstance(entry["network"], dict) else {}
     if type(callback) is not bool or (callback and declared.get("policy") != "allow_list"):
+        raise ValueError("invalid_profile")
+    # A workspace is handed from a networked first phase to a `loopback` second phase, never
+    # the other way: what ran without a network cannot pass anything to a unit that has one.
+    workspace = entry.get("workspace_mb")
+    inherit = entry.get("inherit_workspace", False)
+    if workspace is not None and (
+        type(workspace) is not int
+        or not WORKSPACE_MB[0] <= workspace <= min(WORKSPACE_MB[1], entry["memory_mb"])
+        or inherit
+        or declared.get("policy") == "loopback"
+    ):
+        raise ValueError("invalid_profile")
+    if type(inherit) is not bool or (inherit and declared.get("policy") != "loopback"):
         raise ValueError("invalid_profile")
     concurrency = entry.get("concurrency", 1)
     if type(concurrency) is not int or not CONCURRENCY[0] <= concurrency <= CONCURRENCY[1]:
@@ -241,7 +263,7 @@ def validate_profile(entry: object) -> dict[str, Any]:
     network = entry["network"]
     if not isinstance(network, dict) or network.get("policy") not in NETWORK:
         raise ValueError("invalid_network")
-    if network["policy"] == "none":
+    if network["policy"] in {"none", "loopback"}:
         if set(network) != {"policy"}:
             raise ValueError("invalid_network")
         return entry
@@ -287,7 +309,7 @@ def egress_rules(name: str, network: dict[str, Any]) -> list[str]:
     reached only by CONNECT to port 443, so a registry is TLS only. Every other destination,
     the host's own and private addresses included, falls to the file's deny rules.
     """
-    if network["policy"] == "none":
+    if network["policy"] in {"none", "loopback"}:
         return []
     if network["policy"] == "public_web":
         return [f"http_access allow {name}_port"]
@@ -399,8 +421,11 @@ def confined_command(
     profile: dict[str, Any],
     worker: dict[str, Any],
     inputs: bool = False,
+    workspace: Path | None = None,
 ) -> list[str]:
-    """The M2 systemd + bubblewrap composition, parameterized only by host-owner values."""
+    """The M2 systemd + bubblewrap composition, parameterized only by host-owner values.
+
+    `workspace` is a host directory bound writable at `/work` (ADR-038 amendment)."""
     directory = ROOT / job
     unit = f"cardea-host-{job}.service"
     scratch = profile["scratch_mb"] * 1048576
@@ -422,7 +447,15 @@ def confined_command(
         props["MemoryDenyWriteExecute"] = "no"
     environment = {"PATH": "/usr/bin", "HOME": "/tmp", "CARDEA_DEADLINE": repr(deadline)}
     network = profile["network"]
-    if network["policy"] != "none":
+    if network["policy"] == "loopback":
+        # Keeps `PrivateNetwork=yes`: the unit's own namespace, whose only interface is its
+        # loopback. TCP needs the inet families; the cgroup filter then allows nothing but
+        # loopback addresses, a second fence should the namespace ever not be private.
+        props["RestrictAddressFamilies"] = "AF_UNIX AF_INET AF_INET6"
+        props["SystemCallFilter"] = "~@debug @reboot @swap @obsolete @raw-io"
+        props["IPAddressDeny"] = "any"
+        props["IPAddressAllow"] = "localhost"
+    elif network["policy"] != "none":
         address, port = _proxy(network["proxy"])
         del props["PrivateNetwork"]
         props["RestrictAddressFamilies"] = "AF_UNIX AF_INET AF_INET6"
@@ -455,6 +488,9 @@ def confined_command(
     if inputs:
         binds += ["--ro-bind", str(directory / "inputs"), INPUTS]
         environment["CARDEA_INPUTS"] = INPUTS
+    if workspace is not None:
+        binds += ["--bind", str(workspace), WORKSPACE]
+        environment["CARDEA_WORKSPACE"] = WORKSPACE
     for path in worker.get("read_only", []):
         binds += ["--ro-bind", path, path]
     environment |= worker.get("env", {})
@@ -832,6 +868,49 @@ def admit_inputs(listed: object, profile: dict[str, Any]) -> list[bytes]:
     return decoded
 
 
+JOB = r"[0-9a-f]{32}"
+
+
+def admit_workspace(job: str, request: dict[str, Any], profile: dict[str, Any]) -> Path | None:
+    """The first phase's workspace a `loopback` job inherits, checked before anything starts.
+
+    Only a profile that inherits one may name one, and it must name a job whose staging is
+    ours, whose workspace is a mount and whose unit has finished: no one else is writing.
+    """
+    source = request.get("workspace_from")
+    if not profile.get("inherit_workspace"):
+        if source is not None:
+            raise ValueError("workspace_not_allowed")
+        return None
+    if not isinstance(source, str) or not re.fullmatch(JOB, source) or source == job:
+        raise ValueError("invalid_workspace")
+    directory, work = ROOT / source, ROOT / source / "work"
+    if (
+        directory.is_symlink()
+        or work.is_symlink()
+        or not work.is_dir()
+        or directory.stat().st_uid != os.geteuid()
+        or not os.path.ismount(work)
+    ):
+        raise ValueError("workspace_missing")
+    shown = run(["/usr/bin/systemctl", "show", f"cardea-host-{source}.service"], check=False)
+    state = dict(line.split("=", 1) for line in shown.stdout.splitlines() if "=" in line)
+    if state.get("SubState") not in {"exited", "failed"}:
+        raise ValueError("workspace_in_use")
+    return work
+
+
+def make_workspace(directory: Path, megabytes: int) -> Path:
+    """A size-capped tmpfs under the job's staging, owned by the worker account. Its pages
+    are charged to whoever fills them, the job's unit, so the unit's memory cap holds."""
+    account = pwd.getpwnam("cardea-worker")
+    work = directory / "work"
+    work.mkdir(mode=0o700)
+    options = f"size={megabytes}m,mode=0700,uid={account.pw_uid},gid={account.pw_gid},nosuid,nodev"
+    run(["/usr/bin/mount", "-t", "tmpfs", "-o", options, "tmpfs", str(work)])
+    return work
+
+
 MOUNTINFO = Path("/proc/self/mountinfo")
 # systemd sets up a unit's LoadCredential files through mount propagation. Once these are
 # private (for example after a tool ran `mount --make-rprivate /` in the host's namespace),
@@ -941,6 +1020,7 @@ def handle(request: dict[str, Any]) -> dict[str, Any]:
         if action == "start"
         else {"action", "job", "input", "profile", "worker", "deadline"}
         | ({"inputs"} if "inputs" in request else set())
+        | ({"workspace_from"} if "workspace_from" in request else set())
         if action == "start_confined"
         else {"action", "job"}
     )
@@ -964,11 +1044,17 @@ def handle(request: dict[str, Any]) -> dict[str, Any]:
             content, profile, worker, staged = admit_confined(job, request)
         except Exception as error:
             raise refusal(error) from error
+        try:
+            workspace = admit_workspace(job, request, profile)
+        except Exception as error:
+            raise refusal(error) from error
         # The job may return at most its profile's `output_kb`, whatever the global ceiling.
         stage(directory, content, profile["output_kb"] * 1024, staged)
         if request["deadline"] <= time.time():
             raise ValueError("expired_authority")
-        run(confined_command(job, request["deadline"], profile, worker, bool(staged)))
+        if profile.get("workspace_mb"):
+            workspace = make_workspace(directory, profile["workspace_mb"])
+        run(confined_command(job, request["deadline"], profile, worker, bool(staged), workspace))
         return {"started": True}
     if action == "status":
         return status(job)
@@ -988,6 +1074,12 @@ def handle(request: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("unsafe_job")
         if not shutil.rmtree.avoids_symlink_attacks:
             raise ValueError("unsupported_cleanup")
+        work = directory / "work"
+        if work.is_symlink():
+            raise ValueError("unsafe_job")
+        # Never delete through a mount: it goes first, or the cleanup is refused.
+        if os.path.ismount(work) and run(["/usr/bin/umount", str(work)], check=False).returncode:
+            raise ValueError("workspace_busy")
         retired(job, record=True)  # Commit the replay fence before deleting anything.
         if directory.exists():
             if directory.stat().st_uid != os.geteuid():

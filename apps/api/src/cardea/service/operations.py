@@ -145,6 +145,10 @@ class OperationContext:
     # caller's group pool, or the agent itself outside a group. Running, succeeded and
     # uncertain calls count; failed ones do not. A handler uses it for a rate limit.
     count_calls: Callable[[timedelta], int] | None = None
+    # The first phase's output, for the worker of a `then` phase (ADR-038 amendment,
+    # 2026-11-22): the kernel's own copy of what the first worker reported, never the
+    # caller's. None in a call's first (or only) phase.
+    previous: Mapping[str, JsonValue] | None = None
 
 
 @dataclass(frozen=True)
@@ -179,16 +183,31 @@ Pointer = Annotated[str, Field(pattern=r"^(/([^~/]|~[01])*)+$", max_length=256)]
 WorkerName = Annotated[str, Field(pattern=r"^[a-z][a-z0-9-]{0,31}$")]
 
 
+class FollowOn(Record):
+    """A second confined process the worker may ask for (ADR-038 amendment, 2026-11-22)."""
+
+    profile: WorkerName
+    worker: WorkerName
+    # A host without this profile runs the call in one phase: a call that needs the second
+    # phase is then refused by the worker, never run without it.
+    optional: bool = False
+
+
 class ConfinedExecutor(Record):
     """Run the handler as a separate confined process (ADR-028).
 
     Both names refer to host-owner configuration read by the root helper; the descriptor
     selects among installed profiles and workers but cannot define either.
+
+    `then` names a second phase. When the first worker's output carries `next`, the kernel
+    runs the `then` worker under its own profile with that output as `previous` and the
+    first job's workspace, and the second worker's output is the call's result.
     """
 
     kind: Literal["confined"]
     profile: WorkerName
     worker: WorkerName
+    then: FollowOn | None = None
 
 
 class ResourceGrant(Record):

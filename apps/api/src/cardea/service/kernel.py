@@ -68,6 +68,7 @@ from cardea.service.models import (
 )
 from cardea.service.operations import (
     KERNEL_RIGHTS,
+    FollowOn,
     Handler,
     OperationContext,
     Reconciler,
@@ -641,7 +642,22 @@ class Kernel:
                 "worker_profile_not_installed", "Confined workers are not enabled on this host", 409
             )
         timeout = self.operations.get(name).cardea.timeout_seconds
-        return self.workers.require(executor.profile, executor.worker, timeout)
+        record = self.workers.require(executor.profile, executor.worker, timeout)
+        then = self.second_phase(name)
+        if then is not None:
+            # The second phase is pinned with the first: a changed profile is a new run.
+            record["then"] = self.workers.require(then.profile, then.worker, timeout)
+        return record
+
+    def second_phase(self, name: str) -> FollowOn | None:
+        """The operation's second phase, unless it is optional and the host lacks it."""
+        executor = self.operations.get(name).cardea.executor
+        then = executor.then if executor is not None else None
+        if then is None or self.workers is None:
+            return then
+        if then.optional and not self.workers.offers(then.profile, then.worker):
+            return None
+        return then
 
     def queue_allowance(self, name: str) -> float:
         """Seconds an operation may wait for a confined-worker slot before it runs (ADR-028)."""
@@ -684,7 +700,7 @@ class Kernel:
         assert self.workers is not None
         return confined_handler(
             self.workers,
-            executor,
+            executor.model_copy(update={"then": self.second_phase(name)}),
             descriptor.cardea.timeout_seconds,
             self.worker_watch,
             self._artifact_store(descriptor.cardea.max_artifact_bytes),
@@ -758,6 +774,8 @@ class Kernel:
                 (task_id,),
             ).fetchall()
         for (receipt_id,) in rows:
+            # A second phase first: it holds the first phase's workspace.
+            self.workers.reap(job_id("then", str(receipt_id)))
             self.workers.reap(job_id("operation", str(receipt_id)))
 
     @property

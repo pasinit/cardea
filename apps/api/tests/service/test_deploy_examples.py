@@ -129,7 +129,10 @@ def test_proxy_enforces_the_same_hosts_as_each_profile() -> None:
     profiles = json.loads((KIT / "cardea" / "cardea-host-workers.json").read_text())["profiles"]
     for name, entry in profiles.items():
         network = entry["network"]
-        if network["policy"] == "none":
+        if network["policy"] in {"none", "loopback"}:
+            # No proxy port: the job has no route out, so squid must not serve it either.
+            assert "proxy" not in network and f"name={name}" not in squid
+            assert f"{name}_hosts" not in squid
             continue
         assert f"http_port {network['proxy']} name={name}" in squid
         listed = re.search(rf"^acl {name}_hosts dstdomain (.+)$", squid, re.MULTILINE)

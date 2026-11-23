@@ -29,29 +29,58 @@ PLANTED = {"GITHUB_TOKEN": "ghs_planted0000000000000000000000000000", "AWS_SECRE
 class EnvHost:
     """The helper's interface for the `try` profile, running the worker locally."""
 
-    def __init__(self, env: dict[str, str]) -> None:
+    def __init__(self, env: dict[str, str], root: Path, phases: bool = True) -> None:
         self.env = env
+        self.root = root
+        # Whether the host has the loopback phase: a workspace and the second profile.
+        self.phases = phases
         self.outputs: dict[str, bytes] = {}
         self.started: list[str] = []
+        # Each start as (profile, the job whose workspace it inherits).
+        self.starts: list[tuple[str, str | None]] = []
+        self.workspaces: dict[str, Path] = {}
+        self.cleaned: list[str] = []
 
     def profiles(self) -> dict[str, Any]:
-        return {
-            "profiles": {
-                "try": {
-                    "wall_seconds": 3600,
-                    "network": {"policy": "none"},
-                    "concurrency": 1,
-                    "sha256": "p-try",
-                }
-            },
-            "workers": {"env-try": ["try"]},
-            "sha256": "config",
+        profiles: dict[str, Any] = {
+            "try": {
+                "wall_seconds": 3600,
+                "network": {"policy": "none"},
+                "concurrency": 1,
+                "sha256": "p-try",
+            }
         }
+        workers = {"env-try": ["try"]}
+        if self.phases:
+            profiles["try-loopback"] = {
+                "wall_seconds": 3600,
+                "network": {"policy": "loopback"},
+                "concurrency": 1,
+                "sha256": "p-loopback",
+            }
+            workers["env-try-loopback"] = ["try-loopback"]
+        return {"profiles": profiles, "workers": workers, "sha256": "config"}
 
     def start_confined(
-        self, job: str, content: bytes, deadline: float, profile: str, worker: str
+        self,
+        job: str,
+        content: bytes,
+        deadline: float,
+        profile: str,
+        worker: str,
+        workspace_from: str | None = None,
     ) -> None:
         self.started.append(job)
+        self.starts.append((profile, workspace_from))
+        extra = {}
+        if profile == "try" and self.phases:
+            self.workspaces[job] = self.root / f"workspace-{job[:8]}"
+            self.workspaces[job].mkdir()
+        if profile == "try-loopback":
+            assert workspace_from in self.workspaces and workspace_from not in self.cleaned
+            self.workspaces[job] = self.workspaces[workspace_from]
+        if job in self.workspaces:
+            extra["CARDEA_WORKSPACE"] = str(self.workspaces[job])
         done = subprocess.run(
             [sys.executable, "-m", "cardea.hosts.operation_worker", "env.try"],
             input=content,
@@ -61,6 +90,7 @@ class EnvHost:
                 "PYTHONPATH": str(Path(cardea.__file__).parents[1]),
                 **PLANTED,
                 **self.env,
+                **extra,
             },
             timeout=120,
             check=False,
@@ -79,12 +109,27 @@ class EnvHost:
         return {}
 
     def cleanup(self, job: str) -> dict[str, Any]:
+        self.cleaned.append(job)
         return {}
 
 
 SCENARIO = """
 import json, os, pathlib, sys
 mode = pathlib.Path("mode").read_text().strip()
+if sys.argv[1] == "fetch":
+    pathlib.Path("fetched.txt").write_text("dependencies")
+    sys.exit(0)
+if sys.argv[1] == "fetch-fail":
+    print("could not reach the package index")
+    sys.exit(5)
+if sys.argv[1] == "serve":
+    # The fake host has no network namespace to prove; it checks the phases' hand-over.
+    if not pathlib.Path("fetched.txt").exists():
+        sys.exit(4)
+    pathlib.Path("out").mkdir(exist_ok=True)
+    pathlib.Path("out/serve.json").write_text(json.dumps({"reply": "pong"}))
+    print("loopback ok")
+    sys.exit(0)
 print("scenario", sys.argv[1], "mode", mode)
 print("token ghp_" + "a" * 30)
 pathlib.Path("out").mkdir(exist_ok=True)
@@ -134,6 +179,19 @@ def registry_file(tmp_path: Path, source: Path, **environment: Any) -> Path:
             },
             "teams": {"argv": [sys.executable, str(script), "teams"], "timeout_seconds": 60},
             "boot": {"argv": ["/bin/true"], "tier": "init"},
+            "serve": {
+                "argv": [sys.executable, str(script), "serve"],
+                "timeout_seconds": 60,
+                "artifacts": ["out/serve.json"],
+                "network": "loopback",
+                "fetch": {"argv": [sys.executable, str(script), "fetch"], "timeout_seconds": 60},
+            },
+            "serve-offline": {
+                "argv": [sys.executable, str(script), "serve"],
+                "timeout_seconds": 60,
+                "network": "loopback",
+                "fetch": {"argv": [sys.executable, str(script), "fetch-fail"]},
+            },
         },
         **environment,
     }
@@ -152,7 +210,7 @@ def env_kernel(
     registry = registry_file(tmp_path, repo["source"])
     # The kernel reads the registry for the run key; the worker reads it to run.
     monkeypatch.setenv("CARDEA_REPOSITORIES", str(registry))
-    host = EnvHost({"CARDEA_REPOSITORIES": str(registry)})
+    host = EnvHost({"CARDEA_REPOSITORIES": str(registry)}, tmp_path)
     kernel = kernel_for(
         tmp_path, host, monkeypatch, Registry(descriptors(), {}), "env.try", ("record:work/attach",)
     )
@@ -171,6 +229,7 @@ def output(settled: Any) -> dict[str, Any]:
     return result
 
 
+@pytest.mark.loopback
 def test_a_passing_and_a_failing_commit(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:
@@ -200,6 +259,7 @@ def test_a_passing_and_a_failing_commit(
     assert (failed["scenarios"][0]["outcome"], failed["scenarios"][0]["exit_code"]) == ("fail", 3)
 
 
+@pytest.mark.loopback
 def test_the_same_inputs_return_the_same_result_without_running(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:
@@ -222,6 +282,7 @@ def test_the_same_inputs_return_the_same_result_without_running(
     assert run["rerun_of"] == first.receipt_id
 
 
+@pytest.mark.loopback
 def test_a_changed_catalog_is_a_different_run(
     env_kernel: tuple[Kernel, EnvHost],
     repo: dict[str, Any],
@@ -235,6 +296,7 @@ def test_a_changed_catalog_is_a_different_run(
     assert output(again)["cached"] is False and len(host.started) == started + 1
 
 
+@pytest.mark.loopback
 def test_forced_reruns_are_limited_per_commit_and_day(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:
@@ -263,6 +325,7 @@ def submit_and_run(kernel: Kernel, key: str, **arguments: Any) -> str:
     return state
 
 
+@pytest.mark.loopback
 def test_an_identical_call_while_one_runs_is_refused(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:
@@ -283,6 +346,7 @@ def test_an_identical_call_while_one_runs_is_refused(
     assert call(kernel, "third", commit=repo["good"], scenarios=["try"])[0] == "succeeded"
 
 
+@pytest.mark.loopback
 def test_a_failed_run_is_not_reused(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:
@@ -293,6 +357,7 @@ def test_a_failed_run_is_not_reused(
         assert conn.exec_driver_sql("SELECT COUNT(*) FROM env_runs").scalar_one() == 0
 
 
+@pytest.mark.loopback
 @pytest.mark.parametrize(
     ("arguments", "code"),
     [
@@ -368,6 +433,7 @@ def test_artifact_paths_outside_the_checkout_are_refused_in_the_registry(path: s
         Scenario.model_validate({"argv": ["/bin/true"], "artifacts": [path]})
 
 
+@pytest.mark.loopback
 def test_only_a_passing_run_satisfies_the_records_guard(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:
@@ -461,7 +527,7 @@ def hostile_kernel(
     )
     path.chmod(0o644)
     monkeypatch.setenv("CARDEA_REPOSITORIES", str(path))
-    host = EnvHost({"CARDEA_REPOSITORIES": str(path)})
+    host = EnvHost({"CARDEA_REPOSITORIES": str(path)}, tmp_path)
     kernel = kernel_for(tmp_path, host, monkeypatch, Registry(descriptors(), {}), "env.try")
     return kernel, host
 
@@ -471,6 +537,7 @@ LINUX = pytest.mark.skipif(
 )
 
 
+@pytest.mark.loopback
 @LINUX
 def test_a_scenario_cannot_write_the_workers_result(
     hostile_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
@@ -486,6 +553,7 @@ def test_a_scenario_cannot_write_the_workers_result(
     assert tried and all(v not in {"written", "read"} for v in tried.values()), tried
 
 
+@pytest.mark.loopback
 @LINUX
 def test_a_detached_background_process_does_not_outlive_its_scenario(
     hostile_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
@@ -513,6 +581,7 @@ def _cmdline(path: Path) -> bytes:
         return b""
 
 
+@pytest.mark.loopback
 @LINUX
 def test_a_scenario_that_kills_the_worker_gets_no_result(
     hostile_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
@@ -521,6 +590,130 @@ def test_a_scenario_that_kills_the_worker_gets_no_result(
     state, settled = call(kernel, "kill", commit=repo["good"], scenarios=["killer"])
     assert state == "failed" and settled.state is not OperationState.SUCCEEDED
     assert settled.result is None
+
+
+# The loopback phase (ADR-038 amendment, 2026-11-22).
+@pytest.mark.loopback
+def test_a_loopback_scenario_runs_in_a_second_phase_after_its_fetch(
+    env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
+) -> None:
+    kernel, host = env_kernel
+    _, settled = call(kernel, "loop", commit=repo["good"], scenarios=["serve", "try"])
+    result = output(settled)
+    assert result["passed"] is True and "next" not in result
+    # The report is in the order the caller named, whichever phase ran each scenario.
+    assert [(s["name"], s["outcome"]) for s in result["scenarios"]] == [
+        ("serve", "pass"),
+        ("try", "pass"),
+    ]
+    assert "loopback ok" in result["scenarios"][0]["log_tail"]
+    # Two jobs: the networked one, then the loopback one on the first one's workspace.
+    first = host.started[0]
+    assert host.starts == [("try", None), ("try-loopback", first)]
+    # The first phase's workspace outlives the second phase, and both are reaped after it.
+    assert host.cleaned == [host.started[1], first]
+    # Both phases' artifacts are stored, named apart.
+    names = sorted(a["name"] for s in result["scenarios"] for a in s["artifacts"])
+    assert names == ["a0", "a1"]
+    kept = {a["path"]: a for s in result["scenarios"] for a in s["artifacts"]}
+    assert set(kept) == {"out/report.json", "out/serve.json"}
+    stored = {listed["name"]: listed for listed in result["artifacts"]}
+    assert len(stored) == 2
+    replies = [json.loads(artifacts.read(kernel.database, listed)) for listed in stored.values()]
+    assert {"reply": "pong"} in replies
+    # The same inputs are the same run: nothing starts again.
+    call(kernel, "again", commit=repo["good"], scenarios=["try", "serve"])
+    assert len(host.started) == 2
+
+
+@pytest.mark.loopback
+def test_a_failed_dependency_fetch_reports_the_scenario_without_a_second_phase(
+    env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
+) -> None:
+    kernel, host = env_kernel
+    _, settled = call(kernel, "offline", commit=repo["good"], scenarios=["serve-offline", "try"])
+    result = output(settled)
+    assert result["passed"] is False
+    by_name = {s["name"]: s for s in result["scenarios"]}
+    assert by_name["serve-offline"]["outcome"] == "error"
+    assert by_name["serve-offline"]["exit_code"] == 5
+    assert "could not reach the package index" in by_name["serve-offline"]["log_tail"]
+    assert by_name["try"]["outcome"] == "pass"
+    # Nothing was left to serve, so no second unit started.
+    assert host.starts == [("try", None)]
+
+
+@pytest.mark.loopback
+def test_other_scenarios_run_in_one_phase_as_before(
+    env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
+) -> None:
+    kernel, host = env_kernel
+    _, settled = call(kernel, "plain", commit=repo["good"], scenarios=["try", "teams"])
+    assert output(settled)["passed"] is True
+    assert host.starts == [("try", None)]
+
+
+@pytest.mark.loopback
+def test_a_host_without_the_loopback_phase_refuses_a_loopback_scenario(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo: dict[str, Any]
+) -> None:
+    registry = registry_file(tmp_path, repo["source"])
+    monkeypatch.setenv("CARDEA_REPOSITORIES", str(registry))
+    host = EnvHost({"CARDEA_REPOSITORIES": str(registry)}, tmp_path, phases=False)
+    kernel = kernel_for(tmp_path, host, monkeypatch, Registry(descriptors(), {}), "env.try")
+    state, refused = call(kernel, "no-phase", commit=repo["good"], scenarios=["serve"])
+    assert state == "failed" and refused.failure.code == "env_loopback_unavailable"
+    # It never ran with the network the first phase has, and the checkout never happened.
+    assert not list(tmp_path.glob("workspace-*"))
+    # The host's other scenarios are unaffected, and the profile is not pinned.
+    _, plain = call(kernel, "plain", commit=repo["good"], scenarios=["try"])
+    assert output(plain)["passed"] is True
+    assert "then" not in (kernel.executor_record("env.try") or {})
+
+
+def test_the_second_phase_is_pinned_into_the_run_key(
+    env_kernel: tuple[Kernel, EnvHost],
+) -> None:
+    kernel, _ = env_kernel
+    record = kernel.executor_record("env.try")
+    assert record is not None and record["then"]["profile_sha256"] == "p-loopback"  # type: ignore[index,call-overload]
+
+
+def test_a_second_phase_that_does_not_match_the_first_is_refused(
+    env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any], tmp_path: Path
+) -> None:
+    from datetime import timedelta
+
+    from cardea_env_ops.try_ import try_commit
+
+    from cardea.service.models import now
+    from cardea.service.operations import OperationContext, OperationRejected
+
+    workspace = tmp_path / "ws"
+    (workspace / "checkout").mkdir(parents=True)
+    arguments: Any = {"repo": "app", "commit": repo["good"], "scenarios": ["serve"]}
+
+    def context(previous: dict[str, Any]) -> OperationContext:
+        return OperationContext(
+            task_id="t",
+            namespace="n",
+            receipt_id="r",
+            deadline=now() + timedelta(minutes=5),
+            effect_key="r",
+            previous=previous,
+        )
+
+    for previous in (
+        {"next": ["serve"], "scenarios": [], "catalog_sha256": "0" * 64},  # another catalog
+        {"next": ["try"], "scenarios": []},  # not a loopback scenario
+        {"next": ["nope"], "scenarios": []},
+    ):
+        with pytest.raises(OperationRejected) as refused:
+            try_commit(arguments, context(previous), tmp_path / "x", "subreaper", workspace)
+        assert refused.value.code == "env_phase_invalid"
+    with pytest.raises(OperationRejected) as missing:
+        try_commit(arguments, context({"next": ["serve"]}), tmp_path / "x", "subreaper", None)
+    assert missing.value.code == "env_phase_invalid"
 
 
 # Attaching the result to a work item (record_id)
@@ -576,6 +769,7 @@ def attach_call(
     return state, failure.message if failure is not None else ""
 
 
+@pytest.mark.loopback
 def test_the_result_is_linked_to_the_item_without_touching_its_claim(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:
@@ -600,6 +794,7 @@ def test_the_result_is_linked_to_the_item_without_touching_its_claim(
     assert [link["observed_state"] for link in stored(kernel)["links"]] == ["pass", "fail"]
 
 
+@pytest.mark.loopback
 def test_a_role_without_the_grant_is_refused_naming_it_and_nothing_runs(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:
@@ -615,6 +810,7 @@ def test_a_role_without_the_grant_is_refused_naming_it_and_nothing_runs(
     assert call(kernel, "plain", commit=repo["good"], scenarios=["try"])[0] == "succeeded"
 
 
+@pytest.mark.loopback
 def test_authority_is_read_live_when_the_result_is_recorded(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -633,6 +829,7 @@ def test_authority_is_read_live_when_the_result_is_recorded(
     assert stored(kernel)["links"] == []
 
 
+@pytest.mark.loopback
 def test_a_repeated_idempotency_key_adds_one_entry(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:
@@ -648,6 +845,7 @@ def test_a_repeated_idempotency_key_adds_one_entry(
     assert entry["external_id"] == "one-key"
 
 
+@pytest.mark.loopback
 def test_a_cached_result_is_linked_to_another_item_by_its_own_receipt(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:
