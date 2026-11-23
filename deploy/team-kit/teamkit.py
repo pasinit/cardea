@@ -226,7 +226,7 @@ def email_note(host: dict[str, Any], role: str = "product manager") -> str:
     return (
         f" You may email the client (email.send to `{alias}`) only with a question: one short "
         'message that asks a genuine preference question the goals do not settle, such as "X or '
-        'Y?", with the options and the team\'s pick (what you would choose). An email to the '
+        "Y?\", with the options and the team's pick (what you would choose). An email to the "
         "client is never a status report, summary or update, and never anything the goals "
         "already decide; report status to the supervisor by mailbox instead. A reply is "
         "optional input. It arrives in your mailbox on a later run; never wait for it and never "
