@@ -162,7 +162,7 @@ Same-uid code can still signal the worker: the profiles' seccomp filter blocks `
 
 One host-owner file, named by `CARDEA_REPOSITORIES`, lists the repository aliases that both `code.session` and `vcs.*` read ([ADR-037](decisions/037-coding-and-vcs-operations.md)). Set the variable for the kernel and for the `code-session` worker. The small-host kit uses `/opt/cardea-code/repositories.json` and the drop-in `cardea-kernel.service.d/repositories.conf`. The file must be a regular file of at most 256 KiB that neither group nor others can write, or it is refused with `unsafe_repositories`. Each alias holds:
 
-- `source`: the read-only mirror `code.session` clones.
+- `source`: the mirror `code.session` clones and `env.try` checks commits out of. It is read-only for them. The kernel itself refreshes it after each successful `vcs.push_branch`: it fetches the pushed branch from the staged change bundle (no network, no credential), only for an alias `vcs.*` acts on, so `env.try` can check out a pull request head. It must be a local repository the kernel user can write, not one with the branch checked out. A failure is logged (`mirror_refused`, `mirror_failed`) and never fails the push; `env.try` still refuses a SHA the mirror lacks (`env_commit_unknown`).
 - `owner`, `name`, `api_url`, `git_url`: where `vcs.*` pushes and opens changes. Give all four or none. An alias without them is read-only, and `vcs.*` treats it as unknown.
 - `gates`: the commands `code.session` runs on the change.
 - `branch_prefix` (default `agent/{group}/`): pushed branches must start with it.

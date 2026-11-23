@@ -1,5 +1,6 @@
 """Authenticated application handlers; all acknowledged changes share SQLite commits."""
 
+import asyncio
 import json
 from collections.abc import Callable
 from dataclasses import replace
@@ -24,6 +25,7 @@ from cardea.service import (
     host_budget,
     loopback,
     mailbox,
+    mirror,
     replies,
     spend,
 )
@@ -682,7 +684,7 @@ class Kernel:
             return self._gated(self.operations.handler(name), name)
         self.executor_record(name)
         assert self.workers is not None
-        return confined_handler(
+        confined = confined_handler(
             self.workers,
             executor,
             descriptor.cardea.timeout_seconds,
@@ -692,6 +694,18 @@ class Kernel:
                 self.database, self.content_gate, context, self.endpoint_host
             ),
         )
+        if name != "vcs.push_branch":
+            return confined
+
+        async def pushed(
+            arguments: dict[str, JsonValue], context: OperationContext
+        ) -> dict[str, JsonValue]:
+            output = await confined(arguments, context)
+            # So env.try can check the pushed head out; it never fails the push.
+            await asyncio.to_thread(mirror.after_push, arguments, context)
+            return output
+
+        return pushed
 
     def _artifact_store(self, limit: int) -> StoreArtifacts | None:
         """Where a confined operation's artifacts go: task-owned objects (ADR-037)."""
