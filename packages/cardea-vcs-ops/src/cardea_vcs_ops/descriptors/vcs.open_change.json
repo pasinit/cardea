@@ -2,7 +2,7 @@
   "tool": {
     "name": "vcs.open_change",
     "title": "Open a pull request",
-    "description": "Open a pull request from an agent branch (agent/<group>/...) into a base branch of an allowed repository. Opening it again returns the same pull request. Needs repo:<alias>.",
+    "description": "Open a pull request from an agent branch (agent/<group>/...) into a base branch of an allowed repository. Opening it again returns the same pull request. With a record_id, a work record that already has an open pull request cannot have a second one: the call is refused and names the existing pull request. Needs repo:<alias>.",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
@@ -83,6 +83,15 @@
     "resource": {
       "grant": "repo",
       "argument": "/repository"
-    }
+    },
+    "evidence": [
+      {
+        "name": "existing",
+        "operation": "vcs.open_change",
+        "match": {"arguments/record_id": "/record_id"},
+        "optional": true,
+        "fields": ["arguments/repository", "arguments/record_id", "output/number", "output/url", "output/head"]
+      }
+    ]
   }
 }
