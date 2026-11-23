@@ -227,6 +227,8 @@ used by the examples.
 | `branch_not_allowed` | Only agent-group members push branches or open changes; Branches must be named {…}<name> | `cardea_vcs_ops.ops` |
 | `branch_unknown` | No branch {…} | `cardea_vcs_ops.ops` |
 | `call_abandoned` | — | `cardea.service.invocation` |
+| `change_already_open` | The work record already has an open pull request, #{…} | `cardea_vcs_ops.ops` |
+| `change_branch_unavailable` | the open change #{…} has no branch {…} to start from | `cardea_coding_ops.session` |
 | `change_invalid` | The change bundle was not staged | `cardea_vcs_ops.ops` |
 | `checkpoint_missing` | Completed work has no resumable checkpoint. | `cardea.kernel.store` |
 | `claim_limit` | The holder already has {…} claim(s); the collection allows {…} | `cardea.service.records` |
