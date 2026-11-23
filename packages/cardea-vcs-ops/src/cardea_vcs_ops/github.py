@@ -153,6 +153,16 @@ class GitHub:
         pulls = response.json()
         return pulls[0] if pulls else None
 
+    async def open_pulls(self, limit: int) -> list[dict[str, Any]]:
+        """The open pull requests, most recently created first, at most `limit`."""
+        response = await self._request(
+            "GET",
+            "/pulls",
+            params={"state": "open", "sort": "created", "direction": "desc", "per_page": limit},
+        )
+        result: list[dict[str, Any]] = response.json()
+        return result[:limit]
+
     async def pull(self, number: int) -> dict[str, Any]:
         response = await self._request("GET", f"/pulls/{number}")
         result: dict[str, Any] = response.json()

@@ -174,7 +174,7 @@ Callers need `repo:<alias>` to name an alias in either package.
 
 ## Repository-host operations
 
-The `cardea-vcs-ops` package installs `vcs.push_branch`, `vcs.open_change`, `vcs.comment`, `vcs.review`, `vcs.merge`, `vcs.read_change` and `vcs.check_repository` ([ADR-037](decisions/037-coding-and-vcs-operations.md), slices 4 and 5, without credential minting).
+The `cardea-vcs-ops` package installs `vcs.push_branch`, `vcs.open_change`, `vcs.comment`, `vcs.review`, `vcs.merge`, `vcs.read_change`, `vcs.list_changes` (open pull requests with head, review state and check state; read-only, needs `repo:<alias>`) and `vcs.check_repository` ([ADR-037](decisions/037-coding-and-vcs-operations.md), slices 4 and 5, without credential minting).
 
 - **Confined.** The installed descriptors run in the `vcs` worker profile (ADR-028), one worker per operation, so they need host execution and the root helper. See [deploy/small-host/README.md](../deploy/small-host/README.md), section 4, step 9. The service process holds no repository credential; the worker reads the repository registry (`CARDEA_REPOSITORIES`) bound read-only.
 - **Configuration.** A JSON file named by `CARDEA_VCS_CONFIG` (in the worker, `/opt/cardea-vcs/vcs.json`) holds `allow_approve` (default false) and the credential provider. With `personal_access_token` or `profile_credential` it holds no secret and may be a root-owned, read-only file; with the test provider's token it must be private. Repository aliases, their hosts and branch prefixes come from the repository registry. Install the descriptors from the package's `descriptors/` directory under `operations_dir`.

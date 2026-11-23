@@ -55,6 +55,7 @@ OPERATIONS = (
     "vcs.check_repository",
     "vcs.merge",
     "vcs.read_branch",
+    "vcs.list_changes",
 )
 RUN_GRANTS = (*RIGHTS, "models.invoke", *OPERATIONS, "repo:cardea")
 STEPS = count()
@@ -944,3 +945,78 @@ def test_read_branch_returns_the_head_and_refuses_unknown_branches(
     )
     assert results[1].structured_content["head"] == change["head"], text(results[1])
     assert results[2].is_error and "branch_unknown" in text(results[2])
+
+
+def test_list_changes_shows_open_changes_with_review_and_check_state(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path
+) -> None:
+    """The PM's overview: open changes only, each with its head, review and check state."""
+    first, second = make_change(kernel, tmp_path), make_change(kernel, tmp_path, "Second")
+    steps: list[tuple[str, dict[str, Any]]] = []
+    for number, (branch, change) in enumerate(
+        [("agent/eng/one", first), ("agent/eng/two", second)], 1
+    ):
+        steps += [
+            ("vcs-push_branch", {"repository": "cardea", "branch": branch, **change}),
+            (
+                "vcs-open_change",
+                {
+                    "repository": "cardea",
+                    "head": branch,
+                    "base": "main",
+                    "title": f"Change {number}",
+                },
+            ),
+        ]
+    steps.append(
+        (
+            "vcs-review",
+            {
+                "repository": "cardea",
+                "number": 1,
+                "event": "REQUEST_CHANGES",
+                "body": "No.",
+                "client_key": "r1",
+            },
+        )
+    )
+    run_calls(kernel, session, steps)
+    repo = host.repositories["acme/cardea"]
+    repo.pass_checks(first["head"], "lint", "test")
+    repo.checks[second["head"]] = [{"name": "test", "status": "completed", "conclusion": "failure"}]
+    before = len(host.authorizations)
+    _, state, (listed,) = run_calls(
+        kernel, session, [("vcs-list_changes", {"repository": "cardea"})]
+    )
+    assert state == "succeeded" and not listed.is_error, text(listed)
+    changes = {c["number"]: c for c in listed.structured_content["changes"]}
+    assert [c["number"] for c in listed.structured_content["changes"]] == [2, 1]
+    assert changes[1]["head"] == "agent/eng/one" and changes[1]["head_sha"] == first["head"]
+    assert (changes[1]["review_state"], changes[1]["check_state"]) == (
+        "changes_requested",
+        "passing",
+    )
+    assert (changes[2]["review_state"], changes[2]["check_state"]) == ("none", "failing")
+    # Closed changes are not listed, and the call only read.
+    repo.pulls[0]["state"] = "closed"
+    _, _, (open_only,) = run_calls(
+        kernel, session, [("vcs-list_changes", {"repository": "cardea"})]
+    )
+    assert [c["number"] for c in open_only.structured_content["changes"]] == [2]
+    assert len(host.authorizations) > before
+
+
+def test_list_changes_without_the_grant_is_refused_naming_it(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub
+) -> None:
+    """A role lacking `vcs.list_changes` (or `repo:<alias>`) is refused before the host is
+    called, and the refusal names the grant."""
+    before = len(host.authorizations)
+    without = [g for g in RUN_GRANTS if g != "vcs.list_changes"]
+    _, _, (no_operation,) = run_calls(
+        kernel, session, [("vcs-list_changes", {"repository": "cardea"})], grants=without
+    )
+    assert no_operation.is_error and "vcs.list_changes" in text(no_operation), text(no_operation)
+    _, _, (no_repo,) = run_calls(kernel, session, [("vcs-list_changes", {"repository": "other"})])
+    assert no_repo.is_error and "repo:other" in text(no_repo), text(no_repo)
+    assert untouched(host, before)
