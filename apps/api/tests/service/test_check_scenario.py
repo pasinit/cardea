@@ -159,9 +159,10 @@ CONNECT = (
     "import pytest\n\n\n"
     "{mark}def test_tcp() -> None:\n"
     "    with socket.socket() as s:\n"
+    "        s.settimeout(2)  # a sandbox that drops loopback packets must not hang the connect\n"
     "        try:\n"
     "            s.connect(('127.0.0.1', 9))\n"
-    "        except ConnectionRefusedError:\n"
+    "        except OSError:  # refused, timed out, or no loopback; the guard raises RuntimeError\n"
     "            pass\n"
 )
 

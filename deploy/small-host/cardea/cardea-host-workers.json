@@ -127,6 +127,20 @@
           "files.pythonhosted.org"
         ]
       },
+      "concurrency": 1,
+      "workspace_mb": 1536
+    },
+    "try-loopback": {
+      "memory_mb": 3072,
+      "cpu_percent": 200,
+      "tasks": 512,
+      "wall_seconds": 3600,
+      "scratch_mb": 512,
+      "output_kb": 2048,
+      "network": {
+        "policy": "loopback"
+      },
+      "inherit_workspace": true,
       "concurrency": 1
     }
   },
@@ -370,6 +384,27 @@
       ],
       "profiles": [
         "try"
+      ],
+      "read_only": [
+        "/opt/cardea",
+        "/opt/cardea-code/repositories.json",
+        "/opt/cardea-code/repos",
+        "/opt/cardea-try/toolchain"
+      ],
+      "env": {
+        "CARDEA_REPOSITORIES": "/opt/cardea-code/repositories.json"
+      }
+    },
+    "env-try-loopback": {
+      "argv": [
+        "/opt/cardea/apps/api/.venv/bin/python",
+        "-I",
+        "-m",
+        "cardea.hosts.operation_worker",
+        "env.try"
+      ],
+      "profiles": [
+        "try-loopback"
       ],
       "read_only": [
         "/opt/cardea",

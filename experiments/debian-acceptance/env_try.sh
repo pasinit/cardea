@@ -1,8 +1,8 @@
 #!/bin/sh
 # ADR-038 acceptance: env.try in the real `try` profile (see env_try.py). NOT YET RUN.
 # Runs as root on a Debian 13 dev host with the small-host kit's confined workers installed
-# (deploy/small-host/README.md, section 4, including the `try` profile, the `env-try`
-# worker and the squid `try` port). It spends no model usage.
+# (deploy/small-host/README.md, section 4, including the `try` and `try-loopback` profiles, the
+# `env-try` and `env-try-loopback` workers and the squid `try` port). It spends no model usage.
 #
 #   sudo sh experiments/debian-acceptance/env_try.sh [WORK_DIR]
 #
@@ -24,6 +24,10 @@ for need in /usr/libexec/cardea-host /etc/cardea-host-workers.json "$PY"; do
   [ -e "$need" ] || { echo "missing: $need" >&2; exit 2; }
 done
 grep -q '"env-try"' /etc/cardea-host-workers.json || { echo "no env-try worker" >&2; exit 2; }
+grep -q '"env-try-loopback"' /etc/cardea-host-workers.json || { echo "no env-try-loopback worker (the loopback phase, section 4 step 10)" >&2; exit 2; }
+for tool in /usr/bin/mount /usr/bin/umount; do
+  [ -x "$tool" ] || { echo "missing: $tool" >&2; exit 2; }
+done
 "$PY" -I -c 'import cardea_env_ops' || { echo "cardea-env-ops not installed" >&2; exit 2; }
 id cardea-kernel >/dev/null 2>&1 || { echo "no cardea-kernel user" >&2; exit 2; }
 

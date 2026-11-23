@@ -28,7 +28,8 @@ class WorkerHost(Protocol):
     def start_confined(
         self, job: str, content: bytes, deadline: float, profile: str, worker: str
     ) -> None: ...
-    # Hosts that stage inputs (ADR-037) also take `inputs=[{sha256, data}]` by keyword.
+    # Hosts that stage inputs (ADR-037) also take `inputs=[{sha256, data}]` by keyword, and
+    # hosts with a second phase (ADR-038) `workspace_from=<first phase's job>`.
     def status(self, job: str) -> dict[str, Any]: ...
     def stop(self, job: str) -> dict[str, Any]: ...
     def cleanup(self, job: str) -> dict[str, Any]: ...
@@ -98,6 +99,7 @@ class DebianHost:
         profile: str,
         worker: str,
         inputs: list[dict[str, str]] | None = None,
+        workspace_from: str | None = None,
     ) -> None:
         self.call(
             {
@@ -108,6 +110,7 @@ class DebianHost:
                 "deadline": deadline,
                 "input": base64.b64encode(content).decode(),
                 **({"inputs": inputs} if inputs else {}),
+                **({"workspace_from": workspace_from} if workspace_from else {}),
             }
         )
 

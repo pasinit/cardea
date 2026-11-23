@@ -286,6 +286,7 @@ def oidc_config(tmp_path: Path, issuer: object) -> object:
     )
 
 
+@pytest.mark.loopback
 def test_the_test_issuer_passes_the_kernels_oidc_validation(tmp_path: Path, scripts: None) -> None:
     """The launcher's identity checks OIDC tokens with the kernel's own discovery and
     introspection code, against the test issuer over loopback."""
@@ -321,6 +322,7 @@ def test_the_test_issuer_passes_the_kernels_oidc_validation(tmp_path: Path, scri
         sys.path.remove(str(SCRIPTS.parents[0] / "try"))
 
 
+@pytest.mark.loopback
 def test_the_test_issuer_refuses_unauthenticated_introspection(scripts: None) -> None:
     import httpx
 
@@ -353,6 +355,7 @@ def test_the_env_try_wrapper_restores_the_registry_and_its_catalog_is_valid(
         "try",
         "teams",
         "slow",
+        "loopback",
         "forge",
         "background",
         "check",
@@ -360,4 +363,9 @@ def test_the_env_try_wrapper_restores_the_registry_and_its_catalog_is_valid(
     }
     # The scenario is the commit's own code, which the catalog only names.
     assert all(s.argv[2] == "scenario.py" for s in entry.environment.scenarios.values())
+    # Only the loopback scenario asks for the private-namespace phase, after its fetch.
+    needing = {n for n, s in entry.environment.scenarios.items() if s.network == "loopback"}
+    assert needing == {"loopback"}
+    assert entry.environment.scenarios["loopback"].fetch is not None
+    assert "/proc/net/route" in env_try.SCENARIO
     compile(env_try.SCENARIO, "scenario.py", "exec")

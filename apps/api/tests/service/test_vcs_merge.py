@@ -295,6 +295,7 @@ def refused(result: Any, code: str) -> None:
 # The merge itself
 
 
+@pytest.mark.loopback
 def test_the_opener_merges_an_approved_green_pull_request(
     kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path
 ) -> None:
@@ -320,6 +321,7 @@ def test_the_opener_merges_an_approved_green_pull_request(
     assert output["head_deleted"] is True and repo.head(pull["head"]["ref"]) is None
 
 
+@pytest.mark.loopback
 def test_a_merged_branch_outside_the_agent_prefix_is_kept(
     kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path
 ) -> None:
@@ -338,6 +340,7 @@ def test_a_merged_branch_outside_the_agent_prefix_is_kept(
     assert repo.head("people/fix") is not None and "delete_branch" not in host.calls
 
 
+@pytest.mark.loopback
 @pytest.mark.parametrize(
     ("case", "code"),
     [
@@ -383,6 +386,7 @@ def test_merging_is_refused_with_nothing_sent(
     assert "merge" not in host.calls and repo.head("main") is None
 
 
+@pytest.mark.loopback
 def test_the_principal_cannot_merge(
     kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path
 ) -> None:
@@ -391,6 +395,7 @@ def test_the_principal_cannot_merge(
     assert result.is_error and "merge" not in host.calls
 
 
+@pytest.mark.loopback
 def test_the_host_approval_must_be_the_configured_reviewers(
     kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path, vcs: Vcs
 ) -> None:
@@ -402,6 +407,7 @@ def test_the_host_approval_must_be_the_configured_reviewers(
     assert "merge" not in host.calls
 
 
+@pytest.mark.loopback
 def test_an_approval_from_a_pool_not_allowed_does_not_count(
     kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path, vcs: Vcs
 ) -> None:
@@ -411,6 +417,7 @@ def test_an_approval_from_a_pool_not_allowed_does_not_count(
     refused(merge(kernel, session, "eng.dev.0", number), "merge_not_approved")
 
 
+@pytest.mark.loopback
 def test_an_interrupted_merge_is_reconciled_against_the_host(
     kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path
 ) -> None:
@@ -478,6 +485,7 @@ def test_only_the_reviewer_pool_gets_the_reviewer_token(tmp_path: Path) -> None:
         asyncio.run(lapsed.credential(repository, (), caller("eng.dev.0", "eng")))
 
 
+@pytest.mark.loopback
 def test_each_caller_reaches_the_host_with_its_own_token(
     kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path
 ) -> None:
@@ -488,6 +496,7 @@ def test_each_caller_reaches_the_host_with_its_own_token(
     assert set(host.authorizations[len(developer) :]) == {f"Bearer {REVIEWER}"}
 
 
+@pytest.mark.loopback
 def test_the_host_refuses_an_authors_approval_of_its_own_pull_request(
     kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path, vcs: Vcs
 ) -> None:
@@ -548,6 +557,7 @@ def check(kernel: Kernel, session: FakeSession) -> dict[str, Any]:
     return cast(dict[str, Any], result.structured_content)
 
 
+@pytest.mark.loopback
 def test_without_host_rules_a_repository_is_not_ready_unless_waived(
     kernel: Kernel, session: FakeSession, host: FakeGitHub, vcs: Vcs
 ) -> None:
@@ -563,6 +573,7 @@ def test_without_host_rules_a_repository_is_not_ready_unless_waived(
     assert waived["waived_checks"] == required["missing"]
 
 
+@pytest.mark.loopback
 def test_a_waived_repository_keeps_every_cardea_guard(
     kernel: Kernel, session: FakeSession, host: FakeGitHub, vcs: Vcs, tmp_path: Path
 ) -> None:
@@ -669,6 +680,7 @@ def behind_main(kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path
     return number
 
 
+@pytest.mark.loopback
 def test_a_pull_request_behind_its_base_is_refused_until_brought_up_to_date(
     kernel: Kernel, session: FakeSession, host: FakeGitHub, vcs: Vcs, tmp_path: Path
 ) -> None:
@@ -704,6 +716,7 @@ def test_a_pull_request_behind_its_base_is_refused_until_brought_up_to_date(
     assert output["head_sha"] == head and repo.head("main") == head
 
 
+@pytest.mark.loopback
 def test_an_up_to_date_pull_request_merges_with_the_guard_on(
     kernel: Kernel, session: FakeSession, host: FakeGitHub, vcs: Vcs, tmp_path: Path
 ) -> None:
@@ -722,6 +735,7 @@ def test_an_up_to_date_pull_request_merges_with_the_guard_on(
     assert host.calls.count("compare") == 1 and host.calls.count("merge") == 1
 
 
+@pytest.mark.loopback
 def test_with_the_guard_off_a_branch_behind_its_base_merges_as_before(
     kernel: Kernel, session: FakeSession, host: FakeGitHub, vcs: Vcs, tmp_path: Path
 ) -> None:
@@ -733,6 +747,7 @@ def test_with_the_guard_off_a_branch_behind_its_base_merges_as_before(
     assert "compare" not in host.calls and host.calls.count("merge") == 1
 
 
+@pytest.mark.loopback
 def test_the_guard_keeps_every_other_rule(
     kernel: Kernel, session: FakeSession, host: FakeGitHub, vcs: Vcs, tmp_path: Path
 ) -> None:
@@ -753,6 +768,7 @@ def test_the_guard_keeps_every_other_rule(
     assert merged.structured_content["host_rules"] == "waived"
 
 
+@pytest.mark.loopback
 def test_check_repository_reports_the_guard(
     kernel: Kernel, session: FakeSession, host: FakeGitHub, vcs: Vcs
 ) -> None:
