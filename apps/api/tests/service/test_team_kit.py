@@ -68,9 +68,11 @@ def test_the_example_renders_valid_documents(tmp_path: Path) -> None:
     vcs = json.loads((tmp_path / "vcs.team.json").read_text())
     assert vcs["credentials"]["pools"] == {
         "dev-team.pe": "github-reviewer",
+        "dev-team.tl": "github-reviewer",
         "dev-team.ux": "github-reviewer",
     }
-    assert vcs["allow_approve"] == ["dev-team.pe"]
+    # The principal engineer and the team lead share the review queue.
+    assert vcs["allow_approve"] == ["dev-team.pe", "dev-team.tl"]
     email = json.loads((tmp_path / "email.team.json").read_text())
     assert set(email["roles"]) == {"dev-team.pm", "dev-team.ux"}
     assert all(r["recipients"] == ["client"] for r in email["roles"].values())
@@ -93,7 +95,10 @@ def test_the_triggers_are_the_planned_ones() -> None:
     assert {"exact": {"recordstate": "ready"}} in dev[0]["filters"]  # assigned
     assert {"exact": {"recordstate": "in_review"}} in kinds("pe")[0]["filters"]  # PR opened
     mail = {"types": ["cardea.mailbox.sent"], "subjects": ["$member", "$pool"]}
-    assert all(kinds(name)[-1] == mail for name in ("pm", "tl", "dev", "pe"))
+    assert all(kinds(name)[-1] == mail for name in ("pm", "dev", "pe"))
+    # The team lead reviews too: woken by a pull request opened, after its mail trigger.
+    assert kinds("tl")[-2] == mail
+    assert {"exact": {"recordstate": "in_review"}} in kinds("tl")[-1]["filters"]
     # Only developers merge; only the PE approves, citing an approving review.
     assert "vcs.merge" in pools["dev"]["grants"] and "vcs.merge" not in pools["pe"]["grants"]
     work = kit().work_collection(example())
@@ -231,7 +236,7 @@ def test_role_instructions_name_the_repository_and_branch_from_the_host_file() -
         assert "default branch is `trunk`" in instructions[name], name
     assert "(`repo` for env.try)" in instructions["pm"]
     assert "the head of trunk" in instructions["pm"] and "main" not in instructions["pm"]
-    assert "widgets" not in instructions["tl"]  # no repository operations
+    assert "repository is `widgets`" in instructions["tl"]  # it reviews pull requests
     # Without the field the default branch is main.
     plain = kit().group_document({**example(), "repository": "widgets"})
     pm = next(p for p in plain["spec"]["pools"] if p["name"] == "pm")
@@ -1663,7 +1668,7 @@ def test_instructions_name_only_transitions_the_work_collection_has() -> None:
         granted = {g.removeprefix("record:work/") for g in pool["grants"]} & names
         assert granted <= named, (name, granted - named)
         named_by[name] = named
-    assert named_by["tl"] == {"triage", "cancel"}
+    assert named_by["tl"] == {"triage", "cancel", "approve", "request_changes"}
     assert named_by["dev"] == {"start", "submit", "resubmit", "merge"}
     assert named_by["pe"] == {"approve", "request_changes"}
     assert named_by["ux"] == set()
@@ -1751,3 +1756,22 @@ def test_turning_on_email_keeps_the_ux_schedule_trigger_ids(
     assert {k: v for k, v in after.items() if k != "dev-team.ux.0.created"} == before
     apply_layout(older)  # and back: the optional trigger is removed, the others stay
     assert trigger_kinds() == before
+
+
+def test_the_team_lead_and_the_principal_engineer_share_the_review_queue() -> None:
+    pools = {p["name"]: p for p in kit().group_document(example())["spec"]["pools"]}
+    tl, pe = pools["tl"], pools["pe"]
+    for pool in (tl, pe):
+        assert {"record:work/approve", "record:work/request_changes", "vcs.review"} <= set(
+            pool["grants"]
+        )
+        assert "vcs.review" in pool["run"]["operations"]
+        assert "Read the pull request with vcs.read_change" in pool["run"]["instructions"]
+    # Split by position so they do not review the same pull request twice.
+    assert "at odd positions" in tl["run"]["instructions"]
+    assert "at even positions" in pe["run"]["instructions"]
+    assert "vcs.merge" not in tl["grants"]
+    guards = {t["name"]: t.get("guard") for t in kit().work_transitions("dev-team")}
+    for name in ("approve", "request_changes"):
+        assert guards[name] == "caller.pool in ['dev-team.pe', 'dev-team.tl']"
+    assert guards["triage"] == "caller.pool == 'dev-team.tl'"
