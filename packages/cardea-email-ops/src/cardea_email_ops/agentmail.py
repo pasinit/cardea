@@ -43,6 +43,24 @@ ADDRESS = re.compile(r"[^\s<>\"',;:()\[\]]+@[^\s<>\"',;:()\[\]]+")
 DEFINITE = {400, 401, 403, 404, 413, 422, 429}
 
 
+class _InboxMask(logging.Filter):
+    """httpx logs every request URL at INFO, and the URL names the inbox. Replace the
+    inbox segment before the record reaches any handler."""
+
+    PATH = re.compile(r"(/inboxes/)[^/?\s\"]+")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        text = record.getMessage()
+        if "/inboxes/" in text:
+            record.msg, record.args = self.PATH.sub(r"\1***", text), None
+        return True
+
+
+_httpx_logger = logging.getLogger("httpx")
+if not any(isinstance(f, _InboxMask) for f in _httpx_logger.filters):
+    _httpx_logger.addFilter(_InboxMask())
+
+
 def _masked(response: httpx.Response) -> str:
     """The body of a refused request with the API key, the inbox id and every address
     replaced, cut to `BODY_LIMIT` characters. The provider's message may echo the request."""
