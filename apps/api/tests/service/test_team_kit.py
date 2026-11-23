@@ -54,7 +54,7 @@ def test_the_example_renders_valid_documents(tmp_path: Path) -> None:
     paths = module.render(example(), tmp_path)
     assert {p.name for p in paths} >= {"group.json", "collection.work.json"}
     group = AgentGroup.model_validate_json((tmp_path / "group.json").read_text())
-    assert [p.name for p in group.spec.pools] == ["pm", "tl", "dev", "pe"]
+    assert [p.name for p in group.spec.pools] == ["pm", "tl", "dev", "pe", "ux"]
     for name in ("collection.work.json", "collection.decisions.json"):
         CollectionDocument.model_validate_json((tmp_path / name).read_text())
     # Conservative defaults: 30 runs a day for the team, a run ceiling per role.
@@ -821,6 +821,44 @@ def test_the_pe_approves_only_over_passing_checks() -> None:
     assert "every check on the pull request's head has passed" in text
     assert "approve_checks_pending" in text and "wait for your next run" in text
     assert "name the failing check" in text and "or say that no check ran" in text
+
+
+def test_the_ux_role_renders_from_the_kit_and_gates_ui_review() -> None:
+    module = kit()
+    document = host()
+    group = module.group_document(document)
+    pools = {p["name"]: p for p in group["spec"]["pools"]}
+    ux = pools["ux"]
+    text = " ".join(ux["run"]["instructions"].split())
+    assert "You are the UX designer" in text
+    assert "You own the design of every page" in text
+    assert "phone (390 px)" in text and "desktop width" in text
+    assert "approved mock version" in text and "screenshots" in text
+    assert module.UX_APPROVED in text and module.UX_CHANGES in text
+    assert "the style the app already has" in text
+    # It comments but cannot approve or move items; it files work and records mocks.
+    assert {"vcs.comment", "env.try", "vcs.read_change"} <= set(ux["run"]["operations"])
+    assert "vcs.review" not in ux["run"]["operations"]
+    assert "record:work/create" in ux["grants"] and "record:decisions/create" in ux["grants"]
+    assert not {"record:work/approve", "record:work/request_changes"} & set(ux["grants"])
+    assert {"ux"} <= set(module.POOLS) and module.ROLE_NAMES["ux"] == "UX designer"
+    assert ux["spend"]["runs"] == 6
+    # The supervisor can mail it, and the PE may mail it.
+    rights = {
+        p["operation"] for p in module.provisioning_fragment(document)["permissions"]
+    }
+    assert "mail:dev-team.ux" in rights and "mail:dev-team.ux" in pools["pe"]["grants"]
+
+
+def test_the_pe_may_not_approve_a_ui_pull_request_before_ux_review() -> None:
+    module = kit()
+    pools = {p["name"]: p for p in module.group_document(host())["spec"]["pools"]}
+    text = " ".join(pools["pe"]["run"]["instructions"].split())
+    assert "changes the UI" in text and "needs the UX designer's review first" in text
+    assert f"`{module.UX_APPROVED}`" in text and "current head commit" in text
+    assert "do not approve" in text and "mail the UX designer" in text
+    assert "Never treat a developer's own claim" in text
+    assert "ux" in {m.split(".")[-1] for m in pools["pe"]["grants"] if m.startswith("mail:")}
 
 
 @pytest.mark.loopback

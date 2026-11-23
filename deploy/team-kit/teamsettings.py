@@ -30,7 +30,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-POOLS = ("pm", "tl", "dev", "pe")
+POOLS = ("pm", "tl", "dev", "pe", "ux")
 MAX_RUNS = 1_000_000
 MAX_USD = 1e6
 MAX_DEVELOPERS = 64

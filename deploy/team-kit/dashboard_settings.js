@@ -1,7 +1,7 @@
 "use strict";
 
 // Everything from the API is untrusted text: it is only ever put in with textContent or value.
-const ROLES = ["pm", "tl", "dev", "pe"];
+const ROLES = ["pm", "tl", "dev", "pe", "ux"];
 const inputs = {};
 let current = null;
 let pending = null; // the settings and token of the preview now on screen

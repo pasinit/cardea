@@ -1,13 +1,14 @@
 # Runbook: an agent dev team on a host
 
-This runbook covers how to start, watch, pause, resume and stop the dev team from [`deploy/team-kit`](../../deploy/team-kit/README.md), and what to check each day. The team is four roles in one agent group (ADR-034):
+This runbook covers how to start, watch, pause, resume and stop the dev team from [`deploy/team-kit`](../../deploy/team-kit/README.md), and what to check each day. The team is five roles in one agent group (ADR-034):
 
 | Role | Pool | Wakes on | Does |
 |---|---|---|---|
 | Product manager | `pm` | its schedule, twice a day; mail | reads main's head (`vcs.read_branch`), tries it with `env.try` and files failures as work items |
 | Team lead | `tl` | its daily schedule; a new work item; mail | plans, splits and cancels work, and triages the next item for the developers |
 | Developers | `dev` (2 by default) | an item made `ready`; an item `approved`; `request_changes`; mail; an optional schedule (`schedules.dev`) | claim a ready item, change the code with `code.session`, push, open a pull request, submit (with `env_try.dev_scenarios`, such as `["check"]`, only after `env.try` passes on the pushed head); merge after approval; then take the next ready item in the same run |
-| Principal engineer | `pe` | an item entering `in_review`; mail; an optional schedule (`schedules.pe`) | reviews the pull request and approves it, or requests changes |
+| Principal engineer | `pe` | an item entering `in_review`; mail; an optional schedule (`schedules.pe`) | reviews the pull request and approves it, or requests changes; does not approve a UI pull request before the UX designer's approving comment on its head |
+| UX designer | `ux` | an item entering `in_review`; mail; an optional schedule (`schedules.ux`) | owns page design, files UX items with screenshots, and reviews UI pull requests rendered at 390 px and desktop width against the approved mock (`UX review: approved` / `UX review: changes requested` comments) |
 
 Every trigger refuses double work:
 - **Work items.** One claim per item: of the developers an assignment wakes, only one claims the item. Each developer holds at most two, so one can wait in review while it works on the next.
