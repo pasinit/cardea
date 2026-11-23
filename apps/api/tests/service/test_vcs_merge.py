@@ -226,7 +226,9 @@ def open_pull(kernel: Kernel, session: FakeSession, tmp_path: Path, member: str)
     return int(results[1].structured_content["number"])
 
 
-def approve(kernel: Kernel, session: FakeSession, number: int) -> Any:
+def approve(kernel: Kernel, session: FakeSession, number: int, host: FakeGitHub) -> Any:
+    """The PE's approval of the head; the kernel refuses one unless its checks passed."""
+    host.repositories["acme/cardea"].pass_checks(head_of(host, number), "lint", "test")
     _, (review,) = act(
         kernel,
         session,
@@ -280,7 +282,7 @@ def approved_and_green(
     kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path
 ) -> int:
     number = open_pull(kernel, session, tmp_path, "eng.dev.0")
-    review = approve(kernel, session, number)
+    review = approve(kernel, session, number, host)
     assert not review.is_error, text(review)
     host.repositories["acme/cardea"].pass_checks(head_of(host, number), "lint", "test")
     return number
@@ -360,7 +362,7 @@ def test_merging_is_refused_with_nothing_sent(
     number = open_pull(kernel, session, tmp_path, "eng.dev.0")
     member = "eng.dev.1" if case == "other_developer" else "eng.dev.0"
     if case != "unapproved":
-        assert not approve(kernel, session, number).is_error
+        assert not approve(kernel, session, number, host).is_error
     head = head_of(host, number)
     repo.pass_checks(head, "lint", "test")
     if case == "stale":
@@ -482,7 +484,7 @@ def test_each_caller_reaches_the_host_with_its_own_token(
     open_pull(kernel, session, tmp_path, "eng.dev.0")
     developer = list(host.authorizations)
     assert developer and set(developer) == {f"Bearer {AUTHOR}"}
-    approve(kernel, session, 1)
+    approve(kernel, session, 1, host)
     assert set(host.authorizations[len(developer) :]) == {f"Bearer {REVIEWER}"}
 
 
@@ -497,7 +499,7 @@ def test_the_host_refuses_an_authors_approval_of_its_own_pull_request(
     vcs.credentials = PersonalAccessTokens(
         tokens_config().model_copy(update={"pools": {}}), directory=tmp_path / "creds"
     )
-    refused(approve(kernel, session, number), "host_refused")
+    refused(approve(kernel, session, number, host), "host_refused")
     assert number not in host.repositories["acme/cardea"].reviews
 
 
@@ -579,8 +581,9 @@ def test_a_waived_repository_keeps_every_cardea_guard(
     # A merge still needs the PE's approval at the head, then green checks.
     number = open_pull(kernel, session, tmp_path, "eng.dev.0")
     refused(merge(kernel, session, "eng.dev.0", number), "merge_not_approved")
-    review = approve(kernel, session, number)
+    review = approve(kernel, session, number, host)
     assert not review.is_error, text(review)
+    del repo.checks[head_of(host, number)]  # approved while green; the checks are gone again
     refused(merge(kernel, session, "eng.dev.0", number), "merge_checks_missing")
     refused(merge(kernel, session, "eng.dev.1", number), "merge_not_opener")
     assert host.calls.count("merge") == 0
@@ -661,7 +664,7 @@ def behind_main(kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path
     bare(host, "update-ref", "refs/heads/main", head_of(host, number))  # cut from main
     push_directly(host, number, tmp_path)  # the change itself
     advance_main(host)  # main moves on
-    assert not approve(kernel, session, number).is_error
+    assert not approve(kernel, session, number, host).is_error
     host.repositories["acme/cardea"].pass_checks(head_of(host, number), "lint", "test")
     return number
 
@@ -690,7 +693,8 @@ def test_a_pull_request_behind_its_base_is_refused_until_brought_up_to_date(
     # Brought up to date: the old approval and checks are for an earlier head.
     head = bring_base_in(host, number, tmp_path)
     refused(merge(kernel, session, "eng.dev.0", number), "merge_approval_stale")
-    assert not approve(kernel, session, number).is_error
+    assert not approve(kernel, session, number, host).is_error
+    del repo.checks[head_of(host, number)]  # approved while green; the checks are gone again
     refused(merge(kernel, session, "eng.dev.0", number), "merge_checks_missing")
     repo.pass_checks(head, "lint", "test")
     merged = merge(kernel, session, "eng.dev.0", number)
@@ -709,7 +713,7 @@ def test_an_up_to_date_pull_request_merges_with_the_guard_on(
     base = head_of(host, number)
     bare(host, "update-ref", "refs/heads/main", base)
     head = push_directly(host, number, tmp_path)  # ahead of main, not behind it
-    assert not approve(kernel, session, number).is_error
+    assert not approve(kernel, session, number, host).is_error
     repo.pass_checks(head, "lint", "test")
     merged = merge(kernel, session, "eng.dev.0", number)
     assert not merged.is_error, text(merged)
@@ -738,7 +742,8 @@ def test_the_guard_keeps_every_other_rule(
     number = open_pull(kernel, session, tmp_path, "eng.dev.0")
     bare(host, "update-ref", "refs/heads/main", head_of(host, number))
     refused(merge(kernel, session, "eng.dev.0", number), "merge_not_approved")
-    assert not approve(kernel, session, number).is_error
+    assert not approve(kernel, session, number, host).is_error
+    del repo.checks[head_of(host, number)]  # approved while green; the checks are gone again
     refused(merge(kernel, session, "eng.dev.0", number), "merge_checks_missing")
     repo.pass_checks(head_of(host, number), "lint", "test")
     refused(merge(kernel, session, "eng.dev.1", number), "merge_not_opener")

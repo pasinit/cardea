@@ -183,10 +183,14 @@ class GitHub:
     async def comments(self, number: int) -> list[dict[str, Any]]:
         return await self._list(f"/issues/{number}/comments")
 
-    async def create_review(self, number: int, event: str, body: str) -> dict[str, Any]:
-        response = await self._request(
-            "POST", f"/pulls/{number}/reviews", json={"event": event, "body": body}
-        )
+    async def create_review(
+        self, number: int, event: str, body: str, commit_id: str | None = None
+    ) -> dict[str, Any]:
+        """`commit_id` pins the review to a head, so a later push cannot inherit it."""
+        payload = {"event": event, "body": body}
+        if commit_id is not None:
+            payload["commit_id"] = commit_id
+        response = await self._request("POST", f"/pulls/{number}/reviews", json=payload)
         result: dict[str, Any] = response.json()
         return result
 

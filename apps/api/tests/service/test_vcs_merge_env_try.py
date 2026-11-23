@@ -152,7 +152,7 @@ def try_head(kernel: Kernel, session: FakeSession, member: str, commit: str) -> 
 
 def approved(kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path) -> int:
     number = open_pull(kernel, session, tmp_path, "eng.dev.0")
-    review = approve(kernel, session, number)
+    review = approve(kernel, session, number, host)
     assert not review.is_error, text(review)
     return number
 
@@ -204,7 +204,7 @@ def test_a_changed_head_is_refused_again(
     new = base.push_directly(host, number, tmp_path)
     assert new != old
     # The approval is stale as well; approve the new head, so only the check is missing.
-    assert not approve(kernel, session, number).is_error
+    assert not approve(kernel, session, number, host).is_error
     refused(merge(kernel, session, "eng.dev.0", number), "merge_checks_missing")
     assert not try_head(kernel, session, "eng.dev.0", new).is_error
     merged = merge(kernel, session, "eng.dev.0", number)
