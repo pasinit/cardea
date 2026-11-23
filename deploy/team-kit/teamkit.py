@@ -47,6 +47,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -1404,6 +1405,43 @@ def apply(host: dict[str, Any], connect: Callable[[dict[str, Any]], Any] = clien
     return done
 
 
+def drained_document(host: dict[str, Any]) -> dict[str, Any]:
+    """The group document with every pool's triggers removed: nothing new is admitted, and
+    the runs already admitted go on to the end. `apply` puts the triggers back."""
+    document = group_document(host)
+    for pool in document["spec"]["pools"]:
+        pool["triggers"] = []
+    return document
+
+
+def drain(
+    host: dict[str, Any],
+    wait_seconds: float = 2700.0,
+    poll_seconds: float = 10.0,
+    connect: Callable[[dict[str, Any]], Any] = client,
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> list[str]:
+    """Stop admitting new runs without cancelling any, and wait until none is left (a deploy
+    can then restart the kernel without stranding a run). Returns the runs still unfinished
+    when `wait_seconds` ran out, an empty list when the team is idle. Undo with `apply`."""
+    namespace, group, _, _ = _names(host)
+    kernel = connect(host)
+    try:
+        kernel.request("PUT", f"/groups/{group}", json=drained_document(host))
+        deadline = clock() + wait_seconds
+        while True:
+            view = kernel.request(
+                "GET", f"/groups/{group}/overview", params={"namespace": namespace}
+            )
+            left = running(view)
+            if not left or clock() >= deadline:
+                return left
+            sleep(poll_seconds)
+    finally:
+        kernel.close()
+
+
 def overview(host: dict[str, Any]) -> dict[str, Any]:
     namespace, group, _, _ = _names(host)
     kernel = client(host)
@@ -1678,6 +1716,7 @@ def main(argv: list[str]) -> int:
         "resume",
         "stop",
         "dashboard",
+        "drain",
     ):
         command = commands.add_parser(name)
         command.add_argument("--host", type=Path, required=True, help="the private host file")
@@ -1689,6 +1728,8 @@ def main(argv: list[str]) -> int:
             command.add_argument("--port", type=int, default=8765)
         if name == "pause":
             command.add_argument("--reason", help="why, kept for `status` (no secrets)")
+        if name == "drain":
+            command.add_argument("--wait", type=float, default=2700.0, help="seconds")
     args = parser.parse_args(argv)
     host = load_host(args.host)
     if args.command == "render":
@@ -1716,6 +1757,13 @@ def main(argv: list[str]) -> int:
     elif args.command == "resume":
         resume(host)
         print("the supervisor is enabled; triggers admit again")
+    elif args.command == "drain":
+        left = drain(host, wait_seconds=args.wait)
+        if left:
+            print(f"draining: no new runs; {len(left)} still running after {args.wait:.0f} s")
+            print("\n".join(f"  {run}" for run in left))
+            return 3
+        print("drained: no run is active and none is admitted; `apply` resumes admissions")
     elif args.command == "stop":
         runs, problem = stop(host)
         if problem:

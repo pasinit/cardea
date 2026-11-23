@@ -1775,3 +1775,57 @@ def test_the_team_lead_and_the_principal_engineer_share_the_review_queue() -> No
     for name in ("approve", "request_changes"):
         assert guards[name] == "caller.pool in ['dev-team.pe', 'dev-team.tl']"
     assert guards["triage"] == "caller.pool == 'dev-team.tl'"
+
+
+def test_drain_removes_every_trigger_and_waits_for_the_runs_to_finish() -> None:
+    module = kit()
+    views = [
+        {"pools": [{"members": [{"active_task_id": "task-1"}, {"active_task_id": None}]}]},
+        {"pools": [{"members": [{"active_task_id": None}]}]},
+    ]
+    sent: list[tuple[str, str, Any]] = []
+
+    class Kernel:
+        def request(self, method: str, path: str, **kwargs: Any) -> Any:
+            sent.append((method, path, kwargs.get("json")))
+            return views.pop(0) if method == "GET" else {}
+
+        def close(self) -> None:
+            pass
+
+    left = module.drain(example(), connect=lambda host: Kernel(), sleep=lambda s: None)
+    assert left == []
+    method, path, document = sent[0]
+    assert (method, path) == ("PUT", "/groups/dev-team")
+    assert all(pool["triggers"] == [] for pool in document["spec"]["pools"])
+    # Everything else is the normal group document, so `apply` restores the triggers.
+    normal = module.group_document(example())
+    assert [p["grants"] for p in document["spec"]["pools"]] == [
+        p["grants"] for p in normal["spec"]["pools"]
+    ]
+
+
+def test_drain_gives_up_after_the_wait_and_names_what_still_runs() -> None:
+    module = kit()
+    busy = {"pools": [{"members": [{"active_task_id": "task-9"}]}]}
+    clock = [0.0]
+
+    class Kernel:
+        def request(self, method: str, path: str, **kwargs: Any) -> Any:
+            return busy if method == "GET" else {}
+
+        def close(self) -> None:
+            pass
+
+    def sleep(seconds: float) -> None:
+        clock[0] += seconds
+
+    left = module.drain(
+        example(),
+        wait_seconds=30,
+        poll_seconds=10,
+        connect=lambda host: Kernel(),
+        sleep=sleep,
+        clock=lambda: clock[0],
+    )
+    assert left == ["task-9"]
