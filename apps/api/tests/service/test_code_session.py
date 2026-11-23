@@ -914,3 +914,75 @@ def test_an_unchanged_checkout_reports_no_change(
     monkeypatch.delenv("CARDEA_REPOSITORIES", raising=False)
     output, bundle = run_session(tmp_path, source, "none")
     assert output["changed"] is False and output["head_sha"] is None and not bundle
+
+
+# A record's open change: the session starts from its branch (evidence from vcs.open_change)
+
+RECORD = "rec-" + "0" * 32
+
+
+def opened(number: int, head: str) -> dict[str, Any]:
+    fields = {"output/number": number, "arguments/head": head}
+    return {"opened": ({"receipt_id": "r1", "fields": fields},)}
+
+
+def run_from_change(
+    tmp_path: Path, source: Path, arguments: dict[str, Any], evidence: dict[str, Any]
+) -> tuple[dict[str, Any], bytes]:
+    from cardea_coding_ops.session import session
+
+    scratch = tmp_path / "scratch"
+    scratch.mkdir(parents=True)
+    script = tmp_path / "write.py"
+    script.write_text("open('more.txt', 'w').write('more')\n")
+    config: dict[str, Any] = {
+        "harness": {"argv": [sys.executable, str(script)]},
+        "repositories": {"app": {"source": str(source), "gates": []}},
+    }
+    result = session(
+        {"repository": "app", "base_ref": "main", "task": "go", **arguments},
+        config,
+        scratch,
+        evidence=evidence,
+    )
+    assert isinstance(result, WithArtifacts)
+    return result.output, result.artifacts["change.bundle"]
+
+
+def test_a_session_for_a_record_with_an_open_change_starts_from_its_branch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: Path
+) -> None:
+    monkeypatch.delenv("CARDEA_REPOSITORIES", raising=False)
+    git(source, "branch", "agent/eng/work", "main")
+    work = tmp_path / "branch-work"
+    git(tmp_path, "clone", "--quiet", "--branch", "agent/eng/work", str(source), str(work))
+    (work / "first.txt").write_text("first")
+    git(work, "add", "first.txt")
+    git(work, "commit", "--quiet", "-m", "first")
+    git(work, "push", "--quiet", "origin", "agent/eng/work")
+    tip = git(work, "rev-parse", "HEAD").strip()
+
+    output, bundle = run_from_change(
+        tmp_path, source, {"record_id": RECORD}, opened(7, "agent/eng/work")
+    )
+    assert output["base_sha"] == tip
+    assert output["started_from_change"] == {"number": 7, "head": "agent/eng/work"}
+    assert output["changed"] is True and bundle
+    # The change is only what was added on top of the pull request's branch.
+    assert output["files_changed"] == 1 and "more.txt" in output["diff_excerpt"]
+    assert "first.txt" not in output["diff_excerpt"]
+
+
+def test_a_missing_change_branch_is_refused_only_when_a_record_is_named(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: Path
+) -> None:
+    from cardea.service.operations import OperationRejected
+
+    monkeypatch.delenv("CARDEA_REPOSITORIES", raising=False)
+    gone = opened(7, "agent/eng/gone")
+    with pytest.raises(OperationRejected) as refused:
+        run_from_change(tmp_path, source, {"record_id": RECORD}, gone)
+    assert refused.value.code == "change_branch_unavailable"
+    # Without a record_id the evidence is ignored: the session starts from base_ref.
+    output, _ = run_from_change(tmp_path / "again", source, {}, gone)
+    assert "started_from_change" not in output

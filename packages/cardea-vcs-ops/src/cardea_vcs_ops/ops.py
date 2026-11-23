@@ -477,6 +477,21 @@ class Vcs:
             "head": str(pull["head"]["ref"]),
         }
 
+    @staticmethod
+    async def one_open_change(host: Any, head: str, context: OperationContext) -> None:
+        """Refuse a second open pull request for a work record: the kernel's `earlier`
+        receipts name the record's pull requests, and one on another head that the host
+        still lists as open is the record's change. The same head stays idempotent."""
+        for entry in context.evidence.get("earlier") or ():
+            number, earlier = _field(entry, "output/number"), _field(entry, "arguments/head")
+            if not isinstance(number, int) or earlier == head:
+                continue
+            if (await host.pull(number)).get("state") == "open":
+                raise OperationRejected(
+                    f"The work record already has an open pull request, #{number}",
+                    "change_already_open",
+                )
+
     async def open_change(
         self, arguments: dict[str, JsonValue], context: OperationContext
     ) -> dict[str, JsonValue]:
@@ -486,6 +501,8 @@ class Vcs:
         title, body = str(arguments["title"]), str(arguments.get("body") or "")
         self.gate(context, "vcs.open_change", texts={"title": title, "body": body})
         async with await self.client(repository, context, "pull_requests:write") as host:
+            if arguments.get("record_id") is not None:
+                await self.one_open_change(host, head, context)
             try:
                 pull = await host.create_pull(head, base, title, body, bool(arguments.get("draft")))
             except DuplicatePull:
