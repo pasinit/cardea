@@ -57,6 +57,11 @@ POOLS = ("pm", "tl", "dev", "pe", "ux")
 # The only pools that may email the owner (recipient alias): nobody else is granted it.
 EMAIL_POOLS = ("pm", "ux")
 KIT_PYTHON = ("/opt/cardea/apps/api/.venv/bin/python",)
+# The Debian package ships this kit beside the kernel's own code (`cardea team`). A copy run
+# from there provisions with the installed `cardea`, never with a checkout's environment
+# that a host file names: the team commands and the running kernel are the same code.
+PACKAGED_DIR = Path("/usr/lib/cardea/teamkit")
+PACKAGED_CARDEA = ("/usr/bin/cardea",)
 # Rights every team supervisor needs besides the pools' grants (ADR-034, ADR-027).
 SUPERVISOR_RIGHTS = (
     "groups.manage",
@@ -106,6 +111,11 @@ _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 
 class HostError(ValueError):
     """The host file is missing something the kit needs."""
+
+
+def packaged() -> bool:
+    """Whether this copy of the kit is the one the Debian package installed."""
+    return Path(__file__).resolve().parent == PACKAGED_DIR
 
 
 def _schema() -> Any:
@@ -1159,12 +1169,14 @@ def provisioning_fragment(host: dict[str, Any], *, paused: bool = False) -> dict
     ceiling for them."""
     namespace, _, supervisor, _ = _names(host)
     group = group_document(host)
-    # The supervisor may mail every role's pool: the dashboard's message box.
+    # The supervisor may mail every role's pool (the dashboard's message box) and each
+    # developer by its own address (`cardea team mail dev.N`).
     rights = sorted(
         {
             *SUPERVISOR_RIGHTS,
             *(g for p in group["spec"]["pools"] for g in p["grants"]),
             *_mail(_names(host)[1], *POOLS),
+            *(f"mail:{member}" for member in developers(host)),
         }
     )
     expires = (datetime.now(UTC) + timedelta(days=int(host.get("grant_days", 14)))).isoformat()
@@ -1381,7 +1393,11 @@ def provision(
     staged.chmod(0o600)
     os.replace(staged, out)
     # The kernel's own CLI, from the kit's environment (`python -I -m cardea.service`).
-    cardea = list(settings.get("cardea", [*KIT_PYTHON, "-I", "-m", "cardea.service"]))
+    cardea = list(
+        PACKAGED_CARDEA
+        if packaged()
+        else settings.get("cardea", [*KIT_PYTHON, "-I", "-m", "cardea.service"])
+    )
     config = settings.get("config", "/etc/cardea/config.json")
     runner([*cardea, "provision", "--config", config, str(out)], check=True)
     return out

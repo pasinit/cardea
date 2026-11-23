@@ -1,0 +1,4 @@
+#!/bin/sh
+# The program behind `cardea team`. sudo runs it as cardea-kernel for the group cardea-operators
+# (/etc/sudoers.d/cardea-team); it takes no arguments and reads one request on stdin.
+exec /opt/venvs/cardea-kernel/bin/python -I /usr/lib/cardea/teamkit/teamcli.py --helper

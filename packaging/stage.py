@@ -8,6 +8,14 @@ import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+TEAM_KIT = (
+    "dashboard.py",
+    "teamcli.py",
+    "teamkit.py",
+    "teamschema.py",
+    "teamsettings.py",
+    "teamsettings_apply.py",
+)
 
 
 def stage(destination: Path, uv: str) -> None:
@@ -25,6 +33,11 @@ def stage(destination: Path, uv: str) -> None:
         destination / "debian",
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
+    # The team commands (`cardea team`) run the team kit beside the kernel's own code, not
+    # from a checkout: only the modules they load, never the dashboard's pages.
+    (destination / "teamkit").mkdir()
+    for module in TEAM_KIT:
+        shutil.copyfile(ROOT / "deploy/team-kit" / module, destination / "teamkit" / module)
     shutil.copyfile(ROOT / "apps/api/uv.lock", destination / "uv.lock")
     with (destination / "requirements.txt").open("w") as requirements:
         subprocess.run(
@@ -47,7 +60,13 @@ def stage(destination: Path, uv: str) -> None:
         if path.is_file()
     }
     (destination / "source-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    for name in ("rules", "cardea", "cardea-kernel.postinst", "cardea-kernel.prerm"):
+    for name in (
+        "rules",
+        "cardea",
+        "cardea-team-helper",
+        "cardea-kernel.postinst",
+        "cardea-kernel.prerm",
+    ):
         (destination / "debian" / name).chmod(0o755)
 
 

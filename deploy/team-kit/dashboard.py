@@ -180,13 +180,18 @@ class KernelBackend:
         return page
 
     def send(self, role: str, text: str, client_key: str) -> dict[str, Any]:
+        return self.send_to({"pool": f"{self.group}.{role}"}, text, client_key)
+
+    def send_to(self, to: dict[str, str], text: str, client_key: str) -> dict[str, Any]:
+        """One text message to an address: a pool, `{"pool": "<group>.<role>"}`, or one member,
+        `{"instance": "<principal id>"}`. The kernel checks the supervisor's `mail:` grant."""
         sent: dict[str, Any] = self.request(
             "POST",
             "/mailbox",
             json={
                 "namespace": self.namespace,
                 "client_key": client_key,
-                "to": {"pool": f"{self.group}.{role}"},
+                "to": to,
                 "parts": [{"text": text}],
             },
         )

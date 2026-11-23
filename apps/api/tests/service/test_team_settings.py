@@ -113,6 +113,8 @@ def test_the_preview_diffs_each_setting_against_the_host_file(
     assert changes["schedules.pm"] == (["0 9 * * 1-5"], ["0 10 * * 1-5"])
     assert changes["schedules.dev"] == ([], ["*/30 * * * *"])
     assert changes["developers"] == (2, 4)
+    assert changes["email_rate_limit.count"] == (5, 10)
+    assert changes["email_rate_limit.window_days"] == (2, 1)
     assert changes["model"] == ("claude-sonnet-4-5", "claude-opus-5-5")
     assert changes["product_goals.goals"][0] == "Original goals."
     assert changes["product_goals.non_goals"][1] == "No mobile app."

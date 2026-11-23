@@ -2,6 +2,8 @@
 
 import argparse
 import json
+import runpy
+import sys
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -26,9 +28,27 @@ from cardea.service.operations import Registry
 from cardea.service.server import serve
 
 
+def team_kit() -> Path:
+    """The team kit that goes with this code: installed beside the `cardea` package (the
+    Debian package's `teamkit`), or `deploy/team-kit` in a source checkout."""
+    root = Path(__file__).resolve().parents[2]
+    for candidate in (root / "teamkit", root.parents[2] / "deploy" / "team-kit"):
+        if (candidate / "teamcli.py").is_file():
+            return candidate
+    raise SystemExit("cardea team: the team kit is not installed with this cardea")
+
+
 def main() -> None:
+    if sys.argv[1:2] == ["team"]:
+        # `cardea team ...`: the dev team's commands (teamcli.py), run with this very code.
+        sys.argv = ["cardea team", *sys.argv[2:]]
+        runpy.run_path(str(team_kit() / "teamcli.py"), run_name="__main__")
+        return
     parser = argparse.ArgumentParser(description="Cardea authenticated kernel")
     commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser(
+        "team", help="the agent dev team: status, pause, set, mail (cardea team --help)"
+    )
     administrative = {
         "init",
         "provision",
