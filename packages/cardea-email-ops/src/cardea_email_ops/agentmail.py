@@ -6,7 +6,7 @@ Endpoints (https://docs.agentmail.to/api-reference, read 2026-11-17), base
   with the same key within 24 hours returns the first message and sends nothing;
 - `GET /inboxes/{inbox_id}/messages?labels=...` to find a send by the label it carries;
 - `GET /inboxes/{inbox_id}/threads/{thread_id}` for the messages on one thread;
-- `GET /inboxes/{inbox_id}/messages?labels=received&after=...` and
+- `GET /inboxes/{inbox_id}/messages?labels=received&limit=50` and
   `GET /inboxes/{inbox_id}/messages/{message_id}` for inbound mail on no Cardea thread
   (amendment 2026-11-21). Only messages from an allowed address are read in full.
 
@@ -16,10 +16,11 @@ official Python SDK is not used: see ADR-039 for why.
 
 import base64
 import logging
-from datetime import datetime
+import re
+from datetime import UTC, datetime
 from email.utils import parseaddr
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import httpx
 
@@ -34,16 +35,57 @@ LIST = "GET /inboxes/{inbox_id}/messages"
 MESSAGE = "GET /inboxes/{inbox_id}/messages/{message_id}"
 THREAD = "GET /inboxes/{inbox_id}/threads/{thread_id}"
 MAX_PAGES = 5
+LIST_LIMIT = 50
+BODY_LIMIT = 500
+ADDRESS = re.compile(r"[^\s<>\"',;:()\[\]]+@[^\s<>\"',;:()\[\]]+")
 # Responses that mean the request was refused before anything was sent. 409 is not one:
 # it means this idempotency key already sent a different request, so an earlier attempt
 # may have sent; the call stays uncertain and the reconciler decides.
 DEFINITE = {400, 401, 403, 404, 413, 422, 429}
 
 
+class _InboxMask(logging.Filter):
+    """httpx logs every request URL at INFO, and the URL names the inbox. Replace the
+    inbox segment before the record reaches any handler."""
+
+    PATH = re.compile(r"(/inboxes/)[^/?\s\"]+")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        text = record.getMessage()
+        if "/inboxes/" in text:
+            record.msg, record.args = self.PATH.sub(r"\1***", text), None
+        return True
+
+
+_httpx_logger = logging.getLogger("httpx")
+if not any(isinstance(f, _InboxMask) for f in _httpx_logger.filters):
+    _httpx_logger.addFilter(_InboxMask())
+
+
+def _masked(response: httpx.Response) -> str:
+    """The body of a refused request with the API key, the inbox id and every address
+    replaced, cut to `BODY_LIMIT` characters. The provider's message may echo the request."""
+    request = response.request
+    hidden = [request.headers.get("authorization", "").removeprefix("Bearer ").strip()]
+    parts = request.url.path.split("/")
+    if "inboxes" in parts[:-1]:
+        raw = parts[parts.index("inboxes") + 1]
+        hidden += [raw, unquote(raw)]
+    text = response.text
+    for value in sorted(set(hidden), key=len, reverse=True):
+        if value:
+            text = text.replace(value, "***")
+    text = ADDRESS.sub("***", text)
+    return " ".join(text.split())[:BODY_LIMIT]
+
+
 def _failure(response: httpx.Response, route: str) -> str:
-    """Log a failed call and return its message. Only the status and the route template
-    are reported: the URL names the inbox and the provider's message may echo the request."""
+    """Log a failed call and return its message. The status and the route template are
+    reported: the URL names the inbox. A 400 adds its masked body, which says which
+    parameter the provider refused."""
     message = f"AgentMail answered HTTP {response.status_code} for {route}"
+    if response.status_code == 400:
+        message += f": {_masked(response)}"
     logger.warning(message)
     return message
 
@@ -144,11 +186,8 @@ class AgentMail:
         async with self._client() as client:
             token: str | None = None
             for _ in range(MAX_PAGES):
-                params: dict[str, Any] = {
-                    "labels": "received",
-                    "after": since.isoformat(),
-                    "limit": 100,
-                }
+                # The provider answers 400 to `after`: the window is applied below.
+                params: dict[str, Any] = {"labels": "received", "limit": LIST_LIMIT}
                 if token:
                     params["page_token"] = token
                 response = await client.get(f"/inboxes/{self.inbox}/messages", params=params)
@@ -230,6 +269,11 @@ class AgentMail:
 def _after(stamp: object, since: datetime) -> bool:
     """Whether a provider timestamp is at or after `since`; an unreadable one counts."""
     try:
-        return datetime.fromisoformat(str(stamp)) >= since
-    except (ValueError, TypeError):
+        moment = datetime.fromisoformat(str(stamp))
+    except ValueError:
         return True
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    if since.tzinfo is None:
+        since = since.replace(tzinfo=UTC)
+    return moment >= since

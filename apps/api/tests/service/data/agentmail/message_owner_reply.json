@@ -1,0 +1,13 @@
+{
+  "inbox_id": "team@agents.example.invalid",
+  "thread_id": "thr-owner-1",
+  "message_id": "<owner-reply-1@mail.invalid>",
+  "labels": ["received", "unread"],
+  "timestamp": "2026-11-22T10:00:00.123456Z",
+  "from": "Client <client@example.invalid>",
+  "to": ["team@agents.example.invalid"],
+  "subject": "Re: question",
+  "text": "Yes, go ahead.\n\n> quoted",
+  "extracted_text": "Yes, go ahead.",
+  "authentication_results": {"dmarc": "pass", "dmarc_domain": "example.invalid"}
+}

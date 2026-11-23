@@ -1,0 +1,28 @@
+{
+  "count": 2,
+  "limit": 100,
+  "messages": [
+    {
+      "inbox_id": "team@agents.example.invalid",
+      "thread_id": "thr-owner-1",
+      "message_id": "<owner-reply-1@mail.invalid>",
+      "labels": ["received", "unread"],
+      "timestamp": "2026-11-22T10:00:00.123456Z",
+      "from": "Client <client@example.invalid>",
+      "to": ["team@agents.example.invalid"],
+      "subject": "Re: question",
+      "size": 120
+    },
+    {
+      "inbox_id": "team@agents.example.invalid",
+      "thread_id": "thr-old",
+      "message_id": "<old@mail.invalid>",
+      "labels": ["received"],
+      "timestamp": "2026-01-01T10:00:00Z",
+      "from": "Client <client@example.invalid>",
+      "to": ["team@agents.example.invalid"],
+      "subject": "Old",
+      "size": 90
+    }
+  ]
+}
