@@ -12,6 +12,11 @@ credential (the same one `teamkit.py` uses), so the kernel's rules decide what i
 whether the supervisor may mail the role (`mail:<group>.<role>`). It listens on the loopback
 interface only, and refuses a request whose Host or Origin is not that address.
 
+`POST /api/settings/preview` and `POST /api/settings/apply` (no page yet) show and then change the
+team settings through `teamapply.TeamSettings`: an apply needs the `confirm` token its preview
+returned, and the kernel checks the supervisor's authority live. They take the same Host, Origin
+and content-type guards as the message box. Resume is refused here (`resume_by_host_owner`).
+
 A message carries the page's client key. The kernel returns the message already sent for a
 repeated key, so a double submit, a retry or a second tab with the same form delivers once.
 """
@@ -44,6 +49,11 @@ MAIL_LIMIT = 20
 STATIC = {
     "/": ("dashboard.html", "text/html; charset=utf-8"),
     "/dashboard.js": ("dashboard.js", "text/javascript; charset=utf-8"),
+}
+# The settings routes: the backend method and the exact keys of the JSON body.
+SETTINGS_ROUTES = {
+    "/api/settings/preview": ("settings_preview", {"settings"}),
+    "/api/settings/apply": ("settings_apply", {"settings", "confirm"}),
 }
 # The page loads its one script from this server and talks only to this server.
 CSP = (
@@ -141,8 +151,28 @@ class FixtureBackend:
 class KernelBackend:
     """The kernel, as the supervisor: `request` is `KernelClient.request`."""
 
-    def __init__(self, request: Callable[..., Any], namespace: str, group: str) -> None:
+    def __init__(
+        self,
+        request: Callable[..., Any],
+        namespace: str,
+        group: str,
+        settings: Any = None,
+    ) -> None:
+        """`settings` is a `teamapply.TeamSettings`; without one the settings routes are 404."""
         self.request, self.namespace, self.group = request, namespace, group
+        self.settings = settings
+
+    def settings_preview(self, body: dict[str, Any]) -> dict[str, Any]:
+        if self.settings is None:
+            raise DashboardError("not_found", 404)
+        preview: dict[str, Any] = self.settings.preview(body["settings"])
+        return preview
+
+    def settings_apply(self, body: dict[str, Any]) -> dict[str, Any]:
+        if self.settings is None:
+            raise DashboardError("not_found", 404)
+        applied: dict[str, Any] = self.settings.apply(body["settings"], body["confirm"])
+        return applied
 
     def overview(self) -> dict[str, Any]:
         view: dict[str, Any] = self.request(
@@ -251,7 +281,11 @@ def handler(
             except Exception as error:  # the kernel's refusal, or it being unreachable
                 status = getattr(error, "status", 502)
                 code = str(getattr(error, "code", None) or "kernel_unavailable")
-                self.json(status if 400 <= status < 600 else 502, {"code": code})
+                answer: dict[str, Any] = {"code": code}
+                detail = getattr(error, "detail", None)  # a settings refusal's safe detail
+                if isinstance(detail, str | list):
+                    answer["detail"] = detail
+                self.json(status if 400 <= status < 600 else 502, answer)
 
         def do_GET(self) -> None:
             def get() -> None:
@@ -269,21 +303,34 @@ def handler(
 
             self.guarded(get)
 
+        def body(self, keys: set[str]) -> dict[str, Any]:
+            # A cross-site form cannot send JSON, and a script cannot do so unpreflighted.
+            if self.headers.get_content_type() != "application/json":
+                raise DashboardError("unsupported_media_type", 415)
+            size = int(self.headers.get("Content-Length") or -1)
+            if not 0 <= size <= MAX_BODY_BYTES:
+                raise DashboardError("invalid_message", 413)
+            try:
+                found = json.loads(self.rfile.read(size))
+            except ValueError:
+                raise DashboardError("invalid_message") from None
+            if not isinstance(found, dict) or set(found) != keys:
+                raise DashboardError("invalid_message")
+            return found
+
         def do_POST(self) -> None:
             def post() -> None:
-                if self.path != "/api/message" or not writable:
+                if not writable:
                     return self.json(HTTPStatus.NOT_FOUND, {"code": "not_found"})
-                # A cross-site form cannot send JSON, and a script cannot do so unpreflighted.
-                if self.headers.get_content_type() != "application/json":
-                    raise DashboardError("unsupported_media_type", 415)
-                size = int(self.headers.get("Content-Length") or -1)
-                if not 0 <= size <= MAX_BODY_BYTES:
-                    raise DashboardError("invalid_message", 413)
-                try:
-                    body = json.loads(self.rfile.read(size))
-                except ValueError:
-                    raise DashboardError("invalid_message") from None
-                self.json(HTTPStatus.CREATED, send_message(backend, body))
+                if self.path in SETTINGS_ROUTES:
+                    method, keys = SETTINGS_ROUTES[self.path]
+                    action = getattr(backend, method, None)
+                    if action is None:
+                        return self.json(HTTPStatus.NOT_FOUND, {"code": "not_found"})
+                    return self.json(HTTPStatus.OK, action(self.body(keys)))
+                if self.path != "/api/message":
+                    return self.json(HTTPStatus.NOT_FOUND, {"code": "not_found"})
+                self.json(HTTPStatus.CREATED, send_message(backend, self.body({"role", "text", "client_key"})))
 
             self.guarded(post)
 

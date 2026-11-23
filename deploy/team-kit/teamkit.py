@@ -1345,7 +1345,7 @@ def status(host: dict[str, Any], today: date | None = None) -> list[str]:
     return host_rules_note(host) + tokens + failure_lines(failures(view)) + summarise(view)
 
 
-def dashboard(host: dict[str, Any], port: int) -> None:
+def dashboard(host: dict[str, Any], port: int, host_path: Path | None = None) -> None:
     import importlib.util
 
     path = Path(__file__).with_name("dashboard.py")
@@ -1356,7 +1356,16 @@ def dashboard(host: dict[str, Any], port: int) -> None:
     namespace, group, _, _ = _names(host)
     kernel = client(host)
     try:
-        page.serve(page.KernelBackend(kernel.request, namespace, group), port)
+        settings = None
+        if host_path is not None:
+            apply_module = importlib.util.spec_from_file_location(
+                "teamapply", Path(__file__).with_name("teamapply.py")
+            )
+            assert apply_module is not None and apply_module.loader is not None
+            module = importlib.util.module_from_spec(apply_module)
+            apply_module.loader.exec_module(module)
+            settings = module.TeamSettings(host_path)
+        page.serve(page.KernelBackend(kernel.request, namespace, group, settings), port)
     finally:
         kernel.close()
 
@@ -1391,7 +1400,7 @@ def main(argv: list[str]) -> int:
     elif args.command == "status":
         print("\n".join(status(host)))
     elif args.command == "dashboard":
-        dashboard(host, args.port)
+        dashboard(host, args.port, args.host)
     elif args.command == "pause":
         runs = pause(host, args.reason)
         print(f"the supervisor is disabled; the kernel cancelled its {len(runs)} active run(s)")
