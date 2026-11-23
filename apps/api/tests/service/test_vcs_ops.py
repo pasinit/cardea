@@ -1009,14 +1009,9 @@ def test_list_changes_shows_open_changes_with_review_and_check_state(
 def test_list_changes_without_the_grant_is_refused_naming_it(
     kernel: Kernel, session: FakeSession, host: FakeGitHub
 ) -> None:
-    """A role lacking `vcs.list_changes` (or `repo:<alias>`) is refused before the host is
-    called, and the refusal names the grant."""
+    """A role lacking `repo:<alias>` is refused before the host is called, and the refusal
+    names the grant. (A run cannot expose the operation without holding its own grant.)"""
     before = len(host.authorizations)
-    without = [g for g in RUN_GRANTS if g != "vcs.list_changes"]
-    _, _, (no_operation,) = run_calls(
-        kernel, session, [("vcs-list_changes", {"repository": "cardea"})], grants=without
-    )
-    assert no_operation.is_error and "vcs.list_changes" in text(no_operation), text(no_operation)
     _, _, (no_repo,) = run_calls(kernel, session, [("vcs-list_changes", {"repository": "other"})])
     assert no_repo.is_error and "repo:other" in text(no_repo), text(no_repo)
     assert untouched(host, before)
