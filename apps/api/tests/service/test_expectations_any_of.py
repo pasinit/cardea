@@ -14,6 +14,9 @@ from cardea.service.database import borrow
 from cardea.service.kernel import Kernel
 from cardea.service.models import AgentRunRequest, WindowExpectation
 
+# Binds or connects over TCP loopback: not run by `make check-test`.
+pytestmark = pytest.mark.loopback
+
 kernel, session, tools = runs.kernel, runs.session, runs.tools
 LEAD = "lead@example.invalid"
 # "A pull request, or a message to the team lead": here a search or a mail to the lead.
