@@ -27,16 +27,25 @@ def flow(name: str) -> dict[str, Any]:
     return document
 
 
-def page_backend(env: Env, who: Any = None) -> Any:
+def page_backend(env: Env, who: Any = None, guard: Any = None) -> Any:
     """The dashboard backend for the fixture host file, reading as the team's supervisor unless
-    `who` (a source function) says otherwise."""
+    `who` (a source function) says otherwise; `guard` is the read a change must also pass."""
     read = who or (lambda: {"group": "dev-team"})
-    return teams().TeamsBackend({"dev": read}, hosts={"dev": env.path}, connect=env.connect)
+    guards = {"dev": guard} if guard else None
+    return teams().TeamsBackend(
+        {"dev": read}, hosts={"dev": env.path}, connect=env.connect, guards=guards
+    )
 
 
 def overview(kernel: Kernel, who: str) -> Any:
     """The team's overview read from the real kernel as `who`: the page's authority check."""
     return teams().base.KernelBackend(Supervisor(kernel, who).request, "eng", "eng-team").overview
+
+
+def group_read(kernel: Kernel, who: str) -> Any:
+    """The group read as `who`: the kernel refuses it for a disabled principal (a paused team)."""
+    supervisor = Supervisor(kernel, who)
+    return lambda: supervisor.request("GET", "/groups/eng-team", params={"namespace": "eng"})
 
 
 def preview(backend: Any, settings: object) -> tuple[int, Any]:
@@ -149,13 +158,14 @@ def test_only_the_groups_supervisor_gets_through(
         assert preview(backend, {"developers": 3}) == refused
         assert apply(backend, {"developers": 3}, "0" * 64) == refused
     assert env.path.read_bytes() == before and env.provisioned == [] and env.audit() == []
-    # The supervisor is let through. Once the kernel disables them (a paused team) the preview
-    # still reads, as the overview does, but the apply's own writes are refused.
-    backend = page_backend(env, overview(kernel, "sup-eng"))
+    # The supervisor is let through, and refused the moment the kernel disables them (a paused
+    # team): the overview still reads, but a preview or an apply does not.
+    backend = page_backend(env, overview(kernel, "sup-eng"), group_read(kernel, "sup-eng"))
     token = preview(backend, {"developers": 3})[1]["confirm"]
     with kernel.database.engine.begin() as conn:
         conn.exec_driver_sql("UPDATE principals SET disabled=1 WHERE principal_id='sup-eng'")
-    assert preview(backend, {"developers": 3})[0] == 200
+    assert call(backend, "GET", "/api/settings?team=dev")[0] == 200  # reads work while paused
+    assert preview(backend, {"developers": 3}) == (403, {"code": "principal_disabled"})
     assert apply(backend, {"developers": 3}, token) == (403, {"code": "principal_disabled"})
     assert env.path.read_bytes() == before and env.audit() == []
 
