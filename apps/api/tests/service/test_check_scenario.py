@@ -172,6 +172,7 @@ def test_an_unmarked_test_that_uses_tcp_fails_by_name_under_check(tmp_path: Path
     assert "test_tcp.py::test_tcp uses TCP; mark it `loopback`" in done.stdout
 
 
+@pytest.mark.loopback
 def test_a_test_marked_loopback_may_use_tcp_under_check(tmp_path: Path) -> None:
     done = nested(tmp_path, CONNECT.format(mark="@pytest.mark.loopback\n"))
     assert done.returncode == 0, done.stdout

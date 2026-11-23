@@ -329,6 +329,7 @@ def test_unavailable_profile_listing_installs_nothing(kernel: Kernel, host: Work
 # Execution
 
 
+@pytest.mark.loopback
 def test_confined_read_passes_json_and_limits_through(kernel: Kernel, host: WorkerHost) -> None:
     task_id = submit(kernel)
     before = time.time()
@@ -351,6 +352,7 @@ def test_confined_read_passes_json_and_limits_through(kernel: Kernel, host: Work
     assert host.cleaned == [started["job"]]
 
 
+@pytest.mark.loopback
 def test_memory_cap_kill_of_an_effect_is_outcome_unknown(kernel: Kernel, host: WorkerHost) -> None:
     host.outcome = finished(None, result="oom-kill", exit_status="9")
     task_id = submit(kernel, "pages.post")
@@ -363,6 +365,7 @@ def test_memory_cap_kill_of_an_effect_is_outcome_unknown(kernel: Kernel, host: W
     assert OperationRuntime(kernel).execute(submit(kernel)) == "succeeded"
 
 
+@pytest.mark.loopback
 def test_memory_cap_kill_of_a_read_fails_cleanly(kernel: Kernel, host: WorkerHost) -> None:
     host.outcome = finished(None, result="oom-kill", exit_status="9")
     task_id = submit(kernel)
@@ -379,6 +382,7 @@ def test_memory_cap_kill_of_a_read_fails_cleanly(kernel: Kernel, host: WorkerHos
         (finished({"text": "not wrapped"}), "worker_output_invalid"),
     ],
 )
+@pytest.mark.loopback
 def test_other_worker_failures_of_reads(
     kernel: Kernel, host: WorkerHost, outcome: dict[str, Any], code: str
 ) -> None:
@@ -388,6 +392,7 @@ def test_other_worker_failures_of_reads(
     assert failure(kernel, task_id) == code
 
 
+@pytest.mark.loopback
 def test_worker_that_never_started_is_a_definite_failure(kernel: Kernel, host: WorkerHost) -> None:
     host.reject = True
     task_id = submit(kernel, "pages.post")
@@ -397,6 +402,7 @@ def test_worker_that_never_started_is_a_definite_failure(kernel: Kernel, host: W
     assert host.stops == []
 
 
+@pytest.mark.loopback
 def test_a_host_whose_mounts_are_not_shared_is_named_as_the_cause(
     kernel: Kernel, host: WorkerHost
 ) -> None:
@@ -409,6 +415,7 @@ def test_a_host_whose_mounts_are_not_shared_is_named_as_the_cause(
     assert "mount --make-rshared /" in receipt(kernel, task_id).failure.model_dump_json()
 
 
+@pytest.mark.loopback
 def test_a_credential_systemd_did_not_load_is_named_as_the_cause(
     kernel: Kernel, host: WorkerHost
 ) -> None:
@@ -424,6 +431,7 @@ def test_a_credential_systemd_did_not_load_is_named_as_the_cause(
     assert failure(kernel, task_id) == "credential_not_loaded"
 
 
+@pytest.mark.loopback
 def test_worker_reported_rejection_is_a_definite_failure(kernel: Kernel, host: WorkerHost) -> None:
     host.outcome = finished({"rejected": "provider refused"})
     task_id = submit(kernel, "pages.post")
@@ -431,6 +439,7 @@ def test_worker_reported_rejection_is_a_definite_failure(kernel: Kernel, host: W
     assert receipt(kernel, task_id).state is OperationState.FAILED
 
 
+@pytest.mark.loopback
 def test_cancel_stops_the_worker_and_cleans_up(kernel: Kernel, host: WorkerHost) -> None:
     task_id = submit(kernel)
     host.running = -1
@@ -441,6 +450,7 @@ def test_cancel_stops_the_worker_and_cleans_up(kernel: Kernel, host: WorkerHost)
     assert receipt(kernel, task_id).state is OperationState.CANCELLED
 
 
+@pytest.mark.loopback
 def test_cancel_of_a_running_effect_stops_it_and_stays_uncertain(
     kernel: Kernel, host: WorkerHost
 ) -> None:
@@ -452,6 +462,7 @@ def test_cancel_of_a_running_effect_stops_it_and_stays_uncertain(
     assert receipt(kernel, task_id).state is OperationState.OUTCOME_UNKNOWN
 
 
+@pytest.mark.loopback
 def test_timeout_stops_the_worker(kernel: Kernel, host: WorkerHost) -> None:
     host.running = -1
     task_id = submit(kernel, "pages.post")
@@ -526,6 +537,7 @@ def run_request(**changes: Any) -> AgentRunRequest:
     )
 
 
+@pytest.mark.loopback
 def test_agent_tool_call_killed_at_its_memory_cap(kernel: Kernel, host: WorkerHost) -> None:
     session = FakeSession()
     kernel.session = session
@@ -768,6 +780,7 @@ class Timed:
         host.stop = stopped  # type: ignore[method-assign]
 
 
+@pytest.mark.loopback
 def test_queue_wait_does_not_count_against_the_operation_timeout(
     kernel: Kernel, host: WorkerHost
 ) -> None:
@@ -792,6 +805,7 @@ def test_queue_wait_does_not_count_against_the_operation_timeout(
     assert timed.peak == 1 and len(host.starts) == 4
 
 
+@pytest.mark.loopback
 def test_queue_expiry_is_a_distinct_retryable_failure(kernel: Kernel, host: WorkerHost) -> None:
     Timed(host, 0.1, queue_timeout=1)
     session = FakeSession()
@@ -859,6 +873,7 @@ def test_worker_results_carry_a_bounded_reason(
     assert summary in failed.value.summary and len(failed.value.summary) <= 200
 
 
+@pytest.mark.loopback
 def test_failed_read_receipt_records_the_reason(kernel: Kernel, host: WorkerHost) -> None:
     host.outcome = finished({"error": {"type": "HTTPStatusError", "status": 503}})
     task_id = submit(kernel)
@@ -871,6 +886,7 @@ def test_failed_read_receipt_records_the_reason(kernel: Kernel, host: WorkerHost
     }
 
 
+@pytest.mark.loopback
 def test_a_worker_error_is_logged_and_its_reason_survives_reconciliation(
     kernel: Kernel,
     host: WorkerHost,
@@ -961,6 +977,7 @@ async def settled(kernel: Kernel, task_id: str, operation_id: str) -> Any:
     raise AssertionError("the call never settled")
 
 
+@pytest.mark.loopback
 def test_a_client_that_disconnects_withdraws_its_waiting_call(
     kernel: Kernel, host: WorkerHost
 ) -> None:
@@ -997,6 +1014,7 @@ def test_a_client_that_disconnects_withdraws_its_waiting_call(
     assert host.starts == []
 
 
+@pytest.mark.loopback
 def test_a_cancel_notification_withdraws_the_waiting_call_it_names(
     kernel: Kernel, host: WorkerHost
 ) -> None:
@@ -1040,6 +1058,7 @@ def test_a_cancel_notification_withdraws_the_waiting_call_it_names(
     assert host.starts == []
 
 
+@pytest.mark.loopback
 def test_a_running_call_finishes_and_settles_after_its_client_leaves(
     kernel: Kernel, host: WorkerHost
 ) -> None:

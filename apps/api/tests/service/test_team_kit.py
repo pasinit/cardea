@@ -452,6 +452,7 @@ def ready_item(kernel: Kernel, session: FakeSession, title: str = "Fix it") -> s
     return str(created["record_id"])
 
 
+@pytest.mark.loopback
 def test_an_assignment_wakes_the_developers_and_only_one_claims_it(
     team: tuple[Kernel, FakeSession],
 ) -> None:
@@ -585,6 +586,7 @@ def test_provision_and_apply_refuse_placeholder_values(tmp_path: Path) -> None:
     assert module.placeholders(document) == []
 
 
+@pytest.mark.loopback
 def test_a_refused_repository_call_records_the_missing_grant(
     team: tuple[Kernel, FakeSession], logs: pytest.LogCaptureFixture
 ) -> None:
@@ -673,6 +675,7 @@ def test_disabling_the_supervisor_cancels_its_unfinished_runs(
         )
 
 
+@pytest.mark.loopback
 def test_a_holder_interrupted_by_the_kill_switch_is_woken_after_resume(
     team: tuple[Kernel, FakeSession],
 ) -> None:
@@ -706,6 +709,7 @@ def test_a_holder_interrupted_by_the_kill_switch_is_woken_after_resume(
     assert claims.followups(kernel, at) == []
 
 
+@pytest.mark.loopback
 def test_submit_records_the_pull_request_and_reviews_drive_the_item(
     team: tuple[Kernel, FakeSession], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -809,6 +813,7 @@ def test_submit_records_the_pull_request_and_reviews_drive_the_item(
     assert "data.change" in pe["run"]["instructions"]
 
 
+@pytest.mark.loopback
 def test_events_refused_while_paused_wake_the_members_on_resume(
     team: tuple[Kernel, FakeSession],
 ) -> None:
@@ -1006,6 +1011,7 @@ def test_roles_are_told_the_addresses_they_may_mail() -> None:
     assert "stop at once and send no mail" in pools["dev"]["run"]["instructions"]
 
 
+@pytest.mark.loopback
 def test_a_team_lead_answer_about_an_item_wakes_only_its_holder(
     team: tuple[Kernel, FakeSession],
 ) -> None:
@@ -1196,6 +1202,7 @@ async def start(client: ClientSession, record_id: str) -> tuple[str, dict[str, A
     return (text(moved) if moved.is_error else ""), dict(moved.structured_content or {})
 
 
+@pytest.mark.loopback
 def test_a_developer_starts_the_next_item_after_submitting(
     team: tuple[Kernel, FakeSession], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1385,6 +1392,7 @@ def merge(record_id: str, number: int, outcome: list[str], epoch: int | None = N
     return script
 
 
+@pytest.mark.loopback
 def test_a_lapse_in_progress_returns_the_item_to_ready(
     team: tuple[Kernel, FakeSession],
 ) -> None:
@@ -1400,6 +1408,7 @@ def test_a_lapse_in_progress_returns_the_item_to_ready(
     assert item(kernel, record_id) == ("ready", None, 2, None)
 
 
+@pytest.mark.loopback
 def test_a_lapse_in_review_keeps_the_review_and_another_developer_takes_over(
     team: tuple[Kernel, FakeSession], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1429,6 +1438,7 @@ def test_a_lapse_in_review_keeps_the_review_and_another_developer_takes_over(
     assert item(kernel, record_id)[:2] == ("done", None)
 
 
+@pytest.mark.loopback
 def test_a_lapse_when_approved_keeps_the_approval_for_the_opener(
     team: tuple[Kernel, FakeSession], monkeypatch: pytest.MonkeyPatch
 ) -> None:

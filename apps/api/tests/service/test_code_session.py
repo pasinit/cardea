@@ -306,6 +306,7 @@ def change(edits: dict[str, str]) -> dict[str, Any]:
 # code.session
 
 
+@pytest.mark.loopback
 def test_a_session_returns_a_bounded_receipt_and_the_change_as_objects(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: Path
 ) -> None:
@@ -331,6 +332,7 @@ def test_a_session_returns_a_bounded_receipt_and_the_change_as_objects(
     assert git(check, "show", "change:src/app.py") == "print('hello')\n"
 
 
+@pytest.mark.loopback
 def test_failing_gates_are_reported_not_hidden(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: Path
 ) -> None:
@@ -342,6 +344,7 @@ def test_failing_gates_are_reported_not_hidden(
     assert output["gates_passed"] is False
 
 
+@pytest.mark.loopback
 def test_a_call_without_the_repo_grant_is_refused_before_a_worker_starts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: Path
 ) -> None:
@@ -366,6 +369,7 @@ def test_a_call_without_the_repo_grant_is_refused_before_a_worker_starts(
     assert OperationRuntime(kernel).execute(granted) == "succeeded" and len(started) == 1
 
 
+@pytest.mark.loopback
 def test_no_repository_host_credential_reaches_the_harness_or_gates(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: Path
 ) -> None:
@@ -531,6 +535,7 @@ def renewals(kernel: Kernel, task_id: str) -> int:
         )
 
 
+@pytest.mark.loopback
 def test_a_long_call_keeps_a_short_lease_alive_with_a_heartbeat(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -542,6 +547,7 @@ def test_a_long_call_keeps_a_short_lease_alive_with_a_heartbeat(
     assert receipt(kernel, task_id).state is OperationState.SUCCEEDED
 
 
+@pytest.mark.loopback
 def test_a_long_call_whose_lease_is_lost_is_stopped_and_fenced(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -558,6 +564,7 @@ def test_a_long_call_whose_lease_is_lost_is_stopped_and_fenced(
     assert task(kernel, task_id).state is TaskState.FAILED
 
 
+@pytest.mark.loopback
 def test_a_lease_can_be_renewed_only_by_its_live_holder(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -755,6 +762,7 @@ def stored_objects(kernel: Kernel, task_id: str) -> int:
 
 
 @LINUX
+@pytest.mark.loopback
 def test_a_gate_cannot_write_the_workers_result_through_proc(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: Path
 ) -> None:
@@ -768,6 +776,7 @@ def test_a_gate_cannot_write_the_workers_result_through_proc(
 
 
 @LINUX
+@pytest.mark.loopback
 def test_a_detached_gate_child_is_killed_before_it_can_change_anything(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: Path
 ) -> None:

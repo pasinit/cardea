@@ -546,6 +546,7 @@ def check(kernel: Kernel, session: FakeSession) -> dict[str, Any]:
     return cast(dict[str, Any], result.structured_content)
 
 
+@pytest.mark.loopback
 def test_without_host_rules_a_repository_is_not_ready_unless_waived(
     kernel: Kernel, session: FakeSession, host: FakeGitHub, vcs: Vcs
 ) -> None:
@@ -748,6 +749,7 @@ def test_the_guard_keeps_every_other_rule(
     assert merged.structured_content["host_rules"] == "waived"
 
 
+@pytest.mark.loopback
 def test_check_repository_reports_the_guard(
     kernel: Kernel, session: FakeSession, host: FakeGitHub, vcs: Vcs
 ) -> None:

@@ -173,6 +173,7 @@ ONCE = [{"operation": "mail.send", "min_calls": 1, "max_calls": 1}]
 # 1. Approve: the continuation runs apr-01 and the run resumes with its result
 
 
+@pytest.mark.loopback
 def test_approve_resumes_the_run_with_the_result(
     kernel: Kernel, tools: Tools, session: FakeSession
 ) -> None:
@@ -228,6 +229,7 @@ def test_approve_resumes_the_run_with_the_result(
 # 3. Reject: no effect, the run is told with the escaped reason
 
 
+@pytest.mark.loopback
 def test_reject_tells_the_run_and_runs_nothing(
     kernel: Kernel, tools: Tools, session: FakeSession
 ) -> None:
@@ -273,6 +275,7 @@ def overdue(kernel: Kernel, row: dict[str, Any]) -> dict[str, str]:
 EXPIRING = {**HELD, "expires_after_seconds": 60}
 
 
+@pytest.mark.loopback
 def test_expiry_with_resume_wakes_the_run_and_tells_it(
     kernel: Kernel, tools: Tools, session: FakeSession
 ) -> None:
@@ -297,6 +300,7 @@ def test_expiry_with_resume_wakes_the_run_and_tells_it(
     assert late.value.code == "approval_expired"
 
 
+@pytest.mark.loopback
 def test_expiry_with_fail_fails_the_waiting_run(
     kernel: Kernel, tools: Tools, session: FakeSession
 ) -> None:
@@ -311,6 +315,7 @@ def test_expiry_with_fail_fails_the_waiting_run(
     assert recorder.continuations() == [] and tools.sent == []
 
 
+@pytest.mark.loopback
 def test_expiry_during_the_attempt_applies_after_it_parks(
     kernel: Kernel, tools: Tools, session: FakeSession
 ) -> None:
@@ -338,6 +343,7 @@ def test_expiry_during_the_attempt_applies_after_it_parks(
 # 11 / 16. One open request, the same intent returns it, and the wait cap
 
 
+@pytest.mark.loopback
 def test_open_request_rules_and_the_wait_cap(
     kernel: Kernel, tools: Tools, session: FakeSession
 ) -> None:
@@ -385,6 +391,7 @@ def test_wait_fields_bound_the_run_and_keep_old_digests(kernel: Kernel) -> None:
 # 5. Crash while parked; 8. lease loss after proposing
 
 
+@pytest.mark.loopback
 def test_restart_while_parked_keeps_the_wait(
     kernel: Kernel, tools: Tools, session: FakeSession
 ) -> None:
@@ -412,6 +419,7 @@ class Lost(Exception):
     pass
 
 
+@pytest.mark.loopback
 def test_lease_loss_after_proposing_parks_without_a_session(
     kernel: Kernel, tools: Tools, session: FakeSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -440,6 +448,7 @@ def test_lease_loss_after_proposing_parks_without_a_session(
     assert held_row(kernel, task_id)["state"] == "pending"
 
 
+@pytest.mark.loopback
 def test_cancel_withdraws_a_parked_run(kernel: Kernel, tools: Tools, session: FakeSession) -> None:
     setup(kernel)
     session.scripts = [proposes]
@@ -492,6 +501,7 @@ def reviewing(row: dict[str, Any], outcomes: list[types.CallToolResult]) -> Any:
     return review
 
 
+@pytest.mark.loopback
 def test_reviewer_agent_approves_within_its_ceiling(
     kernel: Kernel, tools: Tools, session: FakeSession
 ) -> None:
@@ -519,6 +529,7 @@ def test_reviewer_agent_approves_within_its_ceiling(
 
 
 @pytest.mark.parametrize("case", ["no_grant", "supervisor_lost_approve", "requester"])
+@pytest.mark.loopback
 def test_agent_approver_refusals(
     kernel: Kernel, tools: Tools, session: FakeSession, case: str
 ) -> None:
@@ -547,6 +558,7 @@ def test_agent_approver_refusals(
         assert conn.exec_driver_sql("SELECT COUNT(*) FROM approval_decisions").scalar_one() == 0
 
 
+@pytest.mark.loopback
 def test_event_payloads_carry_no_arguments(
     kernel: Kernel, tools: Tools, session: FakeSession
 ) -> None:
@@ -567,6 +579,7 @@ def test_event_payloads_carry_no_arguments(
 # Concurrent runs on one runtime keep their own record of what each prompt reported
 
 
+@pytest.mark.loopback
 def test_overlapping_attempts_do_not_share_what_was_reported(
     kernel: Kernel, tools: Tools, session: FakeSession
 ) -> None:
@@ -599,6 +612,7 @@ def test_overlapping_attempts_do_not_share_what_was_reported(
 # 7. Crash after the approved intent commits, before dispatch: reconciled, never replayed
 
 
+@pytest.mark.loopback
 def test_crash_after_the_approved_intent_is_reconciled_not_replayed(
     kernel: Kernel, tools: Tools, session: FakeSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:

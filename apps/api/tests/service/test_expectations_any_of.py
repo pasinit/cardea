@@ -42,6 +42,7 @@ def failure_code(kernel: Kernel, task_id: str) -> str | None:
     return failure.code if failure else None
 
 
+@pytest.mark.loopback
 def test_any_of_is_met_by_one_alternative(
     kernel: Kernel, tools: Tools, session: FakeSession
 ) -> None:
@@ -53,6 +54,7 @@ def test_any_of_is_met_by_one_alternative(
     assert '/to = "lead@example.invalid"' in prompt
 
 
+@pytest.mark.loopback
 def test_any_of_unmet_when_no_alternative_is_met(
     kernel: Kernel, tools: Tools, session: FakeSession
 ) -> None:
@@ -63,6 +65,7 @@ def test_any_of_unmet_when_no_alternative_is_met(
     assert failure_code(kernel, task_id) == "expectation_unmet"
 
 
+@pytest.mark.loopback
 def test_any_of_exceeded_only_when_every_alternative_is(
     kernel: Kernel, tools: Tools, session: FakeSession
 ) -> None:
@@ -82,6 +85,7 @@ def test_any_of_exceeded_only_when_every_alternative_is(
     assert failure_code(kernel, task_id) == "expectation_exceeded"
 
 
+@pytest.mark.loopback
 def test_match_alone_counts_only_matching_calls(
     kernel: Kernel, tools: Tools, session: FakeSession
 ) -> None:
