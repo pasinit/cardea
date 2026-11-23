@@ -48,6 +48,9 @@ from cardea.service.kernel import Kernel, provision
 from cardea.service.models import AgentGroup
 from cardea.service.operations import EvidenceQuery, OperationContext, Registry
 
+# Binds or connects over TCP loopback: not run by `make check-test`.
+pytestmark = pytest.mark.loopback
+
 TRIED = (*DEV_OPS, "env.try")
 
 

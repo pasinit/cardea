@@ -48,6 +48,9 @@ from cardea.service.operation_runtime import OperationRuntime
 from cardea.service.operations import OperationContext, Registry
 
 # Planted for these tests; shaped so no secret scanner mistakes them for real tokens.
+# Binds or connects over TCP loopback: not run by `make check-test`.
+pytestmark = pytest.mark.loopback
+
 AUTHOR = "planted-author-token-not-real-0123456789abcdef"
 REVIEWER = "planted-reviewer-token-not-real-0123456789abcd"
 BOT, OWNER = "team-bot", "owner-reviewer"
