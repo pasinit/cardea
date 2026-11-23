@@ -143,12 +143,24 @@ def _failure(error: Exception) -> str:
     return type(error).__name__ + (f" ({code})" if isinstance(code, str) else "")
 
 
-def _write_host(path: Path, document: dict[str, Any]) -> None:
-    mode = path.stat().st_mode & 0o777
+def _replace(path: Path, data: bytes, mode: int) -> None:
+    """Put `data` at `path`, by a staged file and a rename. Where the directory is not
+    writable (the packaged `/etc/cardea` is root-owned) but the file is, overwrite it in place."""
     staged = path.with_name(f".{path.name}.{os.getpid()}")
-    staged.write_text(json.dumps(document, indent=2) + "\n")
-    staged.chmod(mode)
-    os.replace(staged, path)
+    try:
+        staged.write_bytes(data)
+        staged.chmod(mode)
+        os.replace(staged, path)
+    except PermissionError:
+        with path.open("r+b") as stream:
+            stream.write(data)
+            stream.truncate()
+            stream.flush()
+            os.fsync(stream.fileno())
+
+
+def _write_host(path: Path, document: dict[str, Any]) -> None:
+    _replace(path, (json.dumps(document, indent=2) + "\n").encode(), path.stat().st_mode & 0o777)
 
 
 def apply_settings(
@@ -273,10 +285,7 @@ def _restore(kit: ModuleType, host_path: Path, original: bytes, paused: bool) ->
     is done if the file was never replaced. True when the old settings are in force."""
     try:
         if host_path.read_bytes() != original:
-            staged = host_path.with_name(f".{host_path.name}.{os.getpid()}")
-            staged.write_bytes(original)
-            staged.chmod(host_path.stat().st_mode & 0o777)
-            os.replace(staged, host_path)
+            _replace(host_path, original, host_path.stat().st_mode & 0o777)
             kit.provision(kit.load_host(host_path), paused=paused)
         return True
     except Exception:
