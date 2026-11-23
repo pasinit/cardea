@@ -1212,7 +1212,7 @@ def test_inbound_poll_sends_only_query_parameters_the_provider_accepts(email: Em
         assert path.startswith(f"/v0/inboxes/{INBOX_ID}/messages")
         if set(request.url.params) - LIST_PARAMS:
             return httpx.Response(400, json={"name": "ValidationError"})
-        if path.endswith("/messages"):
+        if request.url.path.endswith("/messages"):
             return httpx.Response(200, text=listing, headers={"content-type": "application/json"})
         return httpx.Response(200, text=message, headers={"content-type": "application/json"})
 
