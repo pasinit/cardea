@@ -866,6 +866,28 @@ def test_a_thin_bundle_artifact_from_code_session_pushes(
     assert refused.is_error and "input_digest_mismatch" in text(refused)
 
 
+@pytest.mark.loopback
+def test_push_fast_forwards_the_branch_in_the_local_mirror(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, vcs: Vcs, tmp_path: Path
+) -> None:
+    """`code.session` clones the registry's `source`: a pushed branch must reach it too."""
+    mirror = tmp_path / "mirror.git"
+    subprocess.run(["git", "init", "--bare", "-q", str(mirror)], check=True)
+    registry = host.registry()
+    entry = registry.repositories["cardea"]
+    registry.repositories["cardea"] = entry.model_copy(update={"source": str(mirror)})
+    vcs.registry = registry
+    branch = "agent/eng/mirrored"
+    change = make_change(kernel, tmp_path, "Mirrored")
+    push = {"repository": "cardea", "branch": branch, **change}
+    _, state, (pushed,) = run_calls(kernel, session, [("vcs-push_branch", push)])
+    assert state == "succeeded" and not pushed.is_error, text(pushed)
+    rev = ["git", "--git-dir", str(mirror), "rev-parse", f"refs/heads/{branch}"]
+    mirrored = subprocess.run(rev, capture_output=True, text=True, check=True)
+    assert mirrored.stdout.strip() == change["head"]
+    assert host.repositories["acme/cardea"].head(branch) == change["head"]
+
+
 # One repository registry (ADR-037 finding 3)
 
 

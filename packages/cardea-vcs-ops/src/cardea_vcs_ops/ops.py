@@ -439,6 +439,7 @@ class Vcs:
                     current = await host.branch_head(branch)
                 if current == head:
                     # Already there (an earlier attempt or another task): nothing to send.
+                    await self.refresh_mirror(arguments["repository"], workspace, branch)
                     return done
                 expected = arguments.get("expected_head")
                 if expected is not None and current != expected:
@@ -446,11 +447,22 @@ class Vcs:
                         "The branch moved since the caller read it", "branch_moved"
                     )
                 await self.pusher(workspace, branch)
+                await self.refresh_mirror(arguments["repository"], workspace, branch)
             except HostRefused as refused:
                 raise OperationRejected(str(refused), "host_refused") from None
             except PushRejected as rejected:
                 raise OperationRejected(str(rejected), "push_rejected") from None
         return done
+
+    async def refresh_mirror(self, alias: object, workspace: Workspace, branch: str) -> None:
+        """Fast-forward the pushed branch in the registry's local bare mirror, so `code.session`
+        sees the new head. The push is done and the host is the source of truth: a mirror that
+        cannot be updated (absent, or the branch diverged) is left for the timer's fetch."""
+        if self.registry is None:
+            return
+        entry = self.registry.repositories.get(str(alias))
+        if entry is not None:
+            await asyncio.to_thread(workspace.mirror, entry.source, branch)
 
     async def find_branch(
         self, arguments: dict[str, JsonValue], context: OperationContext

@@ -8,7 +8,9 @@ private temporary directory:
    named commit, which must be exactly that commit;
 2. `content` returns what the push would send, for the content gate: a unified diff of the
    commits the host does not have, and their messages;
-3. `push` pushes exactly one ref, without force.
+3. `push` pushes exactly one ref, without force;
+4. `mirror` fast-forwards that branch in the local bare registry mirror, so `code.session`
+   sees the new head.
 
 Every `git` command runs with hooks disabled and no credential helper. The token reaches
 `git` only through `GIT_ASKPASS` and a variable in that child's environment; it is never on
@@ -161,6 +163,24 @@ class Workspace:
                 raise PushRejected("the host refused the push (not a fast-forward)")
             # Exit status only: git's stderr may quote the remote; never repeat it.
             raise RuntimeError(f"git push failed with status {pushed.returncode}")
+
+    def mirror(self, source: str, branch: str) -> bool:
+        """Fast-forward `branch` in the bare repository at `source` (the registry's read-only
+        mirror) to the pushed commit. No force: a branch that moved elsewhere is left as it is.
+        Local only, with no credential. Returns whether the mirror now holds the commit."""
+        if not Path(source).is_dir():
+            return False
+        try:
+            fetched = self._git(
+                f"--git-dir={source}",
+                "fetch",
+                "-q",
+                str(self.repo),
+                f"refs/cardea/change:refs/heads/{branch}",
+            )
+        except subprocess.TimeoutExpired:
+            return False
+        return fetched.returncode == 0
 
 
 Pusher = Callable[[Workspace, str], Awaitable[None]]
