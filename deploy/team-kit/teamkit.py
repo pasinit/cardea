@@ -647,7 +647,7 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
     def schedule(cron: str) -> dict[str, Any]:
         return {"schedule": {"cron": cron, "timezone": zone, "misfire": "skip"}}
 
-    pm_ops = ["vcs.read_branch", "env.try", "records.create", "records.query"]
+    pm_ops = ["vcs.read_branch", "vcs.list_changes", "env.try", "records.create", "records.query"]
     if email:
         pm_ops.append("email.send")
     goals = product(host)
@@ -676,6 +676,7 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
                 "record:work/create",
                 "record:work/read",
                 "vcs.read_branch",
+                "vcs.list_changes",
                 "env.try",
                 f"repo:{repo}",
                 *_mail(group, "tl"),

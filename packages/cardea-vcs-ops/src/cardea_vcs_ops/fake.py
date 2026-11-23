@@ -274,6 +274,14 @@ class FakeGitHub:
             return self._create_pull(repo, body, self.login(request))
         if rest == ["pulls"] and method == "GET":
             head = request.url.params.get("head", "")
+            if not head:
+                state = request.url.params.get("state", "open")
+                found = [
+                    repo.pull(p["number"])
+                    for p in sorted(repo.pulls, key=lambda p: -p["number"])
+                    if state == "all" or p["state"] == state
+                ]
+                return httpx.Response(200, json=found)
             branch = head.split(":", 1)[1] if ":" in head else head
             found = [repo.pull(p["number"]) for p in repo.pulls if p["head"]["ref"] == branch]
             return httpx.Response(200, json=found)
