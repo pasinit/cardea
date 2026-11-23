@@ -669,7 +669,7 @@ def test_png_and_html_attachments_are_sent_with_the_message(
         ([attach("a.html", b"<style>@import 'x.css';</style>")], EXTERNAL),
         ([attach("page.png", PNG_BYTES, "text/html")], "attachment_invalid"),
         ([attach("a.png"), attach("a.png")], "attachment_invalid"),
-        ([attach("../a.png")], "attachment_invalid"),
+        ([attach("../a.png")], "invalid_arguments"),
         ([{**attach(), "data": "not base64!"}], "attachment_invalid"),
     ],
 )
@@ -718,15 +718,17 @@ def test_attachments_are_part_of_the_idempotency_fingerprint(
         session,
         [
             question("k", attachments=[attach()]),
-            question("k", attachments=[attach()]),
             question("k", attachments=[other]),
             question("k"),
+            # Last: a replay never reaches the handler, but it counts as a call, so earlier
+            # it would push the third real send past the role's limit of 3.
+            question("k", attachments=[attach()]),
         ],
     )
     assert not any(r.is_error for r in results), [text(r) for r in results]
     # The same key with the same attachments sends once; other attachments, or none, are
     # a different effect.
-    assert results[1].structured_content == results[0].structured_content
+    assert results[3].structured_content == results[0].structured_content
     assert len({r.structured_content["message_id"] for r in results}) == 3
     assert len(sent_to(provider)) == 3
     plain = [m for m in sent_to(provider) if not m["attachments"]]
