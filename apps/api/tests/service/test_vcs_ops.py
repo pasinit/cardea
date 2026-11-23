@@ -1147,3 +1147,100 @@ def test_check_state_summarises_completed_runs() -> None:
     assert check_state([run("success"), run("failure")]) == "failing"
     assert check_state([run("cancelled")]) == "failing"
     assert check_state([run("failure"), run(None, "in_progress")]) == "pending"
+
+
+# The read-only source mirror follows pushed branches
+
+
+def mirrored(host: FakeGitHub, tmp_path: Path, source: str | None) -> Vcs:
+    from cardea.service.repositories import Registry, Repository
+
+    repo = host.repositories["acme/cardea"]
+    entry = Repository(
+        source=source or str(repo.path),
+        owner="acme",
+        name="cardea",
+        api_url="https://api.github.com",
+        git_url=str(repo.path),
+    )
+    config = VcsConfig(credentials=FixedTokenConfig(kind="test", token=SecretStr(TOKEN)))
+    registry = Registry(repositories={"cardea": entry})
+    return Vcs(config, transport=host.transport(), registry=registry)
+
+
+def push_through(
+    vcs: Vcs, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, session: FakeSession, branch: str
+) -> tuple[str, bool]:
+    kernel = build_kernel(tmp_path, monkeypatch, session, Registry(in_process(), vcs.handlers()))
+    try:
+        change = make_change(kernel, tmp_path)
+        args = {"repository": "cardea", "branch": branch, **change}
+        _, state, (pushed,) = run_calls(kernel, session, [("vcs-push_branch", args)])
+        assert state == "succeeded" and not pushed.is_error, text(pushed)
+        return change["head"], pushed.is_error
+    finally:
+        kernel.database.close()
+
+
+@pytest.mark.loopback
+def test_a_push_reaches_the_source_mirror(
+    host: FakeGitHub,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    session: FakeSession,
+    vcs: Vcs,
+) -> None:
+    mirror = tmp_path / "mirror.git"
+    subprocess.run(["git", "init", "--bare", "-q", str(mirror)], check=True)
+    head, _ = push_through(
+        mirrored(host, tmp_path, str(mirror)), tmp_path, monkeypatch, session, "agent/eng/m1"
+    )
+    assert host.repositories["acme/cardea"].head("agent/eng/m1") == head
+    mirror_head = subprocess.run(
+        ["git", "-C", str(mirror), "rev-parse", "refs/heads/agent/eng/m1"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert mirror_head == head
+
+
+@pytest.mark.loopback
+def test_an_unwritable_source_mirror_is_logged_not_fatal(
+    host: FakeGitHub,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    session: FakeSession,
+    vcs: Vcs,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level("WARNING")
+    head, _ = push_through(
+        mirrored(host, tmp_path, str(tmp_path / "missing.git")),
+        tmp_path,
+        monkeypatch,
+        session,
+        "agent/eng/m2",
+    )
+    assert host.repositories["acme/cardea"].head("agent/eng/m2") == head
+    assert "source_refresh_failed" in caplog.text
+
+
+def test_without_a_source_nothing_is_refreshed(
+    host: FakeGitHub, tmp_path: Path, vcs: Vcs, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from cardea.service.repositories import Registry, Repository
+
+    entry = Repository.model_construct(
+        source=None, owner="acme", name="cardea", api_url="https://api.github.com", git_url="x"
+    )
+    registry = Registry.model_construct(repositories={"cardea": entry})
+    plain = Vcs(vcs.config, transport=host.transport(), registry=registry)
+    assert plain.repository("cardea").source is None
+    called: list[str] = []
+    monkeypatch.setattr(Workspace, "refresh", lambda self, source, branch: called.append(source))
+    import asyncio
+
+    with Workspace(b"", "0" * 40, "x", Credential(TOKEN, datetime.now(UTC))) as workspace:
+        asyncio.run(plain.refresh_source(workspace, plain.repository("cardea"), "b"))
+    assert called == []
