@@ -1274,7 +1274,11 @@ class Repository(Step):
         if not entry.get("gates"):
             found.append("no gates")
         env_try = ctx.host.get("env_try") or {}
-        wanted_scenarios = [*env_try.get("scenarios", []), *env_try.get("dev_scenarios", [])]
+        wanted_scenarios = [
+            *env_try.get("scenarios", []),
+            *env_try.get("dev_scenarios", []),
+            *env_try.get("pe_scenarios", []),
+        ]
         if wanted_scenarios:
             environment = entry.get("environment") or {}
             for scenario in dict.fromkeys(wanted_scenarios):

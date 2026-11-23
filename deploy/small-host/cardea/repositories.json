@@ -87,6 +87,18 @@
               "timeout_seconds": 900
             }
           },
+          "screenshots": {
+            "argv": [
+              "/usr/bin/make",
+              "screenshots"
+            ],
+            "timeout_seconds": 300,
+            "network": "loopback",
+            "artifacts": [
+              "screenshots/mobile-390.png",
+              "screenshots/desktop-1280.png"
+            ]
+          },
           "getting-started": {
             "argv": [
               "/usr/bin/make",

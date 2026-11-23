@@ -112,6 +112,19 @@ def test_developers_get_env_try_by_default_and_not_when_nothing_needs_it() -> No
     assert 'scenarios ["check"]' in pool["run"]["instructions"]
 
 
+def test_the_pe_gets_env_try_only_with_pe_scenarios() -> None:
+    def pe(host: dict[str, Any]) -> dict[str, Any]:
+        pools = {p["name"]: p for p in kit().group_document(host)["spec"]["pools"]}
+        pool: dict[str, Any] = pools["pe"]
+        return pool
+
+    assert "env.try" not in pe(example())["grants"]
+    host = {**example(), "env_try": {"scenarios": ["try"], "pe_scenarios": ["screenshots"]}}
+    pool = pe(host)
+    assert "env.try" in pool["grants"] and "env.try" in pool["run"]["operations"]
+    assert 'scenarios ["screenshots"]' in pool["run"]["instructions"]
+
+
 def test_developer_and_pe_schedules_are_opt_in() -> None:
     def crons(host: dict[str, Any], name: str) -> list[str]:
         pools = {p["name"]: p for p in kit().group_document(host)["spec"]["pools"]}
