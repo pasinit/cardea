@@ -96,10 +96,12 @@ class GitHub:
             response.raise_for_status()
         return response
 
-    async def _list(self, path: str) -> list[dict[str, Any]]:
+    async def _list(self, path: str, **params: Any) -> list[dict[str, Any]]:
         found: list[dict[str, Any]] = []
         for page in range(1, MAX_PAGES + 1):
-            response = await self._request("GET", path, params={"per_page": PAGE, "page": page})
+            response = await self._request(
+                "GET", path, params={**params, "per_page": PAGE, "page": page}
+            )
             items = response.json()
             found.extend(items)
             if len(items) < PAGE:
@@ -152,6 +154,10 @@ class GitHub:
         )
         pulls = response.json()
         return pulls[0] if pulls else None
+
+    async def open_pulls(self) -> list[dict[str, Any]]:
+        """Every open pull request, newest first (the list read: heads as of now)."""
+        return await self._list("/pulls", state="open", sort="created", direction="desc")
 
     async def pull(self, number: int) -> dict[str, Any]:
         response = await self._request("GET", f"/pulls/{number}")

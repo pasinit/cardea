@@ -4,6 +4,7 @@ Group members' agent runs call the `vcs.*` tools over the real per-attempt MCP e
 the fake host is `httpx.MockTransport` over real bare git repositories.
 """
 
+import asyncio
 import hashlib
 import json
 import subprocess
@@ -55,6 +56,7 @@ OPERATIONS = (
     "vcs.check_repository",
     "vcs.merge",
     "vcs.read_branch",
+    "vcs.list_changes",
 )
 RUN_GRANTS = (*RIGHTS, "models.invoke", *OPERATIONS, "repo:cardea")
 STEPS = count()
@@ -951,3 +953,157 @@ def test_read_branch_returns_the_head_and_refuses_unknown_branches(
     )
     assert results[1].structured_content["head"] == change["head"], text(results[1])
     assert results[2].is_error and "branch_unknown" in text(results[2])
+
+
+def host_pull(host: FakeGitHub, tmp_path: Path, name: str) -> tuple[int, str]:
+    """An open pull request on a real branch of the fake host: its number and head commit."""
+    repo = host.repositories["acme/cardea"]
+    work = tmp_path / f"list-{name}"
+    subprocess.run(["git", "init", "-q", "-b", "main", str(work)], check=True)
+    (work / "README.md").write_text(f"{name}\n")
+    fixture_git(work, "add", ".")
+    fixture_git(work, "commit", "-q", "-m", name)
+    fixture_git(work, "push", "-q", str(repo.path), f"main:refs/heads/agent/eng/{name}")
+    number = len(repo.pulls) + 1
+    repo.pulls.append(
+        {
+            "number": number,
+            "title": f"Change {name}",
+            "body": "",
+            "state": "open",
+            "draft": False,
+            "merged": False,
+            "mergeable": True,
+            "merge_commit_sha": None,
+            "user": {"login": "agent"},
+            "html_url": f"https://github.test/acme/cardea/pull/{number}",
+            "head": {"ref": f"agent/eng/{name}", "sha": repo.head(f"agent/eng/{name}")},
+            "base": {"ref": "main"},
+        }
+    )
+    return number, str(repo.head(f"agent/eng/{name}"))
+
+
+def test_list_changes_reports_each_open_pull_with_its_full_head_review_and_checks(
+    host: FakeGitHub, vcs: Vcs, tmp_path: Path
+) -> None:
+    """The PM reads the head of an open pull request to try it with `env.try` (ADR-038)."""
+    repo = host.repositories["acme/cardea"]
+    first, first_head = host_pull(host, tmp_path, "a")
+    second, second_head = host_pull(host, tmp_path, "b")
+    third, _ = host_pull(host, tmp_path, "c")
+    repo.pull(third)["state"] = "closed"  # type: ignore[index]
+    repo.pass_checks(first_head)
+    repo.checks[second_head] = [{"name": "test", "status": "in_progress", "conclusion": None}]
+    repo.reviews[first] = [
+        {"user": {"login": "reviewer"}, "state": "CHANGES_REQUESTED", "commit_id": first_head}
+    ]
+    before = len(host.calls)
+    listed = asyncio.run(vcs.list_changes({"repository": "cardea"}, caller("eng")))
+    assert listed["truncated"] is False
+    changes = cast(list[dict[str, Any]], listed["changes"])
+    assert [c["number"] for c in changes] == [second, first]  # open only, newest first
+    by_number = {c["number"]: c for c in changes}
+    assert by_number[first]["head_sha"] == first_head and len(first_head) == 40
+    assert by_number[first]["head"] == "agent/eng/a" and by_number[first]["base"] == "main"
+    assert by_number[first]["review_state"] == "changes_requested"
+    assert by_number[first]["check_state"] == "passing"
+    assert by_number[second]["head_sha"] == second_head
+    assert by_number[second]["review_state"] == "none"
+    assert by_number[second]["check_state"] == "pending"
+    # Read only: the credential is asked for reading, and nothing is created or changed.
+    assert not {"create_pull", "create_comment", "create_review", "merge"} & set(
+        host.calls[before:]
+    )
+
+
+def test_list_changes_refuses_an_unknown_repository_alias(vcs: Vcs) -> None:
+    from cardea.service.operations import OperationRejected
+
+    with pytest.raises(OperationRejected) as refused:
+        asyncio.run(vcs.list_changes({"repository": "guessed"}, caller("eng")))
+    assert refused.value.code == "repository_unknown"
+
+
+def test_review_state_counts_an_approval_only_at_the_current_head() -> None:
+    from cardea_vcs_ops.ops import _review_state
+
+    def review(who: str, state: str, commit: str) -> dict[str, Any]:
+        return {"user": {"login": who}, "state": state, "commit_id": commit}
+
+    assert _review_state([], "h2") == "none"
+    assert _review_state([review("r", "APPROVED", "h1")], "h2") == "none"
+    assert _review_state([review("r", "APPROVED", "h2")], "h2") == "approved"
+    assert _review_state([review("r", "COMMENTED", "h2")], "h2") == "none"
+    later = [review("r", "APPROVED", "h2"), review("r", "CHANGES_REQUESTED", "h2")]
+    assert _review_state(later, "h2") == "changes_requested"
+    assert _review_state([*later, review("r", "APPROVED", "h2")], "h2") == "approved"
+    assert _review_state([*later, review("r", "DISMISSED", "h2")], "h2") == "none"
+
+
+def test_a_pm_run_fetches_the_full_head_of_an_open_pull_request(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path
+) -> None:
+    number, head = host_pull(host, tmp_path, "pm")
+    _, state, results = run_calls(kernel, session, [("vcs-list_changes", {"repository": "cardea"})])
+    assert state == "succeeded" and not results[0].is_error, text(results[0])
+    (entry,) = results[0].structured_content["changes"]
+    assert entry["number"] == number and entry["head_sha"] == head
+
+
+def test_a_role_without_the_list_grant_is_refused_naming_it(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub
+) -> None:
+    """A run whose role lacks `vcs.list_changes` is refused with the grant named, before
+    anything reaches the host."""
+    narrow = {
+        "operations": ["vcs.read_branch"],
+        "grants": [*RIGHTS, "models.invoke", "vcs.read_branch", "repo:cardea"],
+    }
+    with kernel.database.read() as conn:
+        definition = conn.exec_driver_sql(
+            "SELECT definition_json FROM triggers WHERE trigger_id=?", ("eng.dev.0.t0",)
+        ).scalar_one()
+    request = AgentRunRequest.model_validate(
+        {**json.loads(definition)["template"], "request_id": "narrow", **narrow}
+    )
+    before = len(host.authorizations)
+    refused = asyncio.run(
+        AgentRunRuntime(kernel).call_tool(
+            "task", "lease", request, "vcs.list_changes", {"repository": "cardea"}
+        )
+    )
+    assert refused.is_error
+    assert text(refused) == "tool_not_exposed: vcs.list_changes is not granted to this run"
+    assert untouched(host, before)
+
+
+def test_the_kernel_rechecks_the_list_grant_live_at_each_call(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub
+) -> None:
+    """The run was admitted with the grant; when the supervisor's authority for it is
+    revoked mid-run, the next call is refused by the live ceiling and the message names
+    the grant."""
+    document = policy().model_dump(mode="json")
+    for table in ("permissions", "platform"):
+        document[table] = [p for p in document[table] if p["operation"] != "vcs.list_changes"]
+    revoked = Provisioning.model_validate(document)
+    seen: list[int] = []
+    results: list[Any] = []
+
+    async def script(client: ClientSession, request: SessionRequest) -> SessionResult:
+        results.append(await call(client, "vcs-list_changes", repository="cardea"))
+        provision(kernel.database, revoked, kernel.operations)
+        seen.append(len(host.authorizations))
+        results.append(await call(client, "vcs-list_changes", repository="cardea"))
+        return SessionResult(text="Done.", is_error=False)
+
+    session.scripts = [script]
+    assert AgentRunRuntime(kernel).execute(member_run(kernel)) == "succeeded"
+    allowed, denied = results
+    assert not allowed.is_error, text(allowed)
+    assert denied.is_error and text(denied) == (
+        "authority_denied: Current authority does not permit this operation: "
+        "vcs.list_changes is not held by the live ceiling (platform)"
+    )
+    assert untouched(host, seen[0])  # the refused call sent nothing

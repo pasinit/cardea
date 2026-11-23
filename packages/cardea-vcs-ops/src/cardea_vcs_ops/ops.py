@@ -83,6 +83,8 @@ MAX_PATCHES = 50
 # Check runs on the head, for `vcs.read_change` (`checks`): what failed and why, as CI's
 # annotations say it (packaging/ci_annotate.py), since agents cannot read job logs.
 MAX_CHECKS = 30
+# Open pull requests one `vcs.list_changes` call reports, newest first.
+MAX_LISTED = 30
 MAX_ANNOTATIONS = 5
 MAX_ANNOTATION = 4096
 # All annotations together, so the diff keeps most of the recorded output.
@@ -781,6 +783,40 @@ class Vcs:
             raise OperationRejected(f"No branch {branch}", "branch_unknown")
         return {"repository": str(arguments["repository"]), "branch": branch, "head": head}
 
+    async def list_changes(
+        self, arguments: dict[str, JsonValue], context: OperationContext
+    ) -> dict[str, JsonValue]:
+        """The open pull requests of a repository, each with its full head commit, branch,
+        review state and check state: read only, nothing sent but GETs."""
+        repository = self.repository(arguments["repository"])
+        listed: list[JsonValue] = []
+        async with await self.client(repository, context, "pull_requests:read") as host:
+            try:
+                pulls = await host.open_pulls()
+                for pull in pulls[:MAX_LISTED]:
+                    sha = str(pull["head"]["sha"])
+                    number = int(pull["number"])
+                    listed.append(
+                        {
+                            "number": number,
+                            "title": _bounded(pull.get("title"), 200)[0],
+                            "draft": bool(pull.get("draft")),
+                            "head": str(pull["head"]["ref"]),
+                            "head_sha": sha,
+                            "base": str(pull["base"]["ref"]),
+                            "url": str(pull.get("html_url", "")),
+                            "review_state": _review_state(await host.reviews(number), sha),
+                            "check_state": _check_state(await host.check_runs(sha)),
+                        }
+                    )
+            except HostRefused as refused:
+                raise OperationRejected(str(refused), "host_refused") from None
+        return {
+            "repository": str(arguments["repository"]),
+            "changes": listed,
+            "truncated": len(pulls) > MAX_LISTED,
+        }
+
     async def read_change(
         self, arguments: dict[str, JsonValue], context: OperationContext
     ) -> dict[str, JsonValue]:
@@ -896,6 +932,7 @@ class Vcs:
             "vcs.find_review": self.find_review,
             "vcs.read_change": self.read_change,
             "vcs.read_branch": self.read_branch,
+            "vcs.list_changes": self.list_changes,
             "vcs.check_repository": self.check_repository,
             "vcs.merge": self.merge,
             "vcs.find_merge": self.find_merge,
@@ -1000,6 +1037,35 @@ def _check_runs(runs: list[dict[str, Any]], tried: bool = False) -> None:
         raise OperationRejected(
             f"Checks did not succeed: {', '.join(failed)[:200]}", "merge_checks_failed"
         )
+
+
+def _review_state(reviews: list[dict[str, Any]], head: str) -> str:
+    """`changes_requested`, `approved` or `none`, from each reviewer's latest deciding
+    review. An approval counts only for the head it was given on; a request for changes
+    counts on any head, as the host's own merge rule does until it is dismissed."""
+    latest: dict[str, tuple[str, str]] = {}
+    for review in reviews:
+        state = str(review.get("state", ""))
+        who = str((review.get("user") or {}).get("login", ""))
+        if state in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}:
+            latest[who] = (state, str(review.get("commit_id", "")))
+    if any(state == "CHANGES_REQUESTED" for state, _ in latest.values()):
+        return "changes_requested"
+    if any(state == "APPROVED" and commit == head for state, commit in latest.values()):
+        return "approved"
+    return "none"
+
+
+def _check_state(runs: list[dict[str, Any]]) -> str:
+    """`none`, `pending`, `failing` or `passing` for the head's check runs, by the rule
+    `vcs.merge` applies."""
+    if not runs:
+        return "none"
+    if any(r.get("status") != "completed" for r in runs):
+        return "pending"
+    if any(r.get("conclusion") not in PASSING for r in runs):
+        return "failing"
+    return "passing"
 
 
 def _approval_checks(runs: list[dict[str, Any]]) -> None:

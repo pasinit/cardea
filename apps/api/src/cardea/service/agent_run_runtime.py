@@ -137,6 +137,19 @@ def _text(value: object) -> str:
     return text[:MAX_TOOL_TEXT]
 
 
+def _naming_grant(refused: Fault, missing: dict[str, str]) -> str:
+    """A grant refusal's message with the grant the live ceiling lacked named, as record
+    refusals do (ADR-034); any other refusal's message unchanged."""
+    grant = missing.get("grant")
+    if refused.code not in ("task_grant_denied", "authority_denied") or not grant:
+        return refused.message
+    if grant in refused.message:
+        return refused.message
+    holder = missing.get("holder", "task")
+    by = "the task" if holder == "task" else f"the live ceiling ({holder})"
+    return f"{refused.message}: {grant} is not held by {by}"
+
+
 def _error(code: str, detail: str = "") -> types.CallToolResult:
     message = f"{code}: {detail}" if detail else code
     return types.CallToolResult(
@@ -904,7 +917,7 @@ class AgentRunRuntime:
         abandoned: Callable[[], bool] | None = None,
     ) -> types.CallToolResult:
         if name not in request.operations:
-            return _error("tool_not_exposed")
+            return _error("tool_not_exposed", f"{name} is not granted to this run")
         if gate is not None and not gate.enter():
             # Refused before admission: no intent, no receipt, nothing counted as a call.
             self._current(task_id).tool_refused(name, "tool_busy", in_flight=gate.limit)
@@ -1031,7 +1044,7 @@ class AgentRunRuntime:
                 if key in refused.details
             }
             activity.tool_refused(name, refused.code, kind=kind, **missing)
-            return Outcome(refused.code, refused.message)
+            return Outcome(refused.code, _naming_grant(refused, missing))
         activity = self._current(task_id)
         if admitted.deduplicated is not None:
             activity.event(
