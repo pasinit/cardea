@@ -402,13 +402,13 @@ def _apply(
                 elif kind != "unchanged":
                     plan["triggers_updated"].append(trigger.trigger_id)
             # Manifest triggers dropped from a pool: in-flight runs keep their requests.
-            wanted = set(trigger_ids(pool, member))
+            wanted_triggers = set(trigger_ids(pool, member))
             for (stale,) in conn.exec_driver_sql(
                 "SELECT trigger_id FROM triggers WHERE managed_by='group' AND removed=0 "
                 "AND json_extract(definition_json,'$.template.agent_id')=? ORDER BY trigger_id",
                 (member,),
             ).fetchall():
-                if stale not in wanted:
+                if stale not in wanted_triggers:
                     remove(conn, str(stale), at)
                     plan["triggers_removed"].append(str(stale))
     # Converge what can be converged now; draining members finish on later ticks.
