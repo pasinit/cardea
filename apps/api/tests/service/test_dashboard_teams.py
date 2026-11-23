@@ -92,9 +92,9 @@ def test_no_token_appears_in_any_output() -> None:
     outputs = [call(down, "GET", path)[1] for path in ("/", "/dashboard_teams.js", "/api/status")]
     assert all(TOKEN not in json.dumps(o) for o in outputs)
     assert call(down, "GET", "/api/status")[1]["teams"][1]["error"] == "unreachable"
-    # The page code has no path for a credential: it reads only /api/status.
+    # The page code has no path for a credential: it reads /api/status and posts settings.
     script = (KIT / "dashboard_teams.js").read_text()
-    assert script.count("fetch(") == 1 and "token" not in script.lower()
+    assert script.count("fetch(") == 2 and "token" not in script.lower()
     assert "authorization" not in script.lower() and "bearer" not in script.lower()
 
 
@@ -105,7 +105,7 @@ def test_the_page_is_read_only() -> None:
         assert call(b, method, "/api/message", {"role": "dev"})[0] in (404, 501)
     page = (KIT / "dashboard_teams.html").read_text()
     assert "<form" not in page and "<button" not in page and "<a " not in page
-    assert "method:" not in (KIT / "dashboard_teams.js").read_text()
+    assert (KIT / "dashboard_teams.js").read_text().count("method:") == 1
     assert call(b, "GET", "/api/status", headers={"Host": "evil.example"})[0] == 403
 
 

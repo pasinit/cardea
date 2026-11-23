@@ -30,15 +30,23 @@
   .message { background: #fff; border: 1px solid #d0d7de; border-radius: 6px; padding: .5rem .7rem; margin-bottom: .5rem; }
   .message .head { color: #57606a; font-size: .85rem; }
   .message pre { margin: .35rem 0 0; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
+  #settings form { display: grid; gap: .4rem; max-width: 40rem; }
+  #settings label { display: grid; gap: .15rem; color: #57606a; }
+  #settings input, #settings textarea, #settings select, #settings button { font: inherit; padding: .3rem .5rem; max-width: 100%; }
+  #settings textarea { min-height: 4rem; }
+  #settings .row { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .5rem; }
+  #settings .ok { color: #1a7f37; }
   @media (max-width: 600px) { body { margin: .6rem; font-size: 15px; } .filters > * { flex: 1 1 100%; } }
 </style>
 </head>
 <body>
-<h1>Teams <span class="muted">(read-only)</span></h1>
+<h1>Teams</h1>
 <div id="tabs" role="tablist">Loading…</div>
 <div id="team"></div>
 <h3>Mail</h3>
 <div id="mail"></div>
+<h3>Settings</h3>
+<div id="settings"></div>
 <script src="/dashboard_teams.js"></script>
 </body>
 </html>

@@ -95,6 +95,18 @@ async function get(path) {
   return body;
 }
 
+async function post(path, body) {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.detail ? `${result.code}: ${result.detail}` : result.code);
+  return result;
+}
+
 let teams = [];
 let selected = null;
 let filter = { member: "", item: "" };
@@ -191,6 +203,144 @@ function mailView(team) {
   loadMail(team, "", list, more, run);
 }
 
+const ROLES = ["pm", "tl", "dev", "pe"];
+
+// One labelled field; a blank field leaves its setting alone.
+function field(form, label, control, name) {
+  const wrap = el("label", label);
+  control.name = name;
+  wrap.append(control);
+  form.append(wrap);
+  return control;
+}
+
+function whole(value, name) {
+  if (!/^[0-9]+$/.test(value)) throw new Error(`${name} must be a whole number`);
+  return Number(value);
+}
+
+function price(value, name) {
+  if (!/^[0-9]+(\.[0-9]+)?$/.test(value)) throw new Error(`${name} must be a number`);
+  return Number(value);
+}
+
+// The settings document from the filled fields, or an Error naming the field.
+function collect(inputs) {
+  const out = {};
+  const text = (name) => inputs[name].value.trim();
+  const set = (setting, path, value) => {
+    out[setting] = out[setting] || {};
+    let node = out[setting];
+    path.slice(0, -1).forEach((key) => (node = node[key] = node[key] || {}));
+    node[path[path.length - 1]] = value;
+  };
+  if (text("developers")) out.developers = whole(text("developers"), "developers");
+  if (text("model")) out.model = text("model");
+  if (text("run_team")) set("run_limits", ["team"], whole(text("run_team"), "team runs"));
+  if (text("usd_team")) set("spend_limits", ["team_usd"], price(text("usd_team"), "team USD"));
+  if (text("usd_run")) set("spend_limits", ["per_run_usd"], price(text("usd_run"), "USD per run"));
+  ROLES.forEach((role) => {
+    if (text(`runs_${role}`)) set("run_limits", ["roles", role], whole(text(`runs_${role}`), `${role} runs`));
+    if (text(`usd_${role}`)) set("spend_limits", ["roles_usd", role], price(text(`usd_${role}`), `${role} USD`));
+    if (text(`cron_${role}`)) {
+      set("schedules", [role], text(`cron_${role}`).split("\n").map((line) => line.trim()).filter(Boolean));
+    }
+  });
+  if (text("goals")) {
+    out.product_goals = { goals: text("goals") };
+    if (text("non_goals")) out.product_goals.non_goals = text("non_goals");
+  }
+  if (inputs.paused.value) {
+    out.paused = { paused: inputs.paused.value === "pause" };
+    if (out.paused.paused && text("reason")) out.paused.reason = text("reason");
+  }
+  return out;
+}
+
+// Goals arrive as sizes ({bytes}), never as text.
+function shownValue(value) {
+  if (value === null || value === undefined) return "unset";
+  if (typeof value === "object" && !Array.isArray(value)) return `${value.bytes} bytes`;
+  return JSON.stringify(value);
+}
+
+function settingsView(team) {
+  const root = document.getElementById("settings");
+  if (!team.editable) return root.replaceChildren(note("Settings are not offered for this team."));
+  const form = el("form");
+  const inputs = {};
+  const add = (label, name, control) => (inputs[name] = field(form, label, control, name));
+  const number = () => Object.assign(el("input"), { inputMode: "decimal", maxLength: 12 });
+  add("Developers", "developers", number());
+  add("Model", "model", Object.assign(el("input"), { maxLength: 128 }));
+  add("Team runs", "run_team", number());
+  add("Team USD", "usd_team", number());
+  add("USD per run", "usd_run", number());
+  ROLES.forEach((role) => {
+    add(`${role} runs`, `runs_${role}`, number());
+    add(`${role} USD`, `usd_${role}`, number());
+    add(`${role} schedules (cron, one per line)`, `cron_${role}`, el("textarea"));
+  });
+  add("Goals (shown by size only)", "goals", el("textarea"));
+  add("Non-goals", "non_goals", el("textarea"));
+  const paused = el("select");
+  [["", "No change"], ["pause", "Pause the team"], ["resume", "Resume the team"]].forEach(([value, label]) => {
+    const option = el("option", label);
+    option.value = value;
+    paused.append(option);
+  });
+  add("Pause", "paused", paused);
+  add("Reason for pausing", "reason", Object.assign(el("input"), { maxLength: 200 }));
+  const out = el("div");
+  const preview = el("button", "Preview");
+  preview.type = "button";
+  const show = (text, className) => out.replaceChildren(el("p", text, className));
+  preview.addEventListener("click", async () => {
+    let settings;
+    try {
+      settings = collect(inputs);
+      if (!Object.keys(settings).length) throw new Error("nothing to change");
+    } catch (error) {
+      return show(error.message, "bad");
+    }
+    try {
+      const found = await post("/api/settings/preview", { team: team.name, settings });
+      review(team, settings, found, out);
+    } catch (error) {
+      show(`Cannot preview: ${error.message}`, "bad");
+    }
+  });
+  form.append(preview);
+  root.replaceChildren(form, out);
+}
+
+// The preview, then Confirm (which sends what was previewed with its confirm code) or Cancel.
+function review(team, settings, found, out) {
+  const lines = found.changes.map((c) => el("li", `${c.field}: ${shownValue(c.from)} -> ${shownValue(c.to)}`));
+  out.replaceChildren(el("h4", found.changes.length ? "Review the change" : "No change"));
+  if (lines.length) out.append(el("ul", null), note(found.authority));
+  if (lines.length) out.querySelector("ul").append(...lines);
+  found.problems.forEach((p) => out.append(el("p", `Problem: ${p}`, "bad")));
+  if (!lines.length || found.problems.length) return;
+  const row = el("div", null, "row");
+  const confirm = el("button", "Confirm and apply");
+  const cancel = el("button", "Cancel");
+  [confirm, cancel].forEach((b) => (b.type = "button"));
+  cancel.addEventListener("click", () => out.replaceChildren(note("Cancelled; nothing changed.")));
+  confirm.addEventListener("click", async () => {
+    row.replaceChildren(note("Applying…"));
+    try {
+      const done = await post("/api/settings/apply", { team: team.name, settings, confirm: found.confirm });
+      out.replaceChildren(el("p", done.status === "applied" ? "Applied." : "Already in effect.", "ok"));
+      refresh();
+    } catch (error) {
+      out.replaceChildren(el("p", `Not applied: ${error.message}`, "bad"));
+    }
+  });
+  row.append(confirm, cancel);
+  out.append(row);
+}
+
 function draw() {
   tabs();
   const team = teams.find((t) => t.name === selected);
@@ -200,6 +350,7 @@ function draw() {
   scroll.append(overview(team));
   target.replaceChildren(el("h2", team.name), scroll);
   mailView(team);
+  settingsView(team);
 }
 
 async function refresh() {

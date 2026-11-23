@@ -35,6 +35,7 @@ MAX_BODY_BYTES = 16384
 MAX_REPLIES = 20
 MAIL_PAGE = 50
 MAX_MAIL_PAGES = 20
+SETTINGS_ROUTES = {"/api/settings/preview": "preview", "/api/settings/apply": "apply"}
 IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 TEAM = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 ITEM = re.compile(r"^[a-z][a-z0-9_-]{0,63}/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -53,9 +54,9 @@ CSP = (
 
 
 class DashboardError(Exception):
-    def __init__(self, code: str, status: int = 400) -> None:
+    def __init__(self, code: str, status: int = 400, detail: str | None = None) -> None:
         super().__init__(code)
-        self.code, self.status = code, status
+        self.code, self.status, self.detail = code, status, detail
 
 
 class Backend(Protocol):
@@ -66,6 +67,11 @@ class Backend(Protocol):
     def send(self, role: str, text: str, client_key: str) -> dict[str, Any]: ...
 
     def mail(self, query: dict[str, Any]) -> dict[str, Any]: ...
+
+    def settings(self, action: str, body: Any) -> dict[str, Any]:
+        """Preview or apply a settings change (`action` is `preview` or `apply`). A backend with
+        nothing to edit refuses with `settings_unavailable`."""
+        ...
 
 
 def mail_query(raw: str) -> dict[str, Any]:
@@ -137,6 +143,9 @@ class FixtureBackend:
     def mail(self, query: dict[str, Any]) -> dict[str, Any]:
         return {"total": 0, "items": [], "next": None}
 
+    def settings(self, action: str, body: Any) -> dict[str, Any]:
+        raise DashboardError("settings_unavailable", 404)
+
 
 class KernelBackend:
     """The kernel, as the supervisor: `request` is `KernelClient.request`."""
@@ -178,6 +187,9 @@ class KernelBackend:
             params={"namespace": self.namespace, **params},
         )
         return page
+
+    def settings(self, action: str, body: Any) -> dict[str, Any]:
+        raise DashboardError("settings_unavailable", 404)
 
     def send(self, role: str, text: str, client_key: str) -> dict[str, Any]:
         sent: dict[str, Any] = self.request(
@@ -247,7 +259,8 @@ def handler(
             try:
                 action()
             except DashboardError as error:
-                self.json(error.status, {"code": error.code})
+                detail = {} if error.detail is None else {"detail": error.detail}
+                self.json(error.status, {"code": error.code, **detail})
             except Exception as error:  # the kernel's refusal, or it being unreachable
                 status = getattr(error, "status", 502)
                 code = str(getattr(error, "code", None) or "kernel_unavailable")
@@ -271,18 +284,22 @@ def handler(
 
         def do_POST(self) -> None:
             def post() -> None:
-                if self.path != "/api/message" or not writable:
+                action = SETTINGS_ROUTES.get(self.path)
+                if action is None and (self.path != "/api/message" or not writable):
                     return self.json(HTTPStatus.NOT_FOUND, {"code": "not_found"})
+                invalid = "invalid_settings" if action else "invalid_message"
                 # A cross-site form cannot send JSON, and a script cannot do so unpreflighted.
                 if self.headers.get_content_type() != "application/json":
                     raise DashboardError("unsupported_media_type", 415)
                 size = int(self.headers.get("Content-Length") or -1)
                 if not 0 <= size <= MAX_BODY_BYTES:
-                    raise DashboardError("invalid_message", 413)
+                    raise DashboardError(invalid, 413)
                 try:
                     body = json.loads(self.rfile.read(size))
                 except ValueError:
-                    raise DashboardError("invalid_message") from None
+                    raise DashboardError(invalid) from None
+                if action:
+                    return self.json(HTTPStatus.OK, backend.settings(action, body))
                 self.json(HTTPStatus.CREATED, send_message(backend, body))
 
             self.guarded(post)
