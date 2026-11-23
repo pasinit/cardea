@@ -203,3 +203,23 @@ Revisit if:
   - inbound is off by default;
   - configuration validation;
   - `test_team_kit`: the PM fragment is opt-in.
+
+## Amendment (2026-11-23): the inbound poll's query, unverified against the live API
+
+The first live inbound poll was answered `400`, and the response said nothing about why: the adapter reported only the status. Two changes, both **unverified against the live AgentMail API**: no live call has been made since, and the fixtures are recorded bodies served by a fake that accepts the parameters the documentation lists.
+
+- **Query.** `GET /inboxes/{inbox_id}/messages` is sent with `labels=received` and `limit=50` (was 100), plus `page_token` on later pages. It no longer sends `after`: the `since` window is applied client-side, on the timestamps of the returned messages. The cause of the `400` is inferred, not confirmed against the live API: `after` is the suspected trigger, and the adapter's own comment says the provider answers `400` to it. No live call has confirmed that `after` was the cause, or that the `400` is gone.
+- **Diagnosis.** A `400` from AgentMail now carries its response body in the `ProviderError` (or `Refused`, for a send) message and in the warning log. The body is masked first: the API key, the inbox id and every email address become `***`. It is then cut to 500 characters. Other statuses still report the status and the route template only. The API key is never logged.
+- **Delivery is unchanged.** A message is delivered once, keyed by its Message-ID, and each delivery leaves the `operation.inbound_delivered` receipt.
+- **Tests.** Fixture-based, in `apps/api/tests/service/test_email_ops.py`: the query parameters (no `after`, `limit=50`), and the masked and truncated `400` body.
+- **To close.** Run `experiments/debian-acceptance/email_live.py` against a real inbox. If the `400` persists, its body now says which parameter, and this amendment should be corrected.
+
+## Amendment (2026-11-23): attachments on `email.send`
+
+`email.send` takes an optional `attachments` list (1 to 5 items of `{filename, content_type, data}`, `data` being base64). The bytes are in the call's arguments, so the receipt, the idempotency scope and the content gate see exactly what is sent. No object store, credential or path is involved.
+
+- **Types.** `image/png` (the bytes must start with the PNG signature and an IHDR chunk) and `text/html` (UTF-8 text without control characters, and self-contained: no script, frame, object, embed, link, base or form element, and no `src`, `href`, `url()` or `@import` except a `data:` URI or an in-page `#` anchor). The reference check is a conservative screen, not a sanitizer. The filename must be a plain name ending `.png` or `.html` to match the type, and unique in the call.
+- **Limits.** Host file `attachments {max_count (default 3, at most 5), max_file_bytes (default 24576), max_total_bytes (default 32768)}`; the byte ceilings are 32 KiB so the base64 stays within a receipt's 64 KiB document. Refusals are definite, before anything is sent, and do not count against the role's rate limit: `attachments_too_many`, `attachment_too_large`, `attachments_too_large`, `attachment_invalid`, `attachment_type_mismatch`, `attachment_external_reference`.
+- **Idempotency.** The scope is now `/to`, `/client_key` and, when present, `/attachments` (the descriptor's new `idempotency_optional`). The same key with the same attachments is one effect; other attachments, or none, are a different effect. A call without attachments keeps the key it had. The rate limit is unchanged: one call is one send, with or without attachments.
+- **Content gate.** HTML attachments are passed to the gate with the subject and body. A PNG has no text to read, so only its type and size are checked.
+- **Transports.** AgentMail sends `attachments[{filename, content_type, content}]`; SMTP builds a MIME multipart message.

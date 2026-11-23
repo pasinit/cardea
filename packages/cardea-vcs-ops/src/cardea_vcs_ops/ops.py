@@ -40,6 +40,7 @@ Rules checked here, before any network call:
 """
 
 import asyncio
+import logging
 import os
 import re
 from collections.abc import Mapping
@@ -67,6 +68,8 @@ from cardea_vcs_ops.credentials import (
 from cardea_vcs_ops.git import BundleInvalid, Pusher, PushRejected, Workspace, push
 from cardea_vcs_ops.github import DuplicatePull, GitHub, HostRefused
 
+log = logging.getLogger(__name__)
+
 BRANCH = re.compile(r"^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$")
 MAX_BODY = 4096
 MAX_REVIEW_BODY = 500
@@ -83,6 +86,8 @@ MAX_PATCHES = 50
 # Check runs on the head, for `vcs.read_change` (`checks`): what failed and why, as CI's
 # annotations say it (packaging/ci_annotate.py), since agents cannot read job logs.
 MAX_CHECKS = 30
+# Open pull requests one `vcs.list_changes` call returns.
+MAX_LISTED = 30
 MAX_ANNOTATIONS = 5
 MAX_ANNOTATION = 4096
 # All annotations together, so the diff keeps most of the recorded output.
@@ -297,6 +302,7 @@ class Vcs:
                     name=str(entry.name),
                     api_url=str(entry.api_url),
                     git_url=str(entry.git_url),
+                    source=None if entry.source is None else str(entry.source),
                 )
                 if entry is not None and entry.hosted
                 else None
@@ -436,7 +442,9 @@ class Vcs:
                 async with GitHub(repository, credential, self.transport) as host:
                     current = await host.branch_head(branch)
                 if current == head:
-                    # Already there (an earlier attempt or another task): nothing to send.
+                    # Already there (an earlier attempt or another task): nothing to send,
+                    # but the mirror may still lag.
+                    await self.refresh_source(workspace, repository, branch)
                     return done
                 expected = arguments.get("expected_head")
                 if expected is not None and current != expected:
@@ -448,7 +456,20 @@ class Vcs:
                 raise OperationRejected(str(refused), "host_refused") from None
             except PushRejected as rejected:
                 raise OperationRejected(str(rejected), "push_rejected") from None
+            await self.refresh_source(workspace, repository, branch)
         return done
+
+    async def refresh_source(
+        self, workspace: Workspace, repository: Repository, branch: str
+    ) -> None:
+        """Mirror the pushed head into the repository's `source`, so `code.session` sees it.
+        Best effort: the host already has the head, so a failure is logged, not raised."""
+        if repository.source is None:
+            return
+        try:
+            await asyncio.to_thread(workspace.refresh, repository.source, branch)
+        except (RuntimeError, OSError) as failed:
+            log.warning("source_refresh_failed: branch %s: %s", branch, failed)
 
     async def find_branch(
         self, arguments: dict[str, JsonValue], context: OperationContext
@@ -486,6 +507,7 @@ class Vcs:
         title, body = str(arguments["title"]), str(arguments.get("body") or "")
         self.gate(context, "vcs.open_change", texts={"title": title, "body": body})
         async with await self.client(repository, context, "pull_requests:write") as host:
+            await self._one_change_per_record(host, arguments, context)
             try:
                 pull = await host.create_pull(head, base, title, body, bool(arguments.get("draft")))
             except DuplicatePull:
@@ -499,6 +521,43 @@ class Vcs:
             except HostRefused as refused:
                 raise OperationRejected(str(refused), "host_refused") from None
         return self._change(pull)
+
+    async def _one_change_per_record(
+        self, host: GitHub, arguments: dict[str, JsonValue], context: OperationContext
+    ) -> None:
+        """A work record has one open change. The kernel's earlier `vcs.open_change` receipts
+        for the record name candidates; the host says which are still open. A different head
+        is refused with the existing pull request named; the same head is the idempotent
+        reopen and falls through to the host's own duplicate handling."""
+        record_id = arguments.get("record_id")
+        if not record_id:
+            return
+        seen: set[int] = set()
+        for entry in context.evidence.get("existing") or ():
+            fields = entry.get("fields")
+            if not isinstance(fields, dict):
+                continue
+            if (
+                fields.get("arguments/record_id") != record_id
+                or fields.get("arguments/repository") != arguments["repository"]
+                or fields.get("output/head") == arguments["head"]
+            ):
+                continue
+            number = fields.get("output/number")
+            if not isinstance(number, int) or number in seen:
+                continue
+            seen.add(number)
+            try:
+                pull = await host.pull(number)
+            except HostRefused as refused:
+                raise OperationRejected(str(refused), "host_refused") from None
+            if pull.get("state") == "open":
+                raise OperationRejected(
+                    f"Work record {record_id} already has an open pull request: #{number} "
+                    f"({fields.get('output/url')}, branch {fields.get('output/head')}). "
+                    "Push further commits to that branch instead of opening a second change.",
+                    "change_exists",
+                )
 
     async def find_change(
         self, arguments: dict[str, JsonValue], context: OperationContext
@@ -828,6 +887,40 @@ class Vcs:
             read["diff"] = diff(files, offset, OUTPUT_BUDGET - _size(read) - 600, patch_offset)
         return read
 
+    # vcs.list_changes
+
+    async def list_changes(
+        self, arguments: dict[str, JsonValue], context: OperationContext
+    ) -> dict[str, JsonValue]:
+        """The open pull requests of a repository, each with its head, review state and check
+        state, for the product manager's overview. Reads only; the head's check runs are
+        summarised, not listed (`vcs.read_change` has them)."""
+        repository = self.repository(arguments["repository"])
+        limit = min(int(str(arguments.get("limit", MAX_LISTED))), MAX_LISTED)
+        changes: list[JsonValue] = []
+        async with await self.client(repository, context, "pull_requests:read") as host:
+            try:
+                for pull in await host.open_pulls(limit):
+                    number, sha = int(pull["number"]), str(pull["head"]["sha"])
+                    reviews = await host.reviews(number)
+                    runs = await host.check_runs(sha)
+                    changes.append(
+                        {
+                            "number": number,
+                            "title": _bounded(pull.get("title"), 200)[0],
+                            "draft": bool(pull.get("draft")),
+                            "head": str(pull["head"]["ref"]),
+                            "head_sha": sha,
+                            "base": str(pull["base"]["ref"]),
+                            "url": str(pull.get("html_url", "")),
+                            "review_state": review_state(reviews, sha),
+                            "check_state": check_state(runs),
+                        }
+                    )
+            except HostRefused as refused:
+                raise OperationRejected(str(refused), "host_refused") from None
+        return {"repository": str(arguments["repository"]), "changes": changes}
+
     # vcs.check_repository
 
     async def check_repository(
@@ -896,10 +989,38 @@ class Vcs:
             "vcs.find_review": self.find_review,
             "vcs.read_change": self.read_change,
             "vcs.read_branch": self.read_branch,
+            "vcs.list_changes": self.list_changes,
             "vcs.check_repository": self.check_repository,
             "vcs.merge": self.merge,
             "vcs.find_merge": self.find_merge,
         }
+
+
+def review_state(reviews: list[dict[str, Any]], head: str) -> str:
+    """`changes_requested` while any reviewer's latest deciding review asks for changes,
+    else `approved` when one approves exactly this head, else `none`."""
+    latest: dict[str, dict[str, Any]] = {}
+    for r in reviews:
+        if r.get("state") in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}:
+            latest[str((r.get("user") or {}).get("login", ""))] = r
+    states = [(r["state"], r.get("commit_id")) for r in latest.values()]
+    if any(state == "CHANGES_REQUESTED" for state, _ in states):
+        return "changes_requested"
+    if any(state == "APPROVED" and commit == head for state, commit in states):
+        return "approved"
+    return "none"
+
+
+def check_state(runs: list[dict[str, Any]]) -> str:
+    """`none` without check runs, `pending` while one runs, `failing` when one did not
+    succeed, else `passing`."""
+    if not runs:
+        return "none"
+    if any(r.get("status") != "completed" for r in runs):
+        return "pending"
+    if any(r.get("conclusion") not in PASSING for r in runs):
+        return "failing"
+    return "passing"
 
 
 def _field(entry: Mapping[str, JsonValue], path: str) -> JsonValue:

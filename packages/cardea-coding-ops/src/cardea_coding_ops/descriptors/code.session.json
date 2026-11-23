@@ -1,7 +1,7 @@
 {
   "tool": {
     "name": "code.session",
-    "description": "Check out a branch of an allowed repository, run a headless coding agent on the task, run the repository's gates, and return the change (a git bundle stored as kernel objects) with the gate results. Pushes nothing. Needs repo:<alias> for the repository.",
+    "description": "Check out a branch of an allowed repository, run a headless coding agent on the task, run the repository's gates, and return the change (a git bundle stored as kernel objects) with the gate results. Pushes nothing. With a record_id whose work already has a pull request, it starts from that pull request's current head, not base_ref. Needs repo:<alias> for the repository.",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
@@ -22,6 +22,11 @@
         "task_key": {
           "type": "string",
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "record_id": {
+          "type": "string",
+          "pattern": "^rec-[0-9a-f]{32}$",
+          "description": "The work record this session is for. If the kernel holds a vcs.open_change receipt for the record in this repository, the session starts from that change's current head instead of base_ref, and fails if the source does not hold that head."
         }
       },
       "required": [
@@ -42,6 +47,13 @@
         },
         "base_sha": {
           "type": "string"
+        },
+        "starting_from": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "The existing change (branch, number, url) the session started from; null when it started from base_ref."
         },
         "head_sha": {
           "type": [
@@ -114,6 +126,22 @@
     "resource": {
       "grant": "repo",
       "argument": "/repository"
-    }
+    },
+    "evidence": [
+      {
+        "name": "changes",
+        "operation": "vcs.open_change",
+        "match": {"arguments/record_id": "/record_id"},
+        "optional": true,
+        "fields": ["arguments/repository", "arguments/record_id", "output/number", "output/url", "output/head"]
+      },
+      {
+        "name": "pushes",
+        "operation": "vcs.push_branch",
+        "match": {"arguments/record_id": "/record_id"},
+        "optional": true,
+        "fields": ["arguments/repository", "arguments/record_id", "arguments/branch", "arguments/head"]
+      }
+    ]
   }
 }

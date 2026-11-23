@@ -3477,6 +3477,18 @@
               }
             ]
           },
+          "name": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z][a-z0-9-]{0,23}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
           "schedule": {
             "anyOf": [
               {
@@ -3503,6 +3515,18 @@
                 "type": "null"
               }
             ]
+          },
+          "name": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z][a-z0-9-]{0,23}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
           },
           "schedule": {
             "anyOf": [

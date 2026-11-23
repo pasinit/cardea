@@ -19,12 +19,22 @@ from typing import Protocol
 
 
 @dataclass(frozen=True)
+class Attachment:
+    """One checked attachment: a PNG image or a self-contained HTML page."""
+
+    filename: str
+    content_type: str
+    content: bytes
+
+
+@dataclass(frozen=True)
 class Outgoing:
     to: str
     subject: str
     body: str
     # The call's ADR-026 effect key: the provider idempotency key and the Message-ID.
     effect_key: str
+    attachments: tuple[Attachment, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -72,7 +82,9 @@ class Refused(Exception):
 
 class ProviderError(Exception):
     """The provider failed in a way that leaves the outcome open. Its message holds only a
-    status or reply code, never a URL, an address or the provider's own text."""
+    status or reply code, never a URL, an address or the provider's own text. The one
+    exception is a 400 body from AgentMail, masked (key, inbox id, addresses) and cut to 500
+    characters."""
 
 
 class ReconcileUnavailable(Exception):

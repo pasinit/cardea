@@ -20,6 +20,7 @@ from cardea_vcs_ops.config import FixedTokenConfig, VcsConfig
 from cardea_vcs_ops.credentials import Credential
 from cardea_vcs_ops.fake import FakeGitHub
 from cardea_vcs_ops.git import Workspace, push
+from cardea_vcs_ops.ops import check_state
 from mcp.client.session import ClientSession
 from pydantic import SecretStr
 from test_agent_runs import FakeSession, call
@@ -58,6 +59,7 @@ OPERATIONS = (
     "vcs.check_repository",
     "vcs.merge",
     "vcs.read_branch",
+    "vcs.list_changes",
 )
 RUN_GRANTS = (*RIGHTS, "models.invoke", *OPERATIONS, "repo:cardea")
 STEPS = count()
@@ -644,6 +646,98 @@ def test_a_duplicate_pull_request_returns_the_existing_one(
     assert len(host.repositories["acme/cardea"].pulls) == 1
 
 
+def branch_on_host(host: FakeGitHub, tmp_path: Path, branch: str) -> None:
+    """A branch with one commit on the fake host's `cardea` repository."""
+    work = tmp_path / f"work-{next(STEPS)}"
+    git = ["git", "-c", "user.name=agent", "-c", "user.email=agent@example.invalid"]
+    subprocess.run(["git", "init", "-q", "-b", "main", str(work)], check=True)
+    (work / "README.md").write_text(branch)
+    subprocess.run([*git, "-C", str(work), "add", "README.md"], check=True)
+    subprocess.run([*git, "-C", str(work), "commit", "-q", "-m", branch], check=True)
+    path = host.repositories["acme/cardea"].path
+    subprocess.run(
+        ["git", "-C", str(work), "push", "-q", str(path), f"HEAD:refs/heads/{branch}"], check=True
+    )
+
+
+def open_args(branch: str, record_id: str | None) -> dict[str, Any]:
+    arguments: dict[str, Any] = {
+        "repository": "cardea",
+        "head": branch,
+        "base": "main",
+        "title": branch,
+    }
+    if record_id:
+        arguments["record_id"] = record_id
+    return arguments
+
+
+def earlier_open(arguments: dict[str, Any], output: dict[str, Any]) -> dict[str, Any]:
+    """An entry of the `existing` evidence, as the kernel builds it from a receipt."""
+    return {
+        "receipt_id": "r0",
+        "agent_id": "eng.dev.0",
+        "group": "eng",
+        "at": now().isoformat(),
+        "fields": {
+            "arguments/repository": arguments["repository"],
+            "arguments/record_id": arguments.get("record_id"),
+            "output/number": output["number"],
+            "output/url": output["url"],
+            "output/head": output["head"],
+        },
+    }
+
+
+def test_open_change_declares_its_record_evidence() -> None:
+    (descriptor,) = [d for d in descriptors() if d.name == "vcs.open_change"]
+    (query,) = descriptor.cardea.evidence or ()
+    assert (query.name, query.operation, query.optional) == ("existing", "vcs.open_change", True)
+    assert query.match == {"arguments/record_id": "/record_id"}
+
+
+def test_a_second_change_for_the_same_record_is_refused_naming_the_first(
+    host: FakeGitHub, vcs: Vcs, tmp_path: Path
+) -> None:
+    import asyncio
+    from dataclasses import replace
+
+    from cardea.service.operations import OperationRejected
+
+    record = "rec-" + "a" * 32
+    for branch in ("agent/eng/one", "agent/eng/two", "agent/eng/three"):
+        branch_on_host(host, tmp_path, branch)
+    pulls = host.repositories["acme/cardea"].pulls
+    # The content gate has its own tests; here it finds nothing.
+    context = replace(caller("eng"), check_content=lambda **_: None)
+    first_args = open_args("agent/eng/one", record)
+    first = asyncio.run(vcs.open_change(first_args, context))
+    assert first["number"] == 1 and len(pulls) == 1
+    seen = replace(context, evidence={"existing": (earlier_open(first_args, first),)})
+
+    # Another branch for the same record: refused, naming the first pull request, and the
+    # host is not asked to create anything.
+    with pytest.raises(OperationRejected) as refused:
+        asyncio.run(vcs.open_change(open_args("agent/eng/two", record), seen))
+    assert refused.value.code == "change_exists"
+    assert "#1" in str(refused.value) and str(first["url"]) in str(refused.value)
+    assert record in str(refused.value)
+    assert len(pulls) == 1 and host.calls.count("create_pull") == 1
+
+    # The same head is the idempotent reopen: the existing pull request comes back.
+    again = asyncio.run(vcs.open_change(first_args, seen))
+    assert again["number"] == 1 and len(pulls) == 1
+
+    # Another record, or no record, is not held by the first.
+    other = open_args("agent/eng/two", "rec-" + "b" * 32)
+    assert asyncio.run(vcs.open_change(other, seen))["number"] == 2
+
+    # Once the first pull request is closed, the record may open another.
+    pulls[0]["state"] = "closed"
+    third = asyncio.run(vcs.open_change(open_args("agent/eng/three", record), seen))
+    assert third["number"] == 3
+
+
 # The credential stays with the host call
 
 
@@ -968,3 +1062,185 @@ def test_read_branch_returns_the_head_and_refuses_unknown_branches(
     )
     assert results[1].structured_content["head"] == change["head"], text(results[1])
     assert results[2].is_error and "branch_unknown" in text(results[2])
+
+
+@pytest.mark.loopback
+def test_list_changes_shows_open_changes_with_review_and_check_state(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path
+) -> None:
+    """The PM's overview: open changes only, each with its head, review and check state."""
+    first, second = make_change(kernel, tmp_path), make_change(kernel, tmp_path, "Second")
+    steps: list[tuple[str, dict[str, Any]]] = []
+    for number, (branch, change) in enumerate(
+        [("agent/eng/one", first), ("agent/eng/two", second)], 1
+    ):
+        steps += [
+            ("vcs-push_branch", {"repository": "cardea", "branch": branch, **change}),
+            (
+                "vcs-open_change",
+                {
+                    "repository": "cardea",
+                    "head": branch,
+                    "base": "main",
+                    "title": f"Change {number}",
+                },
+            ),
+        ]
+    steps.append(
+        (
+            "vcs-review",
+            {
+                "repository": "cardea",
+                "number": 1,
+                "event": "REQUEST_CHANGES",
+                "body": "No.",
+                "client_key": "r1",
+            },
+        )
+    )
+    run_calls(kernel, session, steps)
+    repo = host.repositories["acme/cardea"]
+    repo.pass_checks(first["head"], "lint", "test")
+    repo.checks[second["head"]] = [{"name": "test", "status": "completed", "conclusion": "failure"}]
+    before = len(host.authorizations)
+    _, state, (listed,) = run_calls(
+        kernel, session, [("vcs-list_changes", {"repository": "cardea"})]
+    )
+    assert state == "succeeded" and not listed.is_error, text(listed)
+    changes = {c["number"]: c for c in listed.structured_content["changes"]}
+    assert [c["number"] for c in listed.structured_content["changes"]] == [2, 1]
+    assert changes[1]["head"] == "agent/eng/one" and changes[1]["head_sha"] == first["head"]
+    assert (changes[1]["review_state"], changes[1]["check_state"]) == (
+        "changes_requested",
+        "passing",
+    )
+    assert (changes[2]["review_state"], changes[2]["check_state"]) == ("none", "failing")
+    # Closed changes are not listed, and the call only read.
+    repo.pulls[0]["state"] = "closed"
+    _, _, (open_only,) = run_calls(
+        kernel, session, [("vcs-list_changes", {"repository": "cardea"})]
+    )
+    assert [c["number"] for c in open_only.structured_content["changes"]] == [2]
+    assert len(host.authorizations) > before
+
+
+@pytest.mark.loopback
+def test_list_changes_without_the_grant_is_refused_naming_it(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub
+) -> None:
+    """A role lacking `repo:<alias>` is refused before the host is called, and the refusal
+    names the grant. (A run cannot expose the operation without holding its own grant.)"""
+    before = len(host.authorizations)
+    _, _, (no_repo,) = run_calls(kernel, session, [("vcs-list_changes", {"repository": "other"})])
+    assert no_repo.is_error and "repo:other" in text(no_repo), text(no_repo)
+    assert untouched(host, before)
+
+
+def test_check_state_summarises_completed_runs() -> None:
+    """Skipped and neutral runs pass; any other conclusion fails; unfinished runs pend."""
+
+    def run(conclusion: str | None, status: str = "completed") -> dict[str, Any]:
+        return {"name": "test", "status": status, "conclusion": conclusion}
+
+    assert check_state([]) == "none"
+    assert check_state([run("success"), run("skipped"), run("neutral")]) == "passing"
+    assert check_state([run("success"), run("failure")]) == "failing"
+    assert check_state([run("cancelled")]) == "failing"
+    assert check_state([run("failure"), run(None, "in_progress")]) == "pending"
+
+
+# The read-only source mirror follows pushed branches
+
+
+def mirrored(host: FakeGitHub, tmp_path: Path, source: str | None) -> Vcs:
+    from cardea.service.repositories import Registry, Repository
+
+    repo = host.repositories["acme/cardea"]
+    entry = Repository(
+        source=source or str(repo.path),
+        owner="acme",
+        name="cardea",
+        api_url="https://api.github.com",
+        git_url=str(repo.path),
+    )
+    config = VcsConfig(credentials=FixedTokenConfig(kind="test", token=SecretStr(TOKEN)))
+    registry = Registry(repositories={"cardea": entry})
+    return Vcs(config, transport=host.transport(), registry=registry)
+
+
+def push_through(
+    vcs: Vcs, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, session: FakeSession, branch: str
+) -> tuple[str, bool]:
+    kernel = build_kernel(tmp_path, monkeypatch, session, Registry(in_process(), vcs.handlers()))
+    try:
+        change = make_change(kernel, tmp_path)
+        args = {"repository": "cardea", "branch": branch, **change}
+        _, state, (pushed,) = run_calls(kernel, session, [("vcs-push_branch", args)])
+        assert state == "succeeded" and not pushed.is_error, text(pushed)
+        return change["head"], pushed.is_error
+    finally:
+        kernel.database.close()
+
+
+@pytest.mark.loopback
+def test_a_push_reaches_the_source_mirror(
+    host: FakeGitHub,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    session: FakeSession,
+    vcs: Vcs,
+) -> None:
+    mirror = tmp_path / "mirror.git"
+    subprocess.run(["git", "init", "--bare", "-q", str(mirror)], check=True)
+    head, _ = push_through(
+        mirrored(host, tmp_path, str(mirror)), tmp_path, monkeypatch, session, "agent/eng/m1"
+    )
+    assert host.repositories["acme/cardea"].head("agent/eng/m1") == head
+    mirror_head = subprocess.run(
+        ["git", "-C", str(mirror), "rev-parse", "refs/heads/agent/eng/m1"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert mirror_head == head
+
+
+@pytest.mark.loopback
+def test_an_unwritable_source_mirror_is_logged_not_fatal(
+    host: FakeGitHub,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    session: FakeSession,
+    vcs: Vcs,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level("WARNING")
+    head, _ = push_through(
+        mirrored(host, tmp_path, str(tmp_path / "missing.git")),
+        tmp_path,
+        monkeypatch,
+        session,
+        "agent/eng/m2",
+    )
+    assert host.repositories["acme/cardea"].head("agent/eng/m2") == head
+    assert "source_refresh_failed" in caplog.text
+
+
+def test_without_a_source_nothing_is_refreshed(
+    host: FakeGitHub, tmp_path: Path, vcs: Vcs, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from cardea.service.repositories import Registry, Repository
+
+    entry = Repository.model_construct(
+        source=None, owner="acme", name="cardea", api_url="https://api.github.com", git_url="x"
+    )
+    registry = Registry.model_construct(repositories={"cardea": entry})
+    plain = Vcs(vcs.config, transport=host.transport(), registry=registry)
+    assert plain.repository("cardea").source is None
+    called: list[str] = []
+    monkeypatch.setattr(Workspace, "refresh", lambda self, source, branch: called.append(source))
+    import asyncio
+
+    with Workspace(b"", "0" * 40, "x", Credential(TOKEN, datetime.now(UTC))) as workspace:
+        asyncio.run(plain.refresh_source(workspace, plain.repository("cardea"), "b"))
+    assert called == []

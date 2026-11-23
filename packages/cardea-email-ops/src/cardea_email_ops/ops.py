@@ -5,7 +5,9 @@ Rules checked before anything is sent:
   and the alias it names is one of that role's recipients (`recipient_not_allowed`);
 - the role's calls in the configured window, this one included, stay within its rate
   limit (`rate_limited`); a call without the kernel's counter is refused;
-- the subject and body pass the kernel's content gate, which fails closed.
+- the subject, body and any HTML attachment pass the kernel's content gate, which fails
+  closed; attachments (PNG, or self-contained HTML) stay within the configured count and
+  sizes and must be what they claim to be (`attachments.py`).
 
 The model names an alias only. The address, the transport and its credential come from
 private host configuration and never appear in arguments, outputs, receipts or logs.
@@ -35,6 +37,7 @@ from pydantic import JsonValue
 
 from cardea.service.operations import OperationContext, OperationRejected, Reconciliation
 from cardea.service.replies import Dropped, Inbox, Polled, Reply
+from cardea_email_ops import attachments
 from cardea_email_ops.agentmail import AgentMail
 from cardea_email_ops.authentication import domain_of
 from cardea_email_ops.config import EmailConfig
@@ -109,14 +112,24 @@ class Email:
         subject = str(arguments["subject"])
         body = str(arguments["body"])
         address = self._check(alias, context)
+        files = attachments.check(arguments.get("attachments"), self.config.attachments)
         if context.check_content is None:
             raise OperationRejected(
                 "The content gate is not available to this call", "content_gate_unavailable"
             )
-        context.check_content(operation="email.send", texts={"subject": subject, "body": body})
+        context.check_content(
+            operation="email.send",
+            texts={"subject": subject, "body": body, **attachments.texts(files)},
+        )
         try:
             sent = await self.transport.send(
-                Outgoing(to=address, subject=subject, body=body, effect_key=context.effect_key)
+                Outgoing(
+                    to=address,
+                    subject=subject,
+                    body=body,
+                    effect_key=context.effect_key,
+                    attachments=files,
+                )
             )
         except Refused as refused:
             raise OperationRejected(str(refused), refused.code) from None

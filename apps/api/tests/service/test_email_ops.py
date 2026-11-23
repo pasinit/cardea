@@ -7,11 +7,13 @@ and every address is a reserved `.invalid` one.
 """
 
 import asyncio
+import base64
+import email as mime
 import json
 import os
 import time
 from collections.abc import Iterator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from itertools import count
 from pathlib import Path
 from typing import Any, cast
@@ -20,10 +22,11 @@ import httpx
 import pytest
 from cardea_email_ops import Email, authentication, descriptors, handlers
 from cardea_email_ops.agentmail import AgentMail
-from cardea_email_ops.config import EmailConfig
+from cardea_email_ops.config import AttachmentLimits, EmailConfig
 from cardea_email_ops.fake import FakeAgentMail, FakeImap, FakeSmtp
 from cardea_email_ops.smtp_imap import SmtpImap
 from cardea_email_ops.transport import (
+    Attachment,
     Outgoing,
     ProviderError,
     ReconcileUnavailable,
@@ -614,6 +617,195 @@ def test_credentials_and_addresses_never_leave_the_adapter(
         assert API_KEY not in str(request.url) and API_KEY.encode() not in request.content
 
 
+# Attachments
+
+EXTERNAL = "attachment_external_reference"
+PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR" + bytes(13) + b"\x00" * 40
+PAGE = b"<html><body><h1>Plan</h1><img src='data:image/png;base64,AAAA'></body></html>"
+
+
+def attach(name: str = "plan.png", content: bytes = PNG_BYTES, kind: str = "") -> dict[str, str]:
+    kind = kind or ("text/html" if name.endswith(".html") else "image/png")
+    return {
+        "filename": name,
+        "content_type": kind,
+        "data": base64.b64encode(content).decode(),
+    }
+
+
+@pytest.mark.loopback
+def test_png_and_html_attachments_are_sent_with_the_message(
+    kernel: Kernel, session: FakeSession, provider: FakeAgentMail
+) -> None:
+    files = [attach(), attach("plan.html", PAGE)]
+    _, results = run_calls(kernel, session, [question(attachments=files)])
+    assert not results[0].is_error, text(results[0])
+    (message,) = sent_to(provider)
+    assert message["attachments"] == [
+        {"filename": a["filename"], "content_type": a["content_type"], "content": a["data"]}
+        for a in files
+    ]
+    assert CLIENT not in json.dumps(results[0].structured_content)
+
+
+@pytest.mark.loopback
+@pytest.mark.parametrize(
+    ("attachments", "code"),
+    [
+        ([attach(f"p{i}.png") for i in range(4)], "attachments_too_many"),
+        ([attach("big.png", PNG_BYTES + bytes(30000))], "attachment_too_large"),
+        (
+            [attach(f"p{i}.png", PNG_BYTES + bytes(20000)) for i in range(2)],
+            "attachments_too_large",
+        ),
+        ([attach("fake.png", b"GIF89a" + bytes(40))], "attachment_type_mismatch"),
+        ([attach("short.png", PNG_BYTES[:8])], "attachment_type_mismatch"),
+        ([attach("page.png", PAGE, "image/png")], "attachment_type_mismatch"),
+        ([attach("page.html", PNG_BYTES)], "attachment_type_mismatch"),
+        ([attach("page.html", b"<p>\x00</p>")], "attachment_type_mismatch"),
+        ([attach("page.html", b"<script>1</script>")], EXTERNAL),
+        ([attach("a.html", b"<img src='https://x.invalid/a.png'>")], EXTERNAL),
+        ([attach("a.html", b"<p style='background:url(//x.invalid/a)'>")], EXTERNAL),
+        ([attach("a.html", b"<style>@import 'x.css';</style>")], EXTERNAL),
+        ([attach("page.png", PNG_BYTES, "text/html")], "attachment_invalid"),
+        ([attach("a.png"), attach("a.png")], "attachment_invalid"),
+        ([attach("../a.png")], "invalid_arguments"),
+        ([{**attach(), "data": "not base64!"}], "attachment_invalid"),
+    ],
+)
+def test_attachment_limits_and_types_refuse_before_anything_is_sent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    session: FakeSession,
+    provider: FakeAgentMail,
+    attachments: list[dict[str, str]],
+    code: str,
+) -> None:
+    config = email_config(tmp_path).model_copy(
+        update={"attachments": AttachmentLimits(max_count=3, max_file_bytes=24576)}
+    )
+    assert config.transport.kind == "agentmail"
+    email = Email(config, AgentMail(config.transport, provider.transport()))
+    kernel = build_kernel(tmp_path, monkeypatch, session, email)
+    try:
+        _, results = run_calls(kernel, session, [question(attachments=attachments)])
+        assert results[0].is_error and code in text(results[0]), text(results[0])
+        assert not [r for r in provider.requests if r.method == "POST"]
+        # A refusal is not a send: it does not use the role's rate limit.
+        _, later = run_calls(kernel, session, [question("q2")])
+        assert not later[0].is_error
+    finally:
+        kernel.database.close()
+
+
+@pytest.mark.loopback
+def test_the_content_gate_reads_html_attachments(
+    kernel: Kernel, session: FakeSession, provider: FakeAgentMail
+) -> None:
+    page = f"<p>About {DENIED}</p>".encode()
+    _, results = run_calls(kernel, session, [question(attachments=[attach("plan.html", page)])])
+    assert results[0].is_error and "content_refused" in text(results[0])
+    assert not sent_to(provider)
+
+
+@pytest.mark.loopback
+def test_attachments_are_part_of_the_idempotency_fingerprint(
+    kernel: Kernel, session: FakeSession, provider: FakeAgentMail
+) -> None:
+    other = attach("plan.png", PNG_BYTES + b"\x01")
+    _, results = run_calls(
+        kernel,
+        session,
+        [
+            question("k", attachments=[attach()]),
+            question("k", attachments=[other]),
+            question("k"),
+            # Last: a replay never reaches the handler, but it counts as a call, so earlier
+            # it would push the third real send past the role's limit of 3.
+            question("k", attachments=[attach()]),
+        ],
+    )
+    assert not any(r.is_error for r in results), [text(r) for r in results]
+    # The same key with the same attachments sends once; other attachments, or none, are
+    # a different effect.
+    assert results[3].structured_content == results[0].structured_content
+    assert len({r.structured_content["message_id"] for r in results}) == 3
+    assert len(sent_to(provider)) == 3
+    plain = [m for m in sent_to(provider) if not m["attachments"]]
+    assert len(plain) == 1
+
+
+@pytest.mark.loopback
+def test_a_send_without_attachments_keeps_its_scope_key(email: Email) -> None:
+    (send,) = descriptors()
+    registry = Registry((send,), handlers(email))
+    arguments: dict[str, Any] = question("k")
+    legacy = send.model_copy(
+        update={
+            "cardea": send.cardea.model_copy(update={"idempotency_scope": ("/to", "/client_key")})
+        }
+    )
+    assert registry.scope_key("email.send", "eng", "c", arguments) == Registry(
+        (legacy,), handlers(email)
+    ).scope_key("email.send", "eng", "c", arguments)
+    attached = {**arguments, "attachments": [attach()]}
+    assert registry.scope_key("email.send", "eng", "c", attached) != (
+        registry.scope_key("email.send", "eng", "c", arguments)
+    )
+
+
+@pytest.mark.loopback
+def test_attachments_share_the_role_rate_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, session: FakeSession, provider: FakeAgentMail
+) -> None:
+    config = email_config(tmp_path, limit=2)
+    assert config.transport.kind == "agentmail"
+    email = Email(config, AgentMail(config.transport, provider.transport()))
+    kernel = build_kernel(tmp_path, monkeypatch, session, email)
+    try:
+        _, results = run_calls(
+            kernel,
+            session,
+            [
+                question("a", attachments=[attach()]),
+                question("b"),
+                question("c", attachments=[attach()]),
+                # A replay of the first send is the same effect, not a third send.
+                question("a", attachments=[attach()]),
+            ],
+        )
+        assert [r.is_error for r in results] == [False, False, True, False]
+        assert "rate_limited" in text(results[2])
+        assert len(sent_to(provider)) == 2
+    finally:
+        kernel.database.close()
+
+
+def test_attachment_limits_are_bounded_by_the_receipt() -> None:
+    with pytest.raises(ValueError, match="max_total_bytes"):
+        AttachmentLimits(max_total_bytes=40000)
+
+
+@pytest.mark.loopback
+def test_smtp_attaches_files_as_mime_parts(
+    tmp_path: Path, mail_servers: tuple[FakeSmtp, FakeImap]
+) -> None:
+    smtp, imap = mail_servers
+    adapter = smtp_imap(tmp_path, smtp, imap)
+    files = (
+        Attachment("plan.png", "image/png", PNG_BYTES),
+        Attachment("plan.html", "text/html", PAGE),
+    )
+    asyncio.run(adapter.send(Outgoing(CLIENT, "Plan", "See attached.", "d" * 64, files)))
+    (raw,) = smtp.accepted
+    parts = [p for p in mime.message_from_bytes(raw).walk() if p.get_filename()]
+    assert [(p.get_filename(), p.get_content_type()) for p in parts] == [
+        ("plan.png", "image/png"),
+        ("plan.html", "text/html"),
+    ]
+    assert parts[0].get_payload(decode=True) == PNG_BYTES
+
+
 # Kernel contract
 
 
@@ -1145,7 +1337,7 @@ def assert_reported(caplog: pytest.LogCaptureFixture, error: Exception, expected
         assert secret not in caplog.text and secret not in str(error)
 
 
-@pytest.mark.parametrize("status", [400, 401, 403, 404, 413, 422, 429, 409, 500, 503])
+@pytest.mark.parametrize("status", [401, 403, 404, 413, 422, 429, 409, 500, 503])
 def test_a_failed_send_reports_only_the_status_and_route(
     email: Email, caplog: pytest.LogCaptureFixture, status: int
 ) -> None:
@@ -1191,3 +1383,91 @@ def test_a_successful_call_logs_nothing(
         thread = Thread(sent.thread_id, sent.message_id, datetime.now(UTC))
         asyncio.run(transport.poll_replies(thread))
     assert not [r for r in caplog.records if r.name == ROUTES]
+
+
+AGENTMAIL_FIXTURES = Path(__file__).parent / "data" / "agentmail"
+LIST_PARAMS = {"labels", "limit", "page_token"}
+
+
+def test_inbound_poll_sends_only_query_parameters_the_provider_accepts(email: Email) -> None:
+    """Recorded AgentMail bodies (list and get-message) served by a provider that answers 400
+    to any query parameter outside the documented, plain set, as the real one did."""
+    transport = email.transport
+    assert isinstance(transport, AgentMail)
+    listing = (AGENTMAIL_FIXTURES / "list_received.json").read_text()
+    message = (AGENTMAIL_FIXTURES / "message_owner_reply.json").read_text()
+    seen: list[httpx.Request] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        path = request.url.raw_path.decode()
+        assert path.startswith(f"/v0/inboxes/{INBOX_ID}/messages")
+        if set(request.url.params) - LIST_PARAMS:
+            return httpx.Response(400, json={"name": "ValidationError"})
+        if request.url.path.endswith("/messages"):
+            return httpx.Response(200, text=listing, headers={"content-type": "application/json"})
+        return httpx.Response(200, text=message, headers={"content-type": "application/json"})
+
+    adapter = AgentMail(transport.config, httpx.MockTransport(answer))
+    since = datetime(2026, 11, 1, tzinfo=UTC)
+    (reply,) = asyncio.run(poll(adapter, since))
+    assert reply.reply_id == "<owner-reply-1@mail.invalid>"
+    assert reply.text == "Yes, go ahead." and reply.authenticated is True
+    listed = [r for r in seen if r.url.path.endswith("/messages")]
+    assert [r.url.params["labels"] for r in listed] == ["received"]
+    # Only labels and page size go to the provider; the window is applied client-side.
+    assert [dict(r.url.params) for r in listed] == [{"labels": "received", "limit": "50"}]
+
+
+def test_the_window_is_applied_client_side_in_any_timezone(email: Email) -> None:
+    transport = email.transport
+    assert isinstance(transport, AgentMail)
+    listing = {
+        "messages": [
+            {"message_id": "m", "timestamp": "2026-11-22T10:30:05.5Z", "from": "x@y.invalid"}
+        ]
+    }
+    adapter = AgentMail(
+        transport.config, httpx.MockTransport(lambda r: httpx.Response(200, json=listing))
+    )
+    plus_two = timezone(timedelta(hours=2))
+    # 12:30:05+02:00 is 10:30:05Z: the message at 10:30:05.5Z is in; a naive since is UTC.
+    assert len(asyncio.run(poll(adapter, datetime(2026, 11, 22, 12, 30, 5, tzinfo=plus_two)))) == 1
+    assert len(asyncio.run(poll(adapter, datetime(2026, 11, 22, 10, 30, 6)))) == 0
+
+
+def test_a_400_reports_its_masked_body_cut_to_500_characters(
+    email: Email, caplog: pytest.LogCaptureFixture
+) -> None:
+    transport = email.transport
+    assert isinstance(transport, AgentMail)
+    echo = f"bad after {API_KEY} {INBOX_ID} {LEAK} {CLIENT} " + "x" * 800
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"name": "ValidationError", "message": echo})
+
+    adapter = AgentMail(transport.config, httpx.MockTransport(answer))
+    since = datetime.now(UTC) - timedelta(minutes=1)
+    with caplog.at_level("DEBUG"), pytest.raises(ProviderError) as e:
+        asyncio.run(poll(adapter, since))
+    prefix = "AgentMail answered HTTP 400 for GET /inboxes/{inbox_id}/messages: "
+    message = str(e.value)
+    assert message.startswith(prefix) and "ValidationError" in message and "bad after" in message
+    assert len(message) - len(prefix) == 500
+    for secret in (API_KEY, INBOX_ID, LEAK, CLIENT):
+        assert secret not in message and secret not in caplog.text
+    assert message in caplog.text
+
+
+def test_a_refused_send_reports_a_masked_400_body(email: Email) -> None:
+    transport = email.transport
+    assert isinstance(transport, AgentMail)
+    body = {"message": f"{API_KEY} {INBOX_ID} {CLIENT} not allowed"}
+    adapter = AgentMail(
+        transport.config, httpx.MockTransport(lambda r: httpx.Response(400, json=body))
+    )
+    with pytest.raises(Refused) as e:
+        asyncio.run(adapter.send(Outgoing(CLIENT, "s", "b", "c" * 64)))
+    assert "not allowed" in str(e.value)
+    for secret in (API_KEY, INBOX_ID, CLIENT):
+        assert secret not in str(e.value)

@@ -43,7 +43,6 @@ from cardea.service.auth import Proof
 from cardea.service.database import Fault, borrow
 from cardea.service.models import (
     DEFAULT_CONTEXT_BYTES,
-    MAX_POOL_TRIGGERS,
     AgentGroup,
     AgentRunRequest,
     GroupPool,
@@ -69,8 +68,16 @@ def member_id(group: str, pool: str, ordinal: int) -> str:
     return f"{group}.{pool}.{ordinal}"
 
 
-def trigger_id(member: str, index: int) -> str:
-    return f"{member}.t{index}"
+def trigger_ids(pool: GroupPool, member: str) -> list[str]:
+    """The ID of each of the pool's triggers for one member, in manifest order."""
+    ids, unnamed = [], 0
+    for trigger in pool.triggers:
+        if trigger.name is None:
+            ids.append(f"{member}.t{unnamed}")
+            unnamed += 1
+        else:
+            ids.append(f"{member}.{trigger.name}")
+    return ids
 
 
 def spec_digest(spec: GroupSpec) -> str:
@@ -137,7 +144,7 @@ def compile_trigger(
     try:
         return TriggerSpec.model_validate(
             {
-                "trigger_id": trigger_id(member, index),
+                "trigger_id": trigger_ids(pool, member)[index],
                 "supervisor_id": spec.supervisor,
                 **source,
                 "template_kind": "agent-run",
@@ -395,15 +402,15 @@ def _apply(
                 elif kind != "unchanged":
                     plan["triggers_updated"].append(trigger.trigger_id)
             # Manifest triggers dropped from a pool: in-flight runs keep their requests.
-            for index in range(len(pool.triggers), MAX_POOL_TRIGGERS):
-                stale = trigger_id(member, index)
-                if conn.exec_driver_sql(
-                    "SELECT 1 FROM triggers WHERE trigger_id=? AND managed_by='group' "
-                    "AND removed=0",
-                    (stale,),
-                ).first():
-                    remove(conn, stale, at)
-                    plan["triggers_removed"].append(stale)
+            wanted_triggers = set(trigger_ids(pool, member))
+            for (stale,) in conn.exec_driver_sql(
+                "SELECT trigger_id FROM triggers WHERE managed_by='group' AND removed=0 "
+                "AND json_extract(definition_json,'$.template.agent_id')=? ORDER BY trigger_id",
+                (member,),
+            ).fetchall():
+                if stale not in wanted_triggers:
+                    remove(conn, str(stale), at)
+                    plan["triggers_removed"].append(str(stale))
     # Converge what can be converged now; draining members finish on later ticks.
     outcome = converge(kernel, conn, namespace, name, at)
     plan["members_removed"] = outcome["members_removed"]

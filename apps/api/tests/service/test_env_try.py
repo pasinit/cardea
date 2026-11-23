@@ -346,8 +346,11 @@ def test_an_identical_call_while_one_runs_is_refused(
     assert call(kernel, "third", commit=repo["good"], scenarios=["try"])[0] == "succeeded"
 
 
-def test_a_head_outside_the_clone_refs_is_staged(tmp_path: Path, repo: dict[str, Any]) -> None:
-    # A commit reachable only from a non-branch ref (a PR head), absent from a plain clone.
+@pytest.mark.parametrize("ref", ["refs/pull/1/head", "refs/heads/agent/dev/rec-1-2"])
+def test_a_head_outside_the_clone_refs_is_staged(
+    tmp_path: Path, repo: dict[str, Any], ref: str
+) -> None:
+    # A commit on a non-main branch or a PR head, by full SHA. A plain clone lacks PR heads.
     work = tmp_path / "pr"
     git(tmp_path, "clone", "--quiet", str(repo["source"]), str(work))
     git(work, "config", "user.email", "a@example.com")
@@ -355,7 +358,7 @@ def test_a_head_outside_the_clone_refs_is_staged(tmp_path: Path, repo: dict[str,
     (work / "mode").write_text("pr\n")
     git(work, "commit", "--quiet", "-am", "pr")
     head = git(work, "rev-parse", "HEAD")
-    git(work, "push", "--quiet", str(repo["source"]), f"{head}:refs/pull/1/head")
+    git(work, "push", "--quiet", str(repo["source"]), f"{head}:{ref}")
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     checkout = stage(str(repo["source"]), head, scratch)
@@ -365,6 +368,37 @@ def test_a_head_outside_the_clone_refs_is_staged(tmp_path: Path, repo: dict[str,
     with pytest.raises(OperationRejected) as unknown:
         stage(str(repo["source"]), "f" * 40, missing)
     assert unknown.value.code == "env_commit_unknown"
+
+
+def test_a_push_the_mirror_lacks_is_fetched_from_the_host(
+    tmp_path: Path, repo: dict[str, Any]
+) -> None:
+    # The host has a fresh agent head; the mirror (the source) has not caught up yet.
+    host = tmp_path / "host.git"
+    git(tmp_path, "clone", "--quiet", "--bare", str(repo["source"]), str(host))
+    work = tmp_path / "fresh"
+    git(tmp_path, "clone", "--quiet", str(host), str(work))
+    git(work, "config", "user.email", "a@example.com")
+    git(work, "config", "user.name", "a")
+    (work / "mode").write_text("fresh\n")
+    git(work, "commit", "--quiet", "-am", "fresh")
+    head = git(work, "rev-parse", "HEAD")
+    git(work, "push", "--quiet", str(host), f"{head}:refs/heads/agent/dev/rec-9-1")
+    lagging = tmp_path / "scratch-lag"
+    lagging.mkdir()
+    with pytest.raises(OperationRejected) as unknown:
+        stage(str(repo["source"]), head, lagging)
+    assert unknown.value.code == "env_commit_unknown"
+    scratch = tmp_path / "scratch-host"
+    scratch.mkdir()
+    checkout = stage(str(repo["source"]), head, scratch, str(host))
+    assert (checkout / "mode").read_text() == "fresh\n"
+    # A commit the host does not have either is still unknown.
+    missing = tmp_path / "scratch-none"
+    missing.mkdir()
+    with pytest.raises(OperationRejected) as none:
+        stage(str(repo["source"]), "f" * 40, missing, str(host))
+    assert none.value.code == "env_commit_unknown"
 
 
 @pytest.mark.loopback
