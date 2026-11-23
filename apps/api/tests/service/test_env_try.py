@@ -367,6 +367,22 @@ def test_a_head_outside_the_clone_refs_is_staged(tmp_path: Path, repo: dict[str,
     assert unknown.value.code == "env_commit_unknown"
 
 
+def test_a_non_main_branch_head_is_staged(tmp_path: Path, repo: dict[str, Any]) -> None:
+    work = tmp_path / "branch"
+    git(tmp_path, "clone", "--quiet", str(repo["source"]), str(work))
+    git(work, "config", "user.email", "a@example.com")
+    git(work, "config", "user.name", "a")
+    git(work, "checkout", "--quiet", "-b", "agent/team/feature")
+    (work / "mode").write_text("branch\n")
+    git(work, "commit", "--quiet", "-am", "branch")
+    head = git(work, "rev-parse", "HEAD")
+    git(work, "push", "--quiet", str(repo["source"]), "agent/team/feature")
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    checkout = stage(str(repo["source"]), head, scratch)
+    assert (checkout / "mode").read_text() == "branch\n"
+
+
 @pytest.mark.loopback
 def test_a_failed_run_is_not_reused(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
