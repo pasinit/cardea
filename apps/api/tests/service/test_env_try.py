@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 from cardea_env_ops import descriptors
-from cardea_env_ops.try_ import scrub
+from cardea_env_ops.try_ import scrub, stage
 from test_code_session import document, kernel_for, receipt, submit, task
 
 import cardea
@@ -21,7 +21,7 @@ from cardea.service import artifacts
 from cardea.service.database import Fault
 from cardea.service.kernel import Kernel, provision
 from cardea.service.operation_runtime import OperationRuntime
-from cardea.service.operations import Registry
+from cardea.service.operations import OperationRejected, Registry
 
 PLANTED = {"GITHUB_TOKEN": "ghs_planted0000000000000000000000000000", "AWS_SECRET": "planted"}
 
@@ -281,6 +281,25 @@ def test_an_identical_call_while_one_runs_is_refused(
     with kernel.database.engine.begin() as conn:
         conn.exec_driver_sql("UPDATE env_runs SET expires_at='2000-01-01T00:00:00+00:00'")
     assert call(kernel, "third", commit=repo["good"], scenarios=["try"])[0] == "succeeded"
+
+
+def test_a_head_outside_the_clone_refs_is_staged(tmp_path: Path, repo: dict[str, Any]) -> None:
+    # A commit reachable only from a non-branch ref (a PR head), absent from a plain clone.
+    work = tmp_path / "pr"
+    git(tmp_path, "clone", "--quiet", str(repo["source"]), str(work))
+    git(work, "config", "user.email", "a@example.com")
+    git(work, "config", "user.name", "a")
+    (work / "mode").write_text("pr\n")
+    git(work, "commit", "--quiet", "-am", "pr")
+    head = git(work, "rev-parse", "HEAD")
+    git(work, "push", "--quiet", str(repo["source"]), f"{head}:refs/pull/1/head")
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    checkout = stage(str(repo["source"]), head, scratch)
+    assert (checkout / "mode").read_text() == "pr\n"
+    with pytest.raises(OperationRejected) as unknown:
+        stage(str(repo["source"]), "f" * 40, tmp_path / "scratch")
+    assert unknown.value.code == "env_commit_unknown"
 
 
 def test_a_failed_run_is_not_reused(
