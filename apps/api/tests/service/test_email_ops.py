@@ -664,6 +664,7 @@ def test_an_html_page_is_attached_as_plain_text_and_base64_may_be_loose(
     ]
 
 
+@pytest.mark.loopback
 @pytest.mark.parametrize(
     ("attachments", "code"),
     [

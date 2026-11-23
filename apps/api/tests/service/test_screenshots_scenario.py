@@ -268,6 +268,7 @@ def test_a_missing_browser_or_page_fails_with_a_reason(
     assert "no page gone.html" in capsys.readouterr().out
 
 
+@pytest.mark.loopback
 @pytest.mark.skipif(
     shutil.which("chromium") is None and shutil.which("chromium-browser") is None,
     reason="Chromium is not installed here",
