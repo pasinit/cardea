@@ -168,7 +168,7 @@ Both are confined workers under ADR-028 with the same repository aliases; they s
 
 - **Package** `packages/cardea-env-ops`: the `env.try` descriptor and its worker entry point.
   - **Descriptor:** `effect: read`, confined profile `try`, worker `env-try`, a one-hour timeout, `repo:<alias>` on `/repo`, artifacts up to 1 MiB, and the run window below.
-  - **Worker** (`cardea_env_ops/try_.py`): clones the alias's read-only `source` from the shared repository registry, with git hooks and global configuration off, and checks out exactly the 40-hex `commit`. A missing commit is `env_commit_unknown`. It then runs each named scenario's fixed argv in the checkout under the call's deadline. Each scenario's environment is built from nothing:
+  - **Worker** (`cardea_env_ops/try_.py`): clones the alias's read-only `source` from the shared repository registry, with git hooks and global configuration off, and checks out exactly the 40-hex `commit`. If the mirror lags a fresh push, the worker fetches the host's heads (then the commit) from the alias's `git_url` through the proxy and retries once, with no credential, so only public hosts work. A commit still missing is `env_commit_unknown`. It then runs each named scenario's fixed argv in the checkout under the call's deadline. Each scenario's environment is built from nothing:
     - the pinned toolchain first on `PATH`;
     - a scratch `HOME`;
     - the profile's proxy;

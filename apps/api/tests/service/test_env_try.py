@@ -370,6 +370,37 @@ def test_a_head_outside_the_clone_refs_is_staged(
     assert unknown.value.code == "env_commit_unknown"
 
 
+def test_a_push_the_mirror_lacks_is_fetched_from_the_host(
+    tmp_path: Path, repo: dict[str, Any]
+) -> None:
+    # The host has a fresh agent head; the mirror (the source) has not caught up yet.
+    host = tmp_path / "host.git"
+    git(tmp_path, "clone", "--quiet", "--bare", str(repo["source"]), str(host))
+    work = tmp_path / "fresh"
+    git(tmp_path, "clone", "--quiet", str(host), str(work))
+    git(work, "config", "user.email", "a@example.com")
+    git(work, "config", "user.name", "a")
+    (work / "mode").write_text("fresh\n")
+    git(work, "commit", "--quiet", "-am", "fresh")
+    head = git(work, "rev-parse", "HEAD")
+    git(work, "push", "--quiet", str(host), f"{head}:refs/heads/agent/dev/rec-9-1")
+    lagging = tmp_path / "scratch-lag"
+    lagging.mkdir()
+    with pytest.raises(OperationRejected) as unknown:
+        stage(str(repo["source"]), head, lagging)
+    assert unknown.value.code == "env_commit_unknown"
+    scratch = tmp_path / "scratch-host"
+    scratch.mkdir()
+    checkout = stage(str(repo["source"]), head, scratch, str(host))
+    assert (checkout / "mode").read_text() == "fresh\n"
+    # A commit the host does not have either is still unknown.
+    missing = tmp_path / "scratch-none"
+    missing.mkdir()
+    with pytest.raises(OperationRejected) as none:
+        stage(str(repo["source"]), "f" * 40, missing, str(host))
+    assert none.value.code == "env_commit_unknown"
+
+
 @pytest.mark.loopback
 def test_a_failed_run_is_not_reused(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]

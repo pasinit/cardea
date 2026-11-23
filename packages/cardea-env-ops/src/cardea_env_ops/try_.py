@@ -133,10 +133,18 @@ def environment(scratch: Path, catalog: repositories.Environment) -> dict[str, s
     return env
 
 
-def stage(source: str, commit: str, scratch: Path) -> Path:
-    """A checkout of exactly `commit`, cloned from the read-only source."""
+def stage(source: str, commit: str, scratch: Path, host_url: str | None = None) -> Path:
+    """A checkout of exactly `commit`, cloned from the read-only source.
+
+    The mirror is refreshed from outside the sandbox and can lag a fresh push. If the commit
+    is not in it and the repository has a host `host_url`, fetch the host's heads (then the
+    commit itself) into the checkout, through the profile's proxy, and try once more."""
     env = {"PATH": BASE_PATH, "HOME": str(scratch), "GIT_CONFIG_NOSYSTEM": "1"}
     env["GIT_CONFIG_GLOBAL"] = os.devnull
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    for name in PROXY:
+        if name in os.environ:
+            env[name] = os.environ[name]
     checkout = scratch / "checkout"
     cloned = _git(scratch, env, "clone", "--quiet", "--no-checkout", source, str(checkout))
     if cloned.returncode:
@@ -147,6 +155,12 @@ def stage(source: str, commit: str, scratch: Path) -> Path:
         # another ref (e.g. refs/pull/*). Read every mirror ref, then try once more.
         _git(checkout, env, "fetch", "--quiet", "--no-tags", "origin", "+refs/*:refs/mirror/*")
         switched = _git(checkout, env, "checkout", "--quiet", "--detach", commit)
+    if switched.returncode and host_url is not None:
+        for refspec in ("+refs/heads/*:refs/host/*", commit):
+            _git(checkout, env, "fetch", "--quiet", "--no-tags", host_url, refspec)
+            switched = _git(checkout, env, "checkout", "--quiet", "--detach", commit)
+            if not switched.returncode:
+                break
     if switched.returncode:
         raise OperationRejected("the commit is not in the repository", "env_commit_unknown")
     head = _git(checkout, env, "rev-parse", "HEAD").stdout.strip()
@@ -307,7 +321,7 @@ def try_commit(
             )
         scratch = workspace  # the second phase inherits it, checkout and fetched dependencies
     env = environment(scratch, catalog)
-    checkout = stage(entry.source, commit, scratch)
+    checkout = stage(entry.source, commit, scratch, entry.git_url)
     deadline = context.deadline.timestamp() - 5  # leave time to report
     dropped = {"artifacts": 0, "log_bytes": 0}
     kept: dict[str, bytes] = {}
