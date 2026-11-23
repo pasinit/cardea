@@ -245,7 +245,9 @@ def email_note(host: dict[str, Any], role: str = "product manager") -> str:
 
 def email_limit(host: dict[str, Any]) -> dict[str, Any]:
     """The host's email rate limit (a host setting, not hard-coded per role)."""
-    return (host.get("email") or {}).get("rate_limit", {"count": 10, "window_days": 1})
+    default = {"count": 10, "window_days": 1}
+    limit: dict[str, Any] = (host.get("email") or {}).get("rate_limit", default)
+    return limit
 
 
 def repository_note(host: dict[str, Any], operations: list[str]) -> str:
@@ -1052,9 +1054,10 @@ def vcs_fragment(host: dict[str, Any]) -> dict[str, Any]:
 
 
 def email_fragment(host: dict[str, Any]) -> dict[str, Any]:
-    """The `roles` entries of the host's email.json for the PM and UX pools (cardea-email-ops), if any,
-    and, when the host file's `email.inbound` is set, the `inbound` section that delivers
-    the alias's new mail to the PM pool (default off)."""
+    """The `roles` entries of the host's email.json for the PM and UX pools
+    (cardea-email-ops), if any, and, when the host file's `email.inbound` is set,
+    the `inbound` section that delivers the alias's new mail to the PM pool
+    (default off)."""
     namespace, group, _, _ = _names(host)
     email = host.get("email") or {}
     if not email.get("alias"):

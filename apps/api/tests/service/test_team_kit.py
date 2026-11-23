@@ -322,7 +322,8 @@ def test_the_email_rate_limit_is_a_host_setting() -> None:
     document = example()
     document["email"] = {**document["email"], "rate_limit": {"count": 4, "window_days": 2}}
     fragment = kit().email_fragment(document)
-    assert all(r["rate_limit"] == {"count": 4, "window_days": 2} for r in fragment["roles"].values())
+    expected = {"count": 4, "window_days": 2}
+    assert all(r["rate_limit"] == expected for r in fragment["roles"].values())
     assert "at most 4 emails every 2 days" in pools_of(document)["ux"]["run"]["instructions"]
     del document["email"]["rate_limit"]
     assert kit().email_fragment(document)["roles"]["dev-team.pm"]["rate_limit"]["count"] == 10
