@@ -166,6 +166,7 @@ One host-owner file, named by `CARDEA_REPOSITORIES`, lists the repository aliase
 - `owner`, `name`, `api_url`, `git_url`: where `vcs.*` pushes and opens changes. Give all four or none. An alias without them is read-only, and `vcs.*` treats it as unknown.
 - `gates`: the commands `code.session` runs on the change.
 - `branch_prefix` (default `agent/{group}/`): pushed branches must start with it.
+- `require_up_to_date` (default `false`): `vcs.merge` refuses a pull request whose head does not contain the base branch's current head (`merge_behind_base`). Only for an alias `vcs.*` acts on. Turn it on wherever the host's own rules do not require up-to-date branches, in particular with `host_rules: waived`.
 
 Callers need `repo:<alias>` to name an alias in either package.
 
@@ -184,6 +185,7 @@ The `cardea-vcs-ops` package installs `vcs.push_branch`, `vcs.open_change`, `vcs
   - an allowed pool's `vcs.review` APPROVE receipt is at the current head;
   - the host shows that reviewer account's approval of the head;
   - every check run on the head succeeded, with none pending;
+  - where the registry sets `require_up_to_date`, the host's compare of the base branch with the head shows the head is not behind (`behind_by == 0`); otherwise it is refused with `merge_behind_base` ([amendment 2026-11-22](decisions/037-coding-and-vcs-operations.md#amendment-2026-11-22-merging-needs-an-up-to-date-branch-where-the-registry-says-so)). The refusal tells the developer to bring the base into the branch, push, wait for green checks and a new approval at the new head, then merge again. The receipt then records `up_to_date: true` and the `base_sha` it compared against;
   - the host reports it mergeable.
 
   Each refusal has its own code (`merge_not_opener`, `merge_approval_stale`, `merge_checks_pending` and the others). An interrupted merge is `outcome_unknown` until the reconcile endpoint reads the pull request. Grant `vcs.merge` only to the pool whose members open the changes.
@@ -191,7 +193,7 @@ The `cardea-vcs-ops` package installs `vcs.push_branch`, `vcs.open_change`, `vcs
 - **Credentials.** `{"kind": "personal_access_token", "expires_on": "<YYYY-MM-DD>"}` is the provider for now (ADR-037 question 7): a fine-grained personal access token, limited to the registry's repositories, stored as the `vcs` profile's root-only credential file, which systemd loads into each worker unit. The worker reads it for each call and uses it only for that call's HTTP header and push. The kernel never reads it, and it never appears in arguments, tool results, receipts, the store, job documents or logs. From `expires_on` on, every call is refused with `credential_unavailable` and nothing is sent, so rotate it before then. `profile_credential` is the same without the expiry check, and the test provider (`{"kind": "test", "token": ...}`) is for fakes and tests. A GitHub App with per-call installation tokens is the documented upgrade and is not built. The token path has run against the fake host only: check `vcs.check_repository` and run the Debian checks before pointing a team at a real repository.
 - **Identities.** `{"kind": "personal_access_tokens", "tokens": {<name>: {"expires_on": ...}}, "default": <name>, "pools": {"<group>.<pool>": <name>}}` gives different callers different repository-host accounts. Each token is a named credential of the `vcs` profile (`credentials: {<name>: <path>}`). The worker picks one per call from the kernel-resolved member id, never from an argument. Use it for a reviewer pool whose approvals must come from an account other than the pull requests' author. As installed in the kit, `pools` is empty: everyone uses `github-author`.
 - **Reviewing.** `vcs.read_change` with `diff: true` also returns the pull request's diff ([ADR-037 amendment 2026-11-21](decisions/037-coding-and-vcs-operations.md#amendment-2026-11-21-reviewers-read-the-diff)). It lists the changed files, then gives per-file patches from `diff_offset`. Each patch is capped at 12 KiB and all of them at 32 KiB, and the whole output stays within the receipt's 64 KiB. Cut patches carry a truncation marker, `next_offset` pages through the rest, and binary or host-omitted files are listed, not shown. To read a large file whole, pass `patch_offset: 0` and then, on each call, `diff_offset: next_offset` and `patch_offset: next_patch_offset` until `next_offset` is `null` ([amendment 2026-11-22](decisions/037-coding-and-vcs-operations.md#amendment-2026-11-22-reviewers-read-a-large-file-whole)). Pages then cut on line boundaries and resume inside the same file; without `patch_offset`, each patch is cut at 12 KiB and paging moves to the next file, as before. Patches are untrusted data, with credential-shaped strings scrubbed. It needs no grant beyond `vcs.read_change` and `repo:<alias>`.
-- **Readiness.** `vcs.check_repository` reports whether the repository's rules hold on the default branch: one approving review, approval of the last push, no force push and no deletion. It also reports whether pushes are allowed only under the agent prefix. It lists what is missing and changes nothing; check it before pointing a team at a repository.
+- **Readiness.** `vcs.check_repository` reports whether the repository's rules hold on the default branch: one approving review, approval of the last push, no force push and no deletion. It also reports whether pushes are allowed only under the agent prefix. It also reports `require_up_to_date`, so a waiver with no up-to-date guard is visible; the team kit's `status` prints both. It lists what is missing and changes nothing; check it before pointing a team at a repository.
 - **Recovery.** An interrupted push, pull request, comment or review is `outcome_unknown`. `POST /v0.2/tasks/<id>/operations/<operation_id>/reconcile` reads the host (the branch head, the pull request for the head, or the comment or review marker) and settles it without sending again.
 
 ## Content gate
@@ -252,6 +254,26 @@ The `cardea-env-ops` package installs `env.try` ([ADR-038](decisions/038-throwaw
   - An identical call while one runs is refused with `409 env_run_in_progress`; retry later.
 - **Toolchain.** `make try-toolchain` builds and pins the image; `cardea-try-toolchain.timer` refreshes it weekly.
 
+
+## Running checks from a developer session
+
+A developer session has no `uv`, `pytest`, `ruff` or `mypy`, and `pip` fails on the egress proxy's CA bundle. Do not work around either: do not install tools by hand, point `pip` at another index, disable certificate checks or widen the session's egress. The supported path is `env.try`, which runs the checks in the `try` profile with the pinned toolchain image (`uv` included) and the allow-listed package indexes.
+
+- **Scenarios.** The repository's `environment` catalog ([`cardea/repositories.json`](../deploy/small-host/cardea/repositories.json)) names one scenario per check:
+
+  | Scenario | Runs | Same as |
+  |---|---|---|
+  | `lint` | `make lint` | CI lint |
+  | `typecheck` | `make typecheck` | CI mypy |
+  | `api-test` | `make api-test` | the backend test suite |
+  | `check` | `make check` | lint, typecheck and the backend tests that need no TCP loopback, in one call |
+
+- **Run.** Push the work to a branch, then call `env.try` with `repo`, the branch head's full 40-hex `commit`, and `scenarios: ["lint", "typecheck", "api-test"]`. Read `passed` and each scenario's `log_tail` in the result. The session needs `env.try` and `repo:<alias>` in its ceiling; ask the supervisor if it lacks them.
+- **`check`.** One scenario for merge-check automation to require: `scenarios: ["check"]`. It runs lint, typecheck and `pytest -m "not loopback"` (tests marked `loopback` bind or connect over TCP and stay in `api-test`), every step even after a failure, with the same tier, toolchain image, egress and confinement as the scenarios above. The log tail ends with each step's exit status, the failing test ids (up to 20, the rest counted) and `check: FAIL (exit N)` or `check: PASS (exit 0)`; `passed` is false and `exit_code` is non-zero when anything failed. Under `check` a test that is not marked `loopback` fails by name if it opens a TCP socket, so mark new tests that need loopback with `@pytest.mark.loopback`.
+- **Targeted tests.** Callers send no command, so a session cannot pass a pytest path. For a narrower run, the host owner adds a scenario to the catalog with a fixed argv (for example `["/usr/bin/make", "kernel-test"]`). Run the full `api-test` before review.
+- **Cost.** Results are cached for 24 hours per commit and scenario set; commit again, or use `rerun: true` (3 a day), to run anew.
+- **Locally.** Where `uv` is installable (a workstation, not a confined session), `make lint`, `make typecheck` and `make api-test` run the same checks.
+- **Not available.** If the call answers `env_toolchain_missing` or `env_tier_unavailable`, the host has not completed [step 10](../deploy/small-host/README.md) (`make try-toolchain`); report it to the host owner, and state in the review that checks were not run.
 
 ## Retention and deletion
 

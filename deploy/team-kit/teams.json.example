@@ -1,0 +1,6 @@
+{
+  "teams": [
+    {"name": "dev", "host": "/Users/owner/cardea/dev.host.json"},
+    {"name": "aerarium", "host": "/Users/owner/cardea/aerarium.host.json"}
+  ]
+}

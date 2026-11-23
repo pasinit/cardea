@@ -200,6 +200,25 @@ class GitHub:
                 break
         return found
 
+    async def annotations(self, check_run_id: int) -> list[dict[str, Any]]:
+        """A check run's annotations, first page only (CI attaches at most a few)."""
+        response = await self._request(
+            "GET", f"/check-runs/{int(check_run_id)}/annotations", params={"per_page": 50}
+        )
+        found: list[dict[str, Any]] = response.json()
+        return found
+
+    async def compare(self, base: str, head: str) -> dict[str, Any]:
+        """How `head` relates to `base` (`ahead_by`, `behind_by`, `base_commit`). One commit
+        per page: only the counts are read."""
+        response = await self._request(
+            "GET",
+            f"/compare/{quote(base, safe='/')}...{quote(head, safe='/')}",
+            params={"per_page": 1},
+        )
+        result: dict[str, Any] = response.json()
+        return result
+
     async def merge(self, number: int, sha: str, title: str, message: str) -> dict[str, Any]:
         """Squash-merge, only if the head is still `sha` (the host answers 409 if not), with
         `title` and `message` as the squash commit's subject and body."""

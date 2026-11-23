@@ -63,7 +63,7 @@ CREDENTIAL_NAMES = re.compile(
 )
 # Credential-shaped strings scrubbed from log tails (ADR-026's summary rule).
 SECRET_SHAPES = re.compile(
-    r"(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,}|"
+    r"(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|\bsk-[A-Za-z0-9_-]{20,}|"
     r"AKIA[0-9A-Z]{16}|xox[abpr]-[A-Za-z0-9-]{10,}|"
     r"-----BEGIN [A-Z ]*PRIVATE KEY-----|(?i:bearer)\s+[A-Za-z0-9._~+/-]{16,}=*)"
 )

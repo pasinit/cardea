@@ -32,7 +32,7 @@ from cardea.service.models import (
     now,
 )
 from cardea.service.operation_runtime import OperationRuntime
-from cardea.service.operations import OperationDescriptor, Registry
+from cardea.service.operations import OperationDescriptor, Registry, WithArtifacts
 
 DESCRIPTOR = Path(__file__).parents[4] / (
     "packages/cardea-coding-ops/src/cardea_coding_ops/descriptors/code.session.json"
@@ -817,3 +817,81 @@ def test_a_gate_that_changes_the_checkout_is_refused(
     settled = receipt(kernel, task_id)
     assert settled.failure is not None and settled.failure.code == "gate_changed_checkout"
     assert stored_objects(kernel, task_id) == 0
+
+
+# The harness may commit itself; `changed` follows HEAD, not the working tree
+
+COMMITTING_HARNESS = """
+import subprocess, sys
+ident = ["-c", "user.name=h", "-c", "user.email=h@example.invalid"]
+
+def git(*args):
+    subprocess.run(["git", *ident, *args], check=True, capture_output=True)
+
+def commit(name):
+    open(name, "w").write(name)
+    git("add", name)
+    git("commit", "-qm", name)
+
+mode = sys.argv[1]
+if mode != "none":
+    git("checkout", "-q", "-b", "side")
+    commit("side.txt")
+    git("checkout", "-q", "main")
+    commit("main.txt")
+    if mode == "rebase":
+        git("checkout", "-q", "side")
+        git("rebase", "-q", "main")
+    else:
+        git("merge", "-q", "--no-ff", "-m", "merge side", "side")
+    # No remote-tracking ref survives, and the commits leave nothing in the tree.
+    git("update-ref", "-d", "refs/remotes/origin/main")
+"""
+
+
+def run_session(tmp_path: Path, source: Path, mode: str) -> tuple[dict[str, Any], bytes]:
+    from cardea_coding_ops.session import session
+
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    script = tmp_path / "committing.py"
+    script.write_text(COMMITTING_HARNESS)
+    entry = {"source": str(source), "gates": []}
+    config: dict[str, Any] = {
+        "harness": {"argv": [sys.executable, str(script), mode]},
+        "repositories": {"app": entry},
+    }
+    arguments: dict[str, Any] = {"repository": "app", "base_ref": "main", "task": "go"}
+    result = session(arguments, config, scratch)
+    if isinstance(result, WithArtifacts):
+        return result.output, result.artifacts["change.bundle"]
+    assert isinstance(result, dict)
+    return result, b""
+
+
+@pytest.mark.parametrize("mode", ["rebase", "merge"])
+def test_commits_made_by_the_harness_are_bundled_without_identity_or_origin_ref(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: Path, mode: str
+) -> None:
+    monkeypatch.delenv("CARDEA_REPOSITORIES", raising=False)
+    output, bundle = run_session(tmp_path, source, mode)
+    assert output["changed"] is True
+    head = output["head_sha"]
+    assert isinstance(head, str) and head != output["base_sha"]
+    assert bundle
+    (tmp_path / "change.bundle").write_bytes(bundle)
+    check = tmp_path / "check"
+    git(tmp_path, "clone", "--quiet", str(source), str(check))
+    git(check, "bundle", "verify", str(tmp_path / "change.bundle"))
+    git(check, "fetch", "--quiet", str(tmp_path / "change.bundle"), "HEAD:refs/heads/change")
+    assert git(check, "rev-parse", "change").strip() == head
+    assert git(check, "show", "change:side.txt") == "side.txt"
+    assert git(check, "show", "change:main.txt") == "main.txt"
+
+
+def test_an_unchanged_checkout_reports_no_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: Path
+) -> None:
+    monkeypatch.delenv("CARDEA_REPOSITORIES", raising=False)
+    output, bundle = run_session(tmp_path, source, "none")
+    assert output["changed"] is False and output["head_sha"] is None and not bundle

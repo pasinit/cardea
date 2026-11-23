@@ -41,6 +41,9 @@ from cardea.service.kernel import Kernel, provision
 from cardea.service.models import AgentRunRequest, Permission, Principal, Provisioning, now
 from cardea.service.operations import Registry
 
+# Binds or connects over TCP loopback: not run by `make check-test`.
+pytestmark = pytest.mark.loopback
+
 SRC = Path(__file__).resolve().parents[2] / "src"
 BINARY = os.environ.get("CARDEA_TEST_OPENCODE")
 needs_binary = pytest.mark.skipif(

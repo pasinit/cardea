@@ -905,7 +905,14 @@ def check_result(source: str, receipt: OperationReceipt) -> None:
 
 # Built-in operations that change a record; their reconciler reads the history.
 WRITES = frozenset(
-    {"records.create", "records.update", "records.claim", "records.release", "records.transition"}
+    {
+        "records.create",
+        "records.update",
+        "records.claim",
+        "records.release",
+        "records.force_release",
+        "records.transition",
+    }
 )
 
 
@@ -1128,14 +1135,21 @@ def expire(
     reason: str,
     spec: "CollectionSpec | None" = None,
 ) -> None:
-    """Return a lapsed claim to the pool: holder cleared, epoch incremented, and the state
-    set to the acquiring transition's `on_claim_expiry`, with history and a journal event,
-    all in the caller's transaction."""
+    """Return a lapsed claim to the pool: holder cleared and epoch incremented, with
+    history and a journal event, all in the caller's transaction.
+
+    The acquiring transition's `on_claim_expiry` undoes the acquisition, so it applies only
+    while the record is still in that transition's target state. A record that later
+    transitions moved on (into review, approved) keeps its state, and with it the work
+    they recorded (ADR-034 amendment, 2026-11-22).
+    """
     old = record_view(row)
     acquired = (
         spec.transition(row["claim_transition"]) if spec and row["claim_transition"] else None
     )
-    state = acquired.on_claim_expiry if acquired and acquired.on_claim_expiry else old["state"]
+    state = old["state"]
+    if acquired is not None and acquired.on_claim_expiry and state == acquired.to:
+        state = acquired.on_claim_expiry
     new: dict[str, JsonValue] = {
         **old,
         "state": state,
@@ -1171,6 +1185,7 @@ class Records:
             "records.update": self.update,
             "records.claim": self.claim,
             "records.release": self.release,
+            "records.force_release": self.force_release,
             "records.claimed": self.claimed,
             "records.summary": self.summary,
             "records.transition": self.transition,
@@ -1532,6 +1547,59 @@ class Records:
                 new,
                 data={"previous_holder": caller["id"], "previous_epoch": row["claim_epoch"]},
             )
+        return {"record": new}
+
+    async def force_release(
+        self, arguments: dict[str, JsonValue], context: OperationContext
+    ) -> dict[str, JsonValue]:
+        """The collection's supervisor takes a record back from whoever holds it.
+
+        The epoch is incremented, so the old holder's later writes fail with `claim_lost`.
+        Authority is checked live in this call: the grant, the task's supervisor being the
+        collection's supervisor and that supervisor still holding `groups.manage`. A record
+        nobody holds is returned unchanged, without a new epoch or history row; a retry
+        with the same `client_key` returns the first result (ADR-026).
+        """
+        collection = str(arguments["collection"])
+        record_id = str(arguments["record_id"])
+        with self.database.engine.begin() as conn:
+            spec, _ = self._authorize(conn, context, collection, "force_release")
+            policy = Policy(conn)
+            # The caller is whoever submitted the task, not the agent running it.
+            principal = str(policy.binding(context.task_id)["supervisor_id"])
+            try:
+                if spec.supervisor != principal:
+                    raise Fault(
+                        "collection_supervisor", "Only the collection's supervisor may do this"
+                    )
+                policy.require(principal, context.namespace, "groups.manage")
+                policy.require("platform", context.namespace, "groups.manage")
+            except Fault as denied:
+                raise OperationRejected(denied.message, denied.code) from None
+            row = _record_row(conn, context.namespace, collection, record_id)
+            if row is None:
+                raise OperationRejected("No such record", "record_not_found")
+            old = record_view(row)
+            if row["holder"] is None:
+                return {"record": old}
+            at = now()
+            new: dict[str, JsonValue] = {
+                **old,
+                "holder": None,
+                "lease_expires_at": None,
+                "claim_epoch": int(row["claim_epoch"]) + 1,
+                "version": int(row["version"]) + 1,
+                "updated_at": at.isoformat(),
+            }
+            self._fence(conn, context)
+            write_claim(conn, row, new)
+            detail: dict[str, JsonValue] = {
+                "forced": True,
+                "reason": arguments["reason"],
+                "previous_holder": row["holder"],
+                "previous_epoch": row["claim_epoch"],
+            }
+            self._event(conn, context, principal, "released", old, new, detail, detail)
         return {"record": new}
 
     async def claimed(
@@ -1973,6 +2041,23 @@ DESCRIPTORS: tuple[OperationDescriptor, ...] = (
         {"record_id": _RECORD_ID, "claim_epoch": _EPOCH},
         ["record_id", "claim_epoch"],
         _ONE,
+        reconciler="cardea.records.reconcile",
+    ),
+    _descriptor(
+        "records.force_release",
+        "Take a record back from its holder, as the collection's supervisor: the claim epoch "
+        "is incremented and the holder's later writes are refused. A record nobody holds is "
+        "left as it is (grant action: force_release)",
+        "effect",
+        {
+            "record_id": _RECORD_ID,
+            "reason": {"type": "string", "minLength": 1, "maxLength": 500},
+            # Retrying with the same key returns the first result (ADR-026).
+            "client_key": {"type": "string", "minLength": 1, "maxLength": 128},
+        },
+        ["record_id", "reason", "client_key"],
+        _ONE,
+        idempotency_scope=["/collection", "/client_key"],
         reconciler="cardea.records.reconcile",
     ),
     _descriptor(

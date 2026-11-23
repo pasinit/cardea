@@ -17,13 +17,14 @@ A team paused by disabling its supervisor refuses this API like every other (the
 has no live authority); `standing` reports what a still-readable team has paused or waived.
 """
 
+import json
 import time
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 import sqlalchemy as sa
 
-from cardea.service import host_budget, repositories, spend
+from cardea.service import host_budget, pages, repositories, spend
 from cardea.service.auth import Proof
 from cardea.service.database import Fault
 from cardea.service.models import GroupSpec, now
@@ -35,6 +36,7 @@ if TYPE_CHECKING:
 TERMINAL = ("succeeded", "failed", "cancelled")
 DEFAULT_LIMIT = 25
 MAX_LIMIT = 100
+MAX_TEXT_LIMIT = 50
 MAX_HOLDERS = 100
 MAX_TITLE = 200
 MAX_REVIEWS = 10
@@ -342,6 +344,111 @@ def mail(
         "items": items,
         "next": items[-1]["message_id"] if len(rows) > limit else None,
     }
+
+
+def _scope(name: str, namespace: str) -> tuple[str, tuple[object, ...]]:
+    """The messages sent from or to the group's roles, as a WHERE clause and its values."""
+    size = len(name) + 1
+    scope = (
+        "namespace=? AND (sender_id=? OR substr(sender_id,1,?)=? OR to_address=? "
+        "OR substr(to_address,1,?)=?)"
+    )
+    return scope, (namespace, name, size, f"{name}.", name, size, f"{name}.")
+
+
+def mail_text(
+    kernel: "Kernel",
+    proof: Proof,
+    namespace: str,
+    name: str,
+    *,
+    member: str | None,
+    item: str | None,
+    after: str,
+    limit: int,
+) -> dict[str, Any]:
+    """The group's messages with their full parts, newest first, for the supervisor only.
+
+    `member` keeps messages a principal sent or received; `item` (`<collection>/<record_id>`)
+    keeps messages about that record. A page ends early rather than exceed the response cap.
+    Parts are untrusted data. Client keys, receipts and run identifiers are never returned.
+    """
+    limit = max(1, min(limit, MAX_TEXT_LIMIT))
+    with kernel.database.read() as conn:
+        supervisor, _ = _check(conn, proof, namespace, name)
+        at = now()
+        members = _members(conn, namespace, name)
+        scope, scoped = _scope(name, namespace)
+        if member is not None:
+            scope += (
+                " AND (sender_id=? OR to_address=? OR EXISTS (SELECT 1 FROM mailbox_deliveries d "
+                "WHERE d.message_id=mailbox_messages.message_id AND d.recipient_id=?))"
+            )
+            scoped += (member, member, member)
+        if item is not None:
+            collection, _, record_id = item.partition("/")
+            scope += (
+                " AND json_extract(record_json,'$.collection')=? "
+                "AND json_extract(record_json,'$.record_id')=?"
+            )
+            scoped += (collection, record_id)
+        clause = ""
+        values: tuple[object, ...] = ()
+        if after:
+            start = conn.exec_driver_sql(
+                f"SELECT created_at FROM mailbox_messages WHERE {scope} AND message_id=?",
+                (*scoped, after),
+            ).first()
+            if start is None:
+                raise Fault("invalid_cursor", "Cursor does not name a message of this list", 400)
+            clause = " AND (created_at,message_id) < (?,?)"
+            values = (str(start[0]), after)
+        total = int(
+            conn.exec_driver_sql(
+                f"SELECT COUNT(*) FROM mailbox_messages WHERE {scope}", scoped
+            ).scalar_one()
+        )
+        rows = (
+            conn.exec_driver_sql(
+                "SELECT message_id,kind,sender_id,to_kind,to_address,record_json,parts_json,"
+                f"about_message_id,created_at FROM mailbox_messages WHERE {scope}{clause} "
+                "ORDER BY created_at DESC, message_id DESC LIMIT ?",
+                (*scoped, *values, limit + 1),
+            )
+            .mappings()
+            .all()
+        )
+
+        def render(row: sa.RowMapping) -> dict[str, Any]:
+            sender, address = str(row["sender_id"]), str(row["to_address"])
+            states = conn.exec_driver_sql(
+                "SELECT state,COUNT(*) FROM mailbox_deliveries WHERE message_id=? "
+                "GROUP BY state ORDER BY state",
+                (row["message_id"],),
+            )
+            return {
+                "message_id": row["message_id"],
+                "kind": row["kind"],
+                "from": {"address": sender, "role": _role(sender, name, members, supervisor)},
+                "to": {
+                    "kind": row["to_kind"],
+                    "address": address,
+                    "role": _role(address, name, members, supervisor),
+                },
+                "item": json.loads(row["record_json"]) if row["record_json"] else None,
+                "about_message_id": row["about_message_id"],
+                "sent_at": row["created_at"],
+                "parts": json.loads(row["parts_json"]),
+                "deliveries": {str(s): int(n) for s, n in states},
+            }
+
+        envelope = _envelope(name, namespace, at)
+        items, cursor = pages.page(
+            rows[:limit], lambda r: str(r["message_id"]), render, envelope, limit
+        )
+        if cursor is None and len(rows) > limit:
+            cursor = str(rows[limit - 1]["message_id"])
+    return {**envelope, "total": total, "items": items, "next": cursor}
 
 
 def _receipts(operation: str) -> str:

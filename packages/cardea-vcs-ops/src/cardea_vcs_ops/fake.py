@@ -59,6 +59,8 @@ class FakeRepository:
     rulesets: list[dict[str, Any]] = field(default_factory=list)
     # Commit SHA to its check runs: `{"name", "status", "conclusion"}`.
     checks: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    # Check run id to its annotations (`{"annotation_level", "title", "message"}`).
+    annotations: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
     # Pull request number to its changed files, overriding the git-computed list.
     files: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
     # A plan without rulesets (a private repository on a free plan): the rules API is 403.
@@ -122,6 +124,49 @@ class FakeRepository:
                 entry["patch"] = text[text.index("@@") :].rstrip("\n") if "@@" in text else ""
             found.append(entry)
         return found
+
+    def compare(self, base: str, head: str) -> dict[str, Any] | None:
+        """The host's compare of `base...head`, counted with git, or None if either is
+        unknown."""
+        base_sha = self.head(base) or self.commit(base)
+        head_sha = self.head(head) or self.commit(head)
+        if base_sha is None or head_sha is None:
+            return None
+        counted = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(self.path),
+                "rev-list",
+                "--left-right",
+                "--count",
+                f"{base_sha}...{head_sha}",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.split()
+        behind, ahead = int(counted[0]), int(counted[1])
+        status = (
+            "identical"
+            if not (ahead or behind)
+            else ("diverged" if ahead and behind else ("ahead" if ahead else "behind"))
+        )
+        return {
+            "status": status,
+            "ahead_by": ahead,
+            "behind_by": behind,
+            "base_commit": {"sha": base_sha},
+        }
+
+    def commit(self, sha: str) -> str | None:
+        found = subprocess.run(
+            ["git", "-C", str(self.path), "rev-parse", "--verify", "-q", f"{sha}^{{commit}}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return found.stdout.strip() or None
 
     def head(self, branch: str) -> str | None:
         found = subprocess.run(
@@ -245,10 +290,19 @@ class FakeGitHub:
             per = int(request.url.params.get("per_page", "30"))
             items = repo.changed_files(number)
             return httpx.Response(200, json=items[(page - 1) * per : page * per])
+        if len(rest) >= 2 and rest[0] == "compare" and method == "GET":
+            base, _, head = "/".join(rest[1:]).partition("...")
+            compared = repo.compare(base, head) if head else None
+            if compared is None:
+                return httpx.Response(404, json={"message": "Not Found"})
+            self.calls.append("compare")
+            return httpx.Response(200, json=compared)
         if len(rest) == 3 and rest[0] == "commits" and rest[2] == "check-runs" and method == "GET":
             page = int(request.url.params.get("page", "1"))
             runs = repo.checks.get(rest[1], []) if page == 1 else []
             return httpx.Response(200, json={"total_count": len(runs), "check_runs": runs})
+        if len(rest) == 3 and rest[0] == "check-runs" and rest[2] == "annotations":
+            return httpx.Response(200, json=repo.annotations.get(int(rest[1]), []))
         if len(rest) == 3 and rest[0] == "pulls" and rest[2] == "merge" and method == "PUT":
             return self._merge(repo, int(rest[1]), body, self.login(request))
         if len(rest) == 3 and rest[0] in {"issues", "pulls"} and rest[2] in {"comments", "reviews"}:

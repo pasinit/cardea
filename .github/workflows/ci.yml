@@ -9,34 +9,40 @@ permissions:
   contents: read
 
 jobs:
+  # Linux only: Cardea ships for Debian (ADR-018); a macOS run cost the most time and
+  # covered only local development.
   python:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
+    # Every step's output is also kept in ci.log; on failure, the last step attaches the
+    # failures to the check run, where agents read them (vcs.read_change `checks`).
+    defaults:
+      run:
+        shell: bash -eo pipefail {0}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
       - run: cd apps/api && uv sync --locked
-      - run: make lint-api
-      - run: make typecheck-api
+      - run: make lint-api 2>&1 | tee -a "$RUNNER_TEMP/ci.log"
+      - run: make typecheck-api 2>&1 | tee -a "$RUNNER_TEMP/ci.log"
       - name: Fetch the pinned OpenCode binary (ADR-033)
         run: echo "CARDEA_TEST_OPENCODE=$(python3 packaging/fetch_opencode.py "$RUNNER_TEMP/opencode" | head -n1)" >> "$GITHUB_ENV"
       - name: Fetch the pinned Gitleaks binary (ADR-037 content gate)
         run: echo "CARDEA_TEST_GITLEAKS=$(python3 packaging/fetch_gitleaks.py "$RUNNER_TEMP/gitleaks" | head -n1)" >> "$GITHUB_ENV"
-      - run: make api-test
+      - run: make api-test 2>&1 | tee -a "$RUNNER_TEMP/ci.log"
         env:
           CARDEA_REQUIRE_OPENCODE: "1"
           CARDEA_REQUIRE_GITLEAKS: "1"
-      - run: make load-check
-      - run: make m4-test
-      - run: make m2-host-check m3-check m4-check m5-check try-check
-      - run: make try-test
-      - run: make teams-test
-      - run: make incident-demo-check incident-demo-test
+      - run: make load-check 2>&1 | tee -a "$RUNNER_TEMP/ci.log"
+      - run: make m4-test 2>&1 | tee -a "$RUNNER_TEMP/ci.log"
+      - run: make m2-host-check m3-check m4-check m5-check try-check 2>&1 | tee -a "$RUNNER_TEMP/ci.log"
+      - run: make try-test 2>&1 | tee -a "$RUNNER_TEMP/ci.log"
+      - run: make teams-test 2>&1 | tee -a "$RUNNER_TEMP/ci.log"
+      - run: make incident-demo-check incident-demo-test 2>&1 | tee -a "$RUNNER_TEMP/ci.log"
+      - name: Attach the failures to the check run
+        if: failure()
+        run: python3 packaging/ci_annotate.py "$RUNNER_TEMP/ci.log"
 
   # Build the Debian package natively on each architecture it targets and install it in a fresh
   # debian:13 container (ADR-018). This is build and install evidence only: a container is not a

@@ -130,7 +130,8 @@ class Transition(_Aliased):
     claim: Literal["acquire", "holder", "release", "none"] = "none"
     requires_receipt: ReceiptRequirement | None = None
     approval: TransitionApproval | None = None
-    # Where an expired claim returns the record; only for `claim: acquire`.
+    # Where an expired claim returns the record while it is still in `to`; only for
+    # `claim: acquire`. A record later transitions moved on keeps its state.
     on_claim_expiry: StateName | None = None
 
     @model_validator(mode="after")
@@ -227,6 +228,7 @@ _ACTIONS = {
     "records.update": "update",
     "records.claim": "claim",
     "records.release": "claim",
+    "records.force_release": "force_release",
 }
 
 

@@ -528,6 +528,28 @@ def test_an_expired_acquired_claim_returns_to_on_claim_expiry(work: Kernel) -> N
     assert again is not None and again["claim"]["claim_epoch"] == 3
 
 
+def test_a_claim_that_lapses_after_later_transitions_keeps_the_state(work: Kernel) -> None:
+    """`on_claim_expiry` undoes the acquisition only while the record is where `start`
+    put it; a record submitted for review stays in review, without a holder."""
+    record = ready(work)
+    move(work, record, "start")
+    receipt = opened_change(work, record["record_id"])
+    _, output, code = move(work, record, "submit", claim_epoch=1, receipt_id=receipt)
+    assert output is not None, code
+    lease = stored(work, record["record_id"])["lease_expires_at"]
+    from datetime import datetime
+
+    after = datetime.fromisoformat(lease) + timedelta(seconds=60)
+    Scheduler(work, lambda: after).tick()
+    row = stored(work, record["record_id"])
+    assert (row["state"], row["holder"], row["claim_epoch"]) == ("review", None, 2)
+    expired = journal(work, "claim_expired")[-1]
+    assert expired["data"]["from"] == "review" and expired["data"]["to"] == "review"
+    # Anyone the guard allows may still close it: approve releases a claim no one holds.
+    _, done, code = move(work, record, "approve", agent="a2")
+    assert done is not None and done["record"]["state"] == "done", code
+
+
 # Receipt evidence
 
 
