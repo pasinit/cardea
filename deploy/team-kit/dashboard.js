@@ -58,12 +58,12 @@ function collections(view) {
     }
     if (c.truncated) box.append(el("p", `${c.truncated} more claims not shown`, "muted"));
   });
-  fill("collections", view.collections.length ? box : empty("No collections."));
+  fill("collections", view.collections.length ? box : empty("No work items."));
 }
 
 function mailbox(view) {
   const rows = view.mailbox.addresses.map((a) => [a.address, a.pending, a.in_flight, a.dead, a.consumed]);
-  fill("mailbox", rows.length ? table(["Address", "Pending", "In flight", "Dead", "Consumed"], rows) : empty("No mail."), view.mailbox.truncated);
+  fill("mailbox", rows.length ? table(["Address", "Pending", "In flight", "Dead", "Consumed"], rows) : empty("No messages."), view.mailbox.truncated);
 }
 
 function replies(list) {
@@ -112,9 +112,45 @@ function roleChoices(view) {
   if (view.pools.some((p) => p.name === chosen)) select.value = chosen;
 }
 
-function render(view, list) {
+const LIVE = ["message-box", "members", "approvals", "spend", "journal"];
+
+function setPaused(paused) {
+  LIVE.forEach((id) => { $(id).hidden = paused; });
+  ["collections", "mailbox"].forEach((id) => { $(id).querySelector(".note").hidden = !paused; });
+}
+
+function banner(kind, nodes) {
+  const box = $("banner");
+  box.className = kind;
+  box.dataset.kind = kind;
+  box.replaceChildren(...nodes);
+}
+
+function showPaused(found) {
+  const pause = found.pause || {};
+  const since = el("time", pause.since || "an unknown time");
+  if (pause.since) since.setAttribute("datetime", pause.since);
+  const when = el("p");
+  when.append("Paused since ", since, `. Reason: ${pause.reason || "not given"}.`);
+  const head = el("p", null, "headline");
+  head.append(el("span", "⏸", "icon"), " Team paused");
+  head.firstChild.setAttribute("aria-hidden", "true");
+  banner("paused", [head, when, el("p", "Work and mail below are the last known state. Nothing is being processed.")]);
+  setPaused(true);
+  const view = found.view;
+  if (view) {
+    collections(view);
+    mailbox(view);
+  } else {
+    fill("collections", empty("No work items."));
+    fill("mailbox", empty("No messages."));
+  }
+}
+
+function showLive(view, list, failed) {
+  banner("", [el("span", `${view.group} (${view.namespace}): ${view.state}; as of ${view.as_of}`)]);
   $("title").textContent = `${view.group} (${view.namespace})`;
-  $("summary").textContent = `${view.state}; generation ${view.generation}, observed ${view.observed_generation}; as of ${view.as_of}`;
+  setPaused(false);
   roleChoices(view);
   members(view);
   collections(view);
@@ -122,7 +158,21 @@ function render(view, list) {
   approvals(view);
   spend(view);
   journal(view);
-  replies(list);
+  if (failed) $("mailbox").querySelector(".body").append(el("p", "Replies could not be loaded.", "bad"));
+  else replies(list);
+}
+
+function showProblem() {
+  if ($("banner").dataset.kind === "problem") return; // keep the button, and focus on it
+  const retry = el("button", "Try again");
+  retry.type = "button";
+  retry.addEventListener("click", refresh);
+  banner("problem", [el("p", "We could not load the team status. Try again in a moment."), retry]);
+  setPaused(true);
+  ["collections", "mailbox"].forEach((id) => {
+    $(id).querySelector(".note").hidden = true;
+    fill(id, el("p", "Could not be loaded.", "bad"));
+  });
 }
 
 async function read(path) {
@@ -132,13 +182,21 @@ async function read(path) {
 }
 
 async function refresh() {
+  let found;
   try {
-    const [view, list] = await Promise.all([read("/api/status"), read("/api/replies")]);
-    render(view, list);
-    $("error").textContent = "";
+    found = await read("/api/status");
   } catch (error) {
-    $("error").textContent = `Cannot read the team's status: ${error.message}`;
+    return showProblem();
   }
+  if (found.paused) return showPaused(found);
+  let list = [];
+  let failed = false;
+  try {
+    list = await read("/api/replies");
+  } catch (error) {
+    failed = true;
+  }
+  showLive(found, list, failed);
 }
 
 // One key per message. A second submit of the same form re-sends the same key, so the

@@ -69,17 +69,9 @@ base = load("dashboard")
 DashboardError = base.DashboardError
 
 
-# Plain words for the codes a pause can leave behind; the page never shows a raw code.
-PLAIN_REASONS = {"principal_disabled": "The team has been paused by the owner."}
-MAX_REASON = 200
-
-
-def plain_reason(value: object) -> str | None:
-    """The pause reason as a sentence, or None when it is missing or not text."""
-    if not isinstance(value, str) or not value.strip():
-        return None
-    text = value.strip()
-    return PLAIN_REASONS.get(text, text[:MAX_REASON])
+plain_reason = base.plain_reason
+PLAIN_REASONS = base.PLAIN_REASONS
+MAX_REASON = base.MAX_REASON
 
 
 def error_code(error: Exception) -> str:
