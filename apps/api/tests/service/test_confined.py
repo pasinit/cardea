@@ -526,6 +526,7 @@ def run_request(**changes: Any) -> AgentRunRequest:
     )
 
 
+@pytest.mark.loopback
 def test_agent_tool_call_killed_at_its_memory_cap(kernel: Kernel, host: WorkerHost) -> None:
     session = FakeSession()
     kernel.session = session
@@ -768,6 +769,7 @@ class Timed:
         host.stop = stopped  # type: ignore[method-assign]
 
 
+@pytest.mark.loopback
 def test_queue_wait_does_not_count_against_the_operation_timeout(
     kernel: Kernel, host: WorkerHost
 ) -> None:
@@ -792,6 +794,7 @@ def test_queue_wait_does_not_count_against_the_operation_timeout(
     assert timed.peak == 1 and len(host.starts) == 4
 
 
+@pytest.mark.loopback
 def test_queue_expiry_is_a_distinct_retryable_failure(kernel: Kernel, host: WorkerHost) -> None:
     Timed(host, 0.1, queue_timeout=1)
     session = FakeSession()
@@ -961,6 +964,7 @@ async def settled(kernel: Kernel, task_id: str, operation_id: str) -> Any:
     raise AssertionError("the call never settled")
 
 
+@pytest.mark.loopback
 def test_a_client_that_disconnects_withdraws_its_waiting_call(
     kernel: Kernel, host: WorkerHost
 ) -> None:
@@ -997,6 +1001,7 @@ def test_a_client_that_disconnects_withdraws_its_waiting_call(
     assert host.starts == []
 
 
+@pytest.mark.loopback
 def test_a_cancel_notification_withdraws_the_waiting_call_it_names(
     kernel: Kernel, host: WorkerHost
 ) -> None:
@@ -1040,6 +1045,7 @@ def test_a_cancel_notification_withdraws_the_waiting_call_it_names(
     assert host.starts == []
 
 
+@pytest.mark.loopback
 def test_a_running_call_finishes_and_settles_after_its_client_leaves(
     kernel: Kernel, host: WorkerHost
 ) -> None:

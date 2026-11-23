@@ -242,6 +242,7 @@ def deliveries(kernel: Kernel) -> list[dict[str, Any]]:
 # Admission and the event as data
 
 
+@pytest.mark.loopback
 def test_event_admits_one_agent_run_with_the_event_as_data(
     kernel: Kernel, session: FakeSession
 ) -> None:

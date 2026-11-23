@@ -188,6 +188,7 @@ def inbox_block(request: SessionRequest) -> dict[str, Any]:
 # Sending
 
 
+@pytest.mark.loopback
 def test_a_send_commits_with_its_receipt_and_is_idempotent(
     kernel: Kernel, session: runs.FakeSession
 ) -> None:
@@ -221,6 +222,7 @@ def test_a_send_commits_with_its_receipt_and_is_idempotent(
     assert event["source"] == "cardea://test" and event["specversion"] == "1.0"
 
 
+@pytest.mark.loopback
 def test_a_refused_send_leaves_no_message(kernel: Kernel, session: runs.FakeSession) -> None:
     async def refused(client: ClientSession, request: SessionRequest) -> SessionResult:
         # No mail:carol grant: there is no implicit mail between principals.
@@ -251,6 +253,7 @@ def test_a_refused_send_leaves_no_message(kernel: Kernel, session: runs.FakeSess
     assert OperationState.FAILED in states
 
 
+@pytest.mark.loopback
 def test_an_interrupted_send_is_reconciled_as_not_sent(
     kernel: Kernel, session: runs.FakeSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -278,6 +281,7 @@ def test_an_interrupted_send_is_reconciled_as_not_sent(
 # Delivery
 
 
+@pytest.mark.loopback
 def test_mail_is_delivered_as_untrusted_context_and_consumed_once(
     kernel: Kernel, session: runs.FakeSession
 ) -> None:
@@ -306,6 +310,7 @@ def test_mail_is_delivered_as_untrusted_context_and_consumed_once(
     assert inbox_block(session.requests[1])["messages"] == []
 
 
+@pytest.mark.loopback
 def test_a_crashed_attempt_keeps_its_mail_for_the_retry(
     kernel: Kernel, session: runs.FakeSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -337,6 +342,7 @@ def test_a_crashed_attempt_keeps_its_mail_for_the_retry(
     assert len(journal(kernel, "delivered")) == 1
 
 
+@pytest.mark.loopback
 def test_a_failed_run_releases_its_mail_for_redelivery(
     kernel: Kernel, session: runs.FakeSession
 ) -> None:
@@ -355,6 +361,7 @@ def test_a_failed_run_releases_its_mail_for_redelivery(
     assert journal(kernel, "dead") == []
 
 
+@pytest.mark.loopback
 def test_mail_is_dead_lettered_after_max_deliveries_with_notices(
     kernel: Kernel, session: runs.FakeSession
 ) -> None:
@@ -380,6 +387,7 @@ def test_mail_is_dead_lettered_after_max_deliveries_with_notices(
     assert inbox_block(session.requests[-1])["messages"] == []
 
 
+@pytest.mark.loopback
 def test_the_inbox_keeps_its_byte_budget_and_says_what_waits(
     kernel: Kernel, session: runs.FakeSession
 ) -> None:
@@ -400,6 +408,7 @@ def test_the_inbox_keeps_its_byte_budget_and_says_what_waits(
     assert block["truncated"] == 0
 
 
+@pytest.mark.loopback
 def test_an_over_budget_message_is_delivered_shortened(
     kernel: Kernel, session: runs.FakeSession
 ) -> None:
@@ -463,6 +472,7 @@ def test_pool_and_group_addresses_need_active_members(kernel: Kernel) -> None:
         mailbox.Address(instance="bob", pool="g1.dev")
 
 
+@pytest.mark.loopback
 def test_messages_are_listed_with_their_delivery_history(
     kernel: Kernel, session: runs.FakeSession
 ) -> None:
@@ -594,6 +604,7 @@ def team(kernel: Kernel, name: str = "team", pool: str = "dev") -> None:
     )
 
 
+@pytest.mark.loopback
 def test_pool_mail_is_consumed_by_exactly_one_member(
     kernel: Kernel, session: runs.FakeSession
 ) -> None:
@@ -612,6 +623,7 @@ def test_pool_mail_is_consumed_by_exactly_one_member(
     assert (row["recipient_id"], row["state"], row["task_id"]) == ("team.dev.1", "consumed", first)
 
 
+@pytest.mark.loopback
 def test_group_mail_is_delivered_to_every_member(kernel: Kernel, session: runs.FakeSession) -> None:
     team(kernel)
     assert supervisor_send(kernel, to={"group": "team"})["recipients"] == 2
@@ -626,6 +638,7 @@ def test_group_mail_is_delivered_to_every_member(kernel: Kernel, session: runs.F
     ]
 
 
+@pytest.mark.loopback
 def test_a_pool_grant_does_not_cover_its_instances(
     kernel: Kernel, session: runs.FakeSession
 ) -> None:
@@ -649,6 +662,7 @@ def test_a_pool_grant_does_not_cover_its_instances(
     assert row["recipient_id"] is None and row["state"] == "pending"
 
 
+@pytest.mark.loopback
 def test_a_released_pool_delivery_goes_back_to_the_pool(
     kernel: Kernel, session: runs.FakeSession
 ) -> None:
@@ -667,6 +681,7 @@ def test_a_released_pool_delivery_goes_back_to_the_pool(
     assert (row["recipient_id"], row["state"], row["deliveries"]) == ("team.dev.1", "consumed", 2)
 
 
+@pytest.mark.loopback
 def test_group_addresses_cannot_equal_principals(kernel: Kernel) -> None:
     # An existing principal named like the group or one of its pools is refused.
     for name, pool in (("bob", "dev"), ("team", "dev")):
@@ -680,6 +695,7 @@ def test_group_addresses_cannot_equal_principals(kernel: Kernel) -> None:
         assert refused.value.code == "principal_conflict"
 
 
+@pytest.mark.loopback
 def test_principals_cannot_take_a_group_address(kernel: Kernel) -> None:
     team(kernel)
     for taken in ("team", "team.dev"):
@@ -695,6 +711,7 @@ def test_principals_cannot_take_a_group_address(kernel: Kernel) -> None:
         assert refused.value.code == "principal_conflict"
 
 
+@pytest.mark.loopback
 def test_kernel_mail_cannot_be_requested_by_agents_or_supervisors(
     kernel: Kernel, session: runs.FakeSession
 ) -> None:

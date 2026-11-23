@@ -195,6 +195,7 @@ SUMMARY = {"operation": "records.summary", "arguments": {"collection": "items"}}
 QUERY = {"operation": "records.query", "arguments": {"collection": "items"}}
 
 
+@pytest.mark.loopback
 def test_built_in_blocks_share_one_snapshot(team: tuple[Kernel, runs.FakeSession]) -> None:
     kernel, session = team
     created(kernel)
@@ -220,6 +221,7 @@ def test_built_in_blocks_share_one_snapshot(team: tuple[Kernel, runs.FakeSession
     assert summary["by_state"] == {"null": 1}
 
 
+@pytest.mark.loopback
 def test_a_source_shows_only_what_the_caller_may_read(
     team: tuple[Kernel, runs.FakeSession],
 ) -> None:
@@ -234,6 +236,7 @@ def test_a_source_shows_only_what_the_caller_may_read(
     assert found["records.query"][0]["status"] == "unavailable"
 
 
+@pytest.mark.loopback
 def test_runs_recent_is_scoped_to_the_caller(team: tuple[Kernel, runs.FakeSession]) -> None:
     kernel, session = team
     created(kernel)  # an operation task of a1 that touched a record
@@ -278,6 +281,7 @@ def test_runs_recent_needs_its_grant(team: tuple[Kernel, runs.FakeSession]) -> N
         )
 
 
+@pytest.mark.loopback
 def test_priority_sources_render_first(team: tuple[Kernel, runs.FakeSession]) -> None:
     kernel, session = team
     created(kernel)

@@ -181,6 +181,7 @@ def test_only_the_groups_supervisor_may_read_it(team: tuple[Kernel, str, str]) -
     assert overview(kernel, who="nobody").status_code == 401
 
 
+@pytest.mark.loopback
 def test_spend_and_open_approvals_appear_for_the_desk(setup: tuple[Kernel, Any, Any]) -> None:
     kernel, session, _ = setup
     document = example_group("trading-desk").model_dump(mode="json", by_alias=True)
