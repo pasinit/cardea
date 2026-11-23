@@ -63,8 +63,11 @@ def test_the_example_renders_valid_documents(tmp_path: Path) -> None:
     # Every file is private to the host owner.
     assert all(p.stat().st_mode & 0o077 == 0 for p in paths)
     vcs = json.loads((tmp_path / "vcs.team.json").read_text())
-    assert vcs["credentials"]["pools"] == {"dev-team.pe": "github-reviewer"}
-    assert vcs["allow_approve"] == ["dev-team.pe"]
+    assert vcs["credentials"]["pools"] == {
+        "dev-team.pe": "github-reviewer",
+        "dev-team.ux": "github-reviewer",
+    }
+    assert vcs["allow_approve"] == ["dev-team.pe", "dev-team.ux"]
     email = json.loads((tmp_path / "email.team.json").read_text())
     assert email["roles"]["dev-team.pm"]["recipients"] == ["client"]
 
@@ -836,17 +839,19 @@ def test_the_ux_role_renders_from_the_kit_and_gates_ui_review() -> None:
     assert "approved mock version" in text and "screenshots" in text
     assert module.UX_APPROVED in text and module.UX_CHANGES in text
     assert "the style the app already has" in text
-    # It comments but cannot approve or move items; it files work and records mocks.
-    assert {"vcs.comment", "env.try", "vcs.read_change"} <= set(ux["run"]["operations"])
-    assert "vcs.review" not in ux["run"]["operations"]
+    # It reviews on the host but cannot move items; it files work and records mocks.
+    ops = set(ux["run"]["operations"])
+    assert {"vcs.review", "vcs.comment", "env.try", "vcs.read_change"} <= ops
+    assert "vcs.review" in ux["grants"]
+    vcs = module.vcs_fragment(document)
+    assert vcs["credentials"]["pools"]["dev-team.ux"] == "github-reviewer"
+    assert "dev-team.ux" in vcs["allow_approve"] and "dev-team.pe" in vcs["allow_approve"]
     assert "record:work/create" in ux["grants"] and "record:decisions/create" in ux["grants"]
     assert not {"record:work/approve", "record:work/request_changes"} & set(ux["grants"])
     assert {"ux"} <= set(module.POOLS) and module.ROLE_NAMES["ux"] == "UX designer"
     assert ux["spend"]["runs"] == 6
     # The supervisor can mail it, and the PE may mail it.
-    rights = {
-        p["operation"] for p in module.provisioning_fragment(document)["permissions"]
-    }
+    rights = {p["operation"] for p in module.provisioning_fragment(document)["permissions"]}
     assert "mail:dev-team.ux" in rights and "mail:dev-team.ux" in pools["pe"]["grants"]
 
 
@@ -855,6 +860,7 @@ def test_the_pe_may_not_approve_a_ui_pull_request_before_ux_review() -> None:
     pools = {p["name"]: p for p in module.group_document(host())["spec"]["pools"]}
     text = " ".join(pools["pe"]["run"]["instructions"].split())
     assert "changes the UI" in text and "needs the UX designer's review first" in text
+    assert module.UX_APPROVED == "UX review: APPROVED"
     assert f"`{module.UX_APPROVED}`" in text and "current head commit" in text
     assert "do not approve" in text and "mail the UX designer" in text
     assert "Never treat a developer's own claim" in text
@@ -1020,7 +1026,7 @@ def test_run_timeouts_must_fit_the_session_wall_time(tmp_path: Path) -> None:
     assert module.wall_problems(fitted) == []
     group = module.group_document(fitted)
     bounds = {p["name"]: p["run"]["bounds"]["timeout_seconds"] for p in group["spec"]["pools"]}
-    assert bounds == {"pm": 1800, "tl": 900, "dev": 1700, "pe": 1800}
+    assert bounds == {"pm": 1800, "tl": 900, "dev": 1700, "pe": 1800, "ux": 1800}
     # Without a readable workers file the check cannot run and refuses nothing.
     assert module.wall_problems({**example(), "workers_config": str(tmp_path / "none")}) == []
 
