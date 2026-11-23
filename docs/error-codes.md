@@ -289,8 +289,8 @@ used by the examples.
 | `recipient_not_allowed` | This role may not email that recipient | `cardea_email_ops.ops` |
 | `reconciliation_required` | An interrupted effect has unknown outcome. | `cardea.kernel.store` |
 | `record_claimed` | Another principal holds this record | `cardea.service.records` |
-| `record_invalid` | labels must be distinct; data must be an object; data does not match the collection schema at {…} ({…}) (and 2 more) | `cardea.service.records` |
-| `record_not_found` | No such record | `cardea.service.records` |
+| `record_invalid` | the record already has {…} links; none was added; labels must be distinct; data must be an object (and 3 more) | `cardea.service.evidence_links`, `cardea.service.records` |
+| `record_not_found` | No such record | `cardea.service.evidence_links`, `cardea.service.records` |
 | `record_too_large` | data is {…} bytes; the collection allows {…} | `cardea.service.records` |
 | `repository_unknown` | No such repository alias on this host | `cardea_env_ops.try_`, `cardea_vcs_ops.ops` |
 | `risk_limit` | The order would breach the desk limit | `cardea_reference_ops.__init__` |

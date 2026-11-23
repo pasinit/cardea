@@ -31,7 +31,7 @@ RESULT_VARIABLES = frozenset({"result"})
 MAX_STATES = 64
 MAX_TRANSITIONS = 64
 # Actions of the built-in record operations; a transition cannot take one of their names.
-RESERVED_ACTIONS = frozenset({"create", "read", "update", "claim", "release"})
+RESERVED_ACTIONS = frozenset({"create", "read", "update", "claim", "release", "attach"})
 TRANSITION_OPERATION = "records.transition"
 
 StateName = Annotated[str, Field(strict=True, pattern=r"^[a-z][a-z0-9_]{0,63}$")]

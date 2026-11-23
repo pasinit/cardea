@@ -315,6 +315,9 @@ class Binding(Record):
     replies: ReplyPolling | None = None
     # Read operations only: reuse a settled run of the same inputs (ADR-038).
     run_window: RunWindow | None = None
+    # Names the argument holding a record ID: the kernel links the result to that record,
+    # needing `record:<collection>/attach` live (`evidence_links`).
+    attach_record: Pointer | None = None
 
     @model_validator(mode="after")
     def effect_only(self) -> Self:
@@ -397,6 +400,7 @@ class OperationDescriptor(Record):
                 ("evidence", self.cardea.evidence),
                 ("replies", self.cardea.replies),
                 ("run_window", self.cardea.run_window),
+                ("attach_record", self.cardea.attach_record),
             )
             if value is None
         }
