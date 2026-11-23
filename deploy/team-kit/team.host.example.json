@@ -57,6 +57,9 @@
       },
       "pe": {
         "runs": 8
+      },
+      "ux": {
+        "runs": 8
       }
     },
     "max_cost_usd_per_run": 1.0

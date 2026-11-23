@@ -54,7 +54,7 @@ def test_the_example_renders_valid_documents(tmp_path: Path) -> None:
     paths = module.render(example(), tmp_path)
     assert {p.name for p in paths} >= {"group.json", "collection.work.json"}
     group = AgentGroup.model_validate_json((tmp_path / "group.json").read_text())
-    assert [p.name for p in group.spec.pools] == ["pm", "tl", "dev", "pe"]
+    assert [p.name for p in group.spec.pools] == ["pm", "tl", "dev", "pe", "ux"]
     for name in ("collection.work.json", "collection.decisions.json"):
         CollectionDocument.model_validate_json((tmp_path / name).read_text())
     # Conservative defaults: 30 runs a day for the team, a run ceiling per role.
@@ -63,7 +63,10 @@ def test_the_example_renders_valid_documents(tmp_path: Path) -> None:
     # Every file is private to the host owner.
     assert all(p.stat().st_mode & 0o077 == 0 for p in paths)
     vcs = json.loads((tmp_path / "vcs.team.json").read_text())
-    assert vcs["credentials"]["pools"] == {"dev-team.pe": "github-reviewer"}
+    assert vcs["credentials"]["pools"] == {
+        "dev-team.pe": "github-reviewer",
+        "dev-team.ux": "github-reviewer",
+    }
     assert vcs["allow_approve"] == ["dev-team.pe"]
     email = json.loads((tmp_path / "email.team.json").read_text())
     assert email["roles"]["dev-team.pm"]["recipients"] == ["client"]
@@ -299,7 +302,9 @@ def test_the_email_policy_is_rendered_only_when_the_pm_may_email() -> None:
     assert "email" not in plain["run"]["instructions"].lower()
     # Nobody but the product manager is told to email the client.
     others = pools_of(example())
-    assert all("email.send" not in others[n]["run"]["instructions"] for n in ("tl", "dev", "pe"))
+    assert all(
+        "email.send" not in others[n]["run"]["instructions"] for n in ("tl", "dev", "pe", "ux")
+    )
 
 
 def test_the_host_file_refuses_an_invalid_default_branch(tmp_path: Path) -> None:
@@ -823,6 +828,42 @@ def test_the_pe_approves_only_over_passing_checks() -> None:
     assert "name the failing check" in text and "or say that no check ran" in text
 
 
+def test_the_ux_role_renders_from_the_kit_and_gates_ui_pull_requests(tmp_path: Path) -> None:
+    module = kit()
+    module.render(example(), tmp_path)
+    AgentGroup.model_validate_json((tmp_path / "group.json").read_text())
+    pools = {p["name"]: p for p in module.group_document(example())["spec"]["pools"]}
+    ux = pools["ux"]
+    assert ux["replicas"] == 1 and ux["spend"]["runs"] == 8
+    assert {"vcs.review", "vcs.read_change", "env.try", "record:work/create"} <= set(ux["grants"])
+    # It reviews but never approves, merges or moves an item.
+    assert not {"vcs.merge", "record:work/approve", "record:work/request_changes"} & set(
+        ux["grants"]
+    )
+    assert {"exact": {"recordstate": "in_review"}} in ux["triggers"][0]["event"]["filters"]
+    text = " ".join(ux["run"]["instructions"].split())
+    for needle in (
+        "You own the design of every page",
+        "existing app's style",
+        "screenshot",
+        "phone width (390px)",
+        "desktop width",
+        "Approved mock",
+        "Request changes",
+        "unless you have seen the page rendered at both widths and it matches the approved mock",
+        "UX REVIEW: PASS",
+    ):
+        assert needle in text, needle
+    # Its reviews use the reviewer credential, and it may not approve on the host.
+    vcs = json.loads((tmp_path / "vcs.team.json").read_text())
+    assert vcs["credentials"]["pools"]["dev-team.ux"] == "github-reviewer"
+    assert "dev-team.ux" not in vcs["allow_approve"]
+    # The PE may not approve a UI change before the UX review.
+    pe = " ".join(pools["pe"]["run"]["instructions"].split())
+    assert "must not be approved before the UX designer has reviewed it" in pe
+    assert "UX REVIEW: PASS" in pe and "current head commit" in pe
+
+
 @pytest.mark.loopback
 def test_events_refused_while_paused_wake_the_members_on_resume(
     team: tuple[Kernel, FakeSession],
@@ -982,7 +1023,7 @@ def test_run_timeouts_must_fit_the_session_wall_time(tmp_path: Path) -> None:
     assert module.wall_problems(fitted) == []
     group = module.group_document(fitted)
     bounds = {p["name"]: p["run"]["bounds"]["timeout_seconds"] for p in group["spec"]["pools"]}
-    assert bounds == {"pm": 1800, "tl": 900, "dev": 1700, "pe": 1800}
+    assert bounds == {"pm": 1800, "tl": 900, "dev": 1700, "pe": 1800, "ux": 1800}
     # Without a readable workers file the check cannot run and refuses nothing.
     assert module.wall_problems({**example(), "workers_config": str(tmp_path / "none")}) == []
 
@@ -1497,6 +1538,7 @@ def test_instructions_name_only_transitions_the_work_collection_has() -> None:
     assert named_by["tl"] == {"triage", "cancel"}
     assert named_by["dev"] == {"start", "submit", "resubmit", "merge"}
     assert named_by["pe"] == {"approve", "request_changes"}
+    assert named_by["ux"] == set()
     tl = pools["tl"]["run"]["instructions"]
     assert "not the state's" in tl and "records.update never changes an item's state" in tl
     assert "records.query (state ready)" in tl
