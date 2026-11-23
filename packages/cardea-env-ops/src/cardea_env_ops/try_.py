@@ -28,6 +28,25 @@ are the kernel's (`cardea.service.env_runs`); this worker only runs.
 A caller names an alias, a commit and scenario names, never a command, a path or a URL. A
 scenario that needs the `init` tier is refused (`env_tier_unavailable`): this worker is the
 process tier, and it never runs a scenario in a weaker tier than it asks for.
+
+**Loopback scenarios.** A scenario that needs TCP on a loopback (`make teams`, an MCP
+loopback test) declares `network: loopback`. The unit this worker runs in reaches the egress
+proxy and nothing else, and the host's loopback not at all, so it cannot serve such a
+scenario. It runs in a second phase, a second worker under a profile whose unit has a private
+network namespace with only its own loopback, no proxy and no route out:
+
+1. *First phase* (this worker, the `try` profile): everything above for the scenarios that
+   do not need loopback, plus each loopback scenario's `fetch`, its dependency fetch through
+   the proxy. All of it happens in the job's workspace (`$CARDEA_WORKSPACE`), which the second
+   phase inherits. A failed fetch reports that scenario as `error` and it is not run. What is
+   left is reported as `next`, and the kernel starts the second phase.
+2. *Second phase* (`phase_two`, the `try-loopback` profile): the deferred scenarios in the
+   same checkout, then the merged report in the order the caller named them. It has the
+   kernel's copy of the first phase's output (`context.previous`), never a file the commit
+   could have written.
+
+A host without the second phase refuses the call before running anything
+(`env_loopback_unavailable`), never running a loopback scenario with the network it has.
 """
 
 import os
@@ -162,9 +181,15 @@ def _run(argv: tuple[str, ...], cwd: Path, env: dict[str, str], timeout: float) 
 
 
 def collect(
-    checkout: Path, paths: tuple[str, ...], kept: dict[str, bytes], dropped: dict[str, int]
+    checkout: Path,
+    paths: tuple[str, ...],
+    kept: dict[str, bytes],
+    dropped: dict[str, int],
+    earlier: tuple[int, int] = (0, 0),
 ) -> list[JsonValue]:
-    """The scenario's artifact paths, within the per-file, total and count limits."""
+    """The scenario's artifact paths, within the per-file, total and count limits.
+
+    `earlier` is the count and size of the artifacts an earlier phase of the call kept."""
     listed: list[JsonValue] = []
     root = checkout.resolve()
     for relative in paths:
@@ -173,26 +198,22 @@ def collect(
             dropped["artifacts"] += 1
             continue
         data = target.read_bytes()
-        total = sum(len(v) for v in kept.values()) + len(data)
+        total = earlier[1] + sum(len(v) for v in kept.values()) + len(data)
         if (
             len(data) > MAX_ARTIFACT
             or total > MAX_ARTIFACTS_TOTAL
-            or len(kept) >= MAX_ARTIFACT_FILES
+            or earlier[0] + len(kept) >= MAX_ARTIFACT_FILES
         ):
             dropped["artifacts"] += 1
             continue
-        name = f"a{len(kept)}"
+        name = f"a{earlier[0] + len(kept)}"
         kept[name] = data
         listed.append({"name": name, "path": relative, "bytes": len(data)})
     return listed
 
 
-def try_commit(
-    arguments: dict[str, JsonValue],
-    context: OperationContext,
-    scratch: Path,
-    mode: str = "subreaper",
-) -> WithArtifacts | dict[str, JsonValue]:
+def _admit(arguments: dict[str, JsonValue]) -> tuple[str, str, list[str], Any, Any]:
+    """The call's alias, commit, scenario names, repository entry and catalog, or a refusal."""
     alias, commit = str(arguments["repo"]), str(arguments["commit"])
     names = [str(n) for n in arguments["scenarios"]]  # type: ignore[union-attr]
     if not COMMIT.fullmatch(commit):
@@ -216,30 +237,41 @@ def try_commit(
             )
     if catalog.toolchain is not None and not Path(catalog.toolchain.path).is_dir():
         raise OperationRejected("The pinned toolchain image is missing", "env_toolchain_missing")
-    env = environment(scratch, catalog)
-    checkout = stage(entry.source, commit, scratch)
-    deadline = context.deadline.timestamp() - 5  # leave time to report
-    dropped = {"artifacts": 0, "log_bytes": 0}
-    kept: dict[str, bytes] = {}
-    results: list[JsonValue] = []
-    for name in names:
-        scenario = catalog.scenarios[name]
-        remaining = deadline - time.time()
-        if remaining <= 1:
-            results.append({"name": name, "outcome": "not_run", "exit_code": None})
-            continue
-        limit = min(float(scenario.timeout_seconds), remaining)
-        ran = _run(scenario.argv, checkout, env, limit)
-        dropped["log_bytes"] += int(ran.pop("dropped_log_bytes"))
-        ran["artifacts"] = collect(checkout, scenario.artifacts, kept, dropped)
-        results.append({"name": name, **ran})
-    # Nothing the commit started may outlive its scenarios into the report.
-    try:
-        isolation.clear(code=CODE)
-    except isolation.IsolationFailed as failed:
-        raise OperationRejected(str(failed), failed.code) from None
+    return alias, commit, names, entry, catalog
+
+
+def _scenario(
+    name: str,
+    argv: tuple[str, ...],
+    timeout_seconds: int,
+    artifacts: tuple[str, ...],
+    checkout: Path,
+    env: dict[str, str],
+    deadline: float,
+    kept: dict[str, bytes],
+    dropped: dict[str, int],
+    earlier: tuple[int, int] = (0, 0),
+) -> dict[str, JsonValue]:
+    """One scenario's report, `not_run` when the call's deadline has passed."""
+    remaining = deadline - time.time()
+    if remaining <= 1:
+        return {"name": name, "outcome": "not_run", "exit_code": None}
+    ran = _run(argv, checkout, env, min(float(timeout_seconds), remaining))
+    dropped["log_bytes"] += int(ran.pop("dropped_log_bytes"))
+    ran["artifacts"] = collect(checkout, artifacts, kept, dropped, earlier)
+    return {"name": name, **ran}
+
+
+def _report(
+    alias: str,
+    commit: str,
+    catalog: repositories.Environment,
+    mode: str,
+    results: list[JsonValue],
+    dropped: dict[str, int],
+) -> dict[str, JsonValue]:
     passed = all(isinstance(r, dict) and r.get("outcome") == "pass" for r in results)
-    output: dict[str, JsonValue] = {
+    return {
         "repo": alias,
         "commit": commit,
         "tier": TIER,
@@ -251,18 +283,146 @@ def try_commit(
         "scenarios": results,
         "dropped": dropped,  # type: ignore[dict-item]
     }
+
+
+def try_commit(
+    arguments: dict[str, JsonValue],
+    context: OperationContext,
+    scratch: Path,
+    mode: str = "subreaper",
+    workspace: Path | None = None,
+) -> WithArtifacts | dict[str, JsonValue]:
+    if context.previous is not None:
+        if workspace is None:
+            raise OperationRejected("The second phase has no workspace", "env_phase_invalid")
+        return phase_two(arguments, context, workspace, mode)
+    alias, commit, names, entry, catalog = _admit(arguments)
+    deferred = [n for n in names if catalog.scenarios[n].network == "loopback"]
+    if deferred:
+        if workspace is None:
+            raise OperationRejected(
+                f"Scenarios {', '.join(deferred)} need loopback, whose second phase this host "
+                "does not offer",
+                "env_loopback_unavailable",
+            )
+        scratch = workspace  # the second phase inherits it, checkout and fetched dependencies
+    env = environment(scratch, catalog)
+    checkout = stage(entry.source, commit, scratch)
+    deadline = context.deadline.timestamp() - 5  # leave time to report
+    dropped = {"artifacts": 0, "log_bytes": 0}
+    kept: dict[str, bytes] = {}
+    results: dict[str, JsonValue] = {}
+    for name in names:
+        if name in deferred:
+            continue
+        scenario = catalog.scenarios[name]
+        results[name] = _scenario(
+            name, scenario.argv, scenario.timeout_seconds, scenario.artifacts,
+            checkout, env, deadline, kept, dropped,
+        )  # fmt: skip
+    # The dependency fetch of each loopback scenario, through the proxy, before its phase.
+    ready: list[JsonValue] = []
+    fetched: dict[tuple[str, ...], dict[str, JsonValue]] = {}
+    for name in deferred:
+        fetch = catalog.scenarios[name].fetch
+        if fetch is None:
+            ready.append(name)
+            continue
+        if fetch.argv not in fetched:
+            fetched[fetch.argv] = _scenario(
+                name, fetch.argv, fetch.timeout_seconds, (), checkout, env, deadline, {}, dropped
+            )
+        done = fetched[fetch.argv]
+        if done["outcome"] == "pass":
+            ready.append(name)
+        else:
+            # It could not start without its dependencies; the fetch's own tail says why.
+            results[name] = {**done, "name": name, "outcome": "error", "artifacts": []}
+    # Nothing the commit started may outlive its scenarios into the report.
+    try:
+        isolation.clear(code=CODE)
+    except isolation.IsolationFailed as failed:
+        raise OperationRejected(str(failed), failed.code) from None
+    listed: list[JsonValue] = [results[n] for n in names if n in results]
+    output = _report(alias, commit, catalog, mode, listed, dropped)
+    if ready:
+        output["next"] = ready
+        del output["passed"]
+    return WithArtifacts(output, kept) if kept else output
+
+
+def _kept(reported: list[JsonValue]) -> tuple[int, int]:
+    """The count and size of the artifacts the first phase kept, from its report."""
+    count = size = 0
+    for result in reported:
+        listed = result.get("artifacts") if isinstance(result, dict) else None
+        for artifact in listed if isinstance(listed, list) else []:
+            count += 1
+            amount = artifact.get("bytes") if isinstance(artifact, dict) else None
+            size += amount if isinstance(amount, int) else 0
+    return count, size
+
+
+def phase_two(
+    arguments: dict[str, JsonValue], context: OperationContext, workspace: Path, mode: str
+) -> WithArtifacts | dict[str, JsonValue]:
+    """The loopback scenarios, in the checkout the first phase left in the workspace."""
+    alias, commit, names, _, catalog = _admit(arguments)
+    previous = dict(context.previous or {})
+    ready = previous.get("next")
+    reported = previous.get("scenarios")
+    checkout = workspace / "checkout"
+    if (
+        not isinstance(ready, list)
+        or not isinstance(reported, list)
+        or not all(isinstance(n, str) and n in names for n in ready)
+        or any(catalog.scenarios[str(n)].network != "loopback" for n in ready)
+        or previous.get("catalog_sha256") != catalog.digest()
+        or not checkout.is_dir()
+    ):
+        raise OperationRejected("The second phase does not match the first", "env_phase_invalid")
+    env = environment(workspace, catalog)
+    results: dict[str, JsonValue] = {
+        str(r["name"]): r for r in reported if isinstance(r, dict) and "name" in r
+    }
+    earlier = _kept(reported)
+    first_dropped = previous.get("dropped")
+    dropped = {"artifacts": 0, "log_bytes": 0}
+    if isinstance(first_dropped, dict):
+        for key in dropped:
+            value = first_dropped.get(key)
+            dropped[key] = value if isinstance(value, int) else 0
+    deadline = context.deadline.timestamp() - 5
+    kept: dict[str, bytes] = {}
+    for name in names:
+        if name not in ready:
+            continue
+        scenario = catalog.scenarios[name]
+        results[name] = _scenario(
+            name, scenario.argv, scenario.timeout_seconds, scenario.artifacts,
+            checkout, env, deadline, kept, dropped, earlier,
+        )  # fmt: skip
+    try:
+        isolation.clear(code=CODE)
+    except isolation.IsolationFailed as failed:
+        raise OperationRejected(str(failed), failed.code) from None
+    if any(n not in results for n in names):
+        raise OperationRejected("The second phase does not match the first", "env_phase_invalid")
+    output = _report(alias, commit, catalog, mode, [results[n] for n in names], dropped)
     return WithArtifacts(output, kept) if kept else output
 
 
 async def run(arguments: dict[str, JsonValue], context: OperationContext) -> Any:
-    """The confined worker's entry point (`env.try`)."""
+    """The confined worker's entry point (`env.try`), in either phase."""
     # Before anything is staged: the commit's code must not reach this process.
     try:
         mode = isolation.harden(code=CODE)
     except isolation.IsolationFailed as failed:
         raise OperationRejected(str(failed), failed.code) from None
+    folder = os.environ.get("CARDEA_WORKSPACE")
+    workspace = Path(folder) if folder else None
     scratch = Path(tempfile.mkdtemp(prefix="env-try-"))
     try:
-        return try_commit(arguments, context, scratch, mode)
+        return try_commit(arguments, context, scratch, mode, workspace)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)

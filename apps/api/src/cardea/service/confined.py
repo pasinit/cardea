@@ -38,6 +38,7 @@ from cardea.runtime.harness import HarnessRequest, HarnessResult
 from cardea.service.database import Fault
 from cardea.service.operations import (
     ConfinedExecutor,
+    FollowOn,
     Handler,
     OperationContext,
     OperationRejected,
@@ -260,6 +261,13 @@ class Workers:
             )
         return {"profile": profile, "worker": worker, "profile_sha256": str(entry.get("sha256"))}
 
+    def offers(self, profile: str, worker: str) -> bool:
+        """Whether the host has installed this worker under this profile."""
+        installed = self.installed()
+        return profile in installed.get("profiles", {}) and profile in installed.get(
+            "workers", {}
+        ).get(worker, ())
+
     def _slot(self, profile: str) -> threading.BoundedSemaphore | None:
         limit = self.installed().get("profiles", {}).get(profile, {}).get("concurrency")
         if not isinstance(limit, int) or limit < 1:
@@ -338,11 +346,16 @@ class Workers:
         watch: Watch | None = None,
         timeout_seconds: float | None = None,
         inputs: list[dict[str, str]] | None = None,
+        workspace_from: str | None = None,
+        keep: bool = False,
     ) -> dict[str, Any]:
         """Wait for a profile slot (bounded by the profile's queue timeout), then run.
 
         ``deadline`` is the absolute limit; ``timeout_seconds`` bounds execution only and
         starts once the worker has a slot, so queueing never eats an operation's time.
+
+        ``keep`` leaves a worker that finished in place (its workspace with it) for a
+        second phase that names it as ``workspace_from``; the caller then reaps it.
         """
         slot = self._slot(profile)
         if slot is not None:
@@ -352,7 +365,9 @@ class Workers:
         try:
             if timeout_seconds is not None:
                 deadline = min(deadline, time.time() + timeout_seconds)
-            return await self._run(job, payload, profile, worker, deadline, watch, inputs)
+            return await self._run(
+                job, payload, profile, worker, deadline, watch, inputs, workspace_from, keep
+            )
         finally:
             if slot is not None:
                 slot.release()
@@ -366,10 +381,14 @@ class Workers:
         deadline: float,
         watch: Watch | None,
         inputs: list[dict[str, str]] | None = None,
+        workspace_from: str | None = None,
+        keep: bool = False,
     ) -> dict[str, Any]:
         content = json.dumps(payload, separators=(",", ":")).encode()
         # Only hosts that stage inputs are asked to: other hosts keep their signature.
         extra: dict[str, Any] = {"inputs": inputs} if inputs else {}
+        if workspace_from is not None:
+            extra["workspace_from"] = workspace_from
         try:
             await asyncio.to_thread(
                 partial(self.host.start_confined, **extra), job, content, deadline, profile, worker
@@ -404,7 +423,8 @@ class Workers:
             # Cancellation, timeout, lease loss or an unknown state: stop the process tree.
             await asyncio.to_thread(self.reap, job)
             raise
-        await asyncio.to_thread(self.reap, job)
+        if not keep:
+            await asyncio.to_thread(self.reap, job)
         return status
 
 
@@ -542,8 +562,9 @@ def confined_handler(
             payload["context"]["content_gate"] = callback
         if manifest:
             payload["context"]["inputs"] = manifest
+        first = job_id("operation", context.receipt_id)
         status = await workers.status_of(
-            job_id("operation", context.receipt_id),
+            first,
             payload,
             profile=executor.profile,
             worker=executor.worker,
@@ -551,10 +572,63 @@ def confined_handler(
             timeout_seconds=timeout_seconds,
             watch=lambda: watch(context.task_id, context.lease_id),
             inputs=staged,
+            keep=executor.then is not None,
         )
-        if store_artifacts is None:
-            return _result(status)
+        if executor.then is None:
+            return await _finish(context, status, None)
+        try:
+            return await _finish(
+                context, status, await _second(arguments, context, executor.then, status)
+            )
+        finally:
+            # The first phase's workspace lives until the second phase is done with it.
+            await asyncio.to_thread(workers.reap, first)
+
+    async def _second(
+        arguments: dict[str, JsonValue],
+        context: OperationContext,
+        then: FollowOn,
+        status: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """The second phase's status, when the first worker asked for one (`next`)."""
+        output, _ = _document(status)
+        if "next" not in output:
+            return None
+        payload = job_document(arguments, context, None)
+        payload["context"]["previous"] = output
+        remaining = context.deadline.timestamp() - time.time()
+        return await workers.status_of(
+            job_id("then", context.receipt_id),
+            payload,
+            profile=then.profile,
+            worker=then.worker,
+            deadline=context.deadline.timestamp(),
+            timeout_seconds=max(1.0, min(float(timeout_seconds), remaining)),
+            watch=lambda: watch(context.task_id, context.lease_id),
+            workspace_from=job_id("operation", context.receipt_id),
+        )
+
+    async def _finish(
+        context: OperationContext, first: dict[str, Any], second: dict[str, Any] | None
+    ) -> Any:
+        """The call's result: the last phase's output, with every phase's artifacts."""
+        status = second if second is not None else first
         output, artifacts = _document(status)
+        if "next" in output:
+            # Asked for a phase that was not run: never report a half-finished call.
+            raise WorkerFailed("worker_output_invalid", "invalid_output", "unfinished phases")
+        if second is not None:
+            earlier = _document(first)[1]
+            if earlier is not None:
+                if not isinstance(earlier, dict) or not isinstance(artifacts or {}, dict):
+                    raise WorkerFailed("worker_output_invalid", "invalid_output", "artifacts")
+                artifacts = {**earlier, **(artifacts if isinstance(artifacts, dict) else {})}
+        if store_artifacts is None:
+            if artifacts is not None:
+                raise WorkerFailed(
+                    "worker_output_invalid", "invalid_output", "unexpected artifacts"
+                )
+            return output
         if artifacts is None:
             return output
         return await asyncio.to_thread(store_artifacts, context, output, artifacts)

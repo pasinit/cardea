@@ -6,6 +6,7 @@ seeded failing test. The real `make lint` and `make typecheck` are not run here.
 """
 
 import importlib.util
+import os
 import shutil
 import subprocess
 import sys
@@ -137,6 +138,11 @@ def test_a_commit_with_a_seeded_failing_test_fails_the_check(
     assert tail.endswith("check: FAIL (exit 1)\n")
 
 
+# A nested pytest under env.try's sandbox starts slowly on a loaded host; the test fails on
+# its assertions, not on a tight clock, so the bound only has to catch a real hang.
+NESTED_TIMEOUT = int(os.environ.get("CARDEA_NESTED_PYTEST_TIMEOUT", "600"))
+
+
 def nested(tmp_path: Path, source: str) -> subprocess.CompletedProcess[str]:
     """A pytest run with this suite's conftest, under `CARDEA_NO_LOOPBACK=1`."""
     shutil.copy(TESTS / "conftest.py", tmp_path / "conftest.py")
@@ -149,7 +155,7 @@ def nested(tmp_path: Path, source: str) -> subprocess.CompletedProcess[str]:
         env=env,
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=NESTED_TIMEOUT,
         check=False,
     )
 
@@ -159,9 +165,10 @@ CONNECT = (
     "import pytest\n\n\n"
     "{mark}def test_tcp() -> None:\n"
     "    with socket.socket() as s:\n"
+    "        s.settimeout(2)  # a sandbox that drops loopback packets must not hang the connect\n"
     "        try:\n"
     "            s.connect(('127.0.0.1', 9))\n"
-    "        except ConnectionRefusedError:\n"
+    "        except OSError:  # refused, timed out, or no loopback; the guard raises RuntimeError\n"
     "            pass\n"
 )
 

@@ -157,6 +157,7 @@ def mail(backend: Any, **query: str) -> tuple[int, Any]:
 MARKUP = '<script>alert(1)</script><img src=x onerror=alert(2)> <a href="javascript:x">y</a>'
 
 
+@pytest.mark.loopback
 def test_the_mail_view_serves_full_text_to_the_supervisor(team: tuple[Kernel, str, str]) -> None:
     kernel, _, _ = team
     plant(
@@ -177,6 +178,7 @@ def test_the_mail_view_serves_full_text_to_the_supervisor(team: tuple[Kernel, st
     assert "ck-secret" not in json.dumps(page) and "client_key" not in json.dumps(page)
 
 
+@pytest.mark.loopback
 def test_the_mail_view_is_refused_to_anyone_but_the_groups_supervisor(
     team: tuple[Kernel, str, str],
 ) -> None:
@@ -192,6 +194,7 @@ def test_the_mail_view_is_refused_to_anyone_but_the_groups_supervisor(
     assert mail(backend, team="eng") == (403, {"code": "principal_disabled"})
 
 
+@pytest.mark.loopback
 def test_the_mail_view_pages_and_filters(team: tuple[Kernel, str, str]) -> None:
     kernel, _, _ = team
     second = "00000000-0000-0000-0000-000000000009"
@@ -217,6 +220,7 @@ def test_the_mail_view_pages_and_filters(team: tuple[Kernel, str, str]) -> None:
     assert by_item["total"] == 1 and mail(backend, team="eng", item="work/rec-bb")[1]["items"] == []
 
 
+@pytest.mark.loopback
 def test_the_mail_query_is_validated_and_the_team_must_exist(
     team: tuple[Kernel, str, str],
 ) -> None:
@@ -234,6 +238,7 @@ def test_the_mail_query_is_validated_and_the_team_must_exist(
     assert call(backend, "GET", "/api/mail?team=eng", headers={"Host": "evil.example"})[0] == 403
 
 
+@pytest.mark.loopback
 def test_each_team_reports_its_state() -> None:
     base = teams().base
     view = fixture()

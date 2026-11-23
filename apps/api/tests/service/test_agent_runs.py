@@ -330,6 +330,7 @@ def test_admission_requires_installed_operations(kernel: Kernel) -> None:
 # Execution
 
 
+@pytest.mark.loopback
 def test_every_tool_call_is_a_receipted_operation(
     kernel: Kernel, tools: Tools, session: FakeSession
 ) -> None:
@@ -355,6 +356,7 @@ def test_every_tool_call_is_a_receipted_operation(
         assert tx.get_task(task_id).verification is not None
 
 
+@pytest.mark.loopback
 def test_agent_receipts_list_the_run_calls(kernel: Kernel, session: FakeSession) -> None:
     session.scripts = [routine]
     task_id = submit(kernel)
@@ -380,6 +382,7 @@ def test_agent_receipts_list_the_run_calls(kernel: Kernel, session: FakeSession)
     assert latest["receipt"]["request"]["operation_id"] == "call-0002"
 
 
+@pytest.mark.loopback
 def test_endpoint_requires_the_attempt_token(kernel: Kernel, session: FakeSession) -> None:
     async def wrong_token(client: ClientSession, request: SessionRequest) -> SessionResult:
         async with httpx2.AsyncClient(headers={"Authorization": "Bearer nope"}) as http:
@@ -391,6 +394,7 @@ def test_endpoint_requires_the_attempt_token(kernel: Kernel, session: FakeSessio
     assert AgentRunRuntime(kernel).execute(submit(kernel)) == "succeeded"
 
 
+@pytest.mark.loopback
 def test_tool_budget_is_enforced(kernel: Kernel, tools: Tools, session: FakeSession) -> None:
     async def greedy(client: ClientSession, request: SessionRequest) -> SessionResult:
         assert not (await call(client, "listings-search")).is_error
@@ -403,6 +407,7 @@ def test_tool_budget_is_enforced(kernel: Kernel, tools: Tools, session: FakeSess
     assert AgentRunRuntime(kernel).execute(submit(kernel, max_tool_calls=1)) == "succeeded"
 
 
+@pytest.mark.loopback
 def test_failed_attempt_retries_with_journal_and_does_not_resend(
     kernel: Kernel, tools: Tools, session: FakeSession
 ) -> None:
@@ -425,6 +430,7 @@ def test_failed_attempt_retries_with_journal_and_does_not_resend(
     assert receipts[1].result is not None and receipts[1].result["deduplicated"] is True
 
 
+@pytest.mark.loopback
 def test_attempts_are_bounded(kernel: Kernel, session: FakeSession) -> None:
     async def fails(client: ClientSession, request: SessionRequest) -> SessionResult:
         return SessionResult(text="", is_error=True, stop_reason="error_during_execution")
@@ -436,6 +442,7 @@ def test_attempts_are_bounded(kernel: Kernel, session: FakeSession) -> None:
         assert cast(Any, tx.get_task(task_id).failure).code == "session_failed"
 
 
+@pytest.mark.loopback
 def test_uncertain_effect_fences_the_run(
     kernel: Kernel, tools: Tools, session: FakeSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -457,6 +464,7 @@ def test_uncertain_effect_fences_the_run(
         assert tx.get_operation(task_id, "call-0001").state is OperationState.OUTCOME_UNKNOWN
 
 
+@pytest.mark.loopback
 def test_reconciler_sees_the_original_call_context(
     kernel: Kernel, tools: Tools, session: FakeSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -507,6 +515,7 @@ def test_reconciler_sees_the_original_call_context(
     assert reconciling.slot_time == "2026-10-20T08:30:00+01:00"
 
 
+@pytest.mark.loopback
 def test_crash_after_effect_resumes_without_resending(
     kernel: Kernel, tools: Tools, session: FakeSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -537,6 +546,7 @@ def test_crash_after_effect_resumes_without_resending(
     assert len(tools.sent) == 1
 
 
+@pytest.mark.loopback
 def test_interrupted_effect_intent_is_never_replayed(
     kernel: Kernel, tools: Tools, session: FakeSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -579,6 +589,7 @@ def test_interrupted_effect_intent_is_never_replayed(
     assert tools.sent == []
 
 
+@pytest.mark.loopback
 def test_interrupted_read_intent_fails_and_the_run_retries(
     kernel: Kernel, tools: Tools, session: FakeSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -605,6 +616,7 @@ def test_interrupted_read_intent_fails_and_the_run_retries(
     assert [s for _, s in states[1:]] == [OperationState.SUCCEEDED] * 2
 
 
+@pytest.mark.loopback
 def test_orphaned_session_cannot_act(kernel: Kernel, tools: Tools, session: FakeSession) -> None:
     leases: list[str] = []
 
@@ -629,6 +641,7 @@ def test_orphaned_session_cannot_act(kernel: Kernel, tools: Tools, session: Fake
     assert tools.sent == []
 
 
+@pytest.mark.loopback
 def test_cancellation_stops_the_session(kernel: Kernel, session: FakeSession) -> None:
     async def slow(client: ClientSession, request: SessionRequest) -> SessionResult:
         with kernel.database.engine.begin() as conn:
@@ -643,6 +656,7 @@ def test_cancellation_stops_the_session(kernel: Kernel, session: FakeSession) ->
     assert AgentRunRuntime(kernel).execute(task_id) == "cancelled"
 
 
+@pytest.mark.loopback
 def test_revoked_authority_refuses_tool_calls(kernel: Kernel, session: FakeSession) -> None:
     async def revoked(client: ClientSession, request: SessionRequest) -> SessionResult:
         with kernel.database.engine.begin() as conn:
@@ -660,6 +674,7 @@ def test_revoked_authority_refuses_tool_calls(kernel: Kernel, session: FakeSessi
 # Slots and idempotency contexts
 
 
+@pytest.mark.loopback
 def test_second_task_for_the_same_slot_cannot_repeat_an_effect(
     kernel: Kernel, tools: Tools, session: FakeSession
 ) -> None:
@@ -695,6 +710,7 @@ def test_second_task_for_the_same_slot_cannot_repeat_an_effect(
     assert "Tuesday 2026-10-20 08:30 local time (UTC+0100" in session.requests[0].system_prompt
 
 
+@pytest.mark.loopback
 def test_unscheduled_runs_scope_effects_to_the_task(
     kernel: Kernel, tools: Tools, session: FakeSession
 ) -> None:
@@ -715,6 +731,7 @@ CONTEXT = [
 ]
 
 
+@pytest.mark.loopback
 def test_context_calls_are_receipted_and_given_as_untrusted_blocks(
     kernel: Kernel, tools: Tools, session: FakeSession
 ) -> None:
@@ -749,6 +766,7 @@ def test_context_calls_are_receipted_and_given_as_untrusted_blocks(
     assert listed == ["ctx-01", "ctx-02", "call-0001", "call-0002"]
 
 
+@pytest.mark.loopback
 def test_context_arguments_default_to_empty_and_need_only_a_grant(
     kernel: Kernel, tools: Tools, session: FakeSession
 ) -> None:
@@ -771,12 +789,14 @@ def test_context_arguments_default_to_empty_and_need_only_a_grant(
         run_request(context=[{"operation": "listings.search", "extra": 1}])
 
 
+@pytest.mark.loopback
 def test_runs_without_context_have_no_context_blocks(kernel: Kernel, session: FakeSession) -> None:
     session.scripts = [routine]
     assert AgentRunRuntime(kernel).execute(submit(kernel)) == "succeeded"
     assert "<context" not in session.requests[0].prompt
 
 
+@pytest.mark.loopback
 def test_context_is_fetched_again_for_each_attempt(
     kernel: Kernel, tools: Tools, session: FakeSession
 ) -> None:
@@ -827,6 +847,7 @@ def test_revoked_context_authority_stops_the_run(kernel: Kernel, session: FakeSe
 # Failure reasons
 
 
+@pytest.mark.loopback
 @pytest.mark.parametrize(
     ("to", "code", "reason", "summary"),
     [
@@ -866,6 +887,7 @@ def test_failed_calls_carry_a_bounded_reason(
     assert view.json()["calls"][0]["failure_details"] == {"reason": reason, "summary": summary}
 
 
+@pytest.mark.loopback
 def test_failed_context_call_records_its_reason(kernel: Kernel, session: FakeSession) -> None:
     session.scripts = [routine]
     context = [{"operation": "listings.search", "arguments": {"to": "upstream-503"}}]
@@ -880,6 +902,7 @@ def test_failed_context_call_records_its_reason(kernel: Kernel, session: FakeSes
     assert "s3cret" not in json.dumps(ctx.model_dump(mode="json"))
 
 
+@pytest.mark.loopback
 def test_uncertain_effect_records_why(
     kernel: Kernel, tools: Tools, session: FakeSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1029,6 +1052,7 @@ def test_claude_session_keeps_client_defaults_without_a_tool_timeout(
     assert options["env"]["MCP_TOOL_TIMEOUT"] == ""
 
 
+@pytest.mark.loopback
 def test_harness_tool_timeout_covers_the_slowest_operation(
     kernel: Kernel, session: FakeSession
 ) -> None:
@@ -1039,6 +1063,7 @@ def test_harness_tool_timeout_covers_the_slowest_operation(
     assert session.requests[0].tool_timeout_seconds == pytest.approx(expected, abs=0.5)
 
 
+@pytest.mark.loopback
 def test_configured_tool_timeout_never_outlasts_the_session(
     kernel: Kernel, session: FakeSession
 ) -> None:
@@ -1053,6 +1078,7 @@ def test_configured_tool_timeout_never_outlasts_the_session(
     assert session.requests[1].tool_timeout_seconds == 20
 
 
+@pytest.mark.loopback
 def test_system_prompt_states_how_many_calls_may_run_at_once(
     kernel: Kernel, session: FakeSession
 ) -> None:
@@ -1065,6 +1091,7 @@ def test_system_prompt_states_how_many_calls_may_run_at_once(
     assert "At most 2 tool calls can run at once" in prompt and "tool_busy" in prompt
 
 
+@pytest.mark.loopback
 def test_calls_beyond_the_concurrency_cap_are_refused_before_admission(
     kernel: Kernel, tools: Tools, session: FakeSession
 ) -> None:
@@ -1107,6 +1134,7 @@ CAP = 262144
 BIG = 65_000  # near the largest output a receipt can record (64 KiB document)
 
 
+@pytest.mark.loopback
 def test_large_runs_stay_under_the_response_cap_and_page_everything(
     kernel: Kernel, tools: Tools, session: FakeSession
 ) -> None:
@@ -1202,6 +1230,7 @@ def test_large_runs_stay_under_the_response_cap_and_page_everything(
     assert json.loads(stored)["text"] == "r" * 300_000
 
 
+@pytest.mark.loopback
 def test_small_runs_keep_values_inline(kernel: Kernel, session: FakeSession) -> None:
     session.scripts = [routine]
     task_id = submit(kernel)
@@ -1220,6 +1249,7 @@ def test_small_runs_keep_values_inline(kernel: Kernel, session: FakeSession) -> 
     assert output["content"]["text"] == "Sent the recap." and output["content_omitted"] is False
 
 
+@pytest.mark.loopback
 def test_oversized_tool_arguments_are_refused(kernel: Kernel, session: FakeSession) -> None:
     async def floods(client: ClientSession, request: SessionRequest) -> SessionResult:
         refused = await call(client, "listings-search", body="b" * 70_000)
@@ -1232,6 +1262,7 @@ def test_oversized_tool_arguments_are_refused(kernel: Kernel, session: FakeSessi
     assert calls(kernel, task_id) == []
 
 
+@pytest.mark.loopback
 def test_a_cancel_during_a_context_call_is_seen(kernel: Kernel, session: FakeSession) -> None:
     """Reads during context fetching are fresh: only built-in sources get the snapshot."""
     from cardea.service.models import Signal

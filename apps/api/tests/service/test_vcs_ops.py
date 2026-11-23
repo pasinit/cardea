@@ -303,6 +303,7 @@ def calls(kernel: Kernel, task_id: str) -> list[Any]:
 # The whole flow: push, open, comment, review, read
 
 
+@pytest.mark.loopback
 def test_push_open_comment_review_and_read(
     kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path
 ) -> None:
@@ -362,6 +363,7 @@ def untouched(host: FakeGitHub, before: int) -> bool:
     return len(host.authorizations) == before
 
 
+@pytest.mark.loopback
 @pytest.mark.parametrize("branch", ["main", "agent/other/x", "agent/eng/", "agent/eng/../main"])
 def test_branches_outside_the_group_prefix_are_refused(
     kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path, branch: str
@@ -404,6 +406,7 @@ def test_a_caller_outside_any_group_cannot_push(
     assert untouched(host, before)
 
 
+@pytest.mark.loopback
 def test_approve_reviews_are_refused_unless_allowed(
     kernel: Kernel, session: FakeSession, host: FakeGitHub, vcs: Vcs, tmp_path: Path
 ) -> None:
@@ -468,6 +471,7 @@ def test_approve_pools_match_the_kernel_member_id(vcs: Vcs) -> None:
             )
 
 
+@pytest.mark.loopback
 def test_repository_authority_is_the_repo_grant(
     kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path
 ) -> None:
@@ -487,6 +491,7 @@ def test_repository_authority_is_the_repo_grant(
     assert untouched(host, before)
 
 
+@pytest.mark.loopback
 def test_a_change_from_another_namespace_is_not_staged(
     kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path
 ) -> None:
@@ -540,6 +545,7 @@ def crashed_then_reconciled(kernel: Kernel, task_id: str, state: str) -> Any:
     return cast(Any, settled.result)["output"]
 
 
+@pytest.mark.loopback
 def test_push_crash_is_reconciled_from_the_branch_head(
     kernel: Kernel,
     session: FakeSession,
@@ -563,6 +569,7 @@ def test_push_crash_is_reconciled_from_the_branch_head(
     assert output["head"] == change["head"] == host.repositories["acme/cardea"].head(branch)
 
 
+@pytest.mark.loopback
 def test_open_crash_is_reconciled_from_the_pull_for_the_head(
     kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path, short_leases: None
 ) -> None:
@@ -587,6 +594,7 @@ def test_open_crash_is_reconciled_from_the_pull_for_the_head(
     assert output["number"] == pull["number"]
 
 
+@pytest.mark.loopback
 @pytest.mark.parametrize("tool", ["vcs-comment", "vcs-review"])
 def test_comment_and_review_crashes_are_reconciled_from_the_marker(
     kernel: Kernel,
@@ -614,6 +622,7 @@ def test_comment_and_review_crashes_are_reconciled_from_the_marker(
     assert output["url"] == made["html_url"]
 
 
+@pytest.mark.loopback
 def test_a_duplicate_pull_request_returns_the_existing_one(
     kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path
 ) -> None:
@@ -638,6 +647,7 @@ def test_a_duplicate_pull_request_returns_the_existing_one(
 # The credential stays with the host call
 
 
+@pytest.mark.loopback
 def test_the_token_never_leaves_the_host_call(
     kernel: Kernel,
     session: FakeSession,
@@ -740,6 +750,7 @@ def test_descriptors_without_resource_or_inputs_keep_their_digest() -> None:
 # The kernel's content gate runs before anything is sent
 
 
+@pytest.mark.loopback
 def test_the_content_gate_refuses_before_sending(
     kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path
 ) -> None:
@@ -773,6 +784,7 @@ def test_the_content_gate_refuses_before_sending(
     assert untouched(host, before)
 
 
+@pytest.mark.loopback
 def test_without_a_configured_gate_nothing_is_sent(
     kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path
 ) -> None:
@@ -801,6 +813,7 @@ def fixture_git(work: Path, *args: str) -> str:
     return done.stdout.strip()
 
 
+@pytest.mark.loopback
 def test_a_thin_bundle_artifact_from_code_session_pushes(
     kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path
 ) -> None:
@@ -937,6 +950,7 @@ def test_the_entry_points_refuse_a_disagreeing_host_definitely(
     assert refused.value.code == "repositories_disagree"
 
 
+@pytest.mark.loopback
 def test_read_branch_returns_the_head_and_refuses_unknown_branches(
     kernel: Kernel, session: FakeSession, tmp_path: Path
 ) -> None:

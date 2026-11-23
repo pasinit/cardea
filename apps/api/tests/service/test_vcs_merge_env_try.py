@@ -160,6 +160,7 @@ def approved(kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: P
     return number
 
 
+@pytest.mark.loopback
 def test_a_passing_check_on_the_head_merges(
     kernel: Kernel,
     session: FakeSession,
@@ -180,6 +181,7 @@ def test_a_passing_check_on_the_head_merges(
     assert tries.ran == [head]
 
 
+@pytest.mark.loopback
 def test_a_failing_check_does_not_merge(
     kernel: Kernel,
     session: FakeSession,
@@ -194,6 +196,7 @@ def test_a_failing_check_does_not_merge(
     assert host.calls.count("merge") == 0
 
 
+@pytest.mark.loopback
 def test_a_changed_head_is_refused_again(
     kernel: Kernel,
     session: FakeSession,
@@ -215,6 +218,7 @@ def test_a_changed_head_is_refused_again(
     assert merged.structured_content["head_sha"] == new
 
 
+@pytest.mark.loopback
 def test_a_check_of_another_commit_or_scenario_does_not_count(
     kernel: Kernel,
     session: FakeSession,
@@ -245,6 +249,7 @@ def test_a_check_of_another_commit_or_scenario_does_not_count(
     refused(merge(kernel, session, "eng.dev.0", number), "merge_checks_missing")
 
 
+@pytest.mark.loopback
 def test_a_role_without_the_grant_is_refused_naming_it(
     kernel: Kernel,
     session: FakeSession,
@@ -265,6 +270,7 @@ def test_a_role_without_the_grant_is_refused_naming_it(
     assert head in text(missing)
 
 
+@pytest.mark.loopback
 def test_host_check_runs_do_not_stand_in_for_the_required_check(
     kernel: Kernel,
     session: FakeSession,
@@ -287,6 +293,7 @@ def merge_at(kernel: Kernel, session: FakeSession, member: str, number: int, hea
     return result
 
 
+@pytest.mark.loopback
 def test_a_pinned_head_finds_the_check_of_that_head(
     kernel: Kernel,
     session: FakeSession,
@@ -302,6 +309,7 @@ def test_a_pinned_head_finds_the_check_of_that_head(
     assert merged.structured_content["check_receipt"]
 
 
+@pytest.mark.loopback
 def test_a_pinned_stale_head_is_refused_even_with_its_check(
     kernel: Kernel,
     session: FakeSession,

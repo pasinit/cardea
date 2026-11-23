@@ -59,6 +59,7 @@ def records(caplog: pytest.LogCaptureFixture, message: str) -> list[logging.LogR
 # Lifecycle
 
 
+@pytest.mark.loopback
 def test_an_attempt_logs_its_lifecycle_and_tool_calls(
     kernel: Kernel, session: FakeSession, logs: pytest.LogCaptureFixture
 ) -> None:
@@ -91,6 +92,7 @@ def test_an_attempt_logs_its_lifecycle_and_tool_calls(
     assert "message_id" not in text and "Search listings" not in text
 
 
+@pytest.mark.loopback
 def test_failed_tool_calls_and_failed_attempts_log_their_codes(
     kernel: Kernel, session: FakeSession, logs: pytest.LogCaptureFixture
 ) -> None:
@@ -110,6 +112,7 @@ def test_failed_tool_calls_and_failed_attempts_log_their_codes(
     assert finished.__dict__["code"] == "session_failed"
 
 
+@pytest.mark.loopback
 def test_a_busy_refusal_is_logged_and_counted_but_not_receipted(
     kernel: Kernel, session: FakeSession, logs: pytest.LogCaptureFixture
 ) -> None:
@@ -142,6 +145,7 @@ def test_a_busy_refusal_is_logged_and_counted_but_not_receipted(
 # Secrets
 
 
+@pytest.mark.loopback
 def test_the_endpoint_token_and_credentials_never_reach_the_log(
     kernel: Kernel, session: FakeSession, logs: pytest.LogCaptureFixture
 ) -> None:
@@ -328,6 +332,7 @@ def test_heartbeat_zero_disables_it() -> None:
     assert not activity.tick()
 
 
+@pytest.mark.loopback
 def test_a_running_attempt_emits_heartbeats(
     kernel: Kernel, session: FakeSession, logs: pytest.LogCaptureFixture
 ) -> None:
@@ -350,6 +355,7 @@ def test_a_running_attempt_emits_heartbeats(
 # Per-attempt files
 
 
+@pytest.mark.loopback
 def test_attempt_log_files_are_private_and_bounded(
     kernel: Kernel, session: FakeSession, logs: pytest.LogCaptureFixture
 ) -> None:

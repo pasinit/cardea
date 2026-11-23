@@ -258,6 +258,7 @@ def state_of(kernel: Kernel, record_id: str) -> tuple[str, str | None, int]:
 # approval check when the continuation re-executes it
 
 
+@pytest.mark.loopback
 def test_held_transition_reexecution_keeps_the_resource_qualified_check(
     setup: tuple[Kernel, Any, Fakes],
 ) -> None:
@@ -355,6 +356,7 @@ def test_held_transition_reexecution_keeps_the_resource_qualified_check(
 # A. Software team: a review gate built from transitions, grants and guards
 
 
+@pytest.mark.loopback
 def test_software_team_review_gate_then_restructure(
     setup: tuple[Kernel, Any, Fakes],
 ) -> None:
@@ -654,6 +656,7 @@ def deliver_fill(kernel: Kernel, secret: str, order: str) -> dict[str, Any]:
     return events.deliver(kernel, "desk-fills", headers, body)
 
 
+@pytest.mark.loopback
 def test_trading_desk_order_flow(setup: tuple[Kernel, Any, Fakes], tmp_path: Path) -> None:
     kernel, session, package = setup
     group = example_group("trading-desk")
@@ -822,6 +825,7 @@ def test_trading_desk_order_flow(setup: tuple[Kernel, Any, Fakes], tmp_path: Pat
     assert "risk_limit" in refused["error"]
 
 
+@pytest.mark.loopback
 def test_trading_desk_gate_rejects_and_expires(setup: tuple[Kernel, Any, Fakes]) -> None:
     """The gated `approve` transition: a human rejection and an expiry both leave the
     order unapproved; after the expiry the risk agent moves it to `expired`."""
