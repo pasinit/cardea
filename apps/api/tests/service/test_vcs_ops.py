@@ -969,6 +969,7 @@ def test_read_branch_returns_the_head_and_refuses_unknown_branches(
     assert results[2].is_error and "branch_unknown" in text(results[2])
 
 
+@pytest.mark.loopback
 def test_list_changes_shows_open_changes_with_review_and_check_state(
     kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path
 ) -> None:
@@ -1028,6 +1029,7 @@ def test_list_changes_shows_open_changes_with_review_and_check_state(
     assert len(host.authorizations) > before
 
 
+@pytest.mark.loopback
 def test_list_changes_without_the_grant_is_refused_naming_it(
     kernel: Kernel, session: FakeSession, host: FakeGitHub
 ) -> None:
