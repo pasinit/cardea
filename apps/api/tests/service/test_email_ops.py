@@ -7,6 +7,8 @@ and every address is a reserved `.invalid` one.
 """
 
 import asyncio
+import base64
+import email as mime
 import json
 import os
 import time
@@ -20,10 +22,11 @@ import httpx
 import pytest
 from cardea_email_ops import Email, authentication, descriptors, handlers
 from cardea_email_ops.agentmail import AgentMail
-from cardea_email_ops.config import EmailConfig
+from cardea_email_ops.config import AttachmentLimits, EmailConfig
 from cardea_email_ops.fake import FakeAgentMail, FakeImap, FakeSmtp
 from cardea_email_ops.smtp_imap import SmtpImap
 from cardea_email_ops.transport import (
+    Attachment,
     Outgoing,
     ProviderError,
     ReconcileUnavailable,
@@ -612,6 +615,195 @@ def test_credentials_and_addresses_never_leave_the_adapter(
     # Only the adapter's own requests carry the key, in the Authorization header.
     for request in provider.requests:
         assert API_KEY not in str(request.url) and API_KEY.encode() not in request.content
+
+
+# Attachments
+
+EXTERNAL = "attachment_external_reference"
+PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR" + bytes(13) + b"\x00" * 40
+PAGE = b"<html><body><h1>Plan</h1><img src='data:image/png;base64,AAAA'></body></html>"
+
+
+def attach(name: str = "plan.png", content: bytes = PNG_BYTES, kind: str = "") -> dict[str, str]:
+    kind = kind or ("text/html" if name.endswith(".html") else "image/png")
+    return {
+        "filename": name,
+        "content_type": kind,
+        "data": base64.b64encode(content).decode(),
+    }
+
+
+@pytest.mark.loopback
+def test_png_and_html_attachments_are_sent_with_the_message(
+    kernel: Kernel, session: FakeSession, provider: FakeAgentMail
+) -> None:
+    files = [attach(), attach("plan.html", PAGE)]
+    _, results = run_calls(kernel, session, [question(attachments=files)])
+    assert not results[0].is_error, text(results[0])
+    (message,) = sent_to(provider)
+    assert message["attachments"] == [
+        {"filename": a["filename"], "content_type": a["content_type"], "content": a["data"]}
+        for a in files
+    ]
+    assert CLIENT not in json.dumps(results[0].structured_content)
+
+
+@pytest.mark.loopback
+@pytest.mark.parametrize(
+    ("attachments", "code"),
+    [
+        ([attach(f"p{i}.png") for i in range(4)], "attachments_too_many"),
+        ([attach("big.png", PNG_BYTES + bytes(30000))], "attachment_too_large"),
+        (
+            [attach(f"p{i}.png", PNG_BYTES + bytes(20000)) for i in range(2)],
+            "attachments_too_large",
+        ),
+        ([attach("fake.png", b"GIF89a" + bytes(40))], "attachment_type_mismatch"),
+        ([attach("short.png", PNG_BYTES[:8])], "attachment_type_mismatch"),
+        ([attach("page.png", PAGE, "image/png")], "attachment_type_mismatch"),
+        ([attach("page.html", PNG_BYTES)], "attachment_type_mismatch"),
+        ([attach("page.html", b"<p>\x00</p>")], "attachment_type_mismatch"),
+        ([attach("page.html", b"<script>1</script>")], EXTERNAL),
+        ([attach("a.html", b"<img src='https://x.invalid/a.png'>")], EXTERNAL),
+        ([attach("a.html", b"<p style='background:url(//x.invalid/a)'>")], EXTERNAL),
+        ([attach("a.html", b"<style>@import 'x.css';</style>")], EXTERNAL),
+        ([attach("page.png", PNG_BYTES, "text/html")], "attachment_invalid"),
+        ([attach("a.png"), attach("a.png")], "attachment_invalid"),
+        ([attach("../a.png")], "invalid_arguments"),
+        ([{**attach(), "data": "not base64!"}], "attachment_invalid"),
+    ],
+)
+def test_attachment_limits_and_types_refuse_before_anything_is_sent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    session: FakeSession,
+    provider: FakeAgentMail,
+    attachments: list[dict[str, str]],
+    code: str,
+) -> None:
+    config = email_config(tmp_path).model_copy(
+        update={"attachments": AttachmentLimits(max_count=3, max_file_bytes=24576)}
+    )
+    assert config.transport.kind == "agentmail"
+    email = Email(config, AgentMail(config.transport, provider.transport()))
+    kernel = build_kernel(tmp_path, monkeypatch, session, email)
+    try:
+        _, results = run_calls(kernel, session, [question(attachments=attachments)])
+        assert results[0].is_error and code in text(results[0]), text(results[0])
+        assert not [r for r in provider.requests if r.method == "POST"]
+        # A refusal is not a send: it does not use the role's rate limit.
+        _, later = run_calls(kernel, session, [question("q2")])
+        assert not later[0].is_error
+    finally:
+        kernel.database.close()
+
+
+@pytest.mark.loopback
+def test_the_content_gate_reads_html_attachments(
+    kernel: Kernel, session: FakeSession, provider: FakeAgentMail
+) -> None:
+    page = f"<p>About {DENIED}</p>".encode()
+    _, results = run_calls(kernel, session, [question(attachments=[attach("plan.html", page)])])
+    assert results[0].is_error and "content_refused" in text(results[0])
+    assert not sent_to(provider)
+
+
+@pytest.mark.loopback
+def test_attachments_are_part_of_the_idempotency_fingerprint(
+    kernel: Kernel, session: FakeSession, provider: FakeAgentMail
+) -> None:
+    other = attach("plan.png", PNG_BYTES + b"\x01")
+    _, results = run_calls(
+        kernel,
+        session,
+        [
+            question("k", attachments=[attach()]),
+            question("k", attachments=[other]),
+            question("k"),
+            # Last: a replay never reaches the handler, but it counts as a call, so earlier
+            # it would push the third real send past the role's limit of 3.
+            question("k", attachments=[attach()]),
+        ],
+    )
+    assert not any(r.is_error for r in results), [text(r) for r in results]
+    # The same key with the same attachments sends once; other attachments, or none, are
+    # a different effect.
+    assert results[3].structured_content == results[0].structured_content
+    assert len({r.structured_content["message_id"] for r in results}) == 3
+    assert len(sent_to(provider)) == 3
+    plain = [m for m in sent_to(provider) if not m["attachments"]]
+    assert len(plain) == 1
+
+
+@pytest.mark.loopback
+def test_a_send_without_attachments_keeps_its_scope_key(email: Email) -> None:
+    (send,) = descriptors()
+    registry = Registry((send,), handlers(email))
+    arguments: dict[str, Any] = question("k")
+    legacy = send.model_copy(
+        update={
+            "cardea": send.cardea.model_copy(update={"idempotency_scope": ("/to", "/client_key")})
+        }
+    )
+    assert registry.scope_key("email.send", "eng", "c", arguments) == Registry(
+        (legacy,), handlers(email)
+    ).scope_key("email.send", "eng", "c", arguments)
+    attached = {**arguments, "attachments": [attach()]}
+    assert registry.scope_key("email.send", "eng", "c", attached) != (
+        registry.scope_key("email.send", "eng", "c", arguments)
+    )
+
+
+@pytest.mark.loopback
+def test_attachments_share_the_role_rate_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, session: FakeSession, provider: FakeAgentMail
+) -> None:
+    config = email_config(tmp_path, limit=2)
+    assert config.transport.kind == "agentmail"
+    email = Email(config, AgentMail(config.transport, provider.transport()))
+    kernel = build_kernel(tmp_path, monkeypatch, session, email)
+    try:
+        _, results = run_calls(
+            kernel,
+            session,
+            [
+                question("a", attachments=[attach()]),
+                question("b"),
+                question("c", attachments=[attach()]),
+                # A replay of the first send is the same effect, not a third send.
+                question("a", attachments=[attach()]),
+            ],
+        )
+        assert [r.is_error for r in results] == [False, False, True, False]
+        assert "rate_limited" in text(results[2])
+        assert len(sent_to(provider)) == 2
+    finally:
+        kernel.database.close()
+
+
+def test_attachment_limits_are_bounded_by_the_receipt() -> None:
+    with pytest.raises(ValueError, match="max_total_bytes"):
+        AttachmentLimits(max_total_bytes=40000)
+
+
+@pytest.mark.loopback
+def test_smtp_attaches_files_as_mime_parts(
+    tmp_path: Path, mail_servers: tuple[FakeSmtp, FakeImap]
+) -> None:
+    smtp, imap = mail_servers
+    adapter = smtp_imap(tmp_path, smtp, imap)
+    files = (
+        Attachment("plan.png", "image/png", PNG_BYTES),
+        Attachment("plan.html", "text/html", PAGE),
+    )
+    asyncio.run(adapter.send(Outgoing(CLIENT, "Plan", "See attached.", "d" * 64, files)))
+    (raw,) = smtp.accepted
+    parts = [p for p in mime.message_from_bytes(raw).walk() if p.get_filename()]
+    assert [(p.get_filename(), p.get_content_type()) for p in parts] == [
+        ("plan.png", "image/png"),
+        ("plan.html", "text/html"),
+    ]
+    assert parts[0].get_payload(decode=True) == PNG_BYTES
 
 
 # Kernel contract

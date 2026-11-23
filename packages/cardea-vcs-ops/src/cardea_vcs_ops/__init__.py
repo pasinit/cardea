@@ -101,6 +101,10 @@ async def read_change(arguments: dict[str, JsonValue], ctx: OperationContext) ->
     return await _vcs().read_change(arguments, ctx)
 
 
+async def list_changes(arguments: dict[str, JsonValue], ctx: OperationContext) -> JsonValue:
+    return await _vcs().list_changes(arguments, ctx)
+
+
 async def read_branch(arguments: dict[str, JsonValue], ctx: OperationContext) -> JsonValue:
     return await _vcs().read_branch(arguments, ctx)
 

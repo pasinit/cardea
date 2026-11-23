@@ -88,6 +88,14 @@ class SmtpImap:
         mail["Date"] = email.utils.formatdate(localtime=False, usegmt=True)
         mail["Message-ID"] = identity
         mail.set_content(message.body)
+        for attachment in message.attachments:
+            maintype, subtype = attachment.content_type.split("/")
+            mail.add_attachment(
+                attachment.content,
+                maintype=maintype,
+                subtype=subtype,
+                filename=attachment.filename,
+            )
         password = _password(self.config.smtp)
         try:
             client = self._smtp()

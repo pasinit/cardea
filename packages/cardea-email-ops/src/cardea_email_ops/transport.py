@@ -19,12 +19,22 @@ from typing import Protocol
 
 
 @dataclass(frozen=True)
+class Attachment:
+    """One checked attachment: a PNG image or a self-contained HTML page."""
+
+    filename: str
+    content_type: str
+    content: bytes
+
+
+@dataclass(frozen=True)
 class Outgoing:
     to: str
     subject: str
     body: str
     # The call's ADR-026 effect key: the provider idempotency key and the Message-ID.
     effect_key: str
+    attachments: tuple[Attachment, ...] = ()
 
 
 @dataclass(frozen=True)
