@@ -322,11 +322,13 @@ def test_a_pinned_stale_head_is_refused_even_with_its_check(
 
 
 def test_only_the_tries_evidence_is_optional() -> None:
-    # Every other evidence query still requires the arguments it matches on.
+    # Every other evidence query of the merge still requires the arguments it matches on.
+    # Scoped to vcs.merge: vcs.open_change's own `earlier` lookup is legitimately optional.
     assert EvidenceQuery(name="x", operation="y.z", match={"arguments/a": "/a"}).optional is False
     queries = {
         query.name: query.optional
         for descriptor in in_process_descriptors()
+        if descriptor.name == "vcs.merge"
         for query in descriptor.cardea.evidence or ()
     }
     assert queries.pop("tries") is True
