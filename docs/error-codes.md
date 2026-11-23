@@ -227,6 +227,7 @@ used by the examples.
 | `branch_not_allowed` | Only agent-group members push branches or open changes; Branches must be named {…}<name> | `cardea_vcs_ops.ops` |
 | `branch_unknown` | No branch {…} | `cardea_vcs_ops.ops` |
 | `call_abandoned` | — | `cardea.service.invocation` |
+| `change_exists` | Record {…} already has open pull request #{…}: {…} | `cardea_vcs_ops.ops` |
 | `change_invalid` | The change bundle was not staged | `cardea_vcs_ops.ops` |
 | `checkpoint_missing` | Completed work has no resumable checkpoint. | `cardea.kernel.store` |
 | `claim_limit` | The holder already has {…} claim(s); the collection allows {…} | `cardea.service.records` |
@@ -306,6 +307,6 @@ used by the examples.
 | `worker_error` | {…} (HTTP {…}) | `cardea.service.confined` |
 | `worker_failed` | exit status {…}, systemd result {…} | `cardea.service.confined` |
 | `worker_lost` | Worker lease expired. | `cardea.kernel.store` |
-| `worker_output_invalid` | unexpected artifacts; output is not JSON; not a reconciliation (and 2 more) | `cardea.service.confined` |
+| `worker_output_invalid` | unexpected artifacts; output is not JSON; not a reconciliation (and 3 more) | `cardea.service.confined` |
 | `worker_start_unknown` | helper start failed | `cardea.service.confined` |
 | `worker_status_unknown` | worker status unavailable | `cardea.service.confined` |

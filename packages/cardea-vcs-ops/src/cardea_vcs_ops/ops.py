@@ -477,6 +477,37 @@ class Vcs:
             "head": str(pull["head"]["ref"]),
         }
 
+    @staticmethod
+    async def open_change_for_item(
+        host: GitHub, arguments: dict[str, JsonValue], context: OperationContext
+    ) -> dict[str, Any] | None:
+        """The pull request this call's item (`record_id`) still has open on the host, other
+        than one for the call's own head. The kernel's earlier `vcs.open_change` receipts
+        for the item name the candidates; the host says whether one is still open."""
+        if not arguments.get("record_id"):
+            return None
+        for entry in context.evidence.get("existing") or ():
+            head = _field(entry, "output/head")
+            if not isinstance(head, str) or head == arguments.get("head"):
+                continue
+            pull = await host.find_pull(head)
+            if pull is not None and pull.get("state") == "open":
+                return pull
+        return None
+
+    async def resolve_base(
+        self, arguments: dict[str, JsonValue], context: OperationContext
+    ) -> dict[str, JsonValue]:
+        """For `code.session`: where the item has an open pull request, work on top of that
+        pull request's head branch, else keep the requested base (`{}`)."""
+        repository = self.repository(arguments["repository"])
+        async with await self.client(repository, context, "pull_requests:read") as host:
+            try:
+                pull = await self.open_change_for_item(host, arguments, context)
+            except HostRefused as refused:
+                raise OperationRejected(str(refused), "host_refused") from None
+        return {} if pull is None else {"base_ref": str(pull["head"]["ref"])}
+
     async def open_change(
         self, arguments: dict[str, JsonValue], context: OperationContext
     ) -> dict[str, JsonValue]:
@@ -487,6 +518,13 @@ class Vcs:
         self.gate(context, "vcs.open_change", texts={"title": title, "body": body})
         async with await self.client(repository, context, "pull_requests:write") as host:
             try:
+                open_pull = await self.open_change_for_item(host, arguments, context)
+                if open_pull is not None:
+                    raise OperationRejected(
+                        f"Record {arguments['record_id']} already has open pull request "
+                        f"#{open_pull['number']}: {open_pull.get('html_url', '')}",
+                        "change_exists",
+                    )
                 pull = await host.create_pull(head, base, title, body, bool(arguments.get("draft")))
             except DuplicatePull:
                 # The host refuses a second pull request for a head (422): find the first.
@@ -890,6 +928,7 @@ class Vcs:
             "vcs.find_branch": self.find_branch,
             "vcs.open_change": self.open_change,
             "vcs.find_change": self.find_change,
+            "vcs.resolve_base": self.resolve_base,
             "vcs.comment": self.comment,
             "vcs.find_comment": self.find_comment,
             "vcs.review": self.review,

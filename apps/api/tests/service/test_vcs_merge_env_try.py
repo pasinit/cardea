@@ -330,4 +330,6 @@ def test_only_the_tries_evidence_is_optional() -> None:
         for query in descriptor.cardea.evidence or ()
     }
     assert queries.pop("tries") is True
+    # The one-open-change check names an item only when the caller passes a record_id.
+    assert queries.pop("existing") is True
     assert queries and not any(queries.values())

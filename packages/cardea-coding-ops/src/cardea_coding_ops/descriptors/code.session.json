@@ -22,6 +22,11 @@
         "task_key": {
           "type": "string",
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "record_id": {
+          "type": "string",
+          "pattern": "^rec-[0-9a-f]{32}$",
+          "description": "The work record this session is for. If it has an open pull request, base_ref is replaced by that pull request's head branch."
         }
       },
       "required": [
@@ -105,6 +110,16 @@
       "worker": "code-session"
     },
     "timeout_seconds": 3600,
+    "resolver": {"profile": "vcs", "worker": "vcs-resolve-base", "entry": "vcs.resolve_base"},
+    "evidence": [
+      {
+        "name": "existing",
+        "operation": "vcs.open_change",
+        "match": {"arguments/repository": "/repository", "arguments/record_id": "/record_id"},
+        "fields": ["output/head"],
+        "optional": true
+      }
+    ],
     "idempotency_scope": [
       "/repository",
       "/base_ref",

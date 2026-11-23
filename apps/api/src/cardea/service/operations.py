@@ -193,6 +193,20 @@ class FollowOn(Record):
     optional: bool = False
 
 
+class Resolver(Record):
+    """A confined step that runs before the operation's worker and may replace `base_ref`.
+
+    `entry` is an entry point served by `worker` under `profile`, which holds the credential
+    the operation's own worker lacks. It runs with the call's arguments and evidence and
+    returns `{"base_ref": ...}` or `{}`; nothing else it returns is used, and the replaced
+    arguments are validated against the descriptor again.
+    """
+
+    profile: WorkerName
+    worker: WorkerName
+    entry: HandlerName
+
+
 class ConfinedExecutor(Record):
     """Run the handler as a separate confined process (ADR-028).
 
@@ -337,9 +351,13 @@ class Binding(Record):
     # Names the argument holding a record ID: the kernel links the result to that record,
     # needing `record:<collection>/attach` live (`evidence_links`).
     attach_record: Pointer | None = None
+    # Confined operations only: a host-side step that may resolve `base_ref` first.
+    resolver: Resolver | None = None
 
     @model_validator(mode="after")
     def effect_only(self) -> Self:
+        if self.resolver is not None and self.executor is None:
+            raise ValueError("Only confined operations declare a resolver")
         if self.effect == "read" and (
             self.idempotency_scope is not None or self.reconciler or self.replies
         ):
@@ -420,6 +438,7 @@ class OperationDescriptor(Record):
                 ("replies", self.cardea.replies),
                 ("run_window", self.cardea.run_window),
                 ("attach_record", self.cardea.attach_record),
+                ("resolver", self.cardea.resolver),
             )
             if value is None
         }

@@ -72,7 +72,7 @@ TOKEN_WARNING_DAYS = 7
 GRANT_RENEWAL_DAYS = 2
 CERT_RENEWAL_SECONDS = 30 * 24 * 3600
 WORKER_PROFILES = ("session", "coding", "vcs", "try")
-WORKER_NAMES = ("agent", "code-session", "env-try", "vcs-check-repository")
+WORKER_NAMES = ("agent", "code-session", "env-try", "vcs-check-repository", "vcs-resolve-base")
 PACKAGES = {
     "cardea-vcs-ops": "cardea_vcs_ops",
     "cardea-coding-ops": "cardea_coding_ops",

@@ -965,3 +965,139 @@ def test_read_branch_returns_the_head_and_refuses_unknown_branches(
     )
     assert results[1].structured_content["head"] == change["head"], text(results[1])
     assert results[2].is_error and "branch_unknown" in text(results[2])
+
+
+# One open pull request per item (record_id)
+
+RECORD = "rec-" + "a" * 32
+OTHER_RECORD = "rec-" + "b" * 32
+
+
+def branch_on_host(host: FakeGitHub, name: str) -> str:
+    """A branch holding one empty commit, as a pushed branch would exist on the host."""
+    git = ["git", "-c", "user.name=agent", "-c", "user.email=agent@example.invalid"]
+    path = str(host.repositories["acme/cardea"].path)
+    tree = subprocess.run(
+        [*git, "-C", path, "hash-object", "-t", "tree", "-w", "--stdin"],
+        input="",
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    commit = subprocess.run(
+        [*git, "-C", path, "commit-tree", tree, "-m", name],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    subprocess.run([*git, "-C", path, "update-ref", f"refs/heads/{name}", commit], check=True)
+    return name
+
+
+def opening(branch: str, record_id: str | None = None) -> dict[str, Any]:
+    return {
+        "repository": "cardea",
+        "head": branch,
+        "base": "main",
+        "title": branch,
+        **({"record_id": record_id} if record_id else {}),
+    }
+
+
+def with_evidence(*heads: str) -> Any:
+    """The kernel's `existing` evidence: this item's earlier `vcs.open_change` heads."""
+    from dataclasses import replace
+
+    entries = tuple({"fields": {"output/head": head}} for head in heads)
+    # A stand-in content gate that finds nothing; the kernel binds the real one.
+    return replace(caller("eng"), evidence={"existing": entries}, check_content=lambda **_: None)
+
+
+def test_an_item_with_an_open_pull_request_cannot_open_a_second(host: FakeGitHub, vcs: Vcs) -> None:
+    import asyncio
+
+    from cardea.service.operations import OperationRejected
+
+    first, second, third = (branch_on_host(host, f"agent/eng/{n}") for n in "abc")
+    pulls = host.repositories["acme/cardea"].pulls
+    opened = asyncio.run(vcs.open_change(opening(first, RECORD), with_evidence()))
+    assert opened["number"] == 1
+    # A second head for the same item is refused, naming the existing pull request.
+    with pytest.raises(OperationRejected) as refused:
+        asyncio.run(vcs.open_change(opening(second, RECORD), with_evidence(first)))
+    assert refused.value.code == "change_exists"
+    assert "#1" in str(refused.value) and str(opened["url"]) in str(refused.value)
+    assert len(pulls) == 1
+    # Opening the same head again is the same call, not a second pull request.
+    again = asyncio.run(vcs.open_change(opening(first, RECORD), with_evidence(first)))
+    assert again["number"] == 1
+    # A call that names no item is not affected, nor is one whose item has no receipt.
+    assert asyncio.run(vcs.open_change(opening(second), with_evidence(first)))["number"] == 2
+    assert (
+        asyncio.run(vcs.open_change(opening(third, OTHER_RECORD), with_evidence()))["number"] == 3
+    )
+    # Once the host shows the first closed, the item may open another.
+    pulls[0]["state"] = "closed"
+    fourth = branch_on_host(host, "agent/eng/d")
+    assert (
+        asyncio.run(vcs.open_change(opening(fourth, RECORD), with_evidence(first)))["number"] == 4
+    )
+
+
+def test_resolve_base_follows_the_open_pull_request_of_the_item(host: FakeGitHub, vcs: Vcs) -> None:
+    import asyncio
+
+    branch = branch_on_host(host, "agent/eng/item")
+    context = with_evidence(branch)
+    asyncio.run(vcs.open_change(opening(branch, RECORD), with_evidence()))
+    arguments: dict[str, Any] = {"repository": "cardea", "base_ref": "main", "record_id": RECORD}
+    assert asyncio.run(vcs.resolve_base(arguments, context)) == {"base_ref": branch}
+    # No item, or no receipt for it: the requested base stands.
+    assert asyncio.run(vcs.resolve_base({**arguments, "record_id": None}, context)) == {}
+    assert asyncio.run(vcs.resolve_base(arguments, with_evidence())) == {}
+    # The host, not the receipt, says whether the pull request is still open.
+    host.repositories["acme/cardea"].pulls[0]["state"] = "closed"
+    assert asyncio.run(vcs.resolve_base(arguments, context)) == {}
+
+
+def test_the_resolver_may_replace_only_a_valid_base_ref() -> None:
+    import asyncio
+    from datetime import UTC, datetime
+
+    from cardea.service.confined import WorkerFailed, resolving_handler
+    from cardea.service.operations import Resolver
+
+    seen: list[dict[str, Any]] = []
+    answers: list[dict[str, Any]] = []
+
+    class Fake:
+        async def run(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+            return answers.pop(0)
+
+    async def inner(arguments: dict[str, Any], context: Any) -> dict[str, Any]:
+        seen.append(arguments)
+        return {"ran": True}
+
+    def validate(arguments: dict[str, Any]) -> None:
+        if not str(arguments["base_ref"]).startswith("agent/"):
+            raise Fault("invalid_arguments", "no", 422)
+
+    context = caller("eng")
+    context = type(context)(
+        task_id="t",
+        namespace="eng",
+        receipt_id="r",
+        deadline=datetime.now(UTC) + timedelta(minutes=1),
+        effect_key="e",
+    )
+    resolver = Resolver(profile="vcs", worker="vcs-resolve-base", entry="vcs.resolve_base")
+    handler = resolving_handler(cast(Workers, Fake()), resolver, inner, validate, 30)
+    arguments: dict[str, Any] = {"repository": "cardea", "base_ref": "agent/eng/x"}
+    answers[:] = [{"base_ref": "agent/eng/item", "other": 1}, {}]
+    assert asyncio.run(asyncio.wait_for(handler(arguments, context), 5)) == {"ran": True}
+    assert asyncio.run(asyncio.wait_for(handler(arguments, context), 5)) == {"ran": True}
+    assert [s["base_ref"] for s in seen] == ["agent/eng/item", "agent/eng/x"]
+    answers[:] = [{"base_ref": "main"}]
+    with pytest.raises(WorkerFailed):
+        asyncio.run(asyncio.wait_for(handler(arguments, context), 5))
+    assert len(seen) == 2

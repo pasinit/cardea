@@ -81,6 +81,10 @@ async def find_change(arguments: dict[str, JsonValue], ctx: OperationContext) ->
     return await _vcs().find_change(arguments, ctx)
 
 
+async def resolve_base(arguments: dict[str, JsonValue], ctx: OperationContext) -> JsonValue:
+    return await _vcs().resolve_base(arguments, ctx)
+
+
 async def comment(arguments: dict[str, JsonValue], ctx: OperationContext) -> JsonValue:
     return await _vcs().comment(arguments, ctx)
 

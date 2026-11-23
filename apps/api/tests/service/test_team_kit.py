@@ -192,9 +192,13 @@ class Profiles:
         return {
             "profiles": {
                 name: {"wall_seconds": 3600, "network": {"policy": "none"}, "sha256": name}
-                for name in ("coding", "try")
+                for name in ("coding", "try", "vcs")
             },
-            "workers": {"code-session": ["coding"], "env-try": ["try"]},
+            "workers": {
+                "code-session": ["coding"],
+                "env-try": ["try"],
+                "vcs-resolve-base": ["vcs"],
+            },
             "sha256": "config",
         }
 

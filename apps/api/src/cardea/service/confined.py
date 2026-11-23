@@ -44,6 +44,7 @@ from cardea.service.operations import (
     OperationRejected,
     Reconciler,
     Reconciliation,
+    Resolver,
 )
 
 log = logging.getLogger(__name__)
@@ -477,6 +478,43 @@ def job_document(
             ),
         },
     }
+
+
+def resolving_handler(
+    workers: "Workers",
+    resolver: Resolver,
+    inner: Handler,
+    validate: Callable[[dict[str, JsonValue]], None],
+    timeout_seconds: int,
+) -> Handler:
+    """Run the resolver's confined step first; it may replace `base_ref` and nothing else.
+
+    The step reads the repository host with its own worker's credential, so the service
+    process and the operation's worker hold none. A refusal or failure of the step is the
+    call's, before the operation's worker starts. The call's recorded arguments stay as
+    the caller sent them; the output records the base actually used.
+    """
+
+    async def run(arguments: dict[str, JsonValue], context: OperationContext) -> Any:
+        output = await workers.run(
+            job_id("resolve", context.receipt_id),
+            job_document(arguments, context, resolver.entry),
+            profile=resolver.profile,
+            worker=resolver.worker,
+            deadline=context.deadline.timestamp(),
+            timeout_seconds=timeout_seconds,
+        )
+        base = output.get("base_ref")
+        if base is None:
+            return await inner(arguments, context)
+        replaced = {**arguments, "base_ref": base}
+        try:
+            validate(replaced)
+        except Fault:
+            raise WorkerFailed("worker_output_invalid", "invalid_output", "bad base_ref") from None
+        return await inner(replaced, context)
+
+    return run
 
 
 def confined_reconciler(

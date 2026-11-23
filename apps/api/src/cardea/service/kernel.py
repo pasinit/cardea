@@ -37,6 +37,7 @@ from cardea.service.confined import (
     confined_handler,
     confined_reconciler,
     job_id,
+    resolving_handler,
 )
 from cardea.service.database import Database, Fault, borrow
 from cardea.service.harnesses import Catalog, Harnesses, check_harness_grants
@@ -647,6 +648,9 @@ class Kernel:
         if then is not None:
             # The second phase is pinned with the first: a changed profile is a new run.
             record["then"] = self.workers.require(then.profile, then.worker, timeout)
+        resolver = self.operations.get(name).cardea.resolver
+        if resolver is not None:
+            record["resolver"] = self.workers.require(resolver.profile, resolver.worker, timeout)
         return record
 
     def second_phase(self, name: str) -> FollowOn | None:
@@ -698,7 +702,7 @@ class Kernel:
             return self._gated(self.operations.handler(name), name)
         self.executor_record(name)
         assert self.workers is not None
-        return confined_handler(
+        handler = confined_handler(
             self.workers,
             executor.model_copy(update={"then": self.second_phase(name)}),
             descriptor.cardea.timeout_seconds,
@@ -707,6 +711,15 @@ class Kernel:
             gate=lambda context: content_gate.GateEndpoint(
                 self.database, self.content_gate, context, self.endpoint_host
             ),
+        )
+        if descriptor.cardea.resolver is None:
+            return handler
+        return resolving_handler(
+            self.workers,
+            descriptor.cardea.resolver,
+            handler,
+            lambda arguments: self.operations.validate_arguments(name, arguments),
+            descriptor.cardea.timeout_seconds,
         )
 
     def _artifact_store(self, limit: int) -> StoreArtifacts | None:

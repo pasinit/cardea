@@ -16,6 +16,7 @@ dependencies = []
 "vcs.find_branch" = "cardea_vcs_ops:find_branch"
 "vcs.open_change" = "cardea_vcs_ops:open_change"
 "vcs.find_change" = "cardea_vcs_ops:find_change"
+"vcs.resolve_base" = "cardea_vcs_ops:resolve_base"
 "vcs.comment" = "cardea_vcs_ops:comment"
 "vcs.find_comment" = "cardea_vcs_ops:find_comment"
 "vcs.review" = "cardea_vcs_ops:review"

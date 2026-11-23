@@ -53,6 +53,7 @@ WORKERS = {
     "vcs-review": ["vcs.review", "vcs.find_review"],
     "vcs-read-change": ["vcs.read_change"],
     "vcs-read-branch": ["vcs.read_branch"],
+    "vcs-resolve-base": ["vcs.resolve_base"],
     "vcs-check-repository": ["vcs.check_repository"],
     "vcs-merge": ["vcs.merge", "vcs.find_merge"],
 }
