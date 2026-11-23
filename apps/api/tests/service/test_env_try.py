@@ -297,8 +297,10 @@ def test_a_head_outside_the_clone_refs_is_staged(tmp_path: Path, repo: dict[str,
     scratch.mkdir()
     checkout = stage(str(repo["source"]), head, scratch)
     assert (checkout / "mode").read_text() == "pr\n"
+    missing = tmp_path / "scratch-unknown"
+    missing.mkdir()
     with pytest.raises(OperationRejected) as unknown:
-        stage(str(repo["source"]), "f" * 40, tmp_path / "scratch-unknown")
+        stage(str(repo["source"]), "f" * 40, missing)
     assert unknown.value.code == "env_commit_unknown"
 
 
