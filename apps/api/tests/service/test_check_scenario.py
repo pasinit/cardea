@@ -52,7 +52,7 @@ def test_make_check_runs_the_runner_and_the_tests_without_loopback() -> None:
     makefile = (ROOT / "Makefile").read_text()
     assert "check:\n\tpython3 packaging/check.py\n" in makefile
     (recipe,) = (line for line in makefile.splitlines() if '-m "not loopback"' in line)
-    assert "CARDEA_NO_LOOPBACK=1" in recipe and "-rfE" in recipe
+    assert "CARDEA_NO_LOOPBACK=1" in recipe and "-rfE" in recipe and "--tb=short" in recipe
     runner_steps = {name: argv for name, argv in runner().STEPS}
     assert runner_steps == {
         "lint": ("make", "lint"),
