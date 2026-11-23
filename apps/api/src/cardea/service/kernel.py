@@ -1,6 +1,5 @@
 """Authenticated application handlers; all acknowledged changes share SQLite commits."""
 
-import asyncio
 import json
 from collections.abc import Callable
 from dataclasses import replace
@@ -25,7 +24,6 @@ from cardea.service import (
     host_budget,
     loopback,
     mailbox,
-    mirror,
     replies,
     spend,
 )
@@ -684,7 +682,7 @@ class Kernel:
             return self._gated(self.operations.handler(name), name)
         self.executor_record(name)
         assert self.workers is not None
-        confined = confined_handler(
+        return confined_handler(
             self.workers,
             executor,
             descriptor.cardea.timeout_seconds,
@@ -694,22 +692,6 @@ class Kernel:
                 self.database, self.content_gate, context, self.endpoint_host
             ),
         )
-        if name != "vcs.push_branch":
-            return confined
-        return self._mirrored(confined)
-
-    @staticmethod
-    def _mirrored(handler: Handler) -> Handler:
-        """After a push succeeds, put the pushed head in the repository mirror (host side)."""
-
-        async def pushed(
-            arguments: dict[str, JsonValue], context: OperationContext
-        ) -> dict[str, JsonValue]:
-            output = await handler(arguments, context)
-            await asyncio.to_thread(mirror.after_push, arguments, context)
-            return output
-
-        return pushed
 
     def _artifact_store(self, limit: int) -> StoreArtifacts | None:
         """Where a confined operation's artifacts go: task-owned objects (ADR-037)."""

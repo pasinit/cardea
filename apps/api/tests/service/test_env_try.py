@@ -122,7 +122,7 @@ def repo(tmp_path: Path) -> dict[str, Any]:
     return {"source": bare, "good": good, "bad": bad}
 
 
-def registry_file(tmp_path: Path, source: Path, **environment: Any) -> Path:
+def registry_file(tmp_path: Path, source: Path | str, **environment: Any) -> Path:
     script = tmp_path / "scenario.py"
     script.write_text(SCENARIO)
     catalog = {
@@ -281,6 +281,23 @@ def test_an_identical_call_while_one_runs_is_refused(
     with kernel.database.engine.begin() as conn:
         conn.exec_driver_sql("UPDATE env_runs SET expires_at='2000-01-01T00:00:00+00:00'")
     assert call(kernel, "third", commit=repo["good"], scenarios=["try"])[0] == "succeeded"
+
+
+def test_a_commit_reachable_only_from_a_pull_ref_is_staged(
+    env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any], tmp_path: Path
+) -> None:
+    kernel, _ = env_kernel
+    work = tmp_path / "work"
+    git(work, "checkout", "--quiet", "-b", "pr-branch")
+    (work / "mode").write_text("good\n")
+    git(work, "commit", "--quiet", "-am", "pull request")
+    pull = git(work, "rev-parse", "HEAD")
+    git(work, "push", "--quiet", str(repo["source"]), "HEAD:refs/pull/7/head")
+    registry_file(tmp_path, f"file://{repo['source']}")
+    passed = output(call(kernel, "pull", commit=pull, scenarios=["try"])[1])
+    assert passed["passed"] is True
+    state, refused = call(kernel, "unknown", commit="e" * 40, scenarios=["try"])
+    assert state == "failed" and refused.failure.code == "env_commit_unknown"
 
 
 def test_a_failed_run_is_not_reused(

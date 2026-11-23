@@ -122,6 +122,10 @@ def stage(source: str, commit: str, scratch: Path) -> Path:
     cloned = _git(scratch, env, "clone", "--quiet", "--no-checkout", source, str(checkout))
     if cloned.returncode:
         raise OperationRejected("the repository source could not be read", "env_source_unavailable")
+    # Bring in every ref of the source (a local read, no network), so a commit reachable only
+    # from a non-branch ref such as refs/pull/N/head is present. An unknown commit stays
+    # absent and the checkout below refuses it with env_commit_unknown.
+    _git(checkout, env, "fetch", "--quiet", "--no-tags", source, "+refs/*:refs/mirror/*")
     switched = _git(checkout, env, "checkout", "--quiet", "--detach", commit)
     if switched.returncode:
         raise OperationRejected("the commit is not in the repository", "env_commit_unknown")
