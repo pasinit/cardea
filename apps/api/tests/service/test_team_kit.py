@@ -329,6 +329,21 @@ def test_the_email_rate_limit_is_a_host_setting() -> None:
     assert kit().email_fragment(document)["roles"]["dev-team.pm"]["rate_limit"]["count"] == 10
 
 
+@pytest.mark.parametrize(
+    "limit",
+    [{"count": 0, "window_days": 1}, {"count": 10}, {"count": "10", "window_days": 1}, 5]
+    + [{"count": 10, "window_days": 91}, {"count": True, "window_days": 1}],
+)
+def test_the_email_rate_limit_must_be_valid(tmp_path: Path, limit: object) -> None:
+    module = kit()
+    document = example()
+    document["email"] = {**document["email"], "rate_limit": limit}
+    path = tmp_path / "team.host.json"
+    path.write_text(json.dumps(document))
+    with pytest.raises(module.HostError, match="email.rate_limit"):
+        module.load_host(path)
+
+
 def test_the_host_file_refuses_an_invalid_default_branch(tmp_path: Path) -> None:
     path = tmp_path / "team.host.json"
     path.write_text(json.dumps({**example(), "default_branch": "no spaces"}))

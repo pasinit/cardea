@@ -152,6 +152,7 @@ def load_host(path: Path) -> dict[str, Any]:
     except ValueError as error:
         raise HostError(str(error)) from error
     product(document)
+    email_limit(document)
     return document
 
 
@@ -246,8 +247,15 @@ def email_note(host: dict[str, Any], role: str = "product manager") -> str:
 def email_limit(host: dict[str, Any]) -> dict[str, Any]:
     """The host's email rate limit (a host setting, not hard-coded per role)."""
     default = {"count": 10, "window_days": 1}
-    limit: dict[str, Any] = (host.get("email") or {}).get("rate_limit", default)
-    return limit
+    limit = (host.get("email") or {}).get("rate_limit", default)
+    bounds = {"count": 1000, "window_days": 90}
+    if not isinstance(limit, dict) or set(limit) != set(bounds):
+        raise HostError("email.rate_limit takes count and window_days")
+    for key, top in bounds.items():
+        value = limit[key]
+        if not isinstance(value, int) or isinstance(value, bool) or not 1 <= value <= top:
+            raise HostError(f"email.rate_limit.{key} must be a whole number from 1 to {top}")
+    return dict(limit)
 
 
 def repository_note(host: dict[str, Any], operations: list[str]) -> str:
