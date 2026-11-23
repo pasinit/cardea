@@ -1,0 +1,11 @@
+# Refresh the repository mirrors env.try and code.session read: branches (agent/* too) and
+# pull request heads. Runs as the mirror's owner, outside every sandbox; the workers keep
+# the mirror read-only and no credential. Install with its timer.
+[Unit]
+Description=Refresh the repository mirrors (branches and pull request heads)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I /opt/cardea/packaging/mirror_refresh.py /opt/cardea-code/repositories.json
