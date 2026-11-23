@@ -7,11 +7,14 @@ import time
 from collections.abc import Iterator
 from datetime import date, timedelta
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 
 import pytest
 from cardea_coding_ops import descriptors as coding_descriptors
+from cardea_email_ops import Email
+from cardea_email_ops import descriptors as email_descriptors
+from cardea_email_ops import handlers as email_handlers
 from cardea_env_ops import descriptors as env_descriptors
 from cardea_vcs_ops import in_process_descriptors
 from mcp.client.session import ClientSession
@@ -393,7 +396,13 @@ def registry() -> Registry:
         ),
         transport=FakeGitHub(Path("/nonexistent")).transport(),
     )
-    return Registry((*in_process_descriptors(), *confined, *env_descriptors()), vcs.handlers())
+    # The team's mail operations are installed so its policy provisions; no mail is sent here.
+    stub = SimpleNamespace(send=None, find_sent=None, poll_replies=None, poll_inbound=None)
+    mail = cast(Email, stub)
+    return Registry(
+        (*in_process_descriptors(), *confined, *env_descriptors(), *email_descriptors()),
+        {**vcs.handlers(), **email_handlers(mail)},
+    )
 
 
 @pytest.fixture
@@ -656,9 +665,7 @@ def provision_team(kernel: Kernel, *, paused: bool) -> None:
     provision_team_for(kernel, host(), paused=paused)
 
 
-def provision_team_for(
-    kernel: Kernel, document: dict[str, Any], *, paused: bool = False
-) -> None:
+def provision_team_for(kernel: Kernel, document: dict[str, Any], *, paused: bool = False) -> None:
     module = kit()
     base = {
         "principals": [

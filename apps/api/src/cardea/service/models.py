@@ -1,6 +1,7 @@
 """Explicit v0.2 wire/config records; existing v0.1 task and receipt bytes are preserved."""
 
 import json
+import re
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -975,14 +976,15 @@ class GroupTrigger(Record):
     # A named trigger's ID is `<member>.<name>`; an unnamed one's is `<member>.t<n>`, `n`
     # counting the unnamed triggers only. A trigger's kind is immutable, so a name keeps an
     # optional trigger's ID from shifting the others' when it comes and goes.
-    name: (
-        Annotated[str, Field(strict=True, pattern=r"^(?!t[0-9]+$)[a-z][a-z0-9-]{0,23}$")] | None
-    ) = None
+    name: Annotated[str, Field(strict=True, pattern=r"^[a-z][a-z0-9-]{0,23}$")] | None = None
     schedule: GroupSchedule | None = None
     event: GroupEventMatch | None = None
 
     @model_validator(mode="after")
     def one_kind(self) -> Self:
+        # `t<n>` is reserved for unnamed triggers (the regex engine has no look-ahead).
+        if self.name is not None and re.fullmatch(r"t[0-9]+", self.name):
+            raise ValueError("A trigger name may not look like t<n>; those IDs are positional")
         if (self.schedule is None) == (self.event is None):
             raise ValueError("A group trigger has exactly one of schedule or event")
         return self

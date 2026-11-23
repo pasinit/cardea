@@ -724,7 +724,7 @@ def _created_trigger() -> dict[str, Any]:
         "event": {
             "types": ["cardea.record.created"],
             "filters": [{"prefix": {"subject": "work/"}}],
-        }
+        },
     }
 
 
