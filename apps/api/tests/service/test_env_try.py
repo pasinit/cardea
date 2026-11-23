@@ -171,6 +171,7 @@ def output(settled: Any) -> dict[str, Any]:
     return result
 
 
+@pytest.mark.loopback
 def test_a_passing_and_a_failing_commit(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:
@@ -200,6 +201,7 @@ def test_a_passing_and_a_failing_commit(
     assert (failed["scenarios"][0]["outcome"], failed["scenarios"][0]["exit_code"]) == ("fail", 3)
 
 
+@pytest.mark.loopback
 def test_the_same_inputs_return_the_same_result_without_running(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:
@@ -222,6 +224,7 @@ def test_the_same_inputs_return_the_same_result_without_running(
     assert run["rerun_of"] == first.receipt_id
 
 
+@pytest.mark.loopback
 def test_a_changed_catalog_is_a_different_run(
     env_kernel: tuple[Kernel, EnvHost],
     repo: dict[str, Any],
@@ -235,6 +238,7 @@ def test_a_changed_catalog_is_a_different_run(
     assert output(again)["cached"] is False and len(host.started) == started + 1
 
 
+@pytest.mark.loopback
 def test_forced_reruns_are_limited_per_commit_and_day(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:
@@ -263,6 +267,7 @@ def submit_and_run(kernel: Kernel, key: str, **arguments: Any) -> str:
     return state
 
 
+@pytest.mark.loopback
 def test_an_identical_call_while_one_runs_is_refused(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:
@@ -283,6 +288,7 @@ def test_an_identical_call_while_one_runs_is_refused(
     assert call(kernel, "third", commit=repo["good"], scenarios=["try"])[0] == "succeeded"
 
 
+@pytest.mark.loopback
 def test_a_failed_run_is_not_reused(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:
@@ -300,6 +306,7 @@ def test_a_failed_run_is_not_reused(
         ({"scenarios": ["boot"]}, "env_tier_unavailable"),
     ],
 )
+@pytest.mark.loopback
 def test_unknown_scenarios_and_unavailable_tiers_are_refused(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any], arguments: Any, code: str
 ) -> None:
@@ -368,6 +375,7 @@ def test_artifact_paths_outside_the_checkout_are_refused_in_the_registry(path: s
         Scenario.model_validate({"argv": ["/bin/true"], "artifacts": [path]})
 
 
+@pytest.mark.loopback
 def test_only_a_passing_run_satisfies_the_records_guard(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:
@@ -471,6 +479,7 @@ LINUX = pytest.mark.skipif(
 )
 
 
+@pytest.mark.loopback
 @LINUX
 def test_a_scenario_cannot_write_the_workers_result(
     hostile_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
@@ -486,6 +495,7 @@ def test_a_scenario_cannot_write_the_workers_result(
     assert tried and all(v not in {"written", "read"} for v in tried.values()), tried
 
 
+@pytest.mark.loopback
 @LINUX
 def test_a_detached_background_process_does_not_outlive_its_scenario(
     hostile_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
@@ -576,6 +586,7 @@ def attach_call(
     return state, failure.message if failure is not None else ""
 
 
+@pytest.mark.loopback
 def test_the_result_is_linked_to_the_item_without_touching_its_claim(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:
@@ -600,6 +611,7 @@ def test_the_result_is_linked_to_the_item_without_touching_its_claim(
     assert [link["observed_state"] for link in stored(kernel)["links"]] == ["pass", "fail"]
 
 
+@pytest.mark.loopback
 def test_a_role_without_the_grant_is_refused_naming_it_and_nothing_runs(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:
@@ -615,6 +627,7 @@ def test_a_role_without_the_grant_is_refused_naming_it_and_nothing_runs(
     assert call(kernel, "plain", commit=repo["good"], scenarios=["try"])[0] == "succeeded"
 
 
+@pytest.mark.loopback
 def test_authority_is_read_live_when_the_result_is_recorded(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -633,6 +646,7 @@ def test_authority_is_read_live_when_the_result_is_recorded(
     assert stored(kernel)["links"] == []
 
 
+@pytest.mark.loopback
 def test_a_repeated_idempotency_key_adds_one_entry(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:
@@ -648,6 +662,7 @@ def test_a_repeated_idempotency_key_adds_one_entry(
     assert entry["external_id"] == "one-key"
 
 
+@pytest.mark.loopback
 def test_a_cached_result_is_linked_to_another_item_by_its_own_receipt(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any]
 ) -> None:

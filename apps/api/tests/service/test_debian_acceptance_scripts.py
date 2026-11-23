@@ -286,6 +286,7 @@ def oidc_config(tmp_path: Path, issuer: object) -> object:
     )
 
 
+@pytest.mark.loopback
 def test_the_test_issuer_passes_the_kernels_oidc_validation(tmp_path: Path, scripts: None) -> None:
     """The launcher's identity checks OIDC tokens with the kernel's own discovery and
     introspection code, against the test issuer over loopback."""
@@ -321,6 +322,7 @@ def test_the_test_issuer_passes_the_kernels_oidc_validation(tmp_path: Path, scri
         sys.path.remove(str(SCRIPTS.parents[0] / "try"))
 
 
+@pytest.mark.loopback
 def test_the_test_issuer_refuses_unauthenticated_introspection(scripts: None) -> None:
     import httpx
 

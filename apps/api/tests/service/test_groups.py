@@ -414,6 +414,7 @@ def test_revoking_groups_manage_stops_members(kernel: Kernel, anchored: None) ->
     assert tick(kernel, "2026-10-01T08:00:10") == {"desk.worker.0.t0": "admitted"}
 
 
+@pytest.mark.loopback
 def test_disabled_supervisor_stops_members(
     kernel: Kernel, session: FakeSession, anchored: None
 ) -> None:
@@ -445,6 +446,7 @@ def test_disabled_supervisor_stops_members(
 # One run per member
 
 
+@pytest.mark.loopback
 def test_slots_coalesce_while_the_members_run_is_unfinished(
     kernel: Kernel, session: FakeSession, anchored: None
 ) -> None:

@@ -242,6 +242,7 @@ def sent_to(provider: FakeAgentMail) -> list[dict[str, Any]]:
 # Sending
 
 
+@pytest.mark.loopback
 def test_a_send_reaches_the_allow_listed_address_once(
     kernel: Kernel, session: FakeSession, provider: FakeAgentMail
 ) -> None:
@@ -267,6 +268,7 @@ def test_a_send_reaches_the_allow_listed_address_once(
         ("eng.dev.0", question(), "recipient_not_allowed"),
     ],
 )
+@pytest.mark.loopback
 def test_only_the_roles_allow_listed_aliases_are_reachable(
     kernel: Kernel,
     session: FakeSession,
@@ -280,11 +282,13 @@ def test_only_the_roles_allow_listed_aliases_are_reachable(
     assert not [r for r in provider.requests if r.method == "POST"]
 
 
+@pytest.mark.loopback
 def test_an_address_is_not_an_alias(kernel: Kernel, session: FakeSession) -> None:
     _, results = run_calls(kernel, session, [question(to=STRANGER)])
     assert results[0].is_error  # refused by the input schema before the handler
 
 
+@pytest.mark.loopback
 def test_the_role_rate_limit_counts_every_send(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, session: FakeSession, provider: FakeAgentMail
 ) -> None:
@@ -304,6 +308,7 @@ def test_the_role_rate_limit_counts_every_send(
         kernel.database.close()
 
 
+@pytest.mark.loopback
 def test_the_content_gate_refuses_before_anything_is_sent(
     kernel: Kernel, session: FakeSession, provider: FakeAgentMail
 ) -> None:
@@ -312,6 +317,7 @@ def test_the_content_gate_refuses_before_anything_is_sent(
     assert not sent_to(provider)
 
 
+@pytest.mark.loopback
 def test_a_provider_refusal_sends_nothing_and_is_definite(
     kernel: Kernel, session: FakeSession, provider: FakeAgentMail
 ) -> None:
@@ -327,6 +333,7 @@ def test_a_provider_refusal_sends_nothing_and_is_definite(
     assert state == "failed"
 
 
+@pytest.mark.loopback
 def test_a_server_error_leaves_the_send_uncertain_until_reconciled(
     kernel: Kernel,
     session: FakeSession,
@@ -379,6 +386,7 @@ def test_the_reconciler_finds_a_send_by_its_label(email: Email, provider: FakeAg
 # Replies
 
 
+@pytest.mark.loopback
 def test_an_allow_listed_reply_reaches_the_sender_as_untrusted_mail(
     kernel: Kernel, session: FakeSession, provider: FakeAgentMail
 ) -> None:
@@ -432,6 +440,7 @@ def test_an_allow_listed_reply_reaches_the_sender_as_untrusted_mail(
         ),
     ],
 )
+@pytest.mark.loopback
 def test_other_replies_are_dropped_counted_and_never_kept(
     kernel: Kernel,
     session: FakeSession,
@@ -509,6 +518,7 @@ def test_agentmail_counts_only_an_aligned_pass(item: dict[str, Any], verdict: bo
     assert authentication.from_agentmail(item) is verdict
 
 
+@pytest.mark.loopback
 def test_the_opt_out_accepts_unauthenticated_replies(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, session: FakeSession, provider: FakeAgentMail
 ) -> None:
@@ -532,6 +542,7 @@ def test_the_opt_out_accepts_unauthenticated_replies(
         kernel.database.close()
 
 
+@pytest.mark.loopback
 def test_mail_on_other_threads_is_never_read(
     kernel: Kernel, session: FakeSession, provider: FakeAgentMail
 ) -> None:
@@ -544,6 +555,7 @@ def test_mail_on_other_threads_is_never_read(
     assert all("thread-not-ours" not in p for p in paths)
 
 
+@pytest.mark.loopback
 def test_a_failing_provider_changes_nothing(
     kernel: Kernel, session: FakeSession, provider: FakeAgentMail
 ) -> None:
@@ -562,6 +574,7 @@ def assert_absent(conn: Any, needle: str) -> None:
             assert needle not in repr(tuple(row)), table
 
 
+@pytest.mark.loopback
 def test_credentials_and_addresses_never_leave_the_adapter(
     kernel: Kernel,
     session: FakeSession,
@@ -706,6 +719,7 @@ def reply_to(
     ).encode()
 
 
+@pytest.mark.loopback
 def test_smtp_send_mints_the_thread_message_id(
     tmp_path: Path, mail_servers: tuple[FakeSmtp, FakeImap]
 ) -> None:
@@ -721,6 +735,7 @@ def test_smtp_send_mints_the_thread_message_id(
         asyncio.run(adapter.send(Outgoing(CLIENT, "X or Y?", "Which?", "c" * 64)))
 
 
+@pytest.mark.loopback
 def test_imap_reads_only_matching_replies_read_only(
     tmp_path: Path, mail_servers: tuple[FakeSmtp, FakeImap]
 ) -> None:
@@ -790,6 +805,7 @@ PASS = "mx.receiver.invalid; dmarc=pass (p=reject) header.from=example.invalid"
         ),
     ],
 )
+@pytest.mark.loopback
 def test_imap_trusts_only_the_receiving_servers_verdict(
     tmp_path: Path,
     mail_servers: tuple[FakeSmtp, FakeImap],
@@ -815,6 +831,7 @@ def test_imap_trusts_only_the_receiving_servers_verdict(
     assert [d.reason for d in polled.dropped] == ([] if accepted else [reason])
 
 
+@pytest.mark.loopback
 def test_imap_opt_out_is_explicit(tmp_path: Path, mail_servers: tuple[FakeSmtp, FakeImap]) -> None:
     smtp, imap = mail_servers
     config = imap_config(tmp_path, smtp, imap, accept_unauthenticated=True)
@@ -836,6 +853,7 @@ def test_imap_opt_out_is_explicit(tmp_path: Path, mail_servers: tuple[FakeSmtp, 
     assert not email_config(tmp_path).transport.accept_unauthenticated
 
 
+@pytest.mark.loopback
 def test_imap_reconciles_from_the_sent_folder_or_stays_uncertain(
     tmp_path: Path, mail_servers: tuple[FakeSmtp, FakeImap]
 ) -> None:
@@ -925,6 +943,7 @@ def inbound_events(kernel: Kernel, kind: str) -> list[dict[str, Any]]:
         ]
 
 
+@pytest.mark.loopback
 def test_inbound_mail_from_the_client_reaches_the_pool_once(
     inbound_kernel: Kernel, session: FakeSession, provider: FakeAgentMail
 ) -> None:
@@ -1002,6 +1021,7 @@ def test_inbound_mail_past_the_rate_limit_is_rejected(
     assert replies.ReplyPoller(inbound_kernel).poll(force=True).delivered == 0
 
 
+@pytest.mark.loopback
 def test_a_reply_on_a_cardea_thread_is_not_inbound_mail(
     inbound_kernel: Kernel, session: FakeSession, provider: FakeAgentMail
 ) -> None:
@@ -1058,6 +1078,7 @@ def imap_kernel(
         instance.database.close()
 
 
+@pytest.mark.loopback
 def test_imap_inbound_mail_is_read_narrowly_and_checked_the_same_way(
     imap_kernel: Kernel, session: FakeSession, mail_servers: tuple[FakeSmtp, FakeImap]
 ) -> None:
@@ -1084,6 +1105,7 @@ def test_imap_inbound_mail_is_read_narrowly_and_checked_the_same_way(
     assert entry["parts"][0]["text"].strip() == "A new idea"
 
 
+@pytest.mark.loopback
 def test_imap_inbound_mail_past_the_rate_limit_is_rejected(
     imap_kernel: Kernel, mail_servers: tuple[FakeSmtp, FakeImap]
 ) -> None:

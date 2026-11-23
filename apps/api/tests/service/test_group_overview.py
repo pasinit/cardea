@@ -110,6 +110,7 @@ def team(setup: tuple[Kernel, Any, Any]) -> tuple[Kernel, str, str]:
     return kernel, item, second["record"]["record_id"]
 
 
+@pytest.mark.loopback
 def test_the_overview_shows_members_work_mail_and_journal(team: tuple[Kernel, str, str]) -> None:
     kernel, item, _ = team
     response = overview(kernel)
@@ -153,6 +154,7 @@ def test_the_overview_shows_members_work_mail_and_journal(team: tuple[Kernel, st
     assert cursors == sorted(cursors, reverse=True) and cursors[0] <= view["cursor"]
 
 
+@pytest.mark.loopback
 def test_every_list_is_bounded_and_says_what_it_left_out(
     team: tuple[Kernel, str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -173,6 +175,7 @@ def test_every_list_is_bounded_and_says_what_it_left_out(
     assert view["mailbox"] == {"addresses": [], "truncated": 1}
 
 
+@pytest.mark.loopback
 def test_only_the_groups_supervisor_may_read_it(team: tuple[Kernel, str, str]) -> None:
     kernel, _, _ = team
     refused = overview(kernel, who="sup-desk")
@@ -181,6 +184,7 @@ def test_only_the_groups_supervisor_may_read_it(team: tuple[Kernel, str, str]) -
     assert overview(kernel, who="nobody").status_code == 401
 
 
+@pytest.mark.loopback
 def test_spend_and_open_approvals_appear_for_the_desk(setup: tuple[Kernel, Any, Any]) -> None:
     kernel, session, _ = setup
     document = example_group("trading-desk").model_dump(mode="json", by_alias=True)

@@ -167,6 +167,7 @@ def gate(kernel: Kernel, tmp_path: Path, **changes: Any) -> Path:
     return denylist
 
 
+@pytest.mark.loopback
 def test_a_clean_change_passes_the_gate_from_inside_the_sandbox(
     kernel: Kernel, sandbox: Sandbox, tmp_path: Path
 ) -> None:
@@ -182,6 +183,7 @@ def test_a_clean_change_passes_the_gate_from_inside_the_sandbox(
     assert str(denylist) not in given and str(kernel.content_gate.gitleaks_binary) not in given
 
 
+@pytest.mark.loopback
 def test_a_refusal_inside_the_sandbox_is_the_same_refusal(
     kernel: Kernel, sandbox: Sandbox, tmp_path: Path
 ) -> None:
@@ -205,12 +207,14 @@ def test_a_worker_that_ignores_a_refusal_leaves_the_effect_in_doubt(
     assert state == "failed" and receipt.state is OperationState.OUTCOME_UNKNOWN
 
 
+@pytest.mark.loopback
 def test_without_a_gate_the_sandboxed_call_sends_nothing(kernel: Kernel, sandbox: Sandbox) -> None:
     state, receipt = push(kernel, DIFF)
     assert state == "failed" and sandbox.pushed == []
     assert receipt.failure is not None and receipt.failure.code == "content_gate_unavailable"
 
 
+@pytest.mark.loopback
 def test_a_worker_without_a_callback_refuses_to_send() -> None:
     for callback in (None, {"url": "http://127.0.0.1:9/check", "token": "x"}):
         with pytest.raises(OperationRejected) as refused:

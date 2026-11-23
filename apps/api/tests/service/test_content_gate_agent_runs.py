@@ -126,6 +126,7 @@ def kernel(
         db.close()
 
 
+@pytest.mark.loopback
 @pytest.mark.parametrize("leak", ["denylist", "secret"])
 def test_a_refused_tool_call_leaves_no_copy_across_a_retry(
     kernel: Kernel,
@@ -198,6 +199,7 @@ def test_a_refused_tool_call_leaves_no_copy_across_a_retry(
     assert not leaking, leaking
 
 
+@pytest.mark.loopback
 def test_a_call_held_for_approval_and_refused_as_apr_leaves_no_copy(
     kernel: Kernel, remote: Remote, session: runs.FakeSession, tmp_path: Path
 ) -> None:
