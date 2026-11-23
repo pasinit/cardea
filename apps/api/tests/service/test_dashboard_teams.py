@@ -4,7 +4,7 @@ one team failing does not hide the others, and no credential reaches the page.""
 import importlib.util
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from test_dashboard import KIT, Supervisor, fixture
@@ -39,7 +39,7 @@ def teams() -> Any:
 
 
 def aerarium() -> dict[str, Any]:
-    return json.loads((KIT / "dashboard.fixture.aerarium.json").read_text())  # type: ignore[no-any-return]
+    return cast(dict[str, Any], json.loads((KIT / "dashboard.fixture.aerarium.json").read_text()))
 
 
 def backend(**extra: Any) -> Any:
@@ -48,6 +48,7 @@ def backend(**extra: Any) -> Any:
     return module.TeamsBackend(sources)
 
 
+@pytest.mark.loopback
 def test_two_teams_render_side_by_side() -> None:
     result = call(backend(), "GET", "/api/status")
     assert result[0] == 200
@@ -55,16 +56,11 @@ def test_two_teams_render_side_by_side() -> None:
     assert names == ["dev", "aerarium"]
     assert result[1]["teams"][0]["view"] == fixture()
     assert result[1]["teams"][1]["view"]["group"] == "aerarium-team"
-    status, page = call(
-        backend(),
-        "GET",
-        "/",
-    )
+    status, page = call(backend(), "GET", "/")
     assert status == 200 and '<script src="/dashboard_teams.js">' in page
     script = (KIT / "dashboard_teams.js").read_text()
-    assert (
-        "innerHTML" not in script and "display: flex" in (KIT / "dashboard_teams.html").read_text()
-    )
+    assert "innerHTML" not in script
+    assert "display: flex" in (KIT / "dashboard_teams.html").read_text()
 
 
 def raising(error: Exception) -> Any:
@@ -74,6 +70,7 @@ def raising(error: Exception) -> Any:
     return read
 
 
+@pytest.mark.loopback
 def test_an_unreachable_team_shows_an_error_and_hides_nothing() -> None:
     down = backend(aerarium=raising(OSError(f"connect failed, Bearer {TOKEN}")))
     status, body = call(down, "GET", "/api/status")
@@ -86,6 +83,7 @@ def test_an_unreachable_team_shows_an_error_and_hides_nothing() -> None:
     assert teams_[0]["error"] == "forbidden" and teams_[1]["view"] == aerarium()
 
 
+@pytest.mark.loopback
 def test_no_token_appears_in_any_output() -> None:
     down = backend(
         aerarium=raising(ClientError(f"Bearer {TOKEN}", 401)),
@@ -100,6 +98,7 @@ def test_no_token_appears_in_any_output() -> None:
     assert "authorization" not in script.lower() and "bearer" not in script.lower()
 
 
+@pytest.mark.loopback
 def test_the_page_is_read_only() -> None:
     b = backend()
     for method in ("POST", "PUT", "DELETE"):

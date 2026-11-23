@@ -78,6 +78,14 @@ MAX_PATH = 200
 MAX_PATCH = 12288
 MAX_DIFF_BYTES = 32768
 MAX_PATCHES = 50
+# Check runs on the head, for `vcs.read_change` (`checks`): what failed and why, as CI's
+# annotations say it (packaging/ci_annotate.py), since agents cannot read job logs.
+MAX_CHECKS = 30
+MAX_ANNOTATIONS = 5
+MAX_ANNOTATION = 4096
+# All annotations together, so the diff keeps most of the recorded output.
+MAX_ANNOTATION_BYTES = 12288
+PASSED = ("success", "skipped", "neutral")
 # Credential-shaped strings scrubbed from host text returned to an agent: the shapes
 # `env.try` scrubs from log tails (ADR-026's summary rule). Shapes, not assignments, so
 # ordinary code such as `password = form["password"]` reads unchanged.
@@ -751,6 +759,7 @@ class Vcs:
                 reviews = await host.reviews(number)
                 comments = await host.comments(number)
                 files = await host.pull_files(number) if with_diff else None
+                checks = await _checks(host, str(pull["head"]["sha"]))
             except HostRefused as refused:
                 raise OperationRejected(str(refused), "host_refused") from None
         body, truncated = _bounded(pull.get("body"), MAX_BODY)
@@ -775,6 +784,7 @@ class Vcs:
                 for r in reviews[-20:]
             ],
             "comments": len(comments),
+            "checks": checks,
         }
         if files is not None:
             # What the rest of the read leaves of the recorded output, less the key's room.
@@ -891,6 +901,38 @@ async def _up_to_date(host: GitHub, base: str, head: str) -> str:
             "merge_behind_base",
         )
     return str((compared.get("base_commit") or {}).get("sha") or "")
+
+
+async def _checks(host: GitHub, sha: str) -> list[JsonValue]:
+    """The head's check runs, failed ones first, each failed one with CI's annotations:
+    bounded, credential shapes scrubbed. Annotations are untrusted text, like a body."""
+    runs = await host.check_runs(sha)
+    runs.sort(key=lambda r: r.get("status") == "completed" and r.get("conclusion") in PASSED)
+    checks: list[JsonValue] = []
+    room = MAX_ANNOTATION_BYTES
+    for run in runs[:MAX_CHECKS]:
+        status, conclusion = str(run.get("status", "")), run.get("conclusion")
+        check: dict[str, JsonValue] = {
+            "name": str(run.get("name", "")),
+            "status": status,
+            "conclusion": None if conclusion is None else str(conclusion),
+            "url": str(run.get("html_url", "")),
+        }
+        failed = status == "completed" and conclusion not in PASSED
+        counted = (run.get("output") or {}).get("annotations_count")
+        if failed and counted and run.get("id") and room > 0:
+            kept: list[JsonValue] = []
+            for note in await host.annotations(int(run["id"])):
+                if note.get("annotation_level") != "failure" or len(kept) == MAX_ANNOTATIONS:
+                    continue
+                message = _clip(_bounded(note.get("message"), MAX_ANNOTATION)[0], room)[0]
+                kept.append({"title": _bounded(note.get("title"), 200)[0], "message": message})
+                room -= _size(message)
+                if room <= 0:
+                    break
+            check["annotations"] = kept
+        checks.append(check)
+    return checks
 
 
 def _check_runs(runs: list[dict[str, Any]]) -> None:

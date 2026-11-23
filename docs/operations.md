@@ -266,8 +266,10 @@ A developer session has no `uv`, `pytest`, `ruff` or `mypy`, and `pip` fails on 
   | `lint` | `make lint` | CI lint |
   | `typecheck` | `make typecheck` | CI mypy |
   | `api-test` | `make api-test` | the backend test suite |
+  | `check` | `make check` | lint, typecheck and the backend tests that need no TCP loopback, in one call |
 
 - **Run.** Push the work to a branch, then call `env.try` with `repo`, the branch head's full 40-hex `commit`, and `scenarios: ["lint", "typecheck", "api-test"]`. Read `passed` and each scenario's `log_tail` in the result. The session needs `env.try` and `repo:<alias>` in its ceiling; ask the supervisor if it lacks them.
+- **`check`.** One scenario for merge-check automation to require: `scenarios: ["check"]`. It runs lint, typecheck and `pytest -m "not loopback"` (tests marked `loopback` bind or connect over TCP and stay in `api-test`), every step even after a failure, with the same tier, toolchain image, egress and confinement as the scenarios above. The log tail ends with each step's exit status, the failing test ids (up to 20, the rest counted) and `check: FAIL (exit N)` or `check: PASS (exit 0)`; `passed` is false and `exit_code` is non-zero when anything failed. Under `check` a test that is not marked `loopback` fails by name if it opens a TCP socket, so mark new tests that need loopback with `@pytest.mark.loopback`.
 - **Targeted tests.** Callers send no command, so a session cannot pass a pytest path. For a narrower run, the host owner adds a scenario to the catalog with a fixed argv (for example `["/usr/bin/make", "kernel-test"]`). Run the full `api-test` before review.
 - **Cost.** Results are cached for 24 hours per commit and scenario set; commit again, or use `rerun: true` (3 a day), to run anew.
 - **Locally.** Where `uv` is installable (a workstation, not a confined session), `make lint`, `make typecheck` and `make api-test` run the same checks.

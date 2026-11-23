@@ -262,6 +262,7 @@ def openssl3() -> str:
     return path
 
 
+@pytest.mark.loopback
 def test_make_tls_certificates_pass_strict_verification(tmp_path: Path) -> None:
     openssl3()
     out = tmp_path / "tls"
