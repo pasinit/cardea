@@ -141,6 +141,12 @@
         "match": {"arguments/record_id": "/record_id"},
         "optional": true,
         "fields": ["arguments/repository", "arguments/record_id", "arguments/branch", "arguments/head"]
+      },
+      {
+        "name": "base_pushes",
+        "operation": "vcs.push_branch",
+        "match": {"arguments/repository": "/repository", "arguments/branch": "/base_ref"},
+        "fields": ["arguments/head"]
       }
     ]
   }

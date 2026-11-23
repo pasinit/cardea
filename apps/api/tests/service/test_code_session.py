@@ -962,7 +962,11 @@ def evidence_for(branch: str, pushed: str | None, record_id: str = RECORD) -> di
 
 
 def session_for(
-    tmp_path: Path, source: Path, evidence: dict[str, Any], record_id: str | None = RECORD
+    tmp_path: Path,
+    source: Path,
+    evidence: dict[str, Any],
+    record_id: str | None = RECORD,
+    base_ref: str = "main",
 ) -> tuple[dict[str, Any], bytes]:
     from cardea_coding_ops.session import session
 
@@ -976,7 +980,7 @@ def session_for(
     }
     arguments: dict[str, Any] = {
         "repository": "app",
-        "base_ref": "main",
+        "base_ref": base_ref,
         "task": json.dumps({"write": {"second.txt": "second\n"}}),
     }
     if record_id:
@@ -1052,11 +1056,42 @@ def test_a_session_is_refused_rather_than_started_from_an_older_head(
     assert gone.value.code == "change_head_missing" and "#7" in str(gone.value)
 
 
+def base_pushes(head: str) -> dict[str, Any]:
+    return {"base_pushes": ({"receipt_id": "r", "fields": {"arguments/head": head}},)}
+
+
+def test_a_session_on_a_pushed_branch_is_refused_while_the_mirror_lags(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: Path
+) -> None:
+    from cardea.service.operations import OperationRejected
+
+    monkeypatch.delenv("CARDEA_REPOSITORIES", raising=False)
+    branch = "agent/eng/work"
+    tip = put_branch(source, tmp_path, branch, "first.txt")
+    # The kernel saw a later push to base_ref that the mirror does not hold yet.
+    behind = tmp_path / "behind"
+    behind.mkdir()
+    with pytest.raises(OperationRejected) as stale:
+        session_for(behind, source, base_pushes("f" * 40), None, branch)
+    assert stale.value.code == "change_head_stale" and branch in str(stale.value)
+    # Once the mirror holds the pushed head, the session starts from it.
+    current = tmp_path / "current"
+    current.mkdir()
+    output, _ = session_for(current, source, base_pushes(tip), None, branch)
+    assert output["base_sha"] == tip
+
+
 def test_code_session_declares_its_record_evidence() -> None:
     declared = json.loads(DESCRIPTOR.read_text())
     queries = {q["name"]: q for q in declared["cardea"]["evidence"]}
     assert queries["changes"]["operation"] == "vcs.open_change"
     assert queries["pushes"]["operation"] == "vcs.push_branch"
-    assert all(q["match"] == {"arguments/record_id": "/record_id"} for q in queries.values())
-    assert all(q["optional"] for q in queries.values())
+    record_scoped = [queries["changes"], queries["pushes"]]
+    assert all(q["match"] == {"arguments/record_id": "/record_id"} for q in record_scoped)
+    assert all(q["optional"] for q in record_scoped)
+    # Any push to base_ref, whoever made it, so a lagging mirror is seen.
+    assert queries["base_pushes"]["match"] == {
+        "arguments/repository": "/repository",
+        "arguments/branch": "/base_ref",
+    }
     OperationDescriptor.model_validate(declared)

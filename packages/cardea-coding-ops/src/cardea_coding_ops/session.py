@@ -349,6 +349,15 @@ def existing_change(evidence: Evidence, arguments: dict[str, JsonValue]) -> dict
     }
 
 
+def base_push(evidence: Evidence, base_ref: str) -> str | None:
+    """The newest head the kernel saw pushed to `base_ref` (for the repository), if any."""
+    for entry in evidence.get("base_pushes") or ():
+        fields = entry.get("fields")
+        if isinstance(fields, dict) and fields.get("arguments/head"):
+            return str(fields["arguments/head"])
+    return None
+
+
 def session(
     arguments: dict[str, JsonValue],
     config: dict[str, Any],
@@ -403,6 +412,14 @@ def session(
             f"the repository source is behind pull request #{existing['number']}: branch "
             f"{start_ref} does not contain {existing['pushed']}, the head last pushed for the "
             "record; no session was started from an older head",
+            "change_head_stale",
+        )
+    # A base_ref some other call pushed to is a branch the mirror may not have caught up on.
+    base_pushed = None if existing else base_push(evidence or {}, base_ref)
+    if base_pushed and not _has_commit(repo, env, base_pushed):
+        raise OperationRejected(
+            f"the repository source is behind {base_ref}: it does not contain {base_pushed}, "
+            "the head last pushed to it; no session was started from an older head",
             "change_head_stale",
         )
 
