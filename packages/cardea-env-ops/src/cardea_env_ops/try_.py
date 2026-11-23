@@ -143,6 +143,11 @@ def stage(source: str, commit: str, scratch: Path) -> Path:
         raise OperationRejected("the repository source could not be read", "env_source_unavailable")
     switched = _git(checkout, env, "checkout", "--quiet", "--detach", commit)
     if switched.returncode:
+        # A clone takes only the mirror's branch heads; a PR or agent head may sit in
+        # another ref (e.g. refs/pull/*). Read every mirror ref, then try once more.
+        _git(checkout, env, "fetch", "--quiet", "--no-tags", "origin", "+refs/*:refs/mirror/*")
+        switched = _git(checkout, env, "checkout", "--quiet", "--detach", commit)
+    if switched.returncode:
         raise OperationRejected("the commit is not in the repository", "env_commit_unknown")
     head = _git(checkout, env, "rev-parse", "HEAD").stdout.strip()
     if head != commit:
