@@ -968,3 +968,71 @@ def test_read_branch_returns_the_head_and_refuses_unknown_branches(
     )
     assert results[1].structured_content["head"] == change["head"], text(results[1])
     assert results[2].is_error and "branch_unknown" in text(results[2])
+
+
+# One open pull request per work record
+
+RECORD = "rec-" + "1" * 32
+
+
+def open_for(record: str | None, branch: str) -> tuple[str, dict[str, Any]]:
+    arguments: dict[str, Any] = {
+        "repository": "cardea",
+        "head": branch,
+        "base": "main",
+        "title": branch,
+    }
+    if record is not None:
+        arguments["record_id"] = record
+    return "vcs-open_change", arguments
+
+
+@pytest.mark.loopback
+def test_a_record_with_an_open_pull_request_cannot_open_another_on_a_different_head(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path
+) -> None:
+    first = open_pull(kernel, session, tmp_path, name="one")
+    change = make_change(kernel, tmp_path, message="Second")
+    run_calls(
+        kernel,
+        session,
+        [("vcs-push_branch", {"repository": "cardea", "branch": "agent/eng/two", **change})],
+    )
+    _, state, (opened,) = run_calls(kernel, session, [open_for(RECORD, "agent/eng/one")])
+    assert state == "succeeded" and opened.structured_content["number"] == first
+    pulls = host.repositories["acme/cardea"].pulls
+    assert len(pulls) == 1
+    # Same head again is idempotent, even for the record.
+    _, _, (again,) = run_calls(kernel, session, [open_for(RECORD, "agent/eng/one")])
+    assert not again.is_error and again.structured_content["number"] == first
+    # Another head for the same record is refused, naming the open pull request.
+    _, _, (refused,) = run_calls(kernel, session, [open_for(RECORD, "agent/eng/two")])
+    assert refused.is_error and "change_already_open" in text(refused)
+    assert f"#{first}" in text(refused)
+    assert len(pulls) == 1
+    # Another record, or no record, is not held back by it.
+    other = "rec-" + "2" * 32
+    _, _, (free, bare) = run_calls(
+        kernel, session, [open_for(other, "agent/eng/two"), open_for(None, "agent/eng/one")]
+    )
+    assert not free.is_error and free.structured_content["number"] != first
+    assert not bare.is_error and bare.structured_content["number"] == first
+
+
+@pytest.mark.loopback
+def test_a_closed_pull_request_does_not_hold_the_record(
+    kernel: Kernel, session: FakeSession, host: FakeGitHub, tmp_path: Path
+) -> None:
+    first = open_pull(kernel, session, tmp_path, name="one")
+    change = make_change(kernel, tmp_path, message="Second")
+    run_calls(
+        kernel,
+        session,
+        [("vcs-push_branch", {"repository": "cardea", "branch": "agent/eng/two", **change})],
+    )
+    run_calls(kernel, session, [open_for(RECORD, "agent/eng/one")])
+    closing = host.repositories["acme/cardea"].pull(first)
+    assert closing is not None
+    closing["state"] = "closed"
+    _, _, (second,) = run_calls(kernel, session, [open_for(RECORD, "agent/eng/two")])
+    assert not second.is_error and second.structured_content["number"] != first

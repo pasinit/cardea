@@ -30,6 +30,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -285,11 +286,30 @@ def repository_entry(alias: str, config: dict[str, Any]) -> dict[str, Any] | Non
     return {"source": entry.source, "gates": entry.gate_documents()}
 
 
+def open_change(
+    arguments: dict[str, JsonValue],
+    evidence: Mapping[str, tuple[Mapping[str, JsonValue], ...]],
+) -> dict[str, JsonValue] | None:
+    """The record's open change as `{number, head}`, from the kernel's `opened` receipts
+    (the newest with a branch); None unless the call names a `record_id`."""
+    if arguments.get("record_id") is None:
+        return None
+    for entry in evidence.get("opened") or ():
+        fields = entry.get("fields")
+        if not isinstance(fields, dict):
+            continue
+        number, head = fields.get("output/number"), fields.get("arguments/head")
+        if isinstance(number, int) and isinstance(head, str) and head:
+            return {"number": number, "head": head}
+    return None
+
+
 def session(
     arguments: dict[str, JsonValue],
     config: dict[str, Any],
     scratch: Path,
     isolation_mode: str = "unknown",
+    evidence: Mapping[str, tuple[Mapping[str, JsonValue], ...]] | None = None,
 ) -> Any:
     """The whole call in `scratch`; returns the output and, if anything changed, the bundle."""
     alias = str(arguments["repository"])
@@ -297,6 +317,10 @@ def session(
     if not isinstance(repository, dict):
         raise OperationRejected(f"repository {alias} is not allowed on this host")
     base_ref = str(arguments["base_ref"])
+    started = open_change(arguments, evidence or {})
+    # The branch the checkout starts from, and the one the bundle names: the record's open
+    # change if it has one, else base_ref.
+    start_ref = str(started["head"]) if started else base_ref
     env = environment(scratch)
     repo = scratch / "repo"
     clone = subprocess.run(
@@ -309,7 +333,7 @@ def session(
             "--no-hardlinks",
             "--single-branch",
             "--branch",
-            base_ref,
+            start_ref,
             str(repository["source"]),
             str(repo),
         ],
@@ -321,6 +345,11 @@ def session(
         check=False,
     )
     if clone.returncode:
+        if started:
+            raise OperationRejected(
+                f"the open change #{started['number']} has no branch {start_ref} to start from",
+                "change_branch_unavailable",
+            )
         raise OperationRejected(f"base_ref {base_ref} could not be checked out")
     base_sha = _git(repo, env, "rev-parse", "HEAD").strip()
 
@@ -368,7 +397,7 @@ def session(
             deletions += int(removed) if removed.isdigit() else 0
         diff = _git(repo, env, "diff", base_sha, head_sha)
         # Explicit refs: the bundle must not depend on what the harness did to origin/<base>.
-        branch = f"refs/heads/{base_ref}"
+        branch = f"refs/heads/{start_ref}"
         _git(repo, env, "update-ref", branch, head_sha)
         target = scratch / BUNDLE
         _git(repo, env, "bundle", "create", "--quiet", str(target), branch, "HEAD", f"^{base_sha}")
@@ -444,6 +473,8 @@ def session(
         # How untrusted steps were contained: `subreaper` on Linux (cardea.hosts.isolation).
         "isolation": isolation_mode,
     }
+    if started:
+        output["started_from_change"] = started
     if not changed:
         return output
     return WithArtifacts(output=output, artifacts={BUNDLE: bundle})
@@ -462,6 +493,6 @@ async def run(arguments: dict[str, JsonValue], context: OperationContext) -> Any
     dependency_env(config)
     scratch = Path(tempfile.mkdtemp(prefix="code-session-"))
     try:
-        return session(arguments, config, scratch, mode)
+        return session(arguments, config, scratch, mode, context.evidence)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
