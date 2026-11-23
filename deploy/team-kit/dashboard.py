@@ -183,19 +183,24 @@ class KernelBackend:
         except Exception as error:
             if getattr(error, "code", None) != "principal_disabled":
                 raise
-            try:
-                record = self.pause() if self.pause else {}
-            except Exception:
-                record = {}
-            since = record.get("paused_at")
-            reason = plain_reason(record.get("reason")) or PLAIN_REASONS["principal_disabled"]
-            return {
-                "paused": True,
-                "pause": {"since": since if isinstance(since, str) else None, "reason": reason},
-                "view": self.last_view,
-            }
+            return self.paused(self.last_view)
         self.last_view = view
-        return view
+        return self.paused(view) if team_state(view) == "paused" else view
+
+    def paused(self, view: dict[str, Any] | None) -> dict[str, Any]:
+        """`{paused, pause: {since, reason}, view}`; only the pause record's time and reason
+        are copied out of the record."""
+        try:
+            record = self.pause() if self.pause else {}
+        except Exception:
+            record = {}
+        since = record.get("paused_at")
+        reason = plain_reason(record.get("reason")) or PLAIN_REASONS["principal_disabled"]
+        return {
+            "paused": True,
+            "pause": {"since": since if isinstance(since, str) else None, "reason": reason},
+            "view": view,
+        }
 
     def replies(self) -> list[dict[str, Any]]:
         """The newest messages a group member sent to an instance, as the supervisor sees them."""

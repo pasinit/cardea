@@ -128,10 +128,13 @@ function banner(kind, nodes) {
 
 function showPaused(found) {
   const pause = found.pause || {};
-  const since = el("time", pause.since || "an unknown time");
-  if (pause.since) since.setAttribute("datetime", pause.since);
   const when = el("p");
-  when.append("Paused since ", since, `. Reason: ${pause.reason || "not given"}.`);
+  if (pause.since) {
+    const since = el("time", pause.since);
+    since.setAttribute("datetime", pause.since);
+    when.append("Paused since ", since, ". ");
+  }
+  when.append(`Reason: ${pause.reason || "not given"}.`);
   const head = el("p", null, "headline");
   head.append(el("span", "⏸", "icon"), " Team paused");
   head.firstChild.setAttribute("aria-hidden", "true");

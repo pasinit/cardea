@@ -322,7 +322,7 @@ def overview(
 
     limit = max(0, min(events, MAX_EVENTS))
     with kernel.database.read() as conn:
-        principal = proof.resolve(conn)
+        principal = proof.resolve(conn, allow_disabled=True)
         _owned(conn, principal, namespace, name)
         Policy(conn).require_paused_read(principal, namespace, "groups.manage")
         at = now()

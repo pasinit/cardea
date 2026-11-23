@@ -131,9 +131,10 @@ function banner(team) {
   icon.append(el("span"), el("span"));
   const text = el("div");
   const pause = team.pause || {};
-  const line = el("p", "Paused since ");
+  const line = el("p");
   const at = when(pause.since);
-  line.append(at || "an unknown time", `. Reason: ${pause.reason || "not given"}.`);
+  if (at) line.append("Paused since ", at, ". ");
+  line.append(`Reason: ${pause.reason || "not given"}.`);
   text.append(el("h2", "Team paused"), line, el("p", "Work and mail below are the last known state. Nothing is being processed."));
   box.append(icon, text);
   return box;

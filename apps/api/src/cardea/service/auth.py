@@ -23,7 +23,7 @@ class Proof:
     subject: str
     expires_at: float
 
-    def resolve(self, conn: sa.Connection) -> str:
+    def resolve(self, conn: sa.Connection, *, allow_disabled: bool = False) -> str:
         if self.expires_at <= time.time():
             raise Fault("invalid_credential", "Credential has expired", 401)
         row = conn.exec_driver_sql(
@@ -33,7 +33,8 @@ class Proof:
         if row is None:
             raise Fault("unknown_identity", "Identity is not provisioned", 401)
         principal = str(row[0])
-        Policy(conn).principal(principal)
+        if not allow_disabled:
+            Policy(conn).principal(principal)
         return principal
 
 

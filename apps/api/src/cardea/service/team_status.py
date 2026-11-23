@@ -60,7 +60,7 @@ def _bounded(limit: int) -> int:
 def _check(conn: sa.Connection, proof: Proof, namespace: str, name: str) -> tuple[str, GroupSpec]:
     from cardea.service.groups import _owned
 
-    principal = proof.resolve(conn)
+    principal = proof.resolve(conn, allow_disabled=True)
     _owned(conn, principal, namespace, name)
     Policy(conn).require_paused_read(principal, namespace, "groups.manage")
     spec_json = conn.exec_driver_sql(
