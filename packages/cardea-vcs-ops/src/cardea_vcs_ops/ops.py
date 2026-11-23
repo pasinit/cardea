@@ -657,7 +657,7 @@ class Vcs:
                     )
                 # 4. Every check run on the head succeeded.
                 runs = await host.check_runs(head)
-                tried = self.tried(repository, context, head)
+                tried = self.tried(arguments["repository"], context, head)
                 _check_runs(runs, tried is not None)
                 # 5. The host can merge it.
                 if pull.get("mergeable") is not True:
