@@ -1108,7 +1108,7 @@ def test_run_timeouts_must_fit_the_session_wall_time(tmp_path: Path) -> None:
     assert module.wall_problems(fitted) == []
     group = module.group_document(fitted)
     bounds = {p["name"]: p["run"]["bounds"]["timeout_seconds"] for p in group["spec"]["pools"]}
-    assert bounds == {"pm": 1800, "tl": 900, "dev": 1700, "pe": 1800, "ux": 1800}
+    assert bounds == {"pm": 1800, "tl": 1800, "dev": 1700, "pe": 1800, "ux": 1800}
     # Without a readable workers file the check cannot run and refuses nothing.
     assert module.wall_problems({**example(), "workers_config": str(tmp_path / "none")}) == []
 

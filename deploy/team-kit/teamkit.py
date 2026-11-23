@@ -433,7 +433,7 @@ ROLE_NAMES = {
     "ux": "UX designer",
 }
 # Run timeouts per role (seconds); a host file may override them with `run_timeouts`.
-DEFAULT_TIMEOUTS = {"pm": 3600, "tl": 900, "dev": 3600, "pe": 1800, "ux": 1800}
+DEFAULT_TIMEOUTS = {"pm": 3600, "tl": 1800, "dev": 3600, "pe": 1800, "ux": 1800}
 
 
 MOCK_DIR = "docs/mocks"
