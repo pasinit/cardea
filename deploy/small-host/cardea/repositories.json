@@ -51,6 +51,13 @@
             ],
             "timeout_seconds": 600
           },
+          "check": {
+            "argv": [
+              "/usr/bin/make",
+              "check"
+            ],
+            "timeout_seconds": 2100
+          },
           "api-test": {
             "argv": [
               "/usr/bin/make",

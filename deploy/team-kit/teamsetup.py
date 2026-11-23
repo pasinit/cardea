@@ -1273,9 +1273,11 @@ class Repository(Step):
             found.append(f"mirror {entry.get('source')} is missing")
         if not entry.get("gates"):
             found.append("no gates")
-        if (ctx.host.get("env_try") or {}).get("scenarios"):
+        env_try = ctx.host.get("env_try") or {}
+        wanted_scenarios = [*env_try.get("scenarios", []), *env_try.get("dev_scenarios", [])]
+        if wanted_scenarios:
             environment = entry.get("environment") or {}
-            for scenario in ctx.host["env_try"]["scenarios"]:
+            for scenario in dict.fromkeys(wanted_scenarios):
                 if scenario not in (environment.get("scenarios") or {}):
                     found.append(f"environment scenario {scenario}")
             pin = str((environment.get("toolchain") or {}).get("sha256", ""))

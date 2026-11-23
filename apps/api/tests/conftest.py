@@ -7,8 +7,10 @@ pick up the developer's global or system configuration (identity, signing, hooks
 
 import logging
 import os
+import socket
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from typing import Any
 
 import pytest
 
@@ -34,6 +36,30 @@ def pytest_configure(config: pytest.Config) -> None:
             **GIT_IDENTITY,
         }
     )
+
+
+@pytest.fixture(autouse=True)
+def no_tcp_unless_marked(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[None]:
+    """Under `make check-test` (CARDEA_NO_LOOPBACK=1) a test that is not marked `loopback`
+    may not use TCP: it fails by name instead of hanging in a sandbox without loopback, so
+    the `check` scenario's exclusion cannot silently drift."""
+    if os.environ.get("CARDEA_NO_LOOPBACK") != "1" or request.node.get_closest_marker("loopback"):
+        yield
+        return
+
+    def refuse(original: Callable[..., Any]) -> Callable[..., Any]:
+        def guarded(self: socket.socket, address: Any, *args: Any) -> Any:
+            if self.family in (socket.AF_INET, socket.AF_INET6):
+                raise RuntimeError(f"{request.node.nodeid} uses TCP; mark it `loopback`")
+            return original(self, address, *args)
+
+        return guarded
+
+    for name in ("connect", "connect_ex", "bind"):
+        monkeypatch.setattr(socket.socket, name, refuse(getattr(socket.socket, name)))
+    yield
 
 
 @pytest.fixture

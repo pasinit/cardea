@@ -9,6 +9,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, cast
 
+import pytest
 from fastapi.testclient import TestClient
 from test_mailboxes import kernel, session, team
 from test_team_kit import example, kit
@@ -122,6 +123,7 @@ def test_the_page_has_a_section_for_every_part_of_the_overview() -> None:
     assert "innerHTML" not in script and "insertAdjacentHTML" not in script
 
 
+@pytest.mark.loopback
 def test_the_page_serves_the_fixture_and_nothing_else_writes() -> None:
     backend = dashboard().FixtureBackend(fixture())
     status, page = call(backend, "GET", "/")
@@ -140,6 +142,7 @@ def test_the_page_serves_the_fixture_and_nothing_else_writes() -> None:
     assert script.count("method:") == 1 and 'method: "POST"' in script
 
 
+@pytest.mark.loopback
 def test_requests_from_another_host_or_origin_are_refused() -> None:
     backend = dashboard().FixtureBackend(fixture())
     assert call(backend, "GET", "/api/status", headers={"Host": "evil.example"})[0] == 403
@@ -154,6 +157,7 @@ def test_requests_from_another_host_or_origin_are_refused() -> None:
     assert call(backend, "GET", "/api/status")[0] == 200
 
 
+@pytest.mark.loopback
 def test_a_bad_message_is_refused_before_the_kernel() -> None:
     backend = dashboard().FixtureBackend(fixture())
     bad = [
@@ -171,6 +175,7 @@ def test_a_bad_message_is_refused_before_the_kernel() -> None:
     assert backend.sent == {}
 
 
+@pytest.mark.loopback
 def test_a_double_submit_delivers_to_the_role_mailbox_once(kernel: Kernel) -> None:
     team(kernel)
     backend = dashboard().KernelBackend(Supervisor(kernel, "supervisor").request, "test", "team")
@@ -205,6 +210,7 @@ def test_a_double_submit_delivers_to_the_role_mailbox_once(kernel: Kernel) -> No
     assert waiting["team.dev"] == 1
 
 
+@pytest.mark.loopback
 def test_the_kernel_decides_whether_the_caller_may_mail_a_role(kernel: Kernel) -> None:
     team(kernel)
     # Someone who is not the group's supervisor is refused by the kernel; nothing is stored.
@@ -218,6 +224,7 @@ def test_the_kernel_decides_whether_the_caller_may_mail_a_role(kernel: Kernel) -
     assert count == 0
 
 
+@pytest.mark.loopback
 def test_replies_to_the_supervisor_are_the_newest_from_group_members(kernel: Kernel) -> None:
     team(kernel)
     backend = dashboard().KernelBackend(Supervisor(kernel, "supervisor").request, "test", "team")

@@ -59,6 +59,8 @@ class FakeRepository:
     rulesets: list[dict[str, Any]] = field(default_factory=list)
     # Commit SHA to its check runs: `{"name", "status", "conclusion"}`.
     checks: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    # Check run id to its annotations (`{"annotation_level", "title", "message"}`).
+    annotations: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
     # Pull request number to its changed files, overriding the git-computed list.
     files: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
     # A plan without rulesets (a private repository on a free plan): the rules API is 403.
@@ -299,6 +301,8 @@ class FakeGitHub:
             page = int(request.url.params.get("page", "1"))
             runs = repo.checks.get(rest[1], []) if page == 1 else []
             return httpx.Response(200, json={"total_count": len(runs), "check_runs": runs})
+        if len(rest) == 3 and rest[0] == "check-runs" and rest[2] == "annotations":
+            return httpx.Response(200, json=repo.annotations.get(int(rest[1]), []))
         if len(rest) == 3 and rest[0] == "pulls" and rest[2] == "merge" and method == "PUT":
             return self._merge(repo, int(rest[1]), body, self.login(request))
         if len(rest) == 3 and rest[0] in {"issues", "pulls"} and rest[2] in {"comments", "reviews"}:
