@@ -56,6 +56,12 @@ POOLS = ("pm", "tl", "dev", "pe", "ux")
 # The only pools that may email the owner (recipient alias): nobody else is granted it.
 EMAIL_POOLS = ("pm", "ux")
 KIT_PYTHON = ("/opt/cardea/apps/api/.venv/bin/python",)
+# Run from the installed package (`cardea team`, ADR-041), the kit is the same code as the
+# running kernel: `cardea provision` is the package's own command, and what the kit writes
+# goes to the kernel account's own state directory, since `/etc/cardea` is not writable by it.
+PACKAGED_ROOT = Path("/usr/lib/cardea")
+PACKAGED_CARDEA = ("/usr/bin/cardea",)
+PACKAGED_STATE = Path("/var/lib/cardea/team")
 # Rights every team supervisor needs besides the pools' grants (ADR-034, ADR-027).
 SUPERVISOR_RIGHTS = (
     "groups.manage",
@@ -105,6 +111,20 @@ _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 
 class HostError(ValueError):
     """The host file is missing something the kit needs."""
+
+
+def packaged() -> bool:
+    """True when this file is the installed package's copy (under `/usr/lib/cardea`)."""
+    return Path(__file__).resolve().is_relative_to(PACKAGED_ROOT)
+
+
+def provisioning_out(host: dict[str, Any]) -> Path:
+    """The provisioning document the kit writes (`provisioning.out`); the pause record, the
+    settings audit and its lock sit beside it."""
+    default = Path("/etc/cardea/provision.json")
+    if packaged():
+        default = PACKAGED_STATE / "provision.json"
+    return Path((host.get("provisioning") or {}).get("out", default))
 
 
 def _schema() -> Any:
@@ -1112,6 +1132,8 @@ def provisioning_fragment(host: dict[str, Any], *, paused: bool = False) -> dict
             *SUPERVISOR_RIGHTS,
             *(g for p in group["spec"]["pools"] for g in p["grants"]),
             *_mail(_names(host)[1], *POOLS),
+            # and each developer's own address: `cardea team mail dev.N`.
+            *_mail(_names(host)[1], *(f"dev.{n}" for n in range(int(host.get("developers", 2))))),
         }
     )
     expires = (datetime.now(UTC) + timedelta(days=int(host.get("grant_days", 14)))).isoformat()
@@ -1313,7 +1335,7 @@ def provision(
     namespace = str(host["namespace"])
     settings = host.get("provisioning") or {}
     base = Path(settings.get("base", "/etc/cardea/provision.base.json"))
-    out = Path(settings.get("out", "/etc/cardea/provision.json"))
+    out = provisioning_out(host)
     document = merge_provisioning(
         json.loads(base.read_text()),
         provisioning_fragment(host, paused=paused),
@@ -1324,7 +1346,8 @@ def provision(
     staged.chmod(0o600)
     os.replace(staged, out)
     # The kernel's own CLI, from the kit's environment (`python -I -m cardea.service`).
-    cardea = list(settings.get("cardea", [*KIT_PYTHON, "-I", "-m", "cardea.service"]))
+    command = PACKAGED_CARDEA if packaged() else (*KIT_PYTHON, "-I", "-m", "cardea.service")
+    cardea = list(settings.get("cardea", command))
     config = settings.get("config", "/etc/cardea/config.json")
     runner([*cardea, "provision", "--config", config, str(out)], check=True)
     return out
@@ -1404,8 +1427,7 @@ def pause_record_path(host: dict[str, Any]) -> Path:
     kit already writes as root. The kernel cannot answer while the supervisor is disabled,
     so `status` reads this instead."""
     _, group, _, _ = _names(host)
-    out = Path((host.get("provisioning") or {}).get("out", "/etc/cardea/provision.json"))
-    return out.with_name(f"{group}.pause.json")
+    return provisioning_out(host).with_name(f"{group}.pause.json")
 
 
 def clean_reason(reason: str | None) -> str:
