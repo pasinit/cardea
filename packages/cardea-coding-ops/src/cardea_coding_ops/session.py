@@ -9,6 +9,12 @@ One call, no state kept between calls:
 4. run each configured gate in the checkout and record its exit status and output tail;
 5. return the bounded summary and the bundle as the `change.bundle` artifact.
 
+A call that names a `record_id` whose work already has a change (a `vcs.open_change`
+receipt in the kernel's own record) starts from that change's head branch instead of
+`base_ref`, so the new commits build on the change and a second, competing change is never
+begun. The branch comes from the kernel's evidence, never from the caller, and the worker
+still reads only the host owner's source.
+
 Configuration is a host-owner JSON file named by `CARDEA_CODING_CONFIG` (read-only in the
 worker): the `harness` command and the gates' environment. Repositories come from the
 host's repository registry (`CARDEA_REPOSITORIES`, `cardea.service.repositories`): each
@@ -30,6 +36,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -208,6 +215,17 @@ def _git(repo: Path, env: dict[str, str], *args: str) -> str:
     return result.stdout
 
 
+def _has_commit(repo: Path, env: dict[str, str], sha: str) -> bool:
+    """Whether the checkout's branch holds `sha` (the tip itself or an ancestor)."""
+    if not re.fullmatch(r"[0-9a-f]{40,64}", sha):
+        return False
+    try:
+        _git(repo, env, "merge-base", "--is-ancestor", sha, "HEAD")
+    except RuntimeError:
+        return False
+    return True
+
+
 def _uncontained(error: isolation.IsolationFailed) -> OperationRejected:
     """A step's process survived, or the worker could not be hardened: report nothing."""
     return OperationRejected(f"untrusted steps not contained: {error}", "isolation_failed")
@@ -285,11 +303,58 @@ def repository_entry(alias: str, config: dict[str, Any]) -> dict[str, Any] | Non
     return {"source": entry.source, "gates": entry.gate_documents()}
 
 
+Evidence = Mapping[str, tuple[Mapping[str, JsonValue], ...]]
+BRANCH = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,199}")
+
+
+def _fields(evidence: Evidence, name: str, arguments: dict[str, JsonValue]) -> list[dict[str, Any]]:
+    """The named evidence entries' fields, newest first, for this record and repository."""
+    record_id = arguments.get("record_id")
+    if not record_id:
+        return []
+    found = []
+    for entry in evidence.get(name) or ():
+        fields = entry.get("fields")
+        if (
+            isinstance(fields, dict)
+            and fields.get("arguments/record_id") == record_id
+            and fields.get("arguments/repository") == arguments["repository"]
+        ):
+            found.append(fields)
+    return found
+
+
+def existing_change(evidence: Evidence, arguments: dict[str, JsonValue]) -> dict[str, Any] | None:
+    """The record's newest change: its branch, number and URL, and the newest commit the
+    kernel saw pushed to that branch for the record (None if it saw none)."""
+    changes = _fields(evidence, "changes", arguments)
+    if not changes:
+        return None
+    branch = str(changes[0].get("output/head"))
+    if not BRANCH.fullmatch(branch) or ".." in branch:
+        raise OperationRejected(f"the record's change names an unusable branch {branch!r}")
+    pushed = next(
+        (
+            str(fields["arguments/head"])
+            for fields in _fields(evidence, "pushes", arguments)
+            if fields.get("arguments/branch") == branch
+        ),
+        None,
+    )
+    return {
+        "branch": branch,
+        "number": changes[0].get("output/number"),
+        "url": changes[0].get("output/url"),
+        "pushed": pushed,
+    }
+
+
 def session(
     arguments: dict[str, JsonValue],
     config: dict[str, Any],
     scratch: Path,
     isolation_mode: str = "unknown",
+    evidence: Evidence | None = None,
 ) -> Any:
     """The whole call in `scratch`; returns the output and, if anything changed, the bundle."""
     alias = str(arguments["repository"])
@@ -297,6 +362,9 @@ def session(
     if not isinstance(repository, dict):
         raise OperationRejected(f"repository {alias} is not allowed on this host")
     base_ref = str(arguments["base_ref"])
+    # A record with a change builds on it: its head branch is the starting point.
+    existing = existing_change(evidence or {}, arguments)
+    start_ref = existing["branch"] if existing else base_ref
     env = environment(scratch)
     repo = scratch / "repo"
     clone = subprocess.run(
@@ -309,7 +377,7 @@ def session(
             "--no-hardlinks",
             "--single-branch",
             "--branch",
-            base_ref,
+            start_ref,
             str(repository["source"]),
             str(repo),
         ],
@@ -320,9 +388,23 @@ def session(
         timeout=300,
         check=False,
     )
+    if clone.returncode and existing:
+        raise OperationRejected(
+            f"the record already has pull request #{existing['number']} ({existing['url']}), "
+            f"but its branch {start_ref} is not in the repository source; "
+            f"no session was started from {base_ref} so as not to begin a second change",
+            "change_head_missing",
+        )
     if clone.returncode:
         raise OperationRejected(f"base_ref {base_ref} could not be checked out")
     base_sha = _git(repo, env, "rev-parse", "HEAD").strip()
+    if existing and existing["pushed"] and not _has_commit(repo, env, existing["pushed"]):
+        raise OperationRejected(
+            f"the repository source is behind pull request #{existing['number']}: branch "
+            f"{start_ref} does not contain {existing['pushed']}, the head last pushed for the "
+            "record; no session was started from an older head",
+            "change_head_stale",
+        )
 
     harness = config.get("harness", {})
     timeout = float(harness.get("timeout_seconds", DEFAULT_HARNESS_TIMEOUT))
@@ -368,7 +450,7 @@ def session(
             deletions += int(removed) if removed.isdigit() else 0
         diff = _git(repo, env, "diff", base_sha, head_sha)
         # Explicit refs: the bundle must not depend on what the harness did to origin/<base>.
-        branch = f"refs/heads/{base_ref}"
+        branch = f"refs/heads/{start_ref}"
         _git(repo, env, "update-ref", branch, head_sha)
         target = scratch / BUNDLE
         _git(repo, env, "bundle", "create", "--quiet", str(target), branch, "HEAD", f"^{base_sha}")
@@ -431,6 +513,9 @@ def session(
         "repository": alias,
         "base_ref": base_ref,
         "base_sha": base_sha,
+        "starting_from": None
+        if existing is None
+        else {k: existing[k] for k in ("branch", "number", "url")},
         "head_sha": head_sha,
         "changed": changed,
         "files_changed": files,
@@ -462,6 +547,6 @@ async def run(arguments: dict[str, JsonValue], context: OperationContext) -> Any
     dependency_env(config)
     scratch = Path(tempfile.mkdtemp(prefix="code-session-"))
     try:
-        return session(arguments, config, scratch, mode)
+        return session(arguments, config, scratch, mode, context.evidence)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)

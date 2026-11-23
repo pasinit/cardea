@@ -488,6 +488,7 @@ class Vcs:
         title, body = str(arguments["title"]), str(arguments.get("body") or "")
         self.gate(context, "vcs.open_change", texts={"title": title, "body": body})
         async with await self.client(repository, context, "pull_requests:write") as host:
+            await self._one_change_per_record(host, arguments, context)
             try:
                 pull = await host.create_pull(head, base, title, body, bool(arguments.get("draft")))
             except DuplicatePull:
@@ -501,6 +502,43 @@ class Vcs:
             except HostRefused as refused:
                 raise OperationRejected(str(refused), "host_refused") from None
         return self._change(pull)
+
+    async def _one_change_per_record(
+        self, host: GitHub, arguments: dict[str, JsonValue], context: OperationContext
+    ) -> None:
+        """A work record has one open change. The kernel's earlier `vcs.open_change` receipts
+        for the record name candidates; the host says which are still open. A different head
+        is refused with the existing pull request named; the same head is the idempotent
+        reopen and falls through to the host's own duplicate handling."""
+        record_id = arguments.get("record_id")
+        if not record_id:
+            return
+        seen: set[int] = set()
+        for entry in context.evidence.get("existing") or ():
+            fields = entry.get("fields")
+            if not isinstance(fields, dict):
+                continue
+            if (
+                fields.get("arguments/record_id") != record_id
+                or fields.get("arguments/repository") != arguments["repository"]
+                or fields.get("output/head") == arguments["head"]
+            ):
+                continue
+            number = fields.get("output/number")
+            if not isinstance(number, int) or number in seen:
+                continue
+            seen.add(number)
+            try:
+                pull = await host.pull(number)
+            except HostRefused as refused:
+                raise OperationRejected(str(refused), "host_refused") from None
+            if pull.get("state") == "open":
+                raise OperationRejected(
+                    f"Work record {record_id} already has an open pull request: #{number} "
+                    f"({fields.get('output/url')}, branch {fields.get('output/head')}). "
+                    "Push further commits to that branch instead of opening a second change.",
+                    "change_exists",
+                )
 
     async def find_change(
         self, arguments: dict[str, JsonValue], context: OperationContext

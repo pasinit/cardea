@@ -646,6 +646,98 @@ def test_a_duplicate_pull_request_returns_the_existing_one(
     assert len(host.repositories["acme/cardea"].pulls) == 1
 
 
+def branch_on_host(host: FakeGitHub, tmp_path: Path, branch: str) -> None:
+    """A branch with one commit on the fake host's `cardea` repository."""
+    work = tmp_path / f"work-{next(STEPS)}"
+    git = ["git", "-c", "user.name=agent", "-c", "user.email=agent@example.invalid"]
+    subprocess.run(["git", "init", "-q", "-b", "main", str(work)], check=True)
+    (work / "README.md").write_text(branch)
+    subprocess.run([*git, "-C", str(work), "add", "README.md"], check=True)
+    subprocess.run([*git, "-C", str(work), "commit", "-q", "-m", branch], check=True)
+    path = host.repositories["acme/cardea"].path
+    subprocess.run(
+        ["git", "-C", str(work), "push", "-q", str(path), f"HEAD:refs/heads/{branch}"], check=True
+    )
+
+
+def open_args(branch: str, record_id: str | None) -> dict[str, Any]:
+    arguments: dict[str, Any] = {
+        "repository": "cardea",
+        "head": branch,
+        "base": "main",
+        "title": branch,
+    }
+    if record_id:
+        arguments["record_id"] = record_id
+    return arguments
+
+
+def earlier_open(arguments: dict[str, Any], output: dict[str, Any]) -> dict[str, Any]:
+    """An entry of the `existing` evidence, as the kernel builds it from a receipt."""
+    return {
+        "receipt_id": "r0",
+        "agent_id": "eng.dev.0",
+        "group": "eng",
+        "at": now().isoformat(),
+        "fields": {
+            "arguments/repository": arguments["repository"],
+            "arguments/record_id": arguments.get("record_id"),
+            "output/number": output["number"],
+            "output/url": output["url"],
+            "output/head": output["head"],
+        },
+    }
+
+
+def test_open_change_declares_its_record_evidence() -> None:
+    (descriptor,) = [d for d in descriptors() if d.name == "vcs.open_change"]
+    (query,) = descriptor.cardea.evidence or ()
+    assert (query.name, query.operation, query.optional) == ("existing", "vcs.open_change", True)
+    assert query.match == {"arguments/record_id": "/record_id"}
+
+
+def test_a_second_change_for_the_same_record_is_refused_naming_the_first(
+    host: FakeGitHub, vcs: Vcs, tmp_path: Path
+) -> None:
+    import asyncio
+    from dataclasses import replace
+
+    from cardea.service.operations import OperationRejected
+
+    record = "rec-" + "a" * 32
+    for branch in ("agent/eng/one", "agent/eng/two", "agent/eng/three"):
+        branch_on_host(host, tmp_path, branch)
+    pulls = host.repositories["acme/cardea"].pulls
+    # The content gate has its own tests; here it finds nothing.
+    context = replace(caller("eng"), check_content=lambda **_: None)
+    first_args = open_args("agent/eng/one", record)
+    first = asyncio.run(vcs.open_change(first_args, context))
+    assert first["number"] == 1 and len(pulls) == 1
+    seen = replace(context, evidence={"existing": (earlier_open(first_args, first),)})
+
+    # Another branch for the same record: refused, naming the first pull request, and the
+    # host is not asked to create anything.
+    with pytest.raises(OperationRejected) as refused:
+        asyncio.run(vcs.open_change(open_args("agent/eng/two", record), seen))
+    assert refused.value.code == "change_exists"
+    assert "#1" in str(refused.value) and str(first["url"]) in str(refused.value)
+    assert record in str(refused.value)
+    assert len(pulls) == 1 and host.calls.count("create_pull") == 1
+
+    # The same head is the idempotent reopen: the existing pull request comes back.
+    again = asyncio.run(vcs.open_change(first_args, seen))
+    assert again["number"] == 1 and len(pulls) == 1
+
+    # Another record, or no record, is not held by the first.
+    other = open_args("agent/eng/two", "rec-" + "b" * 32)
+    assert asyncio.run(vcs.open_change(other, seen))["number"] == 2
+
+    # Once the first pull request is closed, the record may open another.
+    pulls[0]["state"] = "closed"
+    third = asyncio.run(vcs.open_change(open_args("agent/eng/three", record), seen))
+    assert third["number"] == 3
+
+
 # The credential stays with the host call
 
 
