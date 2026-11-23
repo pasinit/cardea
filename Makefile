@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: help install acceptance-check error-codes try try-test try-check teams teams-test test api-test check check-test kernel-test standards-test m1-test m1-demo kernel-openapi spire-fit dbos-fit dbos-integration-fit temporal-fit absurd-fit hatchet-fit cel-fit kernel-schema kernel-demo lint lint-api fix-lint format typecheck typecheck-api check-uv
+.PHONY: help install screenshots acceptance-check error-codes try try-test try-check teams teams-test test api-test check check-test kernel-test standards-test m1-test m1-demo kernel-openapi spire-fit dbos-fit dbos-integration-fit temporal-fit absurd-fit hatchet-fit cel-fit kernel-schema kernel-demo lint lint-api fix-lint format typecheck typecheck-api check-uv
 
 API_DIR := apps/api
 UV ?= $(shell command -v uv 2>/dev/null || printf "%s/bin/uv" "$$(python3 -m site --user-base)")
@@ -97,6 +97,10 @@ api-test: check-uv
 # The `check` scenario of env.try: lint, typecheck and the tests that need no TCP loopback.
 check:
 	python3 packaging/check.py
+
+# The `screenshots` scenario of env.try: a fixture page at 390 px and desktop width.
+screenshots:
+	python3 packaging/screenshots.py
 
 check-test: check-uv
 	cd $(API_DIR) && CARDEA_NO_LOOPBACK=1 "$(UV)" run pytest -m "not loopback" -q -rfE --tb=short -p no:cacheprovider

@@ -1,0 +1,6 @@
+[
+  {"name": "alpha", "state": "running", "open": 3},
+  {"name": "beta", "state": "idle", "open": 0},
+  {"name": "gamma", "state": "running", "open": 7},
+  {"name": "delta", "state": "paused", "open": 1}
+]
