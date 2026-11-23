@@ -3,6 +3,7 @@
 This kit builds a generic, configuration-driven dev team from [`examples/teams/dev-team`](../../examples/teams/README.md). It has five roles: a product manager, a team lead, developers, a principal engineer and a UX designer. They work on one repository through `code.session`, `vcs.*`, `env.try` and the kernel's records, mail and spend ceilings.
 
 - `teamkit.py`: the `render`, `provision`, `apply`, `status`, `pause`, `resume` and `stop` commands.
+- `cardea team ...` runs the same commands from the installed CLI as the supervisor's account, through the package's narrow sudoers rule, with this kit as shipped in the package ([ADR-041](../../docs/decisions/041-cardea-team-cli.md), the [runbook](../../docs/runbooks/dev-team.md)).
 - `dashboard.py`, `dashboard.html`, `dashboard.js`: the read-only team dashboard, below.
 - `dashboard_settings.html`, `dashboard_settings.js`: the settings page of the teams dashboard (`/settings`), below.
 - `teamsetup.py`: `plan` (dry run) and `apply`, one command from a fresh Debian host to a running team ([ADR-040](../../docs/decisions/040-team-setup-command.md)). Each step checks, acts and prints its verify result; a failed or killed run resumes at its step.

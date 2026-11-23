@@ -9,7 +9,8 @@ A settings document names only the settings to change:
      "schedules": {"pm": ["0 9 * * 1-5"]},
      "developers": 3,
      "model": "claude-sonnet-4-5",
-     "product_goals": {"goals": "...", "non_goals": "..."}}
+     "product_goals": {"goals": "...", "non_goals": "..."},
+     "email_rate_limit": {"count": 10, "window_days": 1}}
 
 `validate` refuses a setting it does not understand with an error naming the field. `preview`
 reads the host file at a path, applies the change to a copy and returns the differences; it
@@ -38,6 +39,8 @@ MAX_SCHEDULES = 32
 MAX_MODEL = 128
 MAX_REASON = 200
 MAX_PRODUCT_BYTES = 8192
+MAX_EMAIL_COUNT = 1000
+MAX_EMAIL_WINDOW_DAYS = 90
 _CRON = re.compile(r"[0-9*,/\- ]{1,64}")
 _MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@-]*")
 _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
@@ -51,6 +54,7 @@ SETTINGS = (
     "developers",
     "model",
     "product_goals",
+    "email_rate_limit",
 )
 # Fields a settings document may never carry: they hold or point at secrets.
 SECRET_FIELDS = ("credentials", "token", "secret", "password", "kernel", "supervisor")
@@ -183,6 +187,19 @@ def _product_goals(value: object, path: str) -> dict[str, str]:
     return {k: v.strip() for k, v in out.items()}
 
 
+def _email_rate_limit(value: object, path: str) -> dict[str, int]:
+    found = _object(value, path, ("count", "window_days"))
+    if set(found) != {"count", "window_days"}:
+        raise SettingsError(f"{path} needs count and window_days")
+    out = {}
+    for key, top in (("count", MAX_EMAIL_COUNT), ("window_days", MAX_EMAIL_WINDOW_DAYS)):
+        number = found[key]
+        if isinstance(number, bool) or not isinstance(number, int) or not 1 <= number <= top:
+            raise SettingsError(f"{path}.{key} must be a whole number from 1 to {top}")
+        out[key] = number
+    return out
+
+
 _CHECKS = {
     "run_limits": _run_limits,
     "spend_limits": _spend_limits,
@@ -191,6 +208,7 @@ _CHECKS = {
     "developers": _developers,
     "model": _model,
     "product_goals": _product_goals,
+    "email_rate_limit": _email_rate_limit,
 }
 
 
@@ -242,6 +260,7 @@ def current(host: dict[str, Any], kit: ModuleType, *, paused: bool) -> dict[str,
         "developers": int(host.get("developers", 2)),
         "model": host.get("model"),
         "product_goals": {k: shown[k] for k in ("goals", "non_goals") if k in shown},
+        "email_rate_limit": kit.email_limit(host) if host.get("email") else None,
     }
 
 
@@ -280,6 +299,8 @@ def apply_to(host: dict[str, Any], settings: dict[str, Any]) -> dict[str, Any]:
     if "product_goals" in settings:
         # An inline value replaces a goals_file: the section holds exactly one of them.
         out["product"] = dict(settings["product_goals"])
+    if "email_rate_limit" in settings:
+        _put(out, ("email", "rate_limit"), settings["email_rate_limit"])
     return out
 
 
@@ -329,6 +350,8 @@ def preview(host_path: Path, settings: object, *, paused: bool | None = None) ->
     except ValueError as error:
         problems.append(str(error))
     problems += _budget_problems(changed.get("budgets") or {})
+    if "email_rate_limit" in wanted and "alias" not in (host.get("email") or {}):
+        problems.append("email_rate_limit needs the host file's email alias")
     if "product_goals" in wanted and "product" in host and "goals_file" in host["product"]:
         problems.append("product.goals_file is replaced by inline goals")
     after = copy.deepcopy(before)

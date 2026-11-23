@@ -116,7 +116,17 @@ def test_the_preview_diffs_each_setting_against_the_host_file(
     assert changes["model"] == ("claude-sonnet-4-5", "claude-opus-5-5")
     assert changes["product_goals.goals"][0] == "Original goals."
     assert changes["product_goals.non_goals"][1] == "No mobile app."
+    assert changes["email_rate_limit.count"] == (10, 5)
+    assert changes["email_rate_limit.window_days"] == (1, 2)
     assert result["problems"] == []
+
+
+def test_an_email_rate_limit_needs_the_email_alias(settings: ModuleType, host_file: Path) -> None:
+    document = json.loads(host_file.read_text())
+    del document["email"]
+    host_file.write_text(json.dumps(document))
+    result = settings.preview(host_file, fixture("email_rate_limit")["valid"])
+    assert result["problems"] == ["email_rate_limit needs the host file's email alias"]
 
 
 def test_the_preview_leaves_unnamed_and_unchanged_settings_alone(

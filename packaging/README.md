@@ -35,6 +35,10 @@ The supported execution profile is deliberately narrow: Debian 13 amd64, a Debia
 
 `cardea --help` exposes the existing authenticated client and administrative commands. The service uses isolated Python imports from root-owned `/usr/lib/cardea`; it does not load code from the caller's working directory or `PYTHONPATH`.
 
+## Team commands
+
+`cardea team` (`cardea team --help`, `man cardea-team`) runs the agent dev team from `deploy/team-kit`, which the package ships in `/usr/lib/cardea/team-kit` beside the kernel's code, so it is the kernel's version. The supervisor's SVID is bound to the `cardea-kernel` account, so a front end sends one JSON request to `/usr/libexec/cardea-team-run` through `/etc/sudoers.d/cardea-team`: members of the `cardea-operators` group (created empty; the host owner adds people) may run that one program as `cardea-kernel`, with no arguments. The helper reads only `/etc/cardea/team.host.json`, which must be owned by root or `cardea-kernel` and writable by no one else, so a caller cannot point the supervisor identity at a host of their choosing. Commands that rewrite files (`set`, `provision`, `pause`, `resume`) need `cardea-kernel` to write the host file's and the provisioning file's directory; the package does not change `/etc/cardea`'s mode, the host owner decides (see the [runbook](../docs/runbooks/dev-team.md)).
+
 ## Operate and upgrade
 
 Use `systemctl status cardea-kernel` for process state. The authenticated `/v0.2/system` response reports enabled profiles; task receipts/events remain the source of execution evidence. Do not export raw journald logs or configuration as a supposedly redacted support bundle. `/usr/share/doc/cardea-kernel/dependency-inventory.json.gz` records dependency versions and declared license metadata; their installed license files remain in the environment. This is an inventory, not a license or vulnerability audit. Cardea is licensed under [Apache-2.0](../LICENSE) (declared 2026-10-10); this package is still a pre-release for the fixed profile, not a supported public release.

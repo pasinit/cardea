@@ -1,0 +1,10 @@
+#!/bin/sh
+# The only program that runs as cardea-kernel for `cardea team` (sudoers: cardea-team). It
+# reads one JSON request on stdin; the interpreter is the kernel's own, isolated from the
+# environment and from the current directory.
+exec /opt/venvs/cardea-kernel/bin/python -I -c '
+import sys
+sys.path.insert(0, "/usr/lib/cardea")
+from cardea.service.team_cli import helper_main
+raise SystemExit(helper_main())
+'

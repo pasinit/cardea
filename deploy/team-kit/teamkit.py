@@ -56,6 +56,10 @@ POOLS = ("pm", "tl", "dev", "pe", "ux")
 # The only pools that may email the owner (recipient alias): nobody else is granted it.
 EMAIL_POOLS = ("pm", "ux")
 KIT_PYTHON = ("/opt/cardea/apps/api/.venv/bin/python",)
+# The installed package's entry point (cardea-kernel): when this file runs from under
+# PACKAGED_ROOT, `provision` runs that code, the running kernel's own, whatever the host file says.
+PACKAGED_ROOT = Path("/usr/lib/cardea")
+PACKAGED_MAIN = PACKAGED_ROOT / "main.py"
 # Rights every team supervisor needs besides the pools' grants (ADR-034, ADR-027).
 SUPERVISOR_RIGHTS = (
     "groups.manage",
@@ -1156,12 +1160,14 @@ def provisioning_fragment(host: dict[str, Any], *, paused: bool = False) -> dict
     ceiling for them."""
     namespace, _, supervisor, _ = _names(host)
     group = group_document(host)
-    # The supervisor may mail every role's pool: the dashboard's message box.
+    # The supervisor may mail every role's pool (the dashboard's message box) and each
+    # developer by name (`cardea team mail dev.N`).
     rights = sorted(
         {
             *SUPERVISOR_RIGHTS,
             *(g for p in group["spec"]["pools"] for g in p["grants"]),
             *_mail(_names(host)[1], *POOLS),
+            *(f"mail:{member}" for member in developers(host)),
         }
     )
     expires = (datetime.now(UTC) + timedelta(days=int(host.get("grant_days", 14)))).isoformat()
@@ -1358,6 +1364,15 @@ def check_placeholders(host: dict[str, Any]) -> None:
         raise HostError("the host file still holds placeholder values at " + ", ".join(found))
 
 
+def provision_command(settings: dict[str, Any]) -> list[str]:
+    """The kernel's own CLI. Installed from the package, it is the interpreter running this
+    code on the package's `main.py`, so provisioning and the kernel are one version; otherwise
+    the host file's `cardea` command, or the kit's environment (`python -I -m cardea.service`)."""
+    if Path(__file__).resolve().is_relative_to(PACKAGED_ROOT):
+        return [sys.executable, "-I", str(PACKAGED_MAIN)]
+    return list(settings.get("cardea", [*KIT_PYTHON, "-I", "-m", "cardea.service"]))
+
+
 def provision(
     host: dict[str, Any], *, paused: bool, runner: Callable[..., Any] = subprocess.run
 ) -> Path:
@@ -1377,8 +1392,7 @@ def provision(
     staged.write_text(json.dumps(document, indent=2) + "\n")
     staged.chmod(0o600)
     os.replace(staged, out)
-    # The kernel's own CLI, from the kit's environment (`python -I -m cardea.service`).
-    cardea = list(settings.get("cardea", [*KIT_PYTHON, "-I", "-m", "cardea.service"]))
+    cardea = provision_command(settings)
     config = settings.get("config", "/etc/cardea/config.json")
     runner([*cardea, "provision", "--config", config, str(out)], check=True)
     return out

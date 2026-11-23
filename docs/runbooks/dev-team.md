@@ -77,6 +77,24 @@ Steps, as root, on the dev host:
 
 Every `teamkit.py` command below runs as `cardea-kernel`, with the kernel's Python: `sudo -u cardea-kernel /opt/cardea/apps/api/.venv/bin/python -I deploy/team-kit/teamkit.py ...`. `provision` writes under `/etc/cardea`, so give that account write access to the document it writes (`provisioning.out`), or run `provision` as root with the same Python.
 
+## `cardea team`, from the package
+
+With the `cardea-kernel` package installed, the day-to-day commands are in the CLI and need no `sudo -u` ([ADR-041](../decisions/041-cardea-team-cli.md), `man cardea-team`):
+
+```sh
+cardea team status          # also: pause [reason], resume, stop, apply, render, provision
+cardea team settings        # the host settings in plain words
+cardea team set developers 3        # preview the diff, confirm, apply
+cardea team mail pm "Prioritise the login bug"   # tl, pm, pe, ux or dev.N; `mail list` reads
+```
+
+- **Who:** members of the `cardea-operators` group (created by the package, empty): `adduser <user> cardea-operators`, then log in again. The package's sudoers rule lets that group run `/usr/libexec/cardea-team-run` as `cardea-kernel`, that program only, with no arguments.
+- **Host file:** `/etc/cardea/team.host.json`, fixed. Own it as root or `cardea-kernel`, writable by no one else. `set`, `provision`, `pause` and `resume` rewrite the host file or the provisioning file, so `cardea-kernel` needs write access to that directory (for example `chgrp cardea-kernel`, `chmod g+w /etc/cardea`), or point `provisioning.out` somewhere it can write; the package does not change `/etc/cardea`.
+- **Code:** the package's, so `provision` is the installed kernel's own CLI; `provisioning.cardea` in the host file is ignored there.
+- **Settings:** `set` takes `runs.team|<role> N`, `usd.team|run|<role> X`, `schedule.<role> "cron; cron"`, `email.rate COUNT/DAYS`, `developers N`, `model NAME`, `goals TEXT|@FILE`, `non-goals TEXT|@FILE` (roles `pm`, `tl`, `dev`, `pe`), with the dashboard's validation. Without a terminal it applies nothing unless `--yes` is given. `stop` asks the same way.
+
+The `$KIT` commands below are the same operations from a checkout.
+
 ## Start
 
 ```sh

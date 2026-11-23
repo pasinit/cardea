@@ -1,0 +1,4 @@
+# `cardea team` runs as the supervisor's account through one program, with no arguments (the
+# request is JSON on stdin), for members of the cardea-operators group only.
+Defaults!/usr/libexec/cardea-team-run env_reset, !setenv
+%cardea-operators ALL=(cardea-kernel) NOPASSWD: /usr/libexec/cardea-team-run ""

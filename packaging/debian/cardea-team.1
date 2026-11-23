@@ -1,0 +1,112 @@
+.TH CARDEA-TEAM 1 "November 2026" "cardea-kernel" "Cardea"
+.SH NAME
+cardea-team \- run the agent dev team from the cardea command
+.SH SYNOPSIS
+.B cardea team
+.I COMMAND
+.RI [ ARGUMENTS ]
+.SH DESCRIPTION
+.B cardea team
+runs the dev team described by the host file
+.IR /etc/cardea/team.host.json .
+It acts as the team's supervisor. The supervisor's identity belongs to the
+.B cardea-kernel
+account, so the command passes each request to
+.I /usr/libexec/cardea-team-run
+through a sudoers rule shipped in the package
+.RI ( /etc/sudoers.d/cardea-team ).
+You do not type
+.BR "sudo -u" .
+The helper runs the same code as the kernel, from the package.
+It decides nothing about authority: the kernel checks the supervisor's live authority on every read and write, and a refusal is reported by its error code.
+The commands print no credential.
+.PP
+Your account must be in the
+.B cardea-operators
+group (or be root):
+.B adduser
+.I USER
+.BR cardea-operators ,
+then log in again.
+.SH COMMANDS
+.TP
+.B status
+Show members and their runs, work by state, mail, approvals, spend against the ceilings, when each credential expires, and the last failed runs.
+While the team is paused it prints the pause reason instead.
+.TP
+.BR pause " [" \fIreason\fR ]
+The kill switch. Disable the supervisor: the kernel cancels every unfinished run and nothing is admitted until
+.BR resume .
+The reason is kept for
+.BR status .
+.TP
+.B resume
+Enable the supervisor again. Triggers admit from their next slot or event.
+.TP
+.B stop
+Pause, then delete the group. Collections and records stay. Asks to confirm (\fB\-\-yes\fR skips it).
+.TP
+.B apply
+Put the collections and the group to the kernel as the supervisor.
+.TP
+.BR render " [\-\-out " \fIDIR\fR ]
+Print the documents the host file renders, for review, or write them to
+.IR DIR .
+.TP
+.BR provision " [\-\-paused]"
+Write the supervisor's grants into the provisioning document and provision them.
+.TP
+.B settings
+Show the host settings in plain words: developers, model, run and spend limits, schedules, the email rate limit and the product goals.
+.TP
+.BI set " KEY VALUE"
+Change a setting. It validates like the dashboard's Settings page, shows the diff, asks to confirm and then applies it (render, provision, apply, audit).
+Without a terminal it changes nothing unless
+.B \-\-yes
+is given. Keys:
+.RS
+.nf
+runs.team N, runs.ROLE N          runs a day
+usd.team X, usd.run X, usd.ROLE X dollars a day, or one run
+schedule.ROLE "CRON; CRON"        five-field cron; "none" clears
+email.rate COUNT/DAYS             email rate limit, e.g. 10/1
+developers N                      number of developers
+model NAME                        the model
+goals TEXT | @FILE                product goals
+non-goals TEXT | @FILE            what the team must not build
+.fi
+ROLE is pm, tl, dev or pe.
+.RE
+.TP
+.BI mail " TARGET TEXT"
+Send supervisor mail to
+.BR tl ", " pm ", " pe ", " ux
+(the role's pool) or
+.BI dev. N
+(one developer). Text
+.B \-
+is read from standard input.
+.TP
+.BR "mail list" " [\-\-limit N] [\-\-member ID] [\-\-item COLLECTION/ID]"
+List the team's mail with full text, newest first.
+.PP
+.B \-\-host
+.I FILE
+selects another host file, but only when run as
+.BR cardea-kernel ;
+through the helper the host file is always the default, and it must be owned by root or
+.B cardea-kernel
+and writable by no one else.
+.SH EXIT STATUS
+0 on success; 1 on a refusal or failure; 2 when a command that needs a confirmation was not confirmed because there was no terminal.
+.SH FILES
+.TP
+.I /etc/cardea/team.host.json
+The host file.
+.TP
+.I /etc/sudoers.d/cardea-team
+Lets the cardea-operators group run
+.I /usr/libexec/cardea-team-run
+as cardea-kernel, with no arguments.
+.SH SEE ALSO
+.BR cardea (1)

@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import sys
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -27,8 +28,14 @@ from cardea.service.server import serve
 
 
 def main() -> None:
+    if sys.argv[1:2] == ["team"]:
+        # The team commands have their own parser, so `cardea team --help` lists them all.
+        from cardea.service import team_cli
+
+        raise SystemExit(team_cli.main(sys.argv[2:]))
     parser = argparse.ArgumentParser(description="Cardea authenticated kernel")
     commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("team", help="run the agent dev team: `cardea team --help`")
     administrative = {
         "init",
         "provision",

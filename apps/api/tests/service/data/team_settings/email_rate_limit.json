@@ -1,0 +1,64 @@
+{
+  "valid": {
+    "email_rate_limit": {
+      "count": 5,
+      "window_days": 2
+    }
+  },
+  "invalid": [
+    {
+      "settings": {
+        "email_rate_limit": {
+          "count": 0,
+          "window_days": 1
+        }
+      },
+      "field": "email_rate_limit.count"
+    },
+    {
+      "settings": {
+        "email_rate_limit": {
+          "count": 1001,
+          "window_days": 1
+        }
+      },
+      "field": "email_rate_limit.count"
+    },
+    {
+      "settings": {
+        "email_rate_limit": {
+          "count": 5,
+          "window_days": 91
+        }
+      },
+      "field": "email_rate_limit.window_days"
+    },
+    {
+      "settings": {
+        "email_rate_limit": {
+          "count": 5
+        }
+      },
+      "field": "email_rate_limit"
+    },
+    {
+      "settings": {
+        "email_rate_limit": {
+          "count": true,
+          "window_days": 1
+        }
+      },
+      "field": "email_rate_limit.count"
+    },
+    {
+      "settings": {
+        "email_rate_limit": {
+          "count": 5,
+          "window_days": 1,
+          "burst": 2
+        }
+      },
+      "field": "email_rate_limit.burst"
+    }
+  ]
+}
