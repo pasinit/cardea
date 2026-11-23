@@ -98,7 +98,8 @@ api-test: check-uv
 check:
 	python3 packaging/check.py
 
-# The `screenshots` scenario of env.try: a fixture page at 390 px and desktop width.
+# The `screenshots` scenario of env.try: the mock pages the commit adds under docs/mocks/,
+# full page, at 390 px and desktop width.
 screenshots:
 	python3 packaging/screenshots.py
 

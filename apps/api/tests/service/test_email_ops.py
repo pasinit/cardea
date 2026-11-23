@@ -649,6 +649,22 @@ def test_png_and_html_attachments_are_sent_with_the_message(
 
 
 @pytest.mark.loopback
+@pytest.mark.loopback
+def test_an_html_page_is_attached_as_plain_text_and_base64_may_be_loose(
+    kernel: Kernel, session: FakeSession, provider: FakeAgentMail
+) -> None:
+    html = {"filename": "mock.html", "content_type": "text/html", "text": PAGE.decode()}
+    wrapped = base64.encodebytes(PNG_BYTES + bytes(50)).decode()  # line breaks
+    loose = {**attach("loose.png", PNG_BYTES + bytes(50)), "data": wrapped.strip().rstrip("=")}
+    _, results = run_calls(kernel, session, [question(attachments=[html, loose])])
+    assert not results[0].is_error, text(results[0])
+    (message,) = sent_to(provider)
+    assert [a["content"] for a in message["attachments"]] == [
+        base64.b64encode(PAGE).decode(),
+        base64.b64encode(PNG_BYTES + bytes(50)).decode(),
+    ]
+
+
 @pytest.mark.parametrize(
     ("attachments", "code"),
     [
@@ -671,6 +687,13 @@ def test_png_and_html_attachments_are_sent_with_the_message(
         ([attach("a.png"), attach("a.png")], "attachment_invalid"),
         ([attach("../a.png")], "invalid_arguments"),
         ([{**attach(), "data": "not base64!"}], "attachment_invalid"),
+        ([{**attach("a.html", PAGE), "text": PAGE.decode()}], "attachment_invalid"),
+        ([{"filename": "a.html", "content_type": "text/html"}], "attachment_invalid"),
+        ([{"filename": "a.png", "content_type": "image/png", "text": "x"}], "attachment_invalid"),
+        (
+            [{"filename": "a.html", "content_type": "text/html", "text": "<script>1</script>"}],
+            EXTERNAL,
+        ),
     ],
 )
 def test_attachment_limits_and_types_refuse_before_anything_is_sent(
