@@ -1,6 +1,6 @@
 # Runbook: an agent dev team on a host
 
-This runbook covers how to start, watch, pause, resume and stop the dev team from [`deploy/team-kit`](../../deploy/team-kit/README.md), and what to check each day. The team is four roles in one agent group (ADR-034):
+This runbook covers how to start, watch, pause, resume and stop the dev team from [`deploy/team-kit`](../../deploy/team-kit/README.md), and what to check each day. The team is five roles in one agent group (ADR-034):
 
 | Role | Pool | Wakes on | Does |
 |---|---|---|---|
@@ -8,6 +8,7 @@ This runbook covers how to start, watch, pause, resume and stop the dev team fro
 | Team lead | `tl` | its daily schedule; a new work item; mail | plans, splits and cancels work, and triages the next item for the developers |
 | Developers | `dev` (2 by default) | an item made `ready`; an item `approved`; `request_changes`; mail; an optional schedule (`schedules.dev`) | claim a ready item, change the code with `code.session`, push, open a pull request, submit (with `env_try.dev_scenarios`, such as `["check"]`, only after `env.try` passes on the pushed head); merge after approval; then take the next ready item in the same run |
 | Principal engineer | `pe` | an item entering `in_review`; mail; an optional schedule (`schedules.pe`) | reviews the pull request and approves it, or requests changes |
+| UX designer | `ux` | an item entering `in_review`; an item made `ready`; mail; an optional schedule (`schedules.ux`) | owns the design of every page: writes the approved mock (phone 390px and desktop) into UI items, files UX items with screenshots, and reviews every pull request that changes the UI. It requests changes unless it saw the page rendered at both widths and it matches the approved mock; otherwise it posts a `UX REVIEW: PASS <head sha>` review. The PE does not approve a UI pull request before that review |
 
 Every trigger refuses double work:
 - **Work items.** One claim per item: of the developers an assignment wakes, only one claims the item. Each developer holds at most two, so one can wait in review while it works on the next.
