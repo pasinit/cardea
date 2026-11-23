@@ -649,6 +649,36 @@ def test_png_and_html_attachments_are_sent_with_the_message(
 
 
 @pytest.mark.loopback
+def test_an_html_page_is_attached_as_text_without_base64(
+    kernel: Kernel, session: FakeSession, provider: FakeAgentMail
+) -> None:
+    page = {"filename": "mock.html", "content_type": "text/html", "text": PAGE.decode()}
+    _, results = run_calls(kernel, session, [question(attachments=[page])])
+    assert not results[0].is_error, text(results[0])
+    (message,) = sent_to(provider)
+    (sent,) = message["attachments"]
+    assert base64.b64decode(sent["content"]) == PAGE and sent["content_type"] == "text/html"
+
+
+@pytest.mark.loopback
+@pytest.mark.parametrize(
+    "attachment",
+    [
+        {**attach("a.png"), "text": "x"},
+        {"filename": "a.png", "content_type": "image/png", "text": "x"},
+        {"filename": "a.html", "content_type": "text/html"},
+        {**attach("a.html", PAGE), "text": PAGE.decode()},
+    ],
+)
+def test_text_and_data_are_exclusive_and_text_is_for_html_only(
+    kernel: Kernel, session: FakeSession, provider: FakeAgentMail, attachment: dict[str, str]
+) -> None:
+    _, results = run_calls(kernel, session, [question(attachments=[attachment])])
+    assert results[0].is_error and "attachment_invalid" in text(results[0])
+    assert not sent_to(provider)
+
+
+@pytest.mark.loopback
 @pytest.mark.parametrize(
     ("attachments", "code"),
     [

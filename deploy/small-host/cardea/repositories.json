@@ -95,8 +95,14 @@
             "timeout_seconds": 300,
             "network": "loopback",
             "artifacts": [
-              "screenshots/mobile-390.png",
-              "screenshots/desktop-1280.png"
+              "screenshots/page-1-mobile-390.png",
+              "screenshots/page-1-desktop-1280.png",
+              "screenshots/page-2-mobile-390.png",
+              "screenshots/page-2-desktop-1280.png",
+              "screenshots/page-3-mobile-390.png",
+              "screenshots/page-3-desktop-1280.png",
+              "screenshots/page-4-mobile-390.png",
+              "screenshots/page-4-desktop-1280.png"
             ]
           },
           "getting-started": {

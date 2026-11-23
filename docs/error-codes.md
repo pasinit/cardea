@@ -223,7 +223,7 @@ used by the examples.
 | `approve_refused` | APPROVE reviews are not allowed on this host | `cardea_vcs_ops.ops` |
 | `artifact_refused` | — | `cardea.service.kernel` |
 | `attachment_external_reference` | The HTML attachment must be self-contained | `cardea_email_ops.attachments` |
-| `attachment_invalid` | An attachment needs a unique plain filename that matches its content type; An attachment's data is not valid base64 | `cardea_email_ops.attachments` |
+| `attachment_invalid` | An attachment has base64 `data`, or, for HTML, its page as `text`, not both; An attachment needs a unique plain filename that matches its content type; An attachment's data is not valid base64; for an HTML page send it as `text` instead | `cardea_email_ops.attachments` |
 | `attachment_too_large` | An attachment may be 1 to {…} bytes | `cardea_email_ops.attachments` |
 | `attachment_type_mismatch` | The attachment is not HTML text; The attachment is not a PNG image | `cardea_email_ops.attachments` |
 | `attachments_too_large` | Attachments may total {…} bytes | `cardea_email_ops.attachments` |

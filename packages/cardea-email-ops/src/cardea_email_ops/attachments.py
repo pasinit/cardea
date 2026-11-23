@@ -1,7 +1,9 @@
 """Checks on `email.send` attachments (ADR-039 amendment 2026-11-23).
 
-An attachment is `{filename, content_type, data}` with `data` the base64 of the bytes, so
-the whole attachment is in the call's arguments: the receipt, the idempotency scope and
+An attachment is `{filename, content_type, data}` with `data` the base64 of the bytes, or,
+for `text/html` only, `{filename, content_type, text}` with `text` the page itself (a model
+cannot be relied on to base64-encode a page by hand; the checker encodes it). Exactly one of
+`data` and `text` is given. Either way the whole attachment is in the call's arguments: the receipt, the idempotency scope and
 the content gate all see exactly what is sent. Only two types are accepted:
 - `image/png`: the bytes must start with the PNG signature and an IHDR chunk;
 - `text/html`: the bytes must be UTF-8 text without control characters, and self-contained:
@@ -60,12 +62,7 @@ def check(raw: JsonValue, limits: AttachmentLimits) -> tuple[Attachment, ...]:
                 "An attachment needs a unique plain filename that matches its content type",
                 "attachment_invalid",
             )
-        try:
-            content = base64.b64decode(str(item["data"]), validate=True)
-        except (binascii.Error, ValueError):
-            raise OperationRejected(
-                "An attachment's data is not valid base64", "attachment_invalid"
-            ) from None
+        content = _bytes(item, content_type)
         if not content or len(content) > limits.max_file_bytes:
             raise OperationRejected(
                 f"An attachment may be 1 to {limits.max_file_bytes} bytes", "attachment_too_large"
@@ -77,6 +74,24 @@ def check(raw: JsonValue, limits: AttachmentLimits) -> tuple[Attachment, ...]:
             f"Attachments may total {limits.max_total_bytes} bytes", "attachments_too_large"
         )
     return tuple(checked)
+
+
+def _bytes(item: dict[str, JsonValue], content_type: str) -> bytes:
+    """The attachment's bytes: its `text` as UTF-8 (HTML only) or its `data` from base64."""
+    if ("text" in item) == ("data" in item) or ("text" in item and content_type != "text/html"):
+        raise OperationRejected(
+            "An attachment has base64 `data`, or, for HTML, its page as `text`, not both",
+            "attachment_invalid",
+        )
+    if "text" in item:
+        return str(item["text"]).encode()
+    try:
+        return base64.b64decode(str(item["data"]), validate=True)
+    except (binascii.Error, ValueError):
+        raise OperationRejected(
+            "An attachment's data is not valid base64; for an HTML page send it as `text` instead",
+            "attachment_invalid",
+        ) from None
 
 
 def _content(content_type: str, content: bytes) -> None:

@@ -98,9 +98,10 @@ api-test: check-uv
 check:
 	python3 packaging/check.py
 
-# The `screenshots` scenario of env.try: a fixture page at 390 px and desktop width.
+# The `screenshots` scenario of env.try: the mock pages the commit adds under docs/mocks (or
+# PAGES, paths in the repository), else a fixture page, at 390 px and desktop width.
 screenshots:
-	python3 packaging/screenshots.py
+	python3 packaging/screenshots.py $(PAGES)
 
 check-test: check-uv
 	cd $(API_DIR) && CARDEA_NO_LOOPBACK=1 "$(UV)" run pytest -m "not loopback" -q -rfE --tb=short -p no:cacheprovider
