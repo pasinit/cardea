@@ -162,13 +162,6 @@ class Workspace:
             # Exit status only: git's stderr may quote the remote; never repeat it.
             raise RuntimeError(f"git push failed with status {pushed.returncode}")
 
-    def refresh(self, source: str, branch: str) -> None:
-        """Push the head into the read-only `source` mirror, a local path, without force."""
-        pushed = self._git("push", "--porcelain", source, f"{self.head}:refs/heads/{branch}")
-        if pushed.returncode != 0:
-            # Exit status only: git's stderr may quote the path; never repeat it.
-            raise RuntimeError(f"git push to the mirror failed with status {pushed.returncode}")
-
 
 Pusher = Callable[[Workspace, str], Awaitable[None]]
 
