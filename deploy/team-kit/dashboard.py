@@ -32,6 +32,8 @@ LOOPBACK = "127.0.0.1"
 DEFAULT_PORT = 8765
 MAX_MESSAGE_CHARS = 4000
 MAX_BODY_BYTES = 16384
+MAX_SETTINGS_BODY_BYTES = 65536
+SETTINGS_ROUTES = {"/api/settings/preview": "preview", "/api/settings/apply": "apply"}
 MAX_REPLIES = 20
 MAIL_PAGE = 50
 MAX_MAIL_PAGES = 20
@@ -53,9 +55,9 @@ CSP = (
 
 
 class DashboardError(Exception):
-    def __init__(self, code: str, status: int = 400) -> None:
+    def __init__(self, code: str, status: int = 400, detail: str | None = None) -> None:
         super().__init__(code)
-        self.code, self.status = code, status
+        self.code, self.status, self.detail = code, status, detail
 
 
 class Backend(Protocol):
@@ -66,6 +68,8 @@ class Backend(Protocol):
     def send(self, role: str, text: str, client_key: str) -> dict[str, Any]: ...
 
     def mail(self, query: dict[str, Any]) -> dict[str, Any]: ...
+
+    def settings(self, action: str, body: object) -> dict[str, Any]: ...
 
 
 def mail_query(raw: str) -> dict[str, Any]:
@@ -137,6 +141,9 @@ class FixtureBackend:
     def mail(self, query: dict[str, Any]) -> dict[str, Any]:
         return {"total": 0, "items": [], "next": None}
 
+    def settings(self, action: str, body: object) -> dict[str, Any]:
+        raise DashboardError("not_found", 404)
+
 
 class KernelBackend:
     """The kernel, as the supervisor: `request` is `KernelClient.request`."""
@@ -179,6 +186,9 @@ class KernelBackend:
         )
         return page
 
+    def settings(self, action: str, body: object) -> dict[str, Any]:
+        raise DashboardError("not_found", 404)
+
     def send(self, role: str, text: str, client_key: str) -> dict[str, Any]:
         sent: dict[str, Any] = self.request(
             "POST",
@@ -214,6 +224,7 @@ def handler(
     port: int,
     static: dict[str, tuple[str, str]] = STATIC,
     writable: bool = True,
+    settings: bool = False,
 ) -> type[BaseHTTPRequestHandler]:
     hosts = {f"{LOOPBACK}:{port}", f"localhost:{port}"}
 
@@ -247,7 +258,8 @@ def handler(
             try:
                 action()
             except DashboardError as error:
-                self.json(error.status, {"code": error.code})
+                detail = {"detail": error.detail} if error.detail else {}
+                self.json(error.status, {"code": error.code, **detail})
             except Exception as error:  # the kernel's refusal, or it being unreachable
                 status = getattr(error, "status", 502)
                 code = str(getattr(error, "code", None) or "kernel_unavailable")
@@ -271,18 +283,21 @@ def handler(
 
         def do_POST(self) -> None:
             def post() -> None:
-                if self.path != "/api/message" or not writable:
+                action = SETTINGS_ROUTES.get(self.path) if settings else None
+                if not action and (self.path != "/api/message" or not writable):
                     return self.json(HTTPStatus.NOT_FOUND, {"code": "not_found"})
                 # A cross-site form cannot send JSON, and a script cannot do so unpreflighted.
                 if self.headers.get_content_type() != "application/json":
                     raise DashboardError("unsupported_media_type", 415)
                 size = int(self.headers.get("Content-Length") or -1)
-                if not 0 <= size <= MAX_BODY_BYTES:
+                if not 0 <= size <= (MAX_SETTINGS_BODY_BYTES if action else MAX_BODY_BYTES):
                     raise DashboardError("invalid_message", 413)
                 try:
                     body = json.loads(self.rfile.read(size))
                 except ValueError:
                     raise DashboardError("invalid_message") from None
+                if action:
+                    return self.json(HTTPStatus.OK, backend.settings(action, body))
                 self.json(HTTPStatus.CREATED, send_message(backend, body))
 
             self.guarded(post)
@@ -299,12 +314,13 @@ def server(
     bind: str = LOOPBACK,
     static: dict[str, tuple[str, str]] = STATIC,
     writable: bool = True,
+    settings: bool = False,
 ) -> ThreadingHTTPServer:
     """A server on the loopback interface; `port` 0 picks a free port."""
     if bind != LOOPBACK:
         raise DashboardError("bind_not_loopback")
     httpd = ThreadingHTTPServer((bind, port), BaseHTTPRequestHandler)
-    httpd.RequestHandlerClass = handler(backend, httpd.server_port, static, writable)
+    httpd.RequestHandlerClass = handler(backend, httpd.server_port, static, writable, settings)
     return httpd
 
 

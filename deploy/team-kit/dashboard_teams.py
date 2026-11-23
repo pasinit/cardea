@@ -1,4 +1,4 @@
-"""A read-only, multi-team dashboard on the owner's loopback interface (ADR-034 follows).
+"""A multi-team dashboard on the owner's loopback interface (ADR-034 follows).
 
     python3 -I deploy/team-kit/dashboard_teams.py --teams TEAMS.json [--port 8766]
     python3 -I deploy/team-kit/dashboard_teams.py --fixtures dev=A.json aerarium=B.json
@@ -7,7 +7,8 @@ One page (`dashboard_teams.html`, `dashboard_teams.js`) shows each team's group 
 side. Each team is read through its own host file, the one `teamkit.py` uses: that file names the
 kernel socket and the supervisor's credential source, so the credential is read by this process
 and never reaches the page. The page and its API carry the overviews and, for a team that cannot
-be read, a short error code. There is no message box and no write route.
+be read, a short error code. There is no message box. The only write routes are the settings ones
+below, and they exist only with `--teams`, never with `--fixtures`.
 
 Each team has a tab showing its state (running, stalled, paused or idle) and a mail view:
 `GET /api/mail?team=NAME[&member=ID][&item=COLLECTION/RECORD][&after=CURSOR][&limit=N]` returns
@@ -15,6 +16,14 @@ one page of the team's messages with their full text, newest first. The kernel s
 team's supervisor only (`GET /v0.2/groups/{name}/status/mail/text`), checking that authority live
 on every read; a refusal is relayed as its error code. The page renders all text with
 `textContent`, never as HTML or as a link.
+
+Settings: `POST /api/settings/preview` and `POST /api/settings/apply` take `{"team", "settings"}`
+(and `"confirm"` for apply) and go to `teamsettings_apply.apply_settings`, the same confirm, audit
+and restore-on-refusal path as the command line. Before each, the kernel is asked a
+supervisor-only question (the team's mail with full text, `limit=1`), so a principal that is not
+the group's supervisor, or is disabled, is refused by the kernel before anything is previewed or
+changed; pause and resume included. A preview shows goals by size only and never a secret. The
+page only discards a preview on cancel; nothing is sent.
 
 TEAMS.json is `{"teams": [{"name": "dev", "host": "path/to/host.json"}, ...]}`. One team being
 unreachable shows an error in its column; the others still render.
@@ -50,13 +59,54 @@ def load(name: str) -> ModuleType:
 
 
 base = load("dashboard")
+apply = load("teamsettings_apply")
 DashboardError = base.DashboardError
+MAX_DETAIL = 400
 
 
 def error_code(error: Exception) -> str:
     """The kernel's error code only: never the exception text, which could carry anything."""
     code = getattr(error, "code", None)
     return code if isinstance(code, str) and NAME.match(code) else "unreachable"
+
+
+class TeamSettings:
+    """One team's settings: its host file, a supervisor-only read and how to reach its kernel.
+
+    `read` asks the kernel something only the group's supervisor may read and raises its refusal;
+    `connect` is `KernelClient`-like for the apply (the kit's own client when None).
+    """
+
+    def __init__(
+        self,
+        host: Path,
+        read: Callable[[], object],
+        connect: Callable[[dict[str, Any]], Any] | None = None,
+    ) -> None:
+        self.host, self.read, self.connect = host, read, connect
+
+
+def size(value: object) -> str:
+    return f"{len(value.encode())} bytes" if isinstance(value, str) else "unset"
+
+
+def shown(found: dict[str, Any]) -> dict[str, Any]:
+    """An apply result for the page: goals by size only, and nothing else that is not a setting."""
+    changes = []
+    for change in found["preview"]["changes"]:
+        old, new = change["from"], change["to"]
+        if change["setting"] == "product_goals":
+            old, new = size(old), size(new)
+        changes.append(
+            {"setting": change["setting"], "field": change["field"], "from": old, "to": new}
+        )
+    return {
+        "status": found["status"],
+        "confirm": found["confirm"],
+        "changes": changes,
+        "problems": found["preview"]["problems"],
+        "authority": found["preview"]["authority"],
+    }
 
 
 class TeamsBackend:
@@ -69,8 +119,9 @@ class TeamsBackend:
         self,
         sources: dict[str, Callable[[], dict[str, Any]]],
         mails: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] | None = None,
+        managed: dict[str, TeamSettings] | None = None,
     ) -> None:
-        self.sources, self.mails = sources, mails or {}
+        self.sources, self.mails, self.managed = sources, mails or {}, managed or {}
 
     def one(self, name: str) -> dict[str, Any]:
         try:
@@ -81,10 +132,45 @@ class TeamsBackend:
 
     def overview(self) -> dict[str, Any]:
         with ThreadPoolExecutor(max_workers=max(1, len(self.sources))) as pool:
-            return {"teams": list(pool.map(self.one, self.sources))}
+            teams = list(pool.map(self.one, self.sources))
+        return {"teams": teams, "settings": [n for n in self.sources if n in self.managed]}
 
     def send(self, role: str, text: str, client_key: str) -> dict[str, Any]:
         raise DashboardError("read_only", 405)
+
+    def settings(self, action: str, body: object) -> dict[str, Any]:
+        """Preview or apply a settings change for one team, as that team's supervisor.
+
+        The kernel is asked first, whatever the change (a pause included), and its refusal is
+        relayed; the change itself then goes through `apply_settings`, which holds the
+        confirmation, the audit and the restore."""
+        allowed = {"team", "settings"} | ({"confirm"} if action == "apply" else set())
+        if not isinstance(body, dict) or set(body) != allowed:
+            raise DashboardError("invalid_request")
+        team, change, confirm = body["team"], body["settings"], body.get("confirm")
+        if not isinstance(team, str) or team not in self.managed:
+            raise DashboardError("unknown_team", 404)
+        if action == "apply" and not (isinstance(confirm, str) and confirm):
+            raise DashboardError("confirmation_required", 409)
+        managed = self.managed[team]
+        managed.read()  # the kernel decides who is the supervisor, on every call
+        model = apply._modules()[1]
+        try:
+            found = apply.apply_settings(
+                managed.host,
+                change,
+                confirm=confirm if action == "apply" else None,
+                connect=managed.connect,
+            )
+        except model.SettingsError:
+            raise DashboardError("invalid_settings", 422) from None  # its text may echo a key
+        except apply.ApplyError as error:
+            refused = str(error).startswith("not applied")
+            code, status = ("not_applied", 409) if refused else ("refused", 422)
+            raise DashboardError(code, status, str(error)[:MAX_DETAIL]) from None
+        if action == "apply" and found["status"] == "needs_confirmation":
+            raise DashboardError("stale_confirmation", 409)
+        return shown(found)
 
     def mail(self, query: dict[str, Any]) -> dict[str, Any]:
         team = query.get("team")
@@ -114,8 +200,12 @@ def read_teams(path: Path) -> list[tuple[str, Path]]:
 
 def kernel_source(
     host_file: Path,
-) -> tuple[Callable[[], dict[str, Any]], Callable[[dict[str, Any]], dict[str, Any]]]:
-    """One team's overview and its mail, read as its supervisor through its own host file."""
+) -> tuple[
+    Callable[[], dict[str, Any]],
+    Callable[[dict[str, Any]], dict[str, Any]],
+    TeamSettings,
+]:
+    """One team's overview, its mail and its settings, as its supervisor through its host file."""
     kit = load("teamkit")
     host = kit.load_host(host_file)
     namespace, group, _, _ = kit._names(host)
@@ -137,7 +227,10 @@ def kernel_source(
         finally:
             kernel.close()
 
-    return read, read_mail
+    def supervisor_only() -> object:
+        return read_mail({"limit": 1})
+
+    return read, read_mail, TeamSettings(host_file, supervisor_only)
 
 
 def fixture_source(path: Path) -> Callable[[], dict[str, Any]]:
@@ -146,7 +239,9 @@ def fixture_source(path: Path) -> Callable[[], dict[str, Any]]:
 
 
 def server(backend: TeamsBackend, port: int = DEFAULT_PORT, bind: str = base.LOOPBACK) -> Any:
-    return base.server(backend, port, bind, static=STATIC, writable=False)
+    return base.server(
+        backend, port, bind, static=STATIC, writable=False, settings=bool(backend.managed)
+    )
 
 
 def main(argv: list[str]) -> int:
@@ -161,8 +256,9 @@ def main(argv: list[str]) -> int:
         if args.teams:
             kernels = {n: kernel_source(h) for n, h in read_teams(args.teams)}
             backend = TeamsBackend(
-                {n: read for n, (read, _) in kernels.items()},
-                {n: mail for n, (_, mail) in kernels.items()},
+                {n: read for n, (read, _, _) in kernels.items()},
+                {n: mail for n, (_, mail, _) in kernels.items()},
+                {n: managed for n, (_, _, managed) in kernels.items()},
             )
         else:
             pairs = [item.partition("=") for item in args.fixtures]

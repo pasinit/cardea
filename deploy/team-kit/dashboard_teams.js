@@ -95,7 +95,19 @@ async function get(path) {
   return body;
 }
 
+async function post(path, document) {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(document),
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.detail ? `${body.code}: ${body.detail}` : body.code);
+  return body;
+}
+
 let teams = [];
+let editable = [];
 let selected = null;
 let filter = { member: "", item: "" };
 let mailRun = 0;
@@ -191,6 +203,66 @@ function mailView(team) {
   loadMail(team, "", list, more, run);
 }
 
+// The settings section: a change is previewed, then confirmed or cancelled. Goals are shown by size.
+function settingsView(team) {
+  const root = document.getElementById("settings");
+  root.replaceChildren();
+  if (!editable.includes(team.name)) return;
+  const input = el("textarea");
+  input.rows = 6;
+  input.spellcheck = false;
+  input.placeholder = '{"developers": 3, "run_limits": {"team": 30}}';
+  const out = el("div");
+  const preview = el("button", "Preview");
+  const show = (message, className) => out.replaceChildren(el("p", message, className));
+  const reset = () => {
+    input.disabled = false;
+    preview.disabled = false;
+    out.replaceChildren();
+  };
+  const settingsOf = () => {
+    try {
+      return JSON.parse(input.value);
+    } catch (error) {
+      show("The settings are not valid JSON.", "bad");
+      return null;
+    }
+  };
+  preview.addEventListener("click", async () => {
+    const settings = settingsOf();
+    if (settings === null) return;
+    try {
+      const found = await post("/api/settings/preview", { team: team.name, settings });
+      if (found.status === "unchanged") return show("Already in effect; nothing to change.", "muted");
+      input.disabled = true;
+      preview.disabled = true;
+      const rows = found.changes.map((c) => [c.field, c.from, c.to]);
+      const confirm = el("button", "Confirm and apply");
+      const cancel = el("button", "Cancel");
+      cancel.addEventListener("click", reset);
+      confirm.addEventListener("click", async () => {
+        confirm.disabled = cancel.disabled = true;
+        try {
+          await post("/api/settings/apply", { team: team.name, settings, confirm: found.confirm });
+          reset();
+          show("Applied.", "muted");
+          refresh();
+        } catch (error) {
+          reset();
+          show(`Not applied: ${error.message}`, "bad");
+        }
+      });
+      out.replaceChildren(table(["Setting", "From", "To"], rows), note(found.authority), el("div", null, "filters"));
+      out.lastChild.append(confirm, cancel);
+    } catch (error) {
+      show(`Cannot preview: ${error.message}`, "bad");
+    }
+  });
+  const box = el("div", null, "filters");
+  box.append(input, preview);
+  root.append(el("h3", "Settings"), note("Changes are previewed first and applied only when confirmed."), box, out);
+}
+
 function draw() {
   tabs();
   const team = teams.find((t) => t.name === selected);
@@ -199,12 +271,15 @@ function draw() {
   const scroll = el("div", null, "scroll");
   scroll.append(overview(team));
   target.replaceChildren(el("h2", team.name), scroll);
+  settingsView(team);
   mailView(team);
 }
 
 async function refresh() {
   try {
-    teams = (await get("/api/status")).teams;
+    const status = await get("/api/status");
+    teams = status.teams;
+    editable = status.settings || [];
     const before = selected;
     if (!teams.some((t) => t.name === selected)) selected = teams.length ? teams[0].name : null;
     if (before === selected && document.getElementById("team").firstChild) {

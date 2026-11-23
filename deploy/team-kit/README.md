@@ -50,6 +50,8 @@ Further host-file fields:
 - **Idempotent:** a change already in effect changes and records nothing.
 - **Secrets:** outside the settings; a document naming one is refused, and failures are reported by exception type and kernel error code only.
 
+The multi-team dashboard (`dashboard_teams.py --teams`) has a Settings section for the same path: `POST /api/settings/preview` and `POST /api/settings/apply` call `apply_settings`, so the confirmation token, the audit and the restore on refusal are the command line's. Before each call (a pause or resume included) the kernel is asked a supervisor-only question, so a principal that is not the group's supervisor, or is disabled, is refused by the kernel and nothing is previewed or changed. The page shows the preview, then Confirm or Cancel (cancel sends nothing); goals appear by size only and no secret is shown. A stale or missing token is refused and changes nothing. The section is not offered with `--fixtures`, which has no host file.
+
 How to run it day to day is in the [runbook](../../docs/runbooks/dev-team.md).
 
 ## Repositories without host rules
