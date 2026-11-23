@@ -962,7 +962,11 @@ def evidence_for(branch: str, pushed: str | None, record_id: str = RECORD) -> di
 
 
 def session_for(
-    tmp_path: Path, source: Path, evidence: dict[str, Any], record_id: str | None = RECORD
+    tmp_path: Path,
+    source: Path,
+    evidence: dict[str, Any],
+    record_id: str | None = RECORD,
+    base_ref: str = "main",
 ) -> tuple[dict[str, Any], bytes]:
     from cardea_coding_ops.session import session
 
@@ -976,7 +980,7 @@ def session_for(
     }
     arguments: dict[str, Any] = {
         "repository": "app",
-        "base_ref": "main",
+        "base_ref": base_ref,
         "task": json.dumps({"write": {"second.txt": "second\n"}}),
     }
     if record_id:
@@ -1050,6 +1054,29 @@ def test_a_session_is_refused_rather_than_started_from_an_older_head(
     with pytest.raises(OperationRejected) as gone:
         session_for(missing, source, evidence_for("agent/eng/other", None))
     assert gone.value.code == "change_head_missing" and "#7" in str(gone.value)
+
+
+def test_a_base_ref_the_record_pushed_to_must_hold_the_last_push(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: Path
+) -> None:
+    from cardea.service.operations import OperationRejected
+
+    monkeypatch.delenv("CARDEA_REPOSITORIES", raising=False)
+    branch = "agent/eng/work"
+    tip = put_branch(source, tmp_path, branch, "first.txt")
+    # A push the mirror does not hold yet, and no change: the base_ref is lagging.
+    lagging = {"pushes": evidence_for(branch, "f" * 40)["pushes"]}
+    behind = tmp_path / "behind"
+    behind.mkdir()
+    with pytest.raises(OperationRejected) as stale:
+        session_for(behind, source, lagging, base_ref=branch)
+    assert stale.value.code == "change_head_stale" and "the record's push" in str(stale.value)
+    # Once the mirror holds the pushed head, the session starts from it.
+    caught_up = tmp_path / "caught-up"
+    caught_up.mkdir()
+    current = {"pushes": evidence_for(branch, tip)["pushes"]}
+    output, _ = session_for(caught_up, source, current, base_ref=branch)
+    assert output["base_sha"] == tip and output["starting_from"] is None
 
 
 def test_code_session_declares_its_record_evidence() -> None:

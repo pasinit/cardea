@@ -235,7 +235,7 @@ used by the examples.
 | `call_abandoned` | — | `cardea.service.invocation` |
 | `change_exists` | Work record {…} already has an open pull request: #{…} ({…}, branch {…}). Push further commits to that branch instead of opening a second change. | `cardea_vcs_ops.ops` |
 | `change_head_missing` | the record already has pull request #{…} ({…}), but its branch {…} is not in the repository source; no session was started from {…} so as not to begin a second change | `cardea_coding_ops.session` |
-| `change_head_stale` | the repository source is behind pull request #{…}: branch {…} does not contain {…}, the head last pushed for the record; no session was started from an older head | `cardea_coding_ops.session` |
+| `change_head_stale` | the repository source is behind {pull request #{…} \| the record's push}: branch {…} does not contain {…}, the head last pushed for the record; no session was started from an older head | `cardea_coding_ops.session` |
 | `change_invalid` | The change bundle was not staged | `cardea_vcs_ops.ops` |
 | `checkpoint_missing` | Completed work has no resumable checkpoint. | `cardea.kernel.store` |
 | `claim_limit` | The holder already has {…} claim(s); the collection allows {…} | `cardea.service.records` |

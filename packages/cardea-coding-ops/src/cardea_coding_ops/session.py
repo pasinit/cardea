@@ -324,6 +324,18 @@ def _fields(evidence: Evidence, name: str, arguments: dict[str, JsonValue]) -> l
     return found
 
 
+def pushed_head(evidence: Evidence, arguments: dict[str, JsonValue], branch: str) -> str | None:
+    """The newest commit the kernel saw pushed to `branch` for the record (None if none)."""
+    return next(
+        (
+            str(fields["arguments/head"])
+            for fields in _fields(evidence, "pushes", arguments)
+            if fields.get("arguments/branch") == branch
+        ),
+        None,
+    )
+
+
 def existing_change(evidence: Evidence, arguments: dict[str, JsonValue]) -> dict[str, Any] | None:
     """The record's newest change: its branch, number and URL, and the newest commit the
     kernel saw pushed to that branch for the record (None if it saw none)."""
@@ -333,19 +345,11 @@ def existing_change(evidence: Evidence, arguments: dict[str, JsonValue]) -> dict
     branch = str(changes[0].get("output/head"))
     if not BRANCH.fullmatch(branch) or ".." in branch:
         raise OperationRejected(f"the record's change names an unusable branch {branch!r}")
-    pushed = next(
-        (
-            str(fields["arguments/head"])
-            for fields in _fields(evidence, "pushes", arguments)
-            if fields.get("arguments/branch") == branch
-        ),
-        None,
-    )
     return {
         "branch": branch,
         "number": changes[0].get("output/number"),
         "url": changes[0].get("output/url"),
-        "pushed": pushed,
+        "pushed": pushed_head(evidence, arguments, branch),
     }
 
 
@@ -398,11 +402,14 @@ def session(
     if clone.returncode:
         raise OperationRejected(f"base_ref {base_ref} could not be checked out")
     base_sha = _git(repo, env, "rev-parse", "HEAD").strip()
-    if existing and existing["pushed"] and not _has_commit(repo, env, existing["pushed"]):
+    # A base_ref the record pushed to counts the same: the mirror must hold that push.
+    pushed = existing["pushed"] if existing else pushed_head(evidence or {}, arguments, base_ref)
+    if pushed and not _has_commit(repo, env, pushed):
+        behind = f"pull request #{existing['number']}" if existing else "the record's push"
         raise OperationRejected(
-            f"the repository source is behind pull request #{existing['number']}: branch "
-            f"{start_ref} does not contain {existing['pushed']}, the head last pushed for the "
-            "record; no session was started from an older head",
+            f"the repository source is behind {behind}: branch {start_ref} does not contain "
+            f"{pushed}, the head last pushed for the record; no session was started from an "
+            "older head",
             "change_head_stale",
         )
 
