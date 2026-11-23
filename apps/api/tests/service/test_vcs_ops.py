@@ -46,6 +46,9 @@ from cardea.service.models import (
 )
 from cardea.service.operations import OperationDescriptor, Registry
 
+# Binds or connects over TCP loopback: not run by `make check-test`.
+pytestmark = pytest.mark.loopback
+
 TOKEN = "ghs_TEST" + "x7Q2" * 8  # recognisable, never expected outside the host
 OPERATIONS = (
     "vcs.push_branch",

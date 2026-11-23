@@ -24,7 +24,7 @@ from collections.abc import Callable
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 from urllib.parse import parse_qs, urlsplit
 
 HERE = Path(__file__).resolve().parent
@@ -258,6 +258,9 @@ def handler(
                 url = urlsplit(self.path)
                 if url.path == "/api/mail":
                     return self.json(HTTPStatus.OK, backend.mail(mail_query(url.query)))
+                if url.path == "/api/settings" and hasattr(backend, "settings_current"):
+                    current = cast(Any, backend).settings_current(mail_query(url.query))
+                    return self.json(HTTPStatus.OK, current)
                 if self.path in static:
                     name, kind = static[self.path]
                     return self.reply(HTTPStatus.OK, (HERE / name).read_bytes(), kind)
@@ -271,7 +274,10 @@ def handler(
 
         def do_POST(self) -> None:
             def post() -> None:
-                if self.path != "/api/message" or not writable:
+                step = self.path.removeprefix("/api/settings/")
+                if step in ("preview", "apply") and hasattr(backend, "settings_change"):
+                    pass
+                elif self.path != "/api/message" or not writable:
                     return self.json(HTTPStatus.NOT_FOUND, {"code": "not_found"})
                 # A cross-site form cannot send JSON, and a script cannot do so unpreflighted.
                 if self.headers.get_content_type() != "application/json":
@@ -283,6 +289,8 @@ def handler(
                     body = json.loads(self.rfile.read(size))
                 except ValueError:
                     raise DashboardError("invalid_message") from None
+                if step in ("preview", "apply"):
+                    return self.json(HTTPStatus.OK, cast(Any, backend).settings_change(step, body))
                 self.json(HTTPStatus.CREATED, send_message(backend, body))
 
             self.guarded(post)

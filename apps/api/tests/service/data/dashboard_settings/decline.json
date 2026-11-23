@@ -1,0 +1,6 @@
+{
+  "description": "A confirmation that is not the preview's token (wrong, stale or for another change) is declined.",
+  "settings": {"developers": 3},
+  "other_settings": {"developers": 4},
+  "bad_confirms": ["", "yes", "0000000000000000000000000000000000000000000000000000000000000000", "zz"]
+}

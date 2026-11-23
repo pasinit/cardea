@@ -16,6 +16,19 @@ team's supervisor only (`GET /v0.2/groups/{name}/status/mail/text`), checking th
 on every read; a refusal is relayed as its error code. The page renders all text with
 `textContent`, never as HTML or as a link.
 
+Settings are edited on a second page, `/settings` (`dashboard_settings.html`,
+`dashboard_settings.js`), for a team read through a host file:
+`GET /api/settings?team=NAME` returns the team's settings as they are now;
+`POST /api/settings/preview` `{team, settings}` returns what the change would alter and a
+confirmation token, and changes nothing; `POST /api/settings/apply` `{team, settings, confirm}`
+applies exactly what that preview showed (`teamsettings_apply.py`: render, provision, apply,
+audit). Cancel is the page dropping the preview; a wrong or stale token is refused (409).
+Only the team's supervisor may use any of the three: each first reads the group overview as the
+supervisor, so the kernel's live check (`groups.manage`) refuses anyone else, and the apply's
+own writes are checked again. This process decides nothing about authority. Secrets are not
+settings: the host file's credentials and socket are never read into a response, and a
+failure is reported by error code, never by a lower layer's message.
+
 TEAMS.json is `{"teams": [{"name": "dev", "host": "path/to/host.json"}, ...]}`. One team being
 unreachable shows an error in its column; the others still render.
 """
@@ -34,8 +47,11 @@ from typing import Any
 HERE = Path(__file__).resolve().parent
 DEFAULT_PORT = 8766
 NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+CONFIRM = re.compile(r"^[0-9a-f]{64}$")
 STATIC = {
     "/": ("dashboard_teams.html", "text/html; charset=utf-8"),
+    "/settings": ("dashboard_settings.html", "text/html; charset=utf-8"),
+    "/dashboard_settings.js": ("dashboard_settings.js", "text/javascript; charset=utf-8"),
     "/dashboard_teams.js": ("dashboard_teams.js", "text/javascript; charset=utf-8"),
 }
 
@@ -69,8 +85,11 @@ class TeamsBackend:
         self,
         sources: dict[str, Callable[[], dict[str, Any]]],
         mails: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] | None = None,
+        hosts: dict[str, Path] | None = None,
+        connect: Callable[[dict[str, Any]], Any] | None = None,
     ) -> None:
         self.sources, self.mails = sources, mails or {}
+        self.hosts, self.connect = hosts or {}, connect
 
     def one(self, name: str) -> dict[str, Any]:
         try:
@@ -92,6 +111,56 @@ class TeamsBackend:
             raise DashboardError("unknown_team", 404)
         read = self.mails.get(team)
         return read(query) if read else {"total": 0, "items": [], "next": None}
+
+    def _settings_team(self, name: object) -> Path:
+        """The team's host file, once the kernel has confirmed the caller is its supervisor."""
+        if not isinstance(name, str) or name not in self.sources:
+            raise DashboardError("unknown_team", 404)
+        if name not in self.hosts:
+            raise DashboardError("settings_unavailable", 404)
+        self.sources[name]()  # the group overview: the kernel refuses a non-supervisor, live
+        return self.hosts[name]
+
+    def settings_current(self, query: dict[str, Any]) -> dict[str, Any]:
+        path = self._settings_team(query.get("team"))
+        kit, model, _ = apply_modules()
+        host = kit.load_host(path)
+        return {"settings": model.current(host, kit, paused=bool(kit.read_pause_record(host)))}
+
+    def settings_change(self, step: str, body: object) -> dict[str, Any]:
+        """Preview (`step` "preview") or confirm (`step` "apply") one settings change."""
+        wanted = {"team", "settings"} | ({"confirm"} if step == "apply" else set())
+        if not isinstance(body, dict) or set(body) != wanted:
+            raise DashboardError("invalid_change")
+        path = self._settings_team(body["team"])
+        confirm = body.get("confirm")
+        if step == "apply" and not (isinstance(confirm, str) and CONFIRM.match(confirm)):
+            raise DashboardError("invalid_confirm")
+        _, model, applier = apply_modules()
+        try:
+            found = applier.apply_settings(
+                path, body["settings"], confirm=confirm, connect=self.connect
+            )
+        except model.SettingsError as error:
+            raise DashboardError(f"invalid_settings: {error}", 422) from None
+        except applier.ApplyError as error:
+            raise DashboardError(f"refused: {error}", 422) from None
+        if step == "apply" and found["status"] == "needs_confirmation":
+            raise DashboardError("confirmation_mismatch", 409)
+        return {
+            "status": found["status"],
+            "confirm": found["confirm"],
+            "changes": found["preview"]["changes"],
+            "problems": found["preview"]["problems"],
+            "lines": model.render(found["preview"]),
+        }
+
+
+def apply_modules() -> tuple[ModuleType, ModuleType, ModuleType]:
+    """The team kit, the settings model and the apply module."""
+    applier = load("teamsettings_apply")
+    kit, model = applier._modules()
+    return kit, model, applier
 
 
 def read_teams(path: Path) -> list[tuple[str, Path]]:
@@ -146,7 +215,7 @@ def fixture_source(path: Path) -> Callable[[], dict[str, Any]]:
 
 
 def server(backend: TeamsBackend, port: int = DEFAULT_PORT, bind: str = base.LOOPBACK) -> Any:
-    return base.server(backend, port, bind, static=STATIC, writable=False)
+    return base.server(backend, port, bind, static=STATIC, writable=False)  # settings: own routes
 
 
 def main(argv: list[str]) -> int:
@@ -163,6 +232,7 @@ def main(argv: list[str]) -> int:
             backend = TeamsBackend(
                 {n: read for n, (read, _) in kernels.items()},
                 {n: mail for n, (_, mail) in kernels.items()},
+                dict(read_teams(args.teams)),
             )
         else:
             pairs = [item.partition("=") for item in args.fixtures]

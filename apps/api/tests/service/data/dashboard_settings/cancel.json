@@ -1,0 +1,4 @@
+{
+  "description": "The operator previews a change and cancels: the page drops the token and sends nothing more.",
+  "settings": {"developers": 3, "model": "claude-opus-5-5"}
+}
