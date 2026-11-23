@@ -20,6 +20,7 @@ from cardea_vcs_ops.config import FixedTokenConfig, VcsConfig
 from cardea_vcs_ops.credentials import Credential
 from cardea_vcs_ops.fake import FakeGitHub
 from cardea_vcs_ops.git import Workspace, push
+from cardea_vcs_ops.ops import check_state
 from mcp.client.session import ClientSession
 from pydantic import SecretStr
 from test_agent_runs import FakeSession, call
@@ -1015,3 +1016,16 @@ def test_list_changes_without_the_grant_is_refused_naming_it(
     _, _, (no_repo,) = run_calls(kernel, session, [("vcs-list_changes", {"repository": "other"})])
     assert no_repo.is_error and "repo:other" in text(no_repo), text(no_repo)
     assert untouched(host, before)
+
+
+def test_check_state_summarises_completed_runs() -> None:
+    """Skipped and neutral runs pass; any other conclusion fails; unfinished runs pend."""
+
+    def run(conclusion: str | None, status: str = "completed") -> dict[str, Any]:
+        return {"name": "test", "status": status, "conclusion": conclusion}
+
+    assert check_state([]) == "none"
+    assert check_state([run("success"), run("skipped"), run("neutral")]) == "passing"
+    assert check_state([run("success"), run("failure")]) == "failing"
+    assert check_state([run("cancelled")]) == "failing"
+    assert check_state([run("failure"), run(None, "in_progress")]) == "pending"
