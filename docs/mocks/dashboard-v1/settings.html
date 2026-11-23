@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Team settings (mock dashboard-v1)</title>
+<style>
+  :root { --ink: #1b1f24; --muted: #57606a; --line: #d0d7de; --bg: #f6f8fa; --card: #fff; --ok: #1a7f37; --bad: #b42318; --warn: #9a6700; --accent: #0969da; }
+  * { box-sizing: border-box; }
+  body { font: 15px/1.45 system-ui, sans-serif; margin: 0; color: var(--ink); background: var(--bg); overflow-wrap: anywhere; }
+  a { color: var(--accent); }
+  .page { max-width: 64rem; margin: 0 auto; padding: .75rem; }
+  .top { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: .75rem; }
+  h1 { font-size: 1.25rem; margin: 0; }
+  h2 { font-size: 1.1rem; margin: 0; }
+  h3 { font-size: .8rem; margin: 0 0 .4rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .btn { display: inline-flex; align-items: center; min-height: 2.5rem; padding: 0 .9rem; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink); font: inherit; text-decoration: none; white-space: nowrap; cursor: pointer; }
+  .btn.primary { background: var(--ink); border-color: var(--ink); color: #fff; }
+  .muted { color: var(--muted); }
+  .bad { color: var(--bad); }
+  .nowrap, .id, .time { white-space: nowrap; }
+  .id, .time, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em; }
+  .state { font-size: .75rem; padding: 0 .4rem; border-radius: 4px; border: 1px solid currentColor; white-space: nowrap; }
+  .state-running { color: var(--ok); } .state-stalled { color: var(--bad); } .state-paused { color: var(--warn); } .state-idle { color: var(--muted); }
+  .panel { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: .75rem; margin-bottom: .75rem; }
+  .panel > summary { cursor: pointer; font-weight: 600; min-height: 2rem; display: flex; align-items: center; gap: .5rem; }
+  .panel > summary .count { margin-left: auto; font-weight: 400; color: var(--muted); font-size: .85rem; }
+  .panel[open] > summary { margin-bottom: .5rem; }
+  .strip { display: flex; gap: .4rem; overflow-x: auto; padding-bottom: .25rem; margin-bottom: .75rem; }
+  .strip a { flex: none; display: inline-flex; align-items: center; gap: .4rem; min-height: 2.5rem; padding: 0 .8rem; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink); text-decoration: none; }
+  .strip a[aria-current="page"] { border-color: var(--ink); font-weight: 600; }
+  .jump { display: flex; gap: .75rem; overflow-x: auto; margin: 0 0 .75rem; font-size: .9rem; white-space: nowrap; }
+  /* Phone: every table row is a stacked card; each cell carries its column name in data-label. */
+  table.rows, .rows tbody, .rows tr, .rows td { display: block; }
+  .rows thead { display: none; }
+  .rows tr { border: 1px solid var(--line); border-radius: 8px; padding: .4rem .6rem; margin-bottom: .4rem; background: var(--card); }
+  .rows td { display: flex; justify-content: space-between; gap: .75rem; padding: .15rem 0; text-align: right; }
+  .rows td::before { content: attr(data-label); flex: none; color: var(--muted); text-align: left; }
+  .rows td.id, .rows td.time { overflow-x: auto; }
+  .fields { display: grid; gap: .6rem; }
+  label { display: block; color: var(--muted); font-size: .85rem; margin-bottom: .15rem; }
+  input, select, textarea { width: 100%; min-height: 2.5rem; padding: .4rem .6rem; font: inherit; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: inherit; }
+  textarea { min-height: 5rem; }
+  @media (min-width: 720px) {
+    body { font-size: 14px; }
+    .page { padding: 1.25rem; }
+    table.rows { display: table; width: 100%; border-collapse: collapse; }
+    .rows thead { display: table-header-group; }
+    .rows tbody { display: table-row-group; }
+    .rows tr { display: table-row; border: 0; border-radius: 0; padding: 0; margin: 0; background: none; }
+    .rows td, .rows th { display: table-cell; padding: .3rem .9rem .3rem 0; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+    .rows th { color: var(--muted); font-weight: 600; }
+    .rows td::before { content: none; }
+    .rows td.id, .rows td.time { overflow-x: visible; }
+    .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 .75rem; align-items: start; }
+    .fields { grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); }
+  }
+  .page { max-width: 48rem; }
+  .actions { position: sticky; bottom: 0; display: flex; gap: .5rem; padding: .6rem .75rem; margin: 0 -.75rem; background: var(--bg); border-top: 1px solid var(--line); }
+  .actions .btn { flex: 1; justify-content: center; }
+  pre { margin: 0; font: inherit; white-space: pre-wrap; }
+  .check { display: flex; align-items: center; gap: .5rem; min-height: 2.5rem; color: var(--ink); font-size: 1rem; }
+  .check input { width: 1.25rem; min-height: 0; }
+  @media (min-width: 720px) { .actions { position: static; margin: 0; padding: .75rem 0; border: 0; } .actions .btn { flex: none; } }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="top">
+    <h1>Team settings</h1>
+    <a class="btn" href="index.html">← Teams</a>
+  </header>
+  <p class="muted" style="margin-top:0">Only the team's supervisor may change these; the kernel checks that on every step. Nothing changes until you confirm a preview. Credentials are not settings and are never shown.</p>
+
+  <label for="team">Team</label>
+  <select id="team" style="margin-bottom:.75rem"><option>dev</option><option>aerarium</option></select>
+
+  <form autocomplete="off" onsubmit="return false">
+    <details class="panel" open>
+      <summary>Run limits</summary>
+      <div class="fields">
+        <div><label for="r1">Team runs</label><input id="r1" type="number" value="30"></div>
+        <div><label for="r2">Runs pm</label><input id="r2" type="number" value="6"></div>
+        <div><label for="r3">Runs tl</label><input id="r3" type="number" value="6"></div>
+        <div><label for="r4">Runs dev</label><input id="r4" type="number" value="14"></div>
+        <div><label for="r5">Runs pe</label><input id="r5" type="number" value="4"></div>
+      </div>
+    </details>
+    <details class="panel">
+      <summary>Spend limits (USD)</summary>
+      <div class="fields">
+        <div><label for="s1">Team</label><input id="s1" type="number" value="20"></div>
+        <div><label for="s2">Per run</label><input id="s2" type="number" value="2"></div>
+        <div><label for="s3">USD pm</label><input id="s3" type="number" value="3"></div>
+        <div><label for="s4">USD tl</label><input id="s4" type="number" value="3"></div>
+        <div><label for="s5">USD dev</label><input id="s5" type="number" value="10"></div>
+        <div><label for="s6">USD pe</label><input id="s6" type="number" value="4"></div>
+      </div>
+    </details>
+    <details class="panel">
+      <summary>Pause <span class="count">running</span></summary>
+      <div class="fields">
+        <label class="check"><input type="checkbox"> Paused</label>
+        <div><label for="p1">Reason (when pausing)</label><input id="p1"></div>
+      </div>
+    </details>
+    <details class="panel">
+      <summary>Schedules <span class="count">cron, one per line</span></summary>
+      <div class="fields">
+        <div><label for="c1">pm</label><textarea id="c1">0 9 * * 1-5</textarea></div>
+        <div><label for="c2">tl</label><textarea id="c2">30 9 * * 1-5</textarea></div>
+        <div><label for="c3">dev</label><textarea id="c3">*/30 * * * *</textarea></div>
+        <div><label for="c4">pe</label><textarea id="c4">0 17 * * 1-5</textarea></div>
+      </div>
+    </details>
+    <details class="panel">
+      <summary>Team</summary>
+      <div class="fields">
+        <div><label for="t1">Developers</label><input id="t1" type="number" value="2"></div>
+        <div><label for="t2">Model</label><input id="t2" value="claude-sonnet-5-5"></div>
+      </div>
+    </details>
+    <details class="panel">
+      <summary>Product</summary>
+      <div class="fields">
+        <div><label for="g1">Goals</label><textarea id="g1">Ship the importer with retries.</textarea></div>
+        <div><label for="g2">Non-goals</label><textarea id="g2">No new data sources this quarter.</textarea></div>
+      </div>
+    </details>
+
+    <section class="panel" aria-labelledby="pv">
+      <h3 id="pv">Preview</h3>
+      <pre>Run limits: dev 14 → 16
+Nothing else changes. Not applied yet.</pre>
+      <p class="muted" style="margin-bottom:0">Review the preview, then confirm or cancel. Nothing has changed yet.</p>
+    </section>
+
+    <div class="actions">
+      <button class="btn" type="button">Preview</button>
+      <button class="btn primary" type="button">Confirm and apply</button>
+      <button class="btn" type="button">Cancel</button>
+    </div>
+  </form>
+</div>
+</body>
+</html>

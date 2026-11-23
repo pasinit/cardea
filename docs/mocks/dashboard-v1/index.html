@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teams dashboard (mock dashboard-v1)</title>
+<style>
+  :root { --ink: #1b1f24; --muted: #57606a; --line: #d0d7de; --bg: #f6f8fa; --card: #fff; --ok: #1a7f37; --bad: #b42318; --warn: #9a6700; --accent: #0969da; }
+  * { box-sizing: border-box; }
+  body { font: 15px/1.45 system-ui, sans-serif; margin: 0; color: var(--ink); background: var(--bg); overflow-wrap: anywhere; }
+  a { color: var(--accent); }
+  .page { max-width: 64rem; margin: 0 auto; padding: .75rem; }
+  .top { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: .75rem; }
+  h1 { font-size: 1.25rem; margin: 0; }
+  h2 { font-size: 1.1rem; margin: 0; }
+  h3 { font-size: .8rem; margin: 0 0 .4rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .btn { display: inline-flex; align-items: center; min-height: 2.5rem; padding: 0 .9rem; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink); font: inherit; text-decoration: none; white-space: nowrap; cursor: pointer; }
+  .btn.primary { background: var(--ink); border-color: var(--ink); color: #fff; }
+  .muted { color: var(--muted); }
+  .bad { color: var(--bad); }
+  .nowrap, .id, .time { white-space: nowrap; }
+  .id, .time, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em; }
+  .state { font-size: .75rem; padding: 0 .4rem; border-radius: 4px; border: 1px solid currentColor; white-space: nowrap; }
+  .state-running { color: var(--ok); } .state-stalled { color: var(--bad); } .state-paused { color: var(--warn); } .state-idle { color: var(--muted); }
+  .panel { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: .75rem; margin-bottom: .75rem; }
+  .panel > summary { cursor: pointer; font-weight: 600; min-height: 2rem; display: flex; align-items: center; gap: .5rem; }
+  .panel > summary .count { margin-left: auto; font-weight: 400; color: var(--muted); font-size: .85rem; }
+  .panel[open] > summary { margin-bottom: .5rem; }
+  .strip { display: flex; gap: .4rem; overflow-x: auto; padding-bottom: .25rem; margin-bottom: .75rem; }
+  .strip a { flex: none; display: inline-flex; align-items: center; gap: .4rem; min-height: 2.5rem; padding: 0 .8rem; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink); text-decoration: none; }
+  .strip a[aria-current="page"] { border-color: var(--ink); font-weight: 600; }
+  .jump { display: flex; gap: .75rem; overflow-x: auto; margin: 0 0 .75rem; font-size: .9rem; white-space: nowrap; }
+  /* Phone: every table row is a stacked card; each cell carries its column name in data-label. */
+  table.rows, .rows tbody, .rows tr, .rows td { display: block; }
+  .rows thead { display: none; }
+  .rows tr { border: 1px solid var(--line); border-radius: 8px; padding: .4rem .6rem; margin-bottom: .4rem; background: var(--card); }
+  .rows td { display: flex; justify-content: space-between; gap: .75rem; padding: .15rem 0; text-align: right; }
+  .rows td::before { content: attr(data-label); flex: none; color: var(--muted); text-align: left; }
+  .rows td.id, .rows td.time { overflow-x: auto; }
+  .fields { display: grid; gap: .6rem; }
+  label { display: block; color: var(--muted); font-size: .85rem; margin-bottom: .15rem; }
+  input, select, textarea { width: 100%; min-height: 2.5rem; padding: .4rem .6rem; font: inherit; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: inherit; }
+  textarea { min-height: 5rem; }
+  @media (min-width: 720px) {
+    body { font-size: 14px; }
+    .page { padding: 1.25rem; }
+    table.rows { display: table; width: 100%; border-collapse: collapse; }
+    .rows thead { display: table-header-group; }
+    .rows tbody { display: table-row-group; }
+    .rows tr { display: table-row; border: 0; border-radius: 0; padding: 0; margin: 0; background: none; }
+    .rows td, .rows th { display: table-cell; padding: .3rem .9rem .3rem 0; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+    .rows th { color: var(--muted); font-weight: 600; }
+    .rows td::before { content: none; }
+    .rows td.id, .rows td.time { overflow-x: visible; }
+    .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 .75rem; align-items: start; }
+    .fields { grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); }
+  }
+  .mail-item { border: 1px solid var(--line); border-radius: 8px; background: var(--card); margin-bottom: .4rem; }
+  .mail-item > summary { list-style: none; cursor: pointer; padding: .5rem .6rem; min-height: 2.75rem; display: grid; gap: .1rem; }
+  .mail-item > summary::-webkit-details-marker { display: none; }
+  .mail-item > summary .line1 { display: flex; gap: .5rem; justify-content: space-between; color: var(--muted); font-size: .85rem; }
+  .mail-item > summary .line2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mail-item > summary .line2::before { content: "▸ "; color: var(--muted); }
+  .mail-item[open] > summary .line2::before { content: "▾ "; }
+  .mail-item .body { border-top: 1px solid var(--line); padding: .5rem .6rem; }
+  .mail-item .meta { color: var(--muted); font-size: .85rem; margin: 0 0 .35rem; }
+  .mail-item pre { margin: 0; font: inherit; white-space: pre-wrap; max-height: 16rem; overflow-y: auto; }
+  .filters { display: grid; gap: .5rem; margin-bottom: .6rem; }
+  .more { display: flex; align-items: center; gap: .75rem; }
+  @media (min-width: 720px) { .filters { grid-template-columns: 12rem 1fr auto; } .mail-item > summary { grid-template-columns: 14rem 1fr; align-items: baseline; } .mail-item > summary .line1 { justify-content: flex-start; gap: 1rem; } }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="top">
+    <h1>Teams <span class="muted">(read-only)</span></h1>
+    <a class="btn" href="settings.html">Settings</a>
+  </header>
+
+  <nav class="strip" aria-label="Teams">
+    <a href="#" aria-current="page">dev <span class="state state-running">running</span></a>
+    <a href="#">aerarium <span class="state state-paused">paused</span></a>
+    <a href="#">ops <span class="state state-stalled">unreadable</span></a>
+  </nav>
+
+  <section aria-labelledby="team-h">
+    <h2 id="team-h">dev</h2>
+    <p class="muted" style="margin:.1rem 0 .5rem">dev-team (team): active; as of <span class="time">2026-11-21 09:30 UTC</span></p>
+    <nav class="jump" aria-label="Sections">
+      <a href="#members">Members</a><a href="#work">Work</a><a href="#approvals">Approvals</a><a href="#spend">Spend</a><a href="#events">Events</a><a href="#mail">Mail</a>
+    </nav>
+
+    <details class="panel" id="members" open>
+      <summary>Members <span class="count">3</span></summary>
+      <table class="rows">
+        <thead><tr><th>Pool</th><th>Member</th><th>State</th><th>Running</th><th>Last run</th></tr></thead>
+        <tbody>
+          <tr><td data-label="Pool">pm</td><td data-label="Member" class="id">dev-team.pm.0</td><td data-label="State">active</td><td data-label="Running">idle</td><td data-label="Last run">succeeded</td></tr>
+          <tr><td data-label="Pool">dev</td><td data-label="Member" class="id">dev-team.dev.0</td><td data-label="State">active</td><td data-label="Running" class="id">7f0c1d52-3a39-4d0e-9a53-0d3f6f1d1a02</td><td data-label="Last run">-</td></tr>
+          <tr><td data-label="Pool">dev</td><td data-label="Member" class="id">dev-team.dev.1</td><td data-label="State">active</td><td data-label="Running">idle</td><td data-label="Last run" class="bad">failed (run_timeout)</td></tr>
+        </tbody>
+      </table>
+    </details>
+
+    <details class="panel" id="work" open>
+      <summary>Work <span class="count">11 records</span></summary>
+      <p style="margin:0">work: open 3, in_progress 1, done 7</p>
+    </details>
+
+    <details class="panel" id="approvals" open>
+      <summary>Approvals <span class="count">1 waiting</span></summary>
+      <table class="rows">
+        <thead><tr><th>Request</th><th>Operation</th><th>State</th><th>Expires</th></tr></thead>
+        <tbody>
+          <tr><td data-label="Request" class="id">apr-1</td><td data-label="Operation">vcs.merge</td><td data-label="State">pending</td><td data-label="Expires" class="time">2026-11-21 21:20</td></tr>
+        </tbody>
+      </table>
+    </details>
+
+    <details class="panel" id="spend">
+      <summary>Spend <span class="count">today: $4.25 of $20</span></summary>
+      <table class="rows">
+        <thead><tr><th>Account</th><th>Window</th><th>USD</th><th>Runs</th></tr></thead>
+        <tbody>
+          <tr><td data-label="Account">group</td><td data-label="Window">day</td><td data-label="USD" class="nowrap">4.25 / 20</td><td data-label="Runs" class="nowrap">9 / 30</td></tr>
+          <tr><td data-label="Account">pool:dev</td><td data-label="Window">day</td><td data-label="USD" class="nowrap">2.5 / -</td><td data-label="Runs" class="nowrap">5 / 14</td></tr>
+        </tbody>
+      </table>
+    </details>
+
+    <details class="panel" id="events">
+      <summary>Latest events <span class="count">2</span></summary>
+      <table class="rows">
+        <thead><tr><th>#</th><th>At</th><th>Event</th><th>Subject</th></tr></thead>
+        <tbody>
+          <tr><td data-label="#" class="id">412</td><td data-label="At" class="time">2026-11-21 09:06</td><td data-label="Event">cardea.mailbox.sent</td><td data-label="Subject" class="id">dev-team.dev</td></tr>
+          <tr><td data-label="#" class="id">411</td><td data-label="At" class="time">2026-11-21 09:10</td><td data-label="Event">cardea.record.transitioned</td><td data-label="Subject" class="id">work/rec-0001</td></tr>
+        </tbody>
+      </table>
+    </details>
+
+    <details class="panel" id="mailbox">
+      <summary>Mailboxes <span class="count">1 dead</span></summary>
+      <table class="rows">
+        <thead><tr><th>Address</th><th>Pending</th><th>In flight</th><th>Dead</th></tr></thead>
+        <tbody>
+          <tr><td data-label="Address" class="id">dev-team.dev</td><td data-label="Pending">1</td><td data-label="In flight">0</td><td data-label="Dead">0</td></tr>
+          <tr><td data-label="Address" class="id">dev-team.pm</td><td data-label="Pending">0</td><td data-label="In flight">0</td><td data-label="Dead" class="bad">1</td></tr>
+        </tbody>
+      </table>
+    </details>
+
+    <section class="panel" id="mail" aria-labelledby="mail-h">
+      <h3 id="mail-h">Mail log <span style="text-transform:none;letter-spacing:0">(newest first; tap a line to read it)</span></h3>
+      <form class="filters" onsubmit="return false">
+        <select aria-label="Member"><option>Any member</option><option>dev-team.pm.0</option><option>dev-team.dev.0</option><option>dev-team.dev.1</option></select>
+        <input aria-label="Item" placeholder="Item: collection/record-id">
+        <button class="btn" type="button">Filter</button>
+      </form>
+
+      <details class="mail-item" open>
+        <summary>
+          <span class="line1"><span class="time">2026-11-21 09:06</span><span class="nowrap">pm → dev</span></span>
+          <span class="line2">Please pick up rec-0001: add retry to the importer…</span>
+        </summary>
+        <div class="body">
+          <p class="meta"><span class="time">2026-11-21 09:06:12 UTC</span>: pm (dev-team.pm) to dev (dev-team.dev); about <span class="id">work/rec-0001</span>; pending 1</p>
+          <pre>Please pick up rec-0001: add retry to the importer.
+
+Acceptance: three attempts with backoff, a failing source is reported once, tests cover both.</pre>
+        </div>
+      </details>
+      <details class="mail-item">
+        <summary>
+          <span class="line1"><span class="time">2026-11-21 09:10</span><span class="nowrap">dev → pm [notice]</span></span>
+          <span class="line2">Started rec-0001; claim taken, branch importer-retry opened.</span>
+        </summary>
+        <div class="body">
+          <p class="meta"><span class="time">2026-11-21 09:10:41 UTC</span> [notice]: dev (dev-team.dev.0) to pm (dev-team.pm); about <span class="id">work/rec-0001</span>; consumed 1</p>
+          <pre>Started rec-0001; claim taken, branch importer-retry opened.</pre>
+        </div>
+      </details>
+      <details class="mail-item">
+        <summary>
+          <span class="line1"><span class="time">2026-11-21 08:40</span><span class="nowrap">dev → pm</span></span>
+          <span class="line2">Run timed out on rec-0000; the retry needs a longer limit or a smaller step…</span>
+        </summary>
+        <div class="body">
+          <p class="meta"><span class="time">2026-11-21 08:40:03 UTC</span>: dev (dev-team.dev.1) to pm (dev-team.pm); dead 1</p>
+          <pre>Run timed out on rec-0000; the retry needs a longer limit or a smaller step.
+(Long bodies scroll inside this box instead of lengthening the page.)</pre>
+        </div>
+      </details>
+      <div class="more"><button class="btn" type="button">Load older</button><span class="muted">3 of 24 matching</span></div>
+    </section>
+  </section>
+</div>
+</body>
+</html>
