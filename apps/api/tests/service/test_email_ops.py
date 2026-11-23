@@ -11,7 +11,7 @@ import json
 import os
 import time
 from collections.abc import Iterator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from itertools import count
 from pathlib import Path
 from typing import Any, cast
@@ -1145,7 +1145,7 @@ def assert_reported(caplog: pytest.LogCaptureFixture, error: Exception, expected
         assert secret not in caplog.text and secret not in str(error)
 
 
-@pytest.mark.parametrize("status", [400, 401, 403, 404, 413, 422, 429, 409, 500, 503])
+@pytest.mark.parametrize("status", [401, 403, 404, 413, 422, 429, 409, 500, 503])
 def test_a_failed_send_reports_only_the_status_and_route(
     email: Email, caplog: pytest.LogCaptureFixture, status: int
 ) -> None:
@@ -1223,3 +1223,59 @@ def test_inbound_poll_sends_only_query_parameters_the_provider_accepts(email: Em
     assert reply.text == "Yes, go ahead." and reply.authenticated is True
     listed = [r for r in seen if r.url.path.endswith("/messages")]
     assert [r.url.params["labels"] for r in listed] == ["received"]
+    # The window and page size go to the provider: UTC, whole seconds, a `Z` suffix.
+    assert [r.url.params["after"] for r in listed] == ["2026-11-01T00:00:00Z"]
+    assert [r.url.params["limit"] for r in listed] == ["50"]
+
+
+def test_the_after_parameter_is_utc_whole_seconds_with_z(email: Email) -> None:
+    transport = email.transport
+    assert isinstance(transport, AgentMail)
+    seen: list[str] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.params["after"])
+        return httpx.Response(200, json={"messages": []})
+
+    adapter = AgentMail(transport.config, httpx.MockTransport(answer))
+    plus_two = timezone(timedelta(hours=2))
+    asyncio.run(poll(adapter, datetime(2026, 11, 22, 12, 30, 5, 987654, tzinfo=plus_two)))
+    asyncio.run(poll(adapter, datetime(2026, 11, 22, 12, 30, 5, 999999)))
+    assert seen == ["2026-11-22T10:30:05Z", "2026-11-22T12:30:05Z"]
+
+
+def test_a_400_reports_its_masked_body_cut_to_500_characters(
+    email: Email, caplog: pytest.LogCaptureFixture
+) -> None:
+    transport = email.transport
+    assert isinstance(transport, AgentMail)
+    echo = f"bad after {API_KEY} {INBOX_ID} {LEAK} {CLIENT} " + "x" * 800
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"name": "ValidationError", "message": echo})
+
+    adapter = AgentMail(transport.config, httpx.MockTransport(answer))
+    since = datetime.now(UTC) - timedelta(minutes=1)
+    with caplog.at_level("DEBUG"), pytest.raises(ProviderError) as e:
+        asyncio.run(poll(adapter, since))
+    prefix = "AgentMail answered HTTP 400 for GET /inboxes/{inbox_id}/messages: "
+    message = str(e.value)
+    assert message.startswith(prefix) and "ValidationError" in message and "bad after" in message
+    assert len(message) - len(prefix) == 500
+    for secret in (API_KEY, INBOX_ID, LEAK, CLIENT):
+        assert secret not in message and secret not in caplog.text
+    assert message in caplog.text
+
+
+def test_a_refused_send_reports_a_masked_400_body(email: Email) -> None:
+    transport = email.transport
+    assert isinstance(transport, AgentMail)
+    body = {"message": f"{API_KEY} {INBOX_ID} {CLIENT} not allowed"}
+    adapter = AgentMail(
+        transport.config, httpx.MockTransport(lambda r: httpx.Response(400, json=body))
+    )
+    with pytest.raises(Refused) as e:
+        asyncio.run(adapter.send(Outgoing(CLIENT, "s", "b", "c" * 64)))
+    assert "not allowed" in str(e.value)
+    for secret in (API_KEY, INBOX_ID, CLIENT):
+        assert secret not in str(e.value)
