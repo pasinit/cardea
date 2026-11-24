@@ -1797,6 +1797,7 @@ def test_the_team_lead_and_the_principal_engineer_share_the_review_queue() -> No
 
 # Each role's rendered grants, exactly (the base rights and the per-developer mail aside).
 CODE = {"code.session", "vcs.push_branch", "vcs.open_change"}
+CODE_TL = {"code.session", "vcs.push_branch"}
 EXPECTED_GRANTS = {
     "pm": {
         "record:work/create",
@@ -1826,7 +1827,7 @@ EXPECTED_GRANTS = {
         "env.try",
         "email.send",
         "repo:cardea",
-        *CODE,
+        *CODE_TL,
         "mail:dev-team.pm",
         "mail:dev-team.pe",
         "mail:dev-team.ux",
@@ -1919,23 +1920,15 @@ def test_the_ux_designer_builds_mocks_only_under_docs_mocks_and_cannot_merge() -
     assert "vcs.merge" not in ux["grants"] and "vcs.merge" not in ux["run"]["operations"]
 
 
-def test_the_team_lead_codes_under_the_developers_guards() -> None:
-    pools = pools_of(example())
-    tl, dev = pools["tl"], pools["dev"]
-    assert {
-        "code.session",
-        "vcs.push_branch",
-        "vcs.open_change",
-        "vcs.read_change",
-        "vcs.merge",
-        "env.try",
-        "repo:cardea",
-    } <= set(tl["grants"])
-    assert {g for g in dev["grants"] if g.startswith(("vcs.", "repo:"))} <= set(tl["grants"])
+def test_the_team_lead_reviews_and_reads_but_never_opens_a_pull_request() -> None:
+    tl = pools_of(example())["tl"]
+    assert {"vcs.read_change", "vcs.review", "vcs.comment", "env.try", "repo:cardea"} <= set(
+        tl["grants"]
+    )
+    assert "vcs.open_change" not in tl["grants"]
+    assert "vcs.open_change" not in tl["run"]["operations"]
     text = " ".join(tl["run"]["instructions"].split())
-    assert "only the member that opened a pull request may merge it" in text
-    assert "rather than approving your own change" in text
-    assert "env.try of the head on try" in text and "head_sha" in text
+    assert "You do not open pull requests" in text
 
 
 def test_mail_between_the_roles_keeps_the_loop_guard() -> None:
