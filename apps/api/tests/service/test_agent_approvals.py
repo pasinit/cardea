@@ -415,7 +415,7 @@ def test_restart_while_parked_keeps_the_wait(
     assert len(tools.sent) == 1
 
 
-class Lost(Exception):
+class Lost(BaseException):
     pass
 
 
