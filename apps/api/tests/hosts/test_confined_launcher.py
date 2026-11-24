@@ -1059,6 +1059,9 @@ def phases(configured: list[list[str]], monkeypatch: pytest.MonkeyPatch) -> list
     }
     monkeypatch.setattr(launcher, "worker_config", lambda: config)
     monkeypatch.setattr(pwd, "getpwnam", lambda name: SimpleNamespace(pw_uid=994, pw_gid=994))
+    # The host's mount namespace is the test's own; the mount tests assert the nsenter form.
+    monkeypatch.setattr(launcher, "in_host_namespace", lambda args: args)
+    monkeypatch.setattr(launcher, "host_mounted", lambda path: False)
     return configured
 
 
@@ -1113,7 +1116,7 @@ class MountLayer:
         self.owner: dict[Path, tuple[int, int]] = {}
         self.mode: dict[Path, int] = {}
         monkeypatch.setattr(launcher, "run", self.run)
-        monkeypatch.setattr(os.path, "ismount", lambda path: Path(path) in self.mounted)
+        monkeypatch.setattr(launcher, "host_mounted", lambda path: Path(path) in self.mounted)
         monkeypatch.setattr(os, "chown", self.chown)
         monkeypatch.setattr(os, "chmod", self.chmod)
 
@@ -1218,7 +1221,7 @@ def test_a_workspace_still_in_use_is_not_inherited(
     first = "a" * 32
     launcher.handle(start(first, "try", "fetch"))
     mounted = launcher.ROOT / first / "work"
-    monkeypatch.setattr(os.path, "ismount", lambda path: Path(path) == mounted)
+    monkeypatch.setattr(launcher, "host_mounted", lambda path: Path(path) == mounted)
     # The default fake reports the first unit as not finished.
     with pytest.raises(launcher.Rejected, match="^workspace_in_use$"):
         launcher.handle(start("b" * 32, "try-loopback", "serve", workspace_from=first))
@@ -1232,7 +1235,7 @@ def test_cleanup_unmounts_a_workspace_before_deleting_anything(
     launcher.handle(start(job, "try", "fetch"))
     work = launcher.ROOT / job / "work"
     (work / "left").write_text("x")
-    monkeypatch.setattr(os.path, "ismount", lambda path: Path(path) == work)
+    monkeypatch.setattr(launcher, "host_mounted", lambda path: Path(path) == work)
     order: list[str] = []
 
     def run(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
@@ -1253,7 +1256,7 @@ def test_cleanup_is_refused_while_the_workspace_cannot_be_unmounted(
     launcher.handle(start(job, "try", "fetch"))
     work = launcher.ROOT / job / "work"
     (work / "left").write_text("x")
-    monkeypatch.setattr(os.path, "ismount", lambda path: Path(path) == work)
+    monkeypatch.setattr(launcher, "host_mounted", lambda path: Path(path) == work)
 
     def run(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         busy = 1 if args[0] == "/usr/bin/umount" else 0
@@ -1366,3 +1369,33 @@ def test_a_bwrap_loopback_namespace_has_only_lo_and_no_route_out() -> None:
     )  # fmt: skip
     assert done.returncode == 0, done.stderr
     assert done.stdout.split("\n")[:2] == ["[] ['lo']", "101"], done.stdout
+
+
+def test_workspace_mounts_happen_in_the_hosts_mount_namespace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The helper runs under sudo inside the kernel service's own mount namespace; a mount
+    # made there is invisible to the job units, which then see the bare root-owned directory.
+    host = tmp_path / "host-mnt"
+    host.write_text("")
+    monkeypatch.setattr(launcher, "HOST_MOUNT_NAMESPACE", host)
+    links = {"/proc/self/ns/mnt": "mnt:[2]", str(host): "mnt:[1]"}
+    monkeypatch.setattr(os, "readlink", lambda path: links[str(path)])
+    assert launcher.in_host_namespace(["/usr/bin/mount", "x"]) == [
+        "/usr/bin/nsenter",
+        f"--mount={host}",
+        "--",
+        "/usr/bin/mount",
+        "x",
+    ]
+    links["/proc/self/ns/mnt"] = "mnt:[1]"
+    assert launcher.in_host_namespace(["/usr/bin/mount", "x"]) == ["/usr/bin/mount", "x"]
+    mountinfo = tmp_path / "mountinfo"
+    mountinfo.write_text(
+        "24 1 0:22 / / rw - ext4 /dev/vda1 rw\n"
+        "90 24 0:70 / /var/lib/cardea-host/aa/work rw,nosuid - tmpfs tmpfs rw,mode=700\n"
+        "91 24 0:71 / /var/lib/with\\040space rw - tmpfs tmpfs rw\n"
+    )
+    assert launcher.host_mounted(Path("/var/lib/cardea-host/aa/work"), mountinfo)
+    assert launcher.host_mounted(Path("/var/lib/with space"), mountinfo)
+    assert not launcher.host_mounted(Path("/var/lib/cardea-host/bb/work"), mountinfo)
