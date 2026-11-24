@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mock v2: Teams dashboard with member detail</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font: 14px/1.4 system-ui, sans-serif; margin: 1rem; color: #1b1f24; background: #fafafa; overflow-wrap: anywhere; max-width: 64rem; }
+  h1 { font-size: 1.3rem; margin: 0; }
+  h2 { font-size: 1.1rem; margin: 0 0 .25rem; }
+  h3 { font-size: .95rem; margin: 1rem 0 .3rem; border-bottom: 1px solid #d0d7de; }
+  a { color: #0969da; }
+  a, button, summary, select, input { min-height: 44px; }
+  a:focus-visible, button:focus-visible, summary:focus-visible, select:focus-visible, input:focus-visible { outline: 3px solid #0969da; outline-offset: 2px; }
+  .top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: .75rem; }
+  .top a { display: inline-flex; align-items: center; padding: 0 .7rem; border: 1px solid #d0d7de; border-radius: 6px; background: #fff; text-decoration: none; }
+  #tabs { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: 1rem; }
+  #tabs a { display: inline-flex; align-items: center; padding: 0 .7rem; border: 1px solid #d0d7de; border-radius: 6px; background: #fff; color: inherit; text-decoration: none; }
+  #tabs a[aria-current="page"] { border-color: #1b1f24; font-weight: 600; }
+  .state { font-size: .8rem; margin-left: .4rem; padding: 0 .35rem; border-radius: 4px; border: 1px solid currentColor; }
+  .state-running { color: #1a7f37; }
+  .state-stalled { color: #b42318; }
+  .state-paused { color: #9a6700; }
+  .state-idle { color: #57606a; }
+  .muted { color: #57606a; }
+  .bad { color: #b42318; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: .5rem; margin: .5rem 0 1rem; }
+  .card { background: #fff; border: 1px solid #d0d7de; border-radius: 6px; padding: .5rem .7rem; }
+  .card b { display: block; font-size: 1.3rem; }
+  .cols { display: grid; gap: 1rem; }
+  @media (min-width: 900px) { .cols { grid-template-columns: 1fr 1fr; } body { margin: 1.5rem; } }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: .35rem .6rem .35rem 0; vertical-align: top; }
+  th { font-weight: 600; color: #57606a; }
+  .message { background: #fff; border: 1px solid #d0d7de; border-radius: 6px; margin-bottom: .5rem; }
+  .message summary { padding: .3rem .7rem; cursor: pointer; display: flex; flex-direction: column; justify-content: center; }
+  .message .head { color: #57606a; font-size: .85rem; }
+  .message pre { margin: 0; padding: 0 .7rem .6rem; font: inherit; white-space: pre-wrap; max-height: 16rem; overflow: auto; }
+  .filters { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: .75rem; }
+  .filters select, .filters input, .filters button { font: inherit; padding: .3rem .5rem; max-width: 100%; }
+  .filters input { flex: 1 1 12rem; min-width: 0; }
+  button { font: inherit; padding: 0 .9rem; border: 1px solid #d0d7de; border-radius: 6px; background: #fff; cursor: pointer; }
+  .banner { border: 1px solid #9a6700; background: #fff8c5; border-radius: 6px; padding: .6rem .8rem; margin-bottom: 1rem; }
+  .notes { margin-top: 2rem; padding: .7rem; border: 1px dashed #8c959f; background: #fff; color: #57606a; }
+  @media (max-width: 600px) { body { margin: .6rem; font-size: 15px; } .filters > * { flex: 1 1 100%; } }
+
+  .view{display:none}
+  .view:target{display:block}
+  body:not(:has(.view:target)) #overview{display:block}
+  .grid{display:grid;gap:.5rem;grid-template-columns:repeat(auto-fill,minmax(15rem,1fr))}
+  .member{display:block;color:inherit;text-decoration:none;background:#fff;border:1px solid #d0d7de;border-radius:6px;padding:.6rem .7rem;min-height:44px}
+  .member:hover{border-color:#1b1f24}
+  .member b{font-size:1rem}
+  .meter{height:8px;background:#eaeef2;border-radius:4px;overflow:hidden;margin:.3rem 0}
+  .meter i{display:block;height:100%;background:#1a7f37}
+  .meter.warn i{background:#9a6700}
+  .needs{border:1px solid #0969da;background:#ddf4ff;border-radius:6px;padding:.6rem .8rem;margin-bottom:1rem}
+  .needs ul{margin:.3rem 0 0;padding-left:1.1rem}
+  .board{display:grid;gap:.5rem;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr))}
+  .board div.col{background:#f0f2f4;border-radius:6px;padding:.4rem}
+  .board h4{margin:.1rem 0 .3rem;font-size:.85rem;color:#57606a}
+  .item{background:#fff;border:1px solid #d0d7de;border-radius:6px;padding:.3rem .5rem;margin-bottom:.3rem;font-size:.85rem}
+  .crumb{display:inline-flex;align-items:center;margin-bottom:.5rem}
+  .tl{list-style:none;margin:0;padding:0;border-left:2px solid #d0d7de}
+  .tl li{margin:0 0 .4rem .6rem}
+  .tl details{background:#fff;border:1px solid #d0d7de;border-radius:6px}
+  .tl summary{padding:.2rem .6rem;display:flex;flex-wrap:wrap;gap:.2rem .6rem;align-items:center;cursor:pointer}
+  .tl pre{margin:0;padding:0 .6rem .5rem;font:12px/1.4 ui-monospace,monospace;white-space:pre-wrap;max-height:12rem;overflow:auto}
+  .tool{font-family:ui-monospace,monospace;font-weight:600}
+  .ok{color:#1a7f37}
+  .live{color:#1a7f37;font-weight:600}
+  .detail-cols{display:grid;gap:1rem}
+  @media(min-width:900px){.detail-cols{grid-template-columns:3fr 2fr}}
+  .jump{display:flex;flex-wrap:wrap;gap:.4rem;margin:.5rem 0}
+  .jump a{display:inline-flex;align-items:center;padding:0 .7rem;border:1px solid #d0d7de;border-radius:6px;background:#fff;text-decoration:none}
+  .controls{display:flex;flex-wrap:wrap;gap:.5rem}
+  .danger{border-color:#b42318;color:#b42318}
+  .confirm{border:1px solid #b42318;border-radius:6px;background:#fff;padding:.6rem .8rem;margin-top:.5rem}
+  .tablewrap{overflow-x:auto}
+  .tag{font-size:.8rem;padding:0 .35rem;border:1px solid currentColor;border-radius:4px}
+  .no{color:#b42318}
+</style></head><body>
+
+<!-- ===== OVERVIEW ===== -->
+<div id="overview" class="view">
+<header class="top"><h1>Teams <span class="muted">(owner view)</span></h1><a href="#settings">Team settings</a></header>
+<nav id="tabs" aria-label="Teams">
+  <a href="#overview" aria-current="page">dev-team<span class="state state-running">running</span></a>
+  <a href="#overview">ops<span class="state state-paused">paused</span></a>
+  <a href="#overview">team-kit<span class="state state-stalled">unreadable</span></a>
+</nav>
+<main>
+<h2>dev-team</h2>
+<p class="muted">Updated 23:32 · <span class="live">● Live</span>, refreshes every 15 seconds</p>
+
+<section class="needs" role="status" aria-labelledby="needs-h">
+  <h3 id="needs-h" style="border:0;margin:0">Needs you (2)</h3>
+  <ul>
+    <li><b>Mock v2: Teams dashboard</b> waits for your approval. <a href="#overview">Open mock</a></li>
+    <li><b>Question from ux:</b> “Group members by role or by state?” Team’s pick: by state. <a href="#overview">Answer</a></li>
+  </ul>
+</section>
+
+<div class="cards" role="group" aria-label="Summary">
+  <div class="card"><b>3 of 6</b>members working</div>
+  <div class="card"><b>5</b>work items open · 1 in review</div>
+  <div class="card"><b>2</b>mails waiting</div>
+  <div class="card"><b>$4.20 of $20</b>spent today
+    <div class="meter" role="img" aria-label="21 percent of the daily limit"><i style="width:21%"></i></div></div>
+</div>
+
+<section aria-labelledby="mem-h">
+  <h3 id="mem-h">Members <span class="muted">(tap one to see what it is doing)</span></h3>
+  <div class="grid"><a class="member" href="#member-dev.0"><b>dev.0</b> <span class="muted">developer</span><span class="state state-idle">idle</span><br><span>Waiting for work</span><br><span class="muted">Last: <span class="tool">git commit · 21:58</span></span><br><span class="muted">$0.40 today</span></a><a class="member" href="#member-dev.1"><b>dev.1</b> <span class="muted">developer</span><span class="state state-running">running</span><br><span>Working on rec-2356… Redesign teams dashboard</span><br><span class="muted">Last: <span class="tool">env.try · just now</span></span><br><span class="muted">$1.90 today</span></a><a class="member" href="#member-dev.2"><b>dev.2</b> <span class="muted">developer</span><span class="state state-running">running</span><br><span>Working on rec-8196… Paused team view</span><br><span class="muted">Last: <span class="tool">vcs.read_change · 12 s ago</span></span><br><span class="muted">$1.10 today</span></a><a class="member" href="#member-ux"><b>ux</b> <span class="muted">designer</span><span class="state state-running">running</span><br><span>Drawing mock v2</span><br><span class="muted">Last: <span class="tool">Write · just now</span></span><br><span class="muted">$0.50 today</span></a><a class="member" href="#member-pe"><b>pe</b> <span class="muted">principal engineer</span><span class="state state-idle">idle</span><br><span>Waiting for a review</span><br><span class="muted">Last: <span class="tool">vcs.review · 20:40</span></span><br><span class="muted">$0.20 today</span></a><a class="member" href="#member-tl"><b>tl</b> <span class="muted">team lead</span><span class="state state-idle">idle</span><br><span>Waiting for mail</span><br><span class="muted">Last: <span class="tool">mailbox.send · 23:29</span></span><br><span class="muted">$0.10 today</span></a></div>
+</section>
+
+<section aria-labelledby="board-h">
+  <h3 id="board-h">Work</h3>
+  <div class="board">
+    <div class="col"><h4>Open (5)</h4><div class="item">Redesign teams dashboard<br><span class="muted">dev.1</span></div><div class="item">Mock gate follow-up<br><span class="muted">nobody</span></div><p class="muted"><a href="#overview">3 more</a></p></div>
+    <div class="col"><h4>In progress (1)</h4><div class="item">Paused team view<br><span class="muted">dev.2</span></div></div>
+    <div class="col"><h4>In review (1)</h4><div class="item">Member memory folder<br><span class="muted">pe reviewing</span></div></div>
+    <div class="col"><h4>Done (42)</h4><div class="item">Show latest 20<br><a href="#overview">Show all</a></div></div>
+  </div>
+</section>
+
+<div class="cols">
+<section aria-labelledby="mail">
+  <h3 id="mail">Mail <span class="muted">(newest first)</span></h3>
+  <div class="filters"><label class="muted" for="m">Member</label><select id="m"><option>Any member</option></select><button>Filter</button></div>
+  <details class="message"><summary><span class="head">23:29 · tl → ux</span><span>All four dashboard mocks were reviewed…</span></summary><pre>Full text of the message, scrolls inside the box after 16rem.</pre></details>
+  <details class="message"><summary><span class="head">22:10 · dev.1 → tl</span><span>Item blocked on mock rounds</span></summary><pre>Full text.</pre></details>
+  <p><button>Load older</button> <span class="muted">2 of 48 shown</span></p>
+</section>
+<section aria-labelledby="act">
+  <h3 id="act">Latest activity <span class="muted">(all members)</span></h3>
+  <ul class="tl">
+    <li><time>23:32</time> ux · <span class="tool">env.try</span> passed</li>
+    <li><time>23:31</time> dev.2 · <span class="tool">vcs.push_branch</span> done</li>
+    <li><time>23:30</time> dev.1 · <span class="tool">mailbox.send</span> <span class="no">refused</span></li>
+  </ul>
+  <h3>Spend and limits</h3>
+  <p>Team today <b>$4.20</b> of $20</p><div class="meter"><i style="width:21%"></i></div>
+  <p>This week <b>$17.60</b> of $40</p><div class="meter warn"><i style="width:44%"></i></div>
+</section>
+</div>
+
+<section class="notes" aria-label="Design notes (not part of the page)">
+<h3>States (not part of the page)</h3>
+<p><b>Loading:</b> “Loading…” per section; member cards show grey placeholders.</p>
+<p><b>Empty:</b> “No members.” “No work yet.” “No messages.” Needs you: “Nothing needs you right now.”</p>
+<p><b>Paused team:</b> banner “⏸ Team paused. Paused since …, reason …. Work and mail below are the last known state.” Member cards say “paused”; live badge becomes “Not live”.</p>
+<p><b>Error:</b> “We could not load this section. Try again in a moment.” + “Try again” (44px); other sections stay.</p>
+<p><b>Changes from v1:</b> member cards open a detail page (new); “Needs you” panel; work as a board; spend meters with weekly limit; latest activity across members; live indicator.</p>
+</section>
+</main></div>
+
+<!-- ===== MEMBER DETAIL ===== -->
+<div id="member-dev.1" class="view">
+<a class="crumb" href="#overview">← Back to dev-team</a>
+<main>
+<header class="top"><h1>dev.1 <span class="muted">developer</span><span class="state state-running">running</span></h1></header>
+<p>Working on <a href="#overview">rec-2356… Redesign teams dashboard</a> · run started 23:29 (6 min) · $0.62 this run · <span class="live">● Live</span></p>
+<nav class="jump" aria-label="On this page"><a href="#member-dev.1">Timeline</a><a href="#member-dev.1">Capabilities</a><a href="#member-dev.1">Memory</a><a href="#member-dev.1">History</a><a href="#member-dev.1">Controls</a></nav>
+
+<section aria-labelledby="ctl-h" style="margin-bottom:1rem">
+  <h3 id="ctl-h">Controls</h3>
+  <div class="controls">
+    <button>Send a message</button>
+    <button>Wake this member</button>
+    <button>Pause this member</button>
+    <button class="danger">Release stuck claim</button>
+  </div>
+  <div class="confirm" role="alertdialog" aria-labelledby="c-h">
+    <b id="c-h">Release the claim on rec-2356…?</b>
+    <p>dev.1 stops working on this item and anyone can pick it up. This is recorded in the audit log with your name. Shown after tapping a control; every control asks like this.</p>
+    <button class="danger">Yes, release claim</button> <button>Cancel</button>
+  </div>
+  <p class="muted">Done: “Message sent to dev.1.” appears here as a status line. Failed: “Could not release the claim. Nothing changed. Try again.”</p>
+</section>
+
+<div class="detail-cols">
+<div>
+<section aria-labelledby="tl-h">
+  <h3 id="tl-h">Timeline <span class="muted">(newest first, each call: tap for details)</span></h3>
+  <p><span class="live">● Live</span> <button>Pause updates</button> <button>Show only failures</button></p>
+  <ul class="tl"><li><details><summary><time>23:32:41</time><span class="tool">env.try</span><span>repo cardea · scenarios screenshots</span><span class="ok">✓ passed · 41 s</span></summary><pre>Result: 1 of 1 scenarios passed.
+Artifacts: phone.png, desktop.png (tap to open)</pre></details></li><li><details><summary><time>23:32:12</time><span class="tool">Bash</span><span>cardea-change</span><span class="ok">✓ done · 2 s</span></summary><pre>{"head": "9f3c…", "base": "efdec9f"}</pre></details></li><li><details><summary><time>23:31:50</time><span class="tool">Write</span><span>docs/mocks/rec-2356…-v2.html</span><span class="ok">✓ done · 0.1 s</span></summary><pre>Wrote 14 KB</pre></details></li><li><details><summary><time>23:31:02</time><span class="tool">records.query</span><span>collection work · label area:dashboard</span><span class="ok">✓ done · 0.4 s</span></summary><pre>13 records returned</pre></details></li><li><details><summary><time>23:30:40</time><span class="tool">mailbox.send</span><span>to dev-team.tl</span><span class="no">✗ refused · 0.1 s</span></summary><pre>Refused: address not in this role’s grants.
+Nothing was sent.</pre></details></li></ul>
+  <p><button>Load earlier calls</button> <span class="muted">5 of 212 shown for this run</span></p>
+  <p class="muted">Empty: “No tool calls yet in this run.” Idle member: “Not running. Last run ended 21:58.” Error: “Could not load the timeline. Try again in a moment.”</p>
+</section>
+<section aria-labelledby="hi-h">
+  <h3 id="hi-h">History <span class="muted">(past runs)</span></h3>
+  <div class="tablewrap"><table><tr><th>Started</th><th>Item</th><th>Length</th><th>Cost</th><th>Outcome</th></tr><tr><td><time>Today 23:29</time></td><td>rec-2356…</td><td>6 min (running)</td><td>$0.62</td><td>Running</td></tr><tr><td><time>Today 21:40</time></td><td>rec-2356…</td><td>14 min</td><td>$0.88</td><td>Finished</td></tr><tr><td><time>Today 19:05</time></td><td>rec-8196…</td><td>9 min</td><td>$0.40</td><td>Failed: ceiling reached</td></tr><tr><td><time>Yesterday 22:10</time></td><td>rec-b6ae…</td><td>22 min</td><td>$1.31</td><td>Finished</td></tr></table></div>
+  <p class="muted">Empty: “This member has not run yet.”</p>
+</section>
+</div>
+
+<div>
+<section aria-labelledby="cap-h">
+  <h3 id="cap-h">Capabilities <span class="muted">(what this member may do)</span></h3>
+  <div class="tablewrap"><table><tr><th>Action</th><th>Scope</th><th>Status</th></tr><tr><td>Read and write work items</td><td>collection work</td><td class="ok">Allowed</td></tr><tr><td>Push branches</td><td>repo cardea, agent/dev-team/ only</td><td class="ok">Allowed</td></tr><tr><td>Send mail</td><td>team lead, principal engineer, product manager</td><td class="ok">Allowed</td></tr><tr><td>Email the owner</td><td>10 per 7 days (2 used)</td><td class="ok">Allowed</td></tr><tr><td>Merge pull requests</td><td>any repository</td><td class="no">Not allowed</td></tr><tr><td>Change team settings</td><td>any</td><td class="no">Not allowed</td></tr></table></div>
+  <p class="muted">Read-only here. Limits: $20 a day for the team, 6 runs an hour for this member.</p>
+</section>
+<section aria-labelledby="mem2-h">
+  <h3 id="mem2-h">Memory <span class="muted">(kept between runs)</span></h3>
+  <p>Version 14 · 3 files · 18 KB of 64 KB</p><div class="meter"><i style="width:28%"></i></div>
+  <details class="message"><summary>notes.md <span class="muted">9 KB · changed 21:58</span></summary><pre>Plain text of the file, read-only, scrolls after 16rem. Text is shown as text, never as a page.</pre></details>
+  <details class="message"><summary>decisions.md <span class="muted">6 KB</span></summary><pre>…</pre></details>
+  <details class="message"><summary>todo.md <span class="muted">3 KB</span></summary><pre>…</pre></details>
+  <p class="muted">Empty: “Nothing saved yet.”</p>
+</section>
+<section aria-labelledby="mm-h">
+  <h3 id="mm-h">Mail with dev.1</h3>
+  <details class="message"><summary><span class="head">22:10 · dev.1 → tl</span><span>Item blocked on mock rounds</span></summary><pre>Full text.</pre></details>
+</section>
+</div>
+</div>
+
+<section class="notes" aria-label="Design notes (not part of the page)">
+<p><b>Phone 390px:</b> one column in this order: header, controls, timeline, capabilities, memory, history, mail. Jump links at the top, each at least 44px. Tables scroll sideways inside their own box, the page does not. <b>Desktop:</b> timeline and history left, capabilities, memory and mail right.</p>
+<p><b>Accessibility:</b> status never by colour alone (word plus ✓ / ✗); live list is announced politely only when “Live” is on; focus rings visible; confirm box moves focus to its first button.</p>
+</section>
+</main></div>
+</body></html>
