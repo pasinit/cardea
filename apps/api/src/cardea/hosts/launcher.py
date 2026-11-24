@@ -911,6 +911,16 @@ def make_workspace(directory: Path, megabytes: int) -> Path:
     return work
 
 
+def hand_over_workspace(work: Path) -> None:
+    """Give an inherited workspace's mount root to the worker account for the second phase.
+
+    Nothing is widened: the root stays private to the worker (0700) and is never followed
+    through a link."""
+    account = pwd.getpwnam("cardea-worker")
+    os.chown(work, account.pw_uid, account.pw_gid, follow_symlinks=False)
+    os.chmod(work, 0o700)
+
+
 MOUNTINFO = Path("/proc/self/mountinfo")
 # systemd sets up a unit's LoadCredential files through mount propagation. Once these are
 # private (for example after a tool ran `mount --make-rprivate /` in the host's namespace),
@@ -1052,7 +1062,9 @@ def handle(request: dict[str, Any]) -> dict[str, Any]:
         stage(directory, content, profile["output_kb"] * 1024, staged)
         if request["deadline"] <= time.time():
             raise ValueError("expired_authority")
-        if profile.get("workspace_mb"):
+        if workspace is not None:
+            hand_over_workspace(workspace)
+        elif profile.get("workspace_mb"):
             workspace = make_workspace(directory, profile["workspace_mb"])
         run(confined_command(job, request["deadline"], profile, worker, bool(staged), workspace))
         return {"started": True}
