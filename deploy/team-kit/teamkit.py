@@ -522,25 +522,12 @@ REVIEW_SPLIT_TL = (
 )
 
 
-def tl_code_note(group: str, merge_check: list[str]) -> str:
-    """The team lead's own code work: the developers' grants and the same kernel guards."""
+def tl_code_note() -> str:
+    """The team lead reads and reviews pull requests but never opens one."""
     return (
-        " You may also change code yourself, for a small fix that is quicker than an item or a "
-        "change the developers cannot make: use a coding session (code.session), push to a "
-        f"branch of your own, `agent/{group}/lead-<name>`, and open a pull request with "
-        "vcs.open_change. The same guards bind you as a developer: only the member that opened a "
-        "pull request may merge it, and vcs.merge is refused until the principal engineer has "
-        "approved the head and every check has passed, so ask the principal engineer for the "
-        "review rather than approving your own change. "
-        "Run env.try on the pushed head before you ask"
-        + (
-            f"; before vcs.merge the kernel also needs a passing env.try of the head on "
-            f"{', '.join(merge_check)} (repo, commit, scenarios), and the same SHA as head_sha"
-            if merge_check
-            else ""
-        )
-        + ". Do not take over an item a developer "
-        "holds; file a work item when the change is larger than a fix."
+        " You do not open pull requests: your token is the reviewer's GitHub account, so a pull "
+        "request of yours could never be approved. When code must change, file a work item for "
+        "the developers."
     )
 
 
@@ -1022,7 +1009,6 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
                 "record:work/request_changes",
                 "code.session",
                 "vcs.push_branch",
-                "vcs.open_change",
                 "vcs.read_change",
                 "vcs.review",
                 "vcs.comment",
@@ -1047,7 +1033,7 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
                 "instead."
                 + REVIEW_SPLIT_TL
                 + review_rules
-                + tl_code_note(group, merge_check)
+                + tl_code_note()
                 + TL_MAIL_NOTE
                 + (TL_MOCK_NOTE if email else "")
                 + email_note(host, "team lead"),
@@ -1058,7 +1044,6 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
                     "records.transition",
                     "code.session",
                     "vcs.push_branch",
-                    "vcs.open_change",
                     "vcs.read_change",
                     "vcs.review",
                     "vcs.comment",

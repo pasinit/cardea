@@ -177,7 +177,7 @@ def test_interrupted_run_resumes_from_its_receipts(
     monkeypatch.setattr(agent_run_runtime, "attempt_lease_seconds", lambda request: 4.0)
     monkeypatch.setattr(agent_run_runtime, "LEASE_MARGIN", 1.0)
 
-    class Crash(BaseException):
+    class Crash(Exception):
         pass
 
     def crash(stage: str) -> None:

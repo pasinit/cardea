@@ -2,8 +2,9 @@
 
 import json
 import re
+import threading
 from collections.abc import Mapping
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
 from typing import Annotated, Any, Literal, Self
@@ -147,21 +148,24 @@ RIGHTS: tuple[Right, ...] = (
 DISABLED_REQUEST_PREFIX = "disabled."
 
 
-# Backward clock steps smaller than this are jitter (NTP slews, VM pauses); `now()` repeats
-# the last reading for them, so a stored timestamp is never ahead of the next reading.
-# A larger step is a real clock change and passes through.
-CLOCK_JITTER = timedelta(seconds=5)
-_last_now: datetime | None = None
+_clock_lock = threading.Lock()
+_latest = datetime.min.replace(tzinfo=UTC)
+
+
+def _wall_clock() -> datetime:
+    return datetime.now(UTC)
 
 
 def now() -> datetime:
-    global _last_now
-    reading = datetime.now(UTC)
-    last = _last_now
-    if last is not None and last - CLOCK_JITTER < reading < last:
-        return last
-    _last_now = reading
-    return reading
+    """The wall clock, never earlier than any time this process already read.
+
+    A task is stamped with the time of its last write and a worker must not predate it, so
+    a clock that steps backwards must not make a live worker look stale.
+    """
+    global _latest
+    with _clock_lock:
+        _latest = max(_latest, _wall_clock())
+        return _latest
 
 
 class Record(BaseModel):

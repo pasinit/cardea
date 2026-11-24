@@ -415,7 +415,7 @@ def test_restart_while_parked_keeps_the_wait(
     assert len(tools.sent) == 1
 
 
-class Lost(BaseException):
+class Lost(Exception):
     pass
 
 
@@ -423,6 +423,7 @@ class Lost(BaseException):
 def test_lease_loss_after_proposing_parks_without_a_session(
     kernel: Kernel, tools: Tools, session: FakeSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(AgentRunRuntime, "_abandon", lambda self, task_id: None)
     monkeypatch.setattr(agent_run_runtime, "attempt_lease_seconds", lambda request: 3.0)
     monkeypatch.setattr(agent_run_runtime, "LEASE_MARGIN", 1.0)
     setup(kernel)

@@ -165,10 +165,11 @@ def test_a_burst_coalesces_into_the_unstarted_run(
 def test_mail_coalesced_into_a_started_run_gets_one_follow_up(
     kernel: Kernel, session: runs.FakeSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(AgentRunRuntime, "_abandon", lambda self, task_id: None)
     monkeypatch.setattr(agent_run_runtime, "attempt_lease_seconds", lambda request: 4.0)
     monkeypatch.setattr(agent_run_runtime, "LEASE_MARGIN", 1.0)
 
-    class Crash(BaseException):
+    class Crash(Exception):
         pass
 
     def crash(stage: str) -> None:
