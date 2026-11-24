@@ -282,3 +282,33 @@ def test_real_chromium_returns_screenshots_of_the_fixture_page(tmp_path: Path) -
     for name in ("p1-mobile-390.png", "p1-desktop-1280.png"):
         data = (out / name).read_bytes()
         assert data.startswith(PNG) and 0 < len(data) <= module.MAX_BYTES
+
+
+def test_a_toolchain_chromium_starts_without_its_wrapper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # env.try mounts the toolchain under its own root and the worker sees no /etc: Debian's
+    # wrapper sources /etc/chromium.d/* and dies, so the real binary runs directly with the
+    # toolchain's libraries and fontconfig.
+    shots = runner()
+    root = tmp_path / "toolchain"
+    for folder in ("usr/bin", "usr/lib/chromium", "usr/lib/aarch64-linux-gnu/pulseaudio",
+                   "lib/aarch64-linux-gnu", "etc/fonts"):  # fmt: skip
+        (root / folder).mkdir(parents=True)
+    wrapper, real = root / "usr/bin/chromium", root / "usr/lib/chromium/chromium"
+    for path in (wrapper, real):
+        path.write_text("#!/bin/sh\n")
+        path.chmod(0o755)
+    (root / "etc/fonts/fonts.conf").write_text("<fontconfig/>")
+    monkeypatch.setenv("PATH", str(root / "usr/bin"))
+    assert shots.browser() == str(real.resolve())
+    libraries = shots.EXTRA_ENV["LD_LIBRARY_PATH"].split(":")
+    assert str((root / "usr/lib/aarch64-linux-gnu").resolve()) in libraries
+    assert str((root / "usr/lib/aarch64-linux-gnu/pulseaudio").resolve()) in libraries
+    assert libraries[-1] == str(real.parent.resolve())
+    assert shots.EXTRA_ENV["FONTCONFIG_FILE"] == str((root / "etc/fonts/fonts.conf").resolve())
+    # A wrapper with no real binary next to it is used as it is.
+    real.unlink()
+    plain = runner()
+    assert plain.browser() == str(wrapper)
+    assert plain.EXTRA_ENV == {}

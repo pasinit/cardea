@@ -23,6 +23,7 @@ import argparse
 import functools
 import http.server
 import io
+import os
 import re
 import shutil
 import subprocess
@@ -70,8 +71,44 @@ class Quiet(http.server.SimpleHTTPRequestHandler):
         return io.BytesIO(body)
 
 
+# Set when the browser is a toolchain's Chromium started directly (see `direct`).
+EXTRA_ENV: dict[str, str] = {}
+
+
 def browser() -> str | None:
-    return next((path for name in BROWSERS if (path := shutil.which(name))), None)
+    found = next((path for name in BROWSERS if (path := shutil.which(name))), None)
+    return direct(found) if found else None
+
+
+def direct(found: str) -> str:
+    """A pinned toolchain's Chromium, started without Debian's wrapper script.
+
+    `env.try` mounts the toolchain under its own root (not at /) and the worker sees no
+    /etc. The wrapper (`<root>/usr/bin/chromium`) sources /etc/chromium.d/* and dies there,
+    and the real binary needs the toolchain's own libraries and fontconfig. So run
+    `<root>/usr/lib/chromium/chromium` with LD_LIBRARY_PATH and FONTCONFIG_FILE pointing
+    into the toolchain. A Chromium installed at / keeps its wrapper.
+    """
+    path = Path(found).resolve()
+    root = path.parent.parent.parent
+    real = root / "usr" / "lib" / "chromium" / "chromium"
+    if path.parent.name != "bin" or root == Path("/") or not real.is_file():
+        return found
+    libraries = [
+        folder
+        for arch in sorted(p.name for p in (root / "usr" / "lib").glob("*-linux-gnu*"))
+        for folder in (
+            root / "usr" / "lib" / arch,
+            root / "lib" / arch,
+            root / "usr" / "lib" / arch / "pulseaudio",
+        )
+        if folder.is_dir()
+    ] + [real.parent]
+    EXTRA_ENV["LD_LIBRARY_PATH"] = ":".join(str(folder) for folder in libraries)
+    fonts = root / "etc" / "fonts" / "fonts.conf"
+    if fonts.is_file():
+        EXTRA_ENV["FONTCONFIG_FILE"] = str(fonts)
+    return str(real)
 
 
 def serve(root: Path) -> http.server.ThreadingHTTPServer:
@@ -124,7 +161,14 @@ def pages(root: Path, page: str | None) -> list[str]:
 def run(argv: list[str]) -> tuple[str, str]:
     """Chromium's stdout and a problem, empty when it exited cleanly."""
     try:
-        done = subprocess.run(argv, capture_output=True, text=True, timeout=TIMEOUT, check=False)
+        done = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=TIMEOUT,
+            check=False,
+            env={**os.environ, **EXTRA_ENV} if EXTRA_ENV else None,
+        )
     except (OSError, subprocess.TimeoutExpired) as error:
         return "", type(error).__name__
     if done.returncode:
