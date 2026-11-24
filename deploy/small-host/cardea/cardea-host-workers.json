@@ -118,6 +118,7 @@
       "tasks": 512,
       "wall_seconds": 3600,
       "scratch_mb": 2048,
+      "input_kb": 12288,
       "output_kb": 2048,
       "network": {
         "policy": "allow_list",
