@@ -41,7 +41,7 @@ kernel, handler = waits.kernel, waits.handler
 EXPIRING = {**RULE, "expires_after_seconds": 60}
 
 
-class Crash(Exception):
+class Crash(BaseException):
     pass
 
 

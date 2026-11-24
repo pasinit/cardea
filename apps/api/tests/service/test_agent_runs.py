@@ -525,7 +525,7 @@ def test_crash_after_effect_resumes_without_resending(
     # retry passed only when it finished within one poll; give it the lease's 3 s.
     monkeypatch.setattr(agent_run_runtime, "LEASE_MARGIN", 1.0)
 
-    class Crash(Exception):
+    class Crash(BaseException):
         pass
 
     def crash(stage: str) -> None:
