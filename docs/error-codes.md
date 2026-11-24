@@ -228,6 +228,7 @@ used by the examples.
 | `attachment_type_mismatch` | The attachment is not HTML text; The attachment is not a PNG image | `cardea_email_ops.attachments` |
 | `attachments_too_large` | Attachments may total {…} bytes | `cardea_email_ops.attachments` |
 | `attachments_too_many` | At most {…} attachments are allowed | `cardea_email_ops.attachments` |
+| `attempt_abandoned` | The attempt ended with an exception. | `cardea.service.agent_run_runtime` |
 | `bad_cursor` | cursor is not one this operation returned | `cardea.service.records` |
 | `branch_moved` | The branch moved since the caller read it | `cardea_vcs_ops.ops` |
 | `branch_not_allowed` | Only agent-group members push branches or open changes; Branches must be named {…}<name> | `cardea_vcs_ops.ops` |
