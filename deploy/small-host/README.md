@@ -263,3 +263,35 @@ minutes) deploys the newest `main` commit once every GitHub check on it has pass
 
 It then checks the kernel, the helper and the team's status and goes back to the previous
 commit if any check fails. Each run appends a JSON line to `/var/log/cardea-update.log`.
+
+### Readiness check
+
+`cardea/cardea-ready.py` tells whether the host actually works. Run it as root:
+
+```sh
+python3 -I /opt/cardea/deploy/small-host/cardea/cardea-ready.py --host /etc/cardea/team.host.json
+```
+
+It prints one line per check and exits 0 when all pass, 1 otherwise (`--json` for
+machine output, `--allow-paused` to accept a paused team). It checks:
+
+- the kernel's `GET /v0.2/readyz` (database, DBOS, host helper, repository mirrors, runs
+  stuck on an expired lease, paused groups; see [operations](../../docs/operations.md#liveness-and-readiness)),
+  asked as the team's supervisor through `teamkit.py ready`, run as `cardea-kernel`;
+- that `squid` is active;
+- each token named in `/opt/cardea-vcs/vcs.json` `credentials.tokens`, read from the file
+  the `vcs` profile loads (`/etc/cardea/credentials/<name>`): not past `expires_on`,
+  valid, able to read every registry repository `vcs.*` acts on, and holding what its
+  pools need: `contents: write` for `default` and the tokens of pools outside
+  `allow_approve` (they push), `pull_requests: write` for the tokens of pools in
+  `allow_approve`. A classic token must hold the `repo` scope. A fine-grained token's
+  permissions are not listed by the API, so each is probed with an empty-body `POST` to
+  `git/refs` or `pulls`, which the host refuses with 403 without the permission and with
+  422 (invalid body, nothing created) with it. The token is read in-process, sent only to
+  the repository host and never printed.
+
+After a deploy, `cardea-update.py` runs the same checks (loaded once, before the checkout
+changes) for up to two minutes and rolls back if a check that passed before the deploy
+still fails. A check that was already failing (a lapsed token, a stale mirror) is reported
+by `cardea-ready.py` but does not roll a deploy back. `cardea-ready.py` lives under
+`deploy/small-host`, so its own changes wait for `--approve`.

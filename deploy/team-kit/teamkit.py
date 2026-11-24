@@ -1554,6 +1554,34 @@ def overview(host: dict[str, Any]) -> dict[str, Any]:
         kernel.close()
 
 
+def ready(
+    host: dict[str, Any],
+    params: dict[str, str] | None = None,
+    connect: Callable[[dict[str, Any]], Any] = client,
+) -> dict[str, Any]:
+    """The kernel's `GET /v0.2/readyz` as the supervisor sees it, as one JSON document:
+    `{"reached": true, "status": 200|503, "body": {...}}`, `{"reached": true, "status":
+    <code>, "error": <code>}` when the kernel refused (a paused team's supervisor gets
+    `principal_disabled`), or `{"reached": false, "error": <type>}`. `cardea-ready.py`
+    decides what it means."""
+    from cardea.service.client import ClientError
+
+    try:
+        kernel = connect(host)
+    except Exception as error:
+        return {"reached": False, "error": type(error).__name__}
+    try:
+        # Each check is bounded (8 s) and they run together; leave room beyond that.
+        body = kernel.request("GET", "/readyz", params=params or {}, accept=(503,), timeout=30)
+        return {"reached": True, "status": 200 if body.get("ready") else 503, "body": body}
+    except ClientError as error:
+        return {"reached": True, "status": error.status, "error": error.code}
+    except Exception as error:
+        return {"reached": False, "error": type(error).__name__}
+    finally:
+        kernel.close()
+
+
 def summarise(view: dict[str, Any]) -> list[str]:
     """A short, plain status from a group overview."""
     lines = [f"as of {view.get('as_of')}"]
@@ -1817,6 +1845,7 @@ def main(argv: list[str]) -> int:
         "stop",
         "dashboard",
         "drain",
+        "ready",
     ):
         command = commands.add_parser(name)
         command.add_argument("--host", type=Path, required=True, help="the private host file")
@@ -1830,6 +1859,8 @@ def main(argv: list[str]) -> int:
             command.add_argument("--reason", help="why, kept for `status` (no secrets)")
         if name == "drain":
             command.add_argument("--wait", type=float, default=2700.0, help="seconds")
+        if name == "ready":
+            command.add_argument("--allow-paused", action="store_true")
     args = parser.parse_args(argv)
     host = load_host(args.host)
     if args.command == "render":
@@ -1857,6 +1888,9 @@ def main(argv: list[str]) -> int:
     elif args.command == "resume":
         resume(host)
         print("the supervisor is enabled; triggers admit again")
+    elif args.command == "ready":
+        params = {"allow_paused": "true"} if args.allow_paused else {}
+        print(json.dumps(ready(host, params)))
     elif args.command == "drain":
         left = drain(host, wait_seconds=args.wait)
         if left:

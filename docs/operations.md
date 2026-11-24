@@ -48,6 +48,16 @@ Every subsequent restore creates another prefix. Stable request IDs can still re
 
 `cardea verify --config /etc/cardea/config.json` requires the service to be stopped. It checks supported schema/runtime, SQLite integrity/foreign keys, task and receipt snapshots/indexes, all object digests and installed-profile artifact references. Verification detects inconsistency; it does not authenticate a backup against a malicious host administrator. Host-root compromise remains outside the trust boundary.
 
+### Liveness and readiness
+
+Two endpoints of the running kernel follow the Kubernetes API server's `/livez` and `/readyz` convention (the IETF health-check response draft was considered; it is an expired individual draft, so the body is Cardea's own small shape):
+
+- `GET /v0.2/livez` needs no credential and reads no state. It answers `{"status": "ok"}` whenever the process serves requests, even while the store is locked.
+- `GET /v0.2/readyz` answers `{"ready", "checks": [{"name", "ok", "detail"}], "as_of"}` with HTTP 200 when every check passes and 503 otherwise. The checks run concurrently, each bounded to 8 s; a slow one fails as `timed out`, so the request never hangs. They are: `database` (a write transaction opens and rolls back; nothing is committed), `workflow_engine` (DBOS was launched by this process and its system database answers), `host_helper` (with a confined host, the helper answers `profiles`, called afresh rather than from the kernel's one-minute cache), `repository:<alias>` (each registry repository's `source` mirror is readable and its newest of `FETCH_HEAD`, `packed-refs` and loose refs is at most `mirror_max_age_seconds` old, default 900), `supervision` (no task is `running` on a lease that expired more than `lease_grace_seconds` ago, default 600: a member the kernel no longer drives) and `group:<namespace>/<name>` (the group's supervisor is enabled; a disabled one is reported as `paused`, accepted with `allow_paused=true`).
+- Authorization follows `/v0.2/system`: any enabled, provisioned principal may ask, because the host-level checks reveal no more than that endpoint does. Group names, task IDs and agent IDs appear only for namespaces where the caller holds `tasks.inspect` (and the platform allows it); other namespaces still count towards `ready`, under one anonymous `groups:other` check and a count in `supervision`. A paused team's own supervisor is disabled and is refused (`principal_disabled`) like every other request it makes; the host-side check reports that as the team being paused.
+
+`deploy/small-host/cardea/cardea-ready.py` adds what the kernel cannot see on a team host (the egress proxy and the repository-host tokens); see the [small-host guide](../deploy/small-host/README.md#unattended-updates).
+
 Use local journald for operational investigation. Raw logs are not a redacted support bundle. The host owner controls journald limits using its standard configuration; Cardea does not change global host log retention.
 
 ### Agent-run attempt logs

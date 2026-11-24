@@ -224,6 +224,7 @@ class Runtime:
         self.kernel.client.register_queue(
             AGENT_RUN_QUEUE, worker_concurrency=sessions, polling_interval_sec=0.5
         )
+        self.kernel.workflows_launched = True
 
     def state(self, task_id: str) -> str:
         with self.kernel.database.engine.begin() as conn, borrow(conn) as tx:
