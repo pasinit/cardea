@@ -116,6 +116,12 @@ def checks_passed(sha: str) -> bool:
     return bool(runs) and all(r.get("conclusion") == "success" for r in runs)
 
 
+def real_descriptor(source: Path) -> bool:
+    """Only real ops packages' descriptors are installed, never the reference fakes
+    (packages/cardea-reference-ops: a fake broker, quotes, risk check and CI status)."""
+    return "cardea-reference-ops" not in source.parts
+
+
 def install(target: str, old: str) -> list[str]:
     """Check out `target` and bring the host's copies in line. Returns what it did."""
     did = []
@@ -137,7 +143,7 @@ def install(target: str, old: str) -> list[str]:
             )
             did.append(f"{package.name} reinstalled")
     for source in sorted(CHECKOUT.glob("packages/cardea-*-ops/src/*/descriptors/*.json")):
-        if "reference" in source.parts[-4]:
+        if not real_descriptor(source):
             continue
         installed = OPERATIONS / source.name
         relative = str(source.relative_to(CHECKOUT))

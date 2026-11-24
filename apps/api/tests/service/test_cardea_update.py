@@ -49,3 +49,12 @@ def test_what_runs_as_root_waits_for_the_owner() -> None:
     # New worker entries are synced by the update itself; the helper and this script are not.
     assert kinds["root"] == [update.LAUNCHER, "deploy/small-host/cardea/cardea-update.py"]
     assert kinds["restart"] == [update.LAUNCHER]
+
+
+def test_the_reference_fakes_are_never_installed() -> None:
+    update = module()
+    root = Path(__file__).parents[4]
+    sources = sorted(root.glob("packages/cardea-*-ops/src/*/descriptors/*.json"))
+    installed = {s.stem for s in sources if update.real_descriptor(s)}
+    assert "broker.place_order" not in installed and "market.quotes" not in installed
+    assert {"vcs.merge", "email.send", "env.try"} <= installed
