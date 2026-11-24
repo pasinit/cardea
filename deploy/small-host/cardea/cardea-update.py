@@ -16,19 +16,24 @@ It deploys a commit only when it can do so without stranding the team's runs:
 * **Owner approval**: a change to what runs as root on the host (the host helper and the
   deploy files) is not deployed until it is run with `--approve`.
 
-After either update it checks the kernel, the host helper and the team's status; if a check
-fails it goes back to the previous commit the same way and exits 1. With `--require-ci` a
+After either update it checks the kernel, the host helper and the team's status, and runs
+`cardea-ready.py` (beside this script) until every check that passed before the deploy
+passes again, for up to two minutes; if a check fails it goes back to the previous commit
+the same way and exits 1. A check that was already failing before (a lapsed token, a stale
+mirror) is not the deploy's doing and does not roll it back. With `--require-ci` a
 commit is deployed only when every GitHub check run on it succeeded (the repository is
 public, so no token is needed). Every run appends one JSON line to /var/log/cardea-update.log.
 """
 
 import argparse
 import fcntl
+import importlib.util
 import json
 import subprocess
 import sys
 import time
 import urllib.request
+from collections.abc import Callable
 from datetime import UTC, datetime
 from fnmatch import fnmatch
 from pathlib import Path
@@ -237,7 +242,64 @@ def helper_ok() -> bool:
     return '"profiles"' in done.stdout
 
 
-def healthy(host: Path) -> tuple[bool, str]:
+def load_ready() -> Any:
+    """`cardea-ready.py` beside this script, loaded once so the same checks run before and
+    after the checkout changes; None when this checkout predates it."""
+    path = Path(__file__).with_name("cardea-ready.py")
+    if not path.is_file():
+        return None
+    spec = importlib.util.spec_from_file_location("cardea_ready", path)
+    if spec is None or spec.loader is None:
+        return None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+READY = load_ready()
+# How long a deploy waits for `cardea-ready` to stop reporting regressions.
+READY_WAIT_SECONDS = 120.0
+
+
+def readiness(host: Path, ready: Any = None) -> dict[str, Any] | None:
+    """The host's readiness (`cardea-ready.py`), or None without it or when it fails."""
+    ready = ready or READY
+    if ready is None:
+        return None
+    try:
+        result: dict[str, Any] = ready.readiness(host)
+    except Exception as error:
+        print(f"cardea-ready failed: {type(error).__name__}")
+        return None
+    return result
+
+
+def ready_regressions(
+    host: Path,
+    baseline: dict[str, Any] | None,
+    ready: Any = None,
+    wait_seconds: float = READY_WAIT_SECONDS,
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> list[str]:
+    """The checks that passed before the deploy and still fail after `wait_seconds` (the
+    kernel may take a while to come up). A check that was already failing does not count:
+    a lapsed token or a stale mirror is reported by `cardea-ready`, not rolled back."""
+    ready = ready or READY
+    if ready is None or baseline is None:
+        return []
+    deadline = clock() + wait_seconds
+    while True:
+        after = readiness(host, ready)
+        broken: list[str] = (
+            ready.regressions(baseline, after) if after is not None else ["cardea-ready"]
+        )
+        if not broken or clock() >= deadline:
+            return broken
+        sleep(10)
+
+
+def healthy(host: Path, baseline: dict[str, Any] | None = None) -> tuple[bool, str]:
     for _ in range(40):
         status = teamkit(host, "status", check=False)
         if "as of" in status:
@@ -249,6 +311,9 @@ def healthy(host: Path) -> tuple[bool, str]:
         return False, "cardea-kernel is not active"
     if not helper_ok():
         return False, "host helper refuses its worker configuration"
+    broken = ready_regressions(host, baseline)
+    if broken:
+        return False, "cardea-ready checks that passed before now fail: " + ", ".join(broken)
     return True, "ok"
 
 
@@ -312,19 +377,21 @@ def update(args: argparse.Namespace) -> int:
     if args.dry_run:
         print("\n".join(f"  {k}: {v}" for k, v in kinds.items()))
         return 0
+    # What passed before the deploy must pass after it (`cardea-ready.py`).
+    baseline = readiness(args.host)
     if restart:
         left = teamkit(args.host, "drain", "--wait", str(args.drain_wait), check=False)
         print(left.strip())
     try:
         did = deploy(args.host, target, old, restart)
-        ok, why = healthy(args.host)
+        ok, why = healthy(args.host, baseline)
         if not ok:
             raise RuntimeError(why)
     except (RuntimeError, OSError, StopIteration) as failed:
         print(f"FAILED: {failed}; going back to {old[:7]}")
         try:
             deploy(args.host, old, target, restart=True)
-            back, why = healthy(args.host)
+            back, why = healthy(args.host, baseline)
         except (RuntimeError, OSError) as again:
             back, why = False, str(again)
         _log(
