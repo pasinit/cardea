@@ -322,6 +322,26 @@ def test_a_fresh_host_converges_and_every_step_prints_its_verify(rig: Rig) -> No
     ]
 
 
+def test_a_workers_file_without_the_loopback_phase_gets_a_note_not_a_failure(rig: Rig) -> None:
+    assert rig.apply()
+    workers = Path(rig.host["workers_config"])
+    step = next(s for s in setup.steps() if s.name == "workers")
+    stock = step.verify(rig.context())
+    assert stock.ok and "loopback" not in stock.detail
+    assert step.loopback_note(rig.context()) == ""
+    document = json.loads(workers.read_text())
+    del document["profiles"]["try-loopback"], document["workers"]["env-try-loopback"]
+    del document["profiles"]["try"]["workspace_mb"]
+    workers.write_text(json.dumps(document))
+    before = snapshot(rig.base)
+    verdict = step.verify(rig.context())
+    assert verdict.ok
+    assert "loopback phase not offered (lacks profile try-loopback" in verdict.detail
+    assert "worker env-try-loopback, workspace_mb on profile try)" in verdict.detail
+    assert "cardea/cardea-host-workers.json to enable it" in verdict.detail
+    assert snapshot(rig.base) == before
+
+
 def test_running_twice_changes_nothing(rig: Rig) -> None:
     assert rig.apply()
     before, effects, files = len(rig.fake.changes), list(rig.fake.changes), snapshot(rig.base)
