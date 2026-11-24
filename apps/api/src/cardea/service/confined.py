@@ -566,6 +566,8 @@ def confined_handler(
     ) -> Any:
         manifest, staged = stage_inputs(context)
         payload = job_document(arguments, context, None)
+        if executor.then is not None:
+            payload["context"]["follow_on"] = True
         if callback is not None:
             payload["context"]["content_gate"] = callback
         if manifest:

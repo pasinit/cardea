@@ -709,20 +709,35 @@ def test_other_scenarios_run_in_one_phase_as_before(
 
 
 @pytest.mark.loopback
-def test_a_host_without_the_loopback_phase_refuses_a_loopback_scenario(
+def test_a_host_without_the_loopback_phase_reports_loopback_scenarios_unavailable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo: dict[str, Any]
 ) -> None:
     registry = registry_file(tmp_path, repo["source"])
     monkeypatch.setenv("CARDEA_REPOSITORIES", str(registry))
     host = EnvHost({"CARDEA_REPOSITORIES": str(registry)}, tmp_path, phases=False)
     kernel = kernel_for(tmp_path, host, monkeypatch, Registry(descriptors(), {}), "env.try")
-    state, refused = call(kernel, "no-phase", commit=repo["good"], scenarios=["serve"])
-    assert state == "failed" and refused.failure.code == "env_loopback_unavailable"
-    # It never ran with the network the first phase has, and the checkout never happened.
-    assert not list(tmp_path.glob("workspace-*"))
-    # The host's other scenarios are unaffected, and the profile is not pinned.
-    _, plain = call(kernel, "plain", commit=repo["good"], scenarios=["try"])
-    assert output(plain)["passed"] is True
+    _, mixed = call(kernel, "mixed", commit=repo["good"], scenarios=["try", "serve"])
+    result = output(mixed)
+    # The call is not refused: what can run runs, in the order the caller named.
+    assert [(s["name"], s["outcome"]) for s in result["scenarios"]] == [
+        ("try", "pass"),
+        ("serve", "unavailable"),
+    ]
+    assert result["passed"] is False and "next" not in result
+    unavailable = result["scenarios"][1]
+    assert unavailable["reason"] == "env_loopback_unavailable"
+    for hint in ("try-loopback", "env-try-loopback", "workspace_mb"):
+        assert hint in unavailable["log_tail"]
+    # It never ran with the network the first phase has, and only one unit started.
+    assert host.starts == [("try", None)]
+    state, alone = call(kernel, "alone", commit=repo["good"], scenarios=["serve"])
+    assert state != "failed"
+    only = output(alone)["scenarios"]
+    assert [(s["name"], s["outcome"], s["reason"]) for s in only] == [
+        ("serve", "unavailable", "env_loopback_unavailable")
+    ]
+    assert host.starts == [("try", None), ("try", None)]
+    # The profile is not pinned to a second phase.
     assert "then" not in (kernel.executor_record("env.try") or {})
 
 
