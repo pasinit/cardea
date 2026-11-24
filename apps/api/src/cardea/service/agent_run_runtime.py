@@ -290,7 +290,9 @@ class AgentRunRuntime:
                 return started
             try:
                 outcome = self._run_attempt(task_id, *started)
-            except BaseException:
+            except Exception:
+                # A BaseException models process death: it leaves the operation running for
+                # lease recovery to reconcile, so only an ordinary error settles the task.
                 self._abandon(task_id)
                 raise
             if outcome == "retry":

@@ -317,9 +317,10 @@ def test_crash_around_expiry(kernel: Kernel, handler: Handler, point: str) -> No
             raise Crash
 
     kernel.fault = crash
-    # The tick logs the failure and carries on; the next tick retries.
-    outcome = approval_requests.expire_due(kernel, after_expiry(row))
-    assert outcome == {row["request_id"]: "error"}
+    # Process death is not an error the tick can log and survive: it propagates, and the
+    # next tick after a restart retries.
+    with pytest.raises(Crash):
+        approval_requests.expire_due(kernel, after_expiry(row))
     kernel.fault = lambda stage: None
     pending = point == "before_commit"
     assert request_row(kernel, task_id)["state"] == ("pending" if pending else "expired")

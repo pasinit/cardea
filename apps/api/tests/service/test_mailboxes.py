@@ -314,7 +314,6 @@ def test_mail_is_delivered_as_untrusted_context_and_consumed_once(
 def test_a_crashed_attempt_keeps_its_mail_for_the_retry(
     kernel: Kernel, session: runs.FakeSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(AgentRunRuntime, "_abandon", lambda self, task_id: None)
     monkeypatch.setattr(agent_run_runtime, "attempt_lease_seconds", lambda request: 4.0)
     monkeypatch.setattr(agent_run_runtime, "LEASE_MARGIN", 1.0)
 

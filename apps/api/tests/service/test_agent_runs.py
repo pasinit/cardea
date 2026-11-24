@@ -519,7 +519,6 @@ def test_reconciler_sees_the_original_call_context(
 def test_crash_after_effect_resumes_without_resending(
     kernel: Kernel, tools: Tools, session: FakeSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(AgentRunRuntime, "_abandon", lambda self, task_id: None)
     monkeypatch.setattr(agent_run_runtime, "attempt_lease_seconds", lambda request: 4.0)
     # With the default 30 s margin a 4 s lease leaves the session no time at all, so the
     # retry passed only when it finished within one poll; give it the lease's 3 s.
