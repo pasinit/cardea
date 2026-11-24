@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teams dashboard, paused team (mock v3)</title>
+<style>
+  :root { --ink: #1b1f24; --muted: #57606a; --line: #d0d7de; --bg: #f6f8fa; --card: #fff; --ok: #1a7f37; --bad: #b42318; --warn: #9a6700; --accent: #0969da; --amber-bg: #fff3cd; --amber-ink: #3d2a00; }
+  * { box-sizing: border-box; }
+  body { font: 15px/1.45 system-ui, sans-serif; margin: 0; color: var(--ink); background: var(--bg); overflow-wrap: anywhere; }
+  a { color: var(--accent); }
+  :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .page { max-width: 64rem; margin: 0 auto; padding: .75rem; }
+  .top { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: .75rem; }
+  h1 { font-size: 1.25rem; margin: 0; }
+  h2 { font-size: 1.1rem; margin: 0; }
+  h3 { font-size: .8rem; margin: 0 0 .4rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .btn { display: inline-flex; align-items: center; min-height: 44px; padding: 0 .9rem; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink); font: inherit; text-decoration: none; white-space: nowrap; cursor: pointer; }
+  .muted { color: var(--muted); }
+  .bad { color: var(--bad); }
+  .nowrap, .id, .time { white-space: nowrap; }
+  .id, .time, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em; }
+  .state { font-size: .75rem; padding: 0 .4rem; border-radius: 4px; border: 1px solid currentColor; white-space: nowrap; }
+  .state-running { color: var(--ok); } .state-stalled { color: var(--bad); } .state-paused { color: var(--warn); } .state-idle { color: var(--muted); }
+  .panel { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: .75rem; margin-bottom: .75rem; }
+  .panel > summary { cursor: pointer; font-weight: 600; min-height: 44px; display: flex; align-items: center; gap: .5rem; }
+  .panel > summary .count { margin-left: auto; font-weight: 400; color: var(--muted); font-size: .85rem; }
+  .panel[open] > summary { margin-bottom: .25rem; }
+  .note { margin: 0 0 .5rem; font-size: .85rem; color: var(--muted); }
+  .strip { display: flex; gap: .4rem; overflow-x: auto; padding: 3px; margin-bottom: .75rem; }
+  .strip a { flex: none; display: inline-flex; align-items: center; gap: .4rem; min-height: 44px; padding: 0 .8rem; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink); text-decoration: none; }
+  .strip a[aria-current="page"] { border-color: var(--ink); font-weight: 600; }
+  .banner { display: flex; gap: .75rem; align-items: flex-start; background: var(--amber-bg); color: var(--amber-ink); border: 1px solid var(--warn); border-left-width: 6px; border-radius: 8px; padding: .75rem; margin: .5rem 0 .75rem; }
+  .banner .icon { flex: none; display: inline-flex; gap: 3px; padding-top: .2rem; }
+  .banner .icon i { display: block; width: 6px; height: 1.1rem; background: var(--amber-ink); border-radius: 1px; }
+  .banner h3 { margin: 0 0 .2rem; font-size: 1rem; text-transform: none; letter-spacing: 0; color: var(--amber-ink); }
+  .banner p { margin: 0 0 .2rem; }
+  .banner p:last-child { margin: 0; }
+  /* Phone: every table row is a stacked card; each cell carries its column name in data-label. */
+  table.rows, .rows tbody, .rows tr, .rows td { display: block; }
+  .rows thead { display: none; }
+  .rows tr { border: 1px solid var(--line); border-radius: 8px; padding: .4rem .6rem; margin-bottom: .4rem; background: var(--card); }
+  .rows td { display: flex; justify-content: space-between; gap: .75rem; padding: .15rem 0; text-align: right; }
+  .rows td::before { content: attr(data-label); flex: none; color: var(--muted); text-align: left; }
+  .rows td.id, .rows td.time { overflow-x: auto; }
+  .mail-item { border: 1px solid var(--line); border-radius: 8px; background: var(--card); margin-bottom: .4rem; }
+  .mail-item > summary { list-style: none; cursor: pointer; padding: .5rem .6rem; min-height: 44px; display: grid; gap: .1rem; }
+  .mail-item > summary::-webkit-details-marker { display: none; }
+  .mail-item > summary .line1 { display: flex; gap: .5rem; justify-content: space-between; color: var(--muted); font-size: .85rem; }
+  .mail-item > summary .line2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mail-item > summary .line2::before { content: "▸ "; color: var(--muted); }
+  .mail-item[open] > summary .line2::before { content: "▾ "; }
+  .mail-item .body { border-top: 1px solid var(--line); padding: .5rem .6rem; }
+  .mail-item .meta { color: var(--muted); font-size: .85rem; margin: 0 0 .35rem; }
+  .mail-item pre { margin: 0; font: inherit; white-space: pre-wrap; max-height: 10rem; overflow-y: auto; }
+  .mail-item pre:focus-visible { outline-offset: -2px; }
+  .states { display: grid; gap: .75rem; }
+  .states p { margin: 0 0 .4rem; }
+  .box { border: 1px dashed var(--line); border-radius: 8px; padding: .6rem .75rem; }
+  .box.err { border: 1px solid var(--bad); }
+  @media (min-width: 720px) {
+    body { font-size: 14px; }
+    .page { padding: 1.25rem; }
+    table.rows { display: table; width: 100%; border-collapse: collapse; }
+    .rows thead { display: table-header-group; }
+    .rows tbody { display: table-row-group; }
+    .rows tr { display: table-row; border: 0; border-radius: 0; padding: 0; margin: 0; background: none; }
+    .rows td, .rows th { display: table-cell; padding: .3rem .9rem .3rem 0; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+    .rows th { color: var(--muted); font-weight: 600; }
+    .rows td::before { content: none; }
+    .rows td.id, .rows td.time { overflow-x: visible; }
+    .mail-item > summary { grid-template-columns: 14rem 1fr; align-items: baseline; }
+    .mail-item > summary .line1 { justify-content: flex-start; gap: 1rem; }
+    .states { grid-template-columns: repeat(3, 1fr); align-items: start; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="top">
+    <h1>Teams <span class="muted">(read-only)</span></h1>
+    <a class="btn" href="dashboard-v1/settings.html">Settings</a>
+  </header>
+
+  <nav class="strip" aria-label="Teams">
+    <a href="#">dev <span class="state state-running">running</span></a>
+    <a href="#" aria-current="page">aerarium <span class="state state-paused">paused</span></a>
+    <a href="#">ops <span class="state state-stalled">unreadable</span></a>
+  </nav>
+
+  <section aria-labelledby="team-h">
+    <h2 id="team-h">aerarium</h2>
+
+    <div class="banner" role="status">
+      <span class="icon" aria-hidden="true"><i></i><i></i></span>
+      <div>
+        <h3>Team paused</h3>
+        <p><strong>Paused</strong> since <time datetime="2026-11-21T09:30:00Z">2026-11-21 09:30 UTC</time>. Reason: waiting for the owner to review the budget.</p>
+        <p>Work and mail below are the last known state. Nothing is being processed.</p>
+      </div>
+    </div>
+
+    <details class="panel" id="work" open>
+      <summary>Work <span class="count">3 items</span></summary>
+      <p class="note">Read-only while paused</p>
+      <table class="rows">
+        <thead><tr><th>Item</th><th>Title</th><th>Status</th><th>Owner</th><th>Updated</th></tr></thead>
+        <tbody>
+          <tr><td data-label="Item" class="id">work/rec-0101</td><td data-label="Title">Reconcile quarterly ledger</td><td data-label="Status">in progress</td><td data-label="Owner">dev.0</td><td data-label="Updated" class="time">2026-11-21 09:12</td></tr>
+          <tr><td data-label="Item" class="id">work/rec-0102</td><td data-label="Title">Draft vendor payment summary</td><td data-label="Status">open</td><td data-label="Owner">unassigned</td><td data-label="Updated" class="time">2026-11-20 16:40</td></tr>
+          <tr><td data-label="Item" class="id">work/rec-0099</td><td data-label="Title">Archive October receipts</td><td data-label="Status">done</td><td data-label="Owner">dev.1</td><td data-label="Updated" class="time">2026-11-19 11:05</td></tr>
+        </tbody>
+      </table>
+    </details>
+
+    <details class="panel" id="mail" open>
+      <summary>Mail <span class="count">3 of 9</span></summary>
+      <p class="note">Read-only while paused</p>
+      <details class="mail-item" open>
+        <summary>
+          <span class="line1"><span class="time">2026-11-21 09:28</span><span class="nowrap">dev → pm</span></span>
+          <span class="line2">Budget for November is nearly spent; please confirm before I continue…</span>
+        </summary>
+        <div class="body">
+          <p class="meta"><span class="time">2026-11-21 09:28:44 UTC</span>: dev to pm; about <span class="id">work/rec-0101</span></p>
+          <pre tabindex="0">Budget for November is nearly spent; please confirm before I continue with the ledger reconciliation.
+
+Remaining steps: match 40 open entries, write the summary, and send it for review.
+(Long bodies scroll inside this box instead of lengthening the page.)</pre>
+        </div>
+      </details>
+      <details class="mail-item">
+        <summary>
+          <span class="line1"><span class="time">2026-11-21 09:15</span><span class="nowrap">pm → dev</span></span>
+          <span class="line2">Please prioritise rec-0101 over the vendor summary.</span>
+        </summary>
+        <div class="body">
+          <p class="meta"><span class="time">2026-11-21 09:15:02 UTC</span>: pm to dev; about <span class="id">work/rec-0101</span></p>
+          <pre tabindex="0">Please prioritise rec-0101 over the vendor summary.</pre>
+        </div>
+      </details>
+      <details class="mail-item">
+        <summary>
+          <span class="line1"><span class="time">2026-11-20 16:41</span><span class="nowrap">pm → dev</span></span>
+          <span class="line2">New item rec-0102 is open when you have capacity.</span>
+        </summary>
+        <div class="body">
+          <p class="meta"><span class="time">2026-11-20 16:41:30 UTC</span>: pm to dev; about <span class="id">work/rec-0102</span></p>
+          <pre tabindex="0">New item rec-0102 is open when you have capacity.</pre>
+        </div>
+      </details>
+    </details>
+
+    <section class="panel" aria-labelledby="states-h">
+      <h3 id="states-h">States</h3>
+      <div class="states">
+        <div class="box"><p class="muted">No work items.</p><p class="muted">No messages.</p></div>
+        <div class="box" role="status"><p class="muted">Checking team status…</p></div>
+        <div class="box err" role="alert">
+          <p class="bad">We could not load the team status. Try again in a moment.</p>
+          <button class="btn" type="button">Try again</button>
+        </div>
+      </div>
+    </section>
+  </section>
+</div>
+</body>
+</html>
