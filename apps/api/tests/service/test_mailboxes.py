@@ -316,6 +316,8 @@ def test_a_crashed_attempt_keeps_its_mail_for_the_retry(
 ) -> None:
     monkeypatch.setattr(agent_run_runtime, "attempt_lease_seconds", lambda request: 4.0)
     monkeypatch.setattr(agent_run_runtime, "LEASE_MARGIN", 1.0)
+    # The fault simulates the process dying, so nothing runs to settle the attempt.
+    monkeypatch.setattr(AgentRunRuntime, "_abandon", lambda *args: None)
 
     class Crash(Exception):
         pass

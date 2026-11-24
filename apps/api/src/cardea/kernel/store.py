@@ -440,10 +440,45 @@ class KernelTransaction:
         _expect_revision(task.revision, expected_revision)
         if task.lease is None or now < task.lease.expires_at:
             raise StoreError("lease_not_expired", "Recovery requires an expired running lease.")
+        return self._fence(task, now, None, "task.recovered")
+
+    @_mutation
+    def abandon_task(
+        self,
+        task_id: str,
+        *,
+        expected_revision: int,
+        lease_id: str,
+        at: datetime,
+        failure: KernelFailure,
+    ) -> Task:
+        """The lease holder gives up its own attempt: fence it and fail the task.
+
+        Unlike `recover_task` it needs no expired lease, so a worker that is stopping can
+        settle the task itself. Its operations are settled as recovery would, and an effect
+        left in doubt makes the failure `reconciliation_required`. The lease is checked, but
+        a clock behind the task's own last write cannot refuse the fence.
+        """
+        task = self.get_task(task_id)
+        _expect_revision(task.revision, expected_revision)
+        if task.state is not TaskState.RUNNING or task.lease is None:
+            raise StoreError("task_not_running", "Task has no live worker.")
+        if task.lease.lease_id != lease_id:
+            raise StoreError("stale_lease", "Worker lease is wrong or expired.")
+        now = max(_timestamp.validate_python(at), task.updated_at)
+        return self._fence(task, now, failure, "task.abandoned")
+
+    def _fence(
+        self,
+        task: Task,
+        now: datetime,
+        failure: KernelFailure | None,
+        event_type: str,
+    ) -> Task:
         rows = self._connection.execute(
             "SELECT snapshot FROM operations WHERE task_id = ? "
             "AND state IN ('accepted', 'running')",
-            (task_id,),
+            (task.task_id,),
         ).fetchall()
         for row in rows:
             receipt = OperationReceipt.model_validate_json(row["snapshot"])
@@ -468,17 +503,19 @@ class KernelTransaction:
             )
             self._save_operation(receipt, updated)
         reason: KernelFailure | None = None
-        if self._unresolved(task_id):
+        if self._unresolved(task.task_id):
             reason = KernelFailure(
                 code="reconciliation_required",
                 message="An interrupted effect has unknown outcome.",
             )
+        elif failure is not None:
+            reason = failure
         elif now >= task.limits.deadline:
             reason = KernelFailure(code="deadline_exceeded", message="Task deadline elapsed.")
         elif task.checkpoint is None:
             completed = self._connection.execute(
                 "SELECT 1 FROM operations WHERE task_id = ? AND state = 'succeeded' LIMIT 1",
-                (task_id,),
+                (task.task_id,),
             ).fetchone()
             if completed is not None:
                 reason = KernelFailure(
@@ -497,7 +534,7 @@ class KernelTransaction:
                 "failure": reason,
             }
         )
-        return self._save_task(task, updated_task, "task.recovered")
+        return self._save_task(task, updated_task, event_type)
 
     def get_operation(self, task_id: str, operation_id: str) -> OperationReceipt:
         self._check()

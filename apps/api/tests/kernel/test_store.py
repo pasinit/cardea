@@ -15,6 +15,7 @@ from cardea.kernel.models import (
     Checkpoint,
     DispatchLease,
     EventWait,
+    KernelFailure,
     OperationRequest,
     OperationState,
     ResourceRef,
@@ -575,6 +576,76 @@ def test_expired_worker_cannot_publish_an_object(
                 at=lease.expires_at,
             )
         assert error.value.code == "stale_lease"
+
+
+def test_lease_holder_abandons_its_attempt_without_waiting_for_expiry(
+    tmp_path: Path,
+    task: Task,
+    lease: DispatchLease,
+    now: datetime,
+    operation_request: OperationRequest,
+) -> None:
+    directory = tmp_path / "state"
+    seed_running(directory, task, lease, now)
+    failure = KernelFailure(code="attempt_aborted", message="stopped")
+    with SQLiteKernelStore(directory) as store, store.transaction() as transaction:
+        with pytest.raises(StoreError, match="Worker lease is wrong"):
+            transaction.abandon_task(
+                task.task_id,
+                expected_revision=1,
+                lease_id="lease-other",
+                at=now,
+                failure=failure,
+            )
+    with SQLiteKernelStore(directory) as store, store.transaction() as transaction:
+        transaction.admit_operation(
+            operation_request,
+            grant_ids=("grant-output",),
+            retry_class=RetryClass.IDEMPOTENT,
+            expected_task_revision=1,
+            lease_id=lease.lease_id,
+            at=now,
+        )
+        transaction.change_operation(
+            task.task_id,
+            operation_request.operation_id,
+            OperationState.RUNNING,
+            expected_revision=0,
+            at=now,
+            lease_id=lease.lease_id,
+        )
+    with SQLiteKernelStore(directory) as store, store.transaction() as transaction:
+        # A clock behind the task's own last write must not stop the worker from settling.
+        abandoned = transaction.abandon_task(
+            task.task_id,
+            expected_revision=1,
+            lease_id=lease.lease_id,
+            at=now - timedelta(seconds=5),
+            failure=failure,
+        )
+        assert abandoned.state is TaskState.FAILED and abandoned.lease is None
+        # The effect may have happened, so it is left to reconciliation, not replayed.
+        assert abandoned.failure is not None
+        assert abandoned.failure.code == "reconciliation_required"
+        receipt = transaction.get_operation(task.task_id, operation_request.operation_id)
+        assert receipt.state is OperationState.OUTCOME_UNKNOWN
+
+
+def test_abandoning_a_clean_attempt_records_the_given_failure(
+    tmp_path: Path, task: Task, lease: DispatchLease, now: datetime
+) -> None:
+    directory = tmp_path / "state"
+    seed_running(directory, task, lease, now)
+    with SQLiteKernelStore(directory) as store, store.transaction() as transaction:
+        abandoned = transaction.abandon_task(
+            task.task_id,
+            expected_revision=1,
+            lease_id=lease.lease_id,
+            at=now,
+            failure=KernelFailure(code="attempt_aborted", message="stopped"),
+        )
+        assert abandoned.state is TaskState.FAILED
+        assert abandoned.failure is not None and abandoned.failure.code == "attempt_aborted"
 
 
 def test_recovery_cancels_undispatched_intent_and_requeues_initial_state(

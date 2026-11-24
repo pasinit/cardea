@@ -4,7 +4,7 @@ import asyncio
 import json
 import time
 from collections.abc import Awaitable, Callable, Iterator
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
@@ -16,9 +16,11 @@ from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 from pydantic import JsonValue, ValidationError
 
-from cardea.kernel.models import OperationState, ResourceRef
+from cardea.kernel.models import OperationState, ResourceRef, TaskState
+from cardea.kernel.store import KernelTransaction
 from cardea.runtime.agent_session import ClaudeAgentSession, SessionRequest, SessionResult
 from cardea.service import agent_run_runtime
+from cardea.service import models as service_models
 from cardea.service import kernel as handlers
 from cardea.service.agent_run_runtime import AgentRunRuntime
 from cardea.service.app import create_app
@@ -523,6 +525,8 @@ def test_crash_after_effect_resumes_without_resending(
     # With the default 30 s margin a 4 s lease leaves the session no time at all, so the
     # retry passed only when it finished within one poll; give it the lease's 3 s.
     monkeypatch.setattr(agent_run_runtime, "LEASE_MARGIN", 1.0)
+    # The fault simulates the process dying, so nothing runs to settle the attempt.
+    monkeypatch.setattr(AgentRunRuntime, "_abandon", lambda *args: None)
 
     class Crash(Exception):
         pass
@@ -544,6 +548,87 @@ def test_crash_after_effect_resumes_without_resending(
     kernel.fault = lambda stage: None
     assert AgentRunRuntime(kernel).execute(task_id) == "succeeded"
     assert len(tools.sent) == 1
+
+
+@pytest.mark.parametrize(
+    "error", [RuntimeError, KeyboardInterrupt, SystemExit, asyncio.CancelledError]
+)
+def test_any_exception_in_an_attempt_fails_the_task_instead_of_leaving_it_running(
+    kernel: Kernel, session: FakeSession, error: type[BaseException]
+) -> None:
+    def dies(stage: str) -> None:
+        if stage == "agent_run.attempt_started":
+            raise error
+
+    task_id = submit(kernel)
+    kernel.fault = dies
+    with pytest.raises(error):
+        AgentRunRuntime(kernel).execute(task_id)
+    kernel.fault = lambda stage: None
+    with kernel.database.engine.begin() as conn, borrow(conn) as tx:
+        task = tx.get_task(task_id)
+    assert task.state is TaskState.FAILED and task.lease is None
+    assert task.failure is not None and task.failure.code == "attempt_aborted"
+    assert error.__name__ in task.failure.message
+    # Nothing is left to recover: running it again reports the settled state.
+    assert AgentRunRuntime(kernel).execute(task_id) == "failed"
+
+
+def test_an_attempt_that_dies_after_its_session_leaves_no_call_in_doubt(
+    kernel: Kernel, session: FakeSession
+) -> None:
+    session.scripts = [routine]
+    task_id = submit(kernel)
+
+    def dies(stage: str) -> None:
+        if stage == "agent_run.before_finish":
+            raise RuntimeError("after the session")
+
+    kernel.fault = dies
+    with pytest.raises(RuntimeError):
+        AgentRunRuntime(kernel).execute(task_id)
+    kernel.fault = lambda stage: None
+    with kernel.database.engine.begin() as conn, borrow(conn) as tx:
+        assert tx.get_task(task_id).state is TaskState.FAILED
+        assert all(r.state is OperationState.SUCCEEDED for r in tx.list_operations(task_id))
+
+
+def test_failure_to_settle_an_aborted_attempt_keeps_the_original_error(
+    kernel: Kernel, session: FakeSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def dies(stage: str) -> None:
+        if stage == "agent_run.attempt_started":
+            raise RuntimeError("original")
+
+    def unavailable(*args: Any, **kwargs: Any) -> None:
+        raise OSError("database unavailable")
+
+    task_id = submit(kernel)
+    kernel.fault = dies
+    monkeypatch.setattr(KernelTransaction, "abandon_task", unavailable)
+    with pytest.raises(RuntimeError, match="original"):
+        AgentRunRuntime(kernel).execute(task_id)
+    kernel.fault = lambda stage: None
+    # Settling failed, so the task is left for recovery as before.
+    with kernel.database.engine.begin() as conn, borrow(conn) as tx:
+        assert tx.get_task(task_id).state is TaskState.RUNNING
+
+
+def test_the_service_clock_never_runs_backwards(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A step back in the wall clock must not make a worker's write predate its own last."""
+    real = datetime.now(UTC)
+    readings = iter([real, real - timedelta(seconds=30), real + timedelta(seconds=1)])
+
+    class Stepped(datetime):
+        @classmethod
+        def now(cls, tz: Any = None) -> datetime:
+            return next(readings)
+
+    monkeypatch.setattr(service_models, "datetime", Stepped)
+    monkeypatch.setattr(service_models, "_latest", datetime.min.replace(tzinfo=UTC))
+    first, stepped, after = (service_models.now() for _ in range(3))
+    assert stepped >= first and after >= stepped
+    assert after == real + timedelta(seconds=1)
 
 
 @pytest.mark.loopback

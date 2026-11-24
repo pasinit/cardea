@@ -167,6 +167,8 @@ def test_mail_coalesced_into_a_started_run_gets_one_follow_up(
 ) -> None:
     monkeypatch.setattr(agent_run_runtime, "attempt_lease_seconds", lambda request: 4.0)
     monkeypatch.setattr(agent_run_runtime, "LEASE_MARGIN", 1.0)
+    # The fault simulates the process dying, so nothing runs to settle the attempt.
+    monkeypatch.setattr(AgentRunRuntime, "_abandon", lambda *args: None)
 
     class Crash(Exception):
         pass

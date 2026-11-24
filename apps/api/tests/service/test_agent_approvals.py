@@ -425,6 +425,8 @@ def test_lease_loss_after_proposing_parks_without_a_session(
 ) -> None:
     monkeypatch.setattr(agent_run_runtime, "attempt_lease_seconds", lambda request: 3.0)
     monkeypatch.setattr(agent_run_runtime, "LEASE_MARGIN", 1.0)
+    # The fault simulates the process dying, so nothing runs to settle the attempt.
+    monkeypatch.setattr(AgentRunRuntime, "_abandon", lambda *args: None)
     setup(kernel)
 
     def dies(stage: str) -> None:
