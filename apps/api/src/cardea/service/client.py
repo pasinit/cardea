@@ -104,7 +104,11 @@ class KernelClient:
         client.workload = workload
         return client
 
-    def request(self, method: str, path: str, **kwargs: Any) -> Any:
+    def request(
+        self, method: str, path: str, *, accept: tuple[int, ...] = (), **kwargs: Any
+    ) -> Any:
+        """The JSON body; an error status raises `ClientError` unless it is in `accept`
+        (for example `/readyz`'s 503, whose body says which check failed)."""
         kind, token = self.credentials()
         with self.http.stream(
             method,
@@ -121,7 +125,7 @@ class KernelClient:
                 data = httpx.Response(response.status_code, content=bytes(chunks)).json()
             except ValueError:
                 raise ClientError("invalid_http_response", response.status_code) from None
-            if response.status_code >= 400:
+            if response.status_code >= 400 and response.status_code not in accept:
                 raise ClientError(str(data.get("code", "request_failed")), response.status_code)
             return data
 

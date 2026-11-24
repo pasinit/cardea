@@ -27,6 +27,7 @@ from cardea.service import agent_run_runtime, claims, journal
 from cardea.service import kernel as handlers
 from cardea.service.agent_run_runtime import AgentRunRuntime
 from cardea.service.auth import Authentication, Proof
+from cardea.service.client import ClientError
 from cardea.service.confined import Workers
 from cardea.service.database import Database, Fault, borrow
 from cardea.service.groups import apply
@@ -1996,6 +1997,42 @@ def test_drain_gives_up_after_the_wait_and_names_what_still_runs() -> None:
         clock=lambda: clock[0],
     )
     assert left == ["task-9"]
+
+
+def test_ready_reports_the_kernels_readiness_and_refusals_as_one_document() -> None:
+    module = kit()
+    body = {"ready": False, "checks": [{"name": "database", "ok": False, "detail": "x"}]}
+    asked: list[tuple[str, Any]] = []
+
+    class Kernel:
+        def __init__(self, answer: Any) -> None:
+            self.answer = answer
+
+        def request(self, method: str, path: str, **kwargs: Any) -> Any:
+            asked.append((path, kwargs))
+            if isinstance(self.answer, Exception):
+                raise self.answer
+            return self.answer
+
+        def close(self) -> None:
+            pass
+
+    params = {"allow_paused": "true"}
+    outcome = module.ready(example(), params, connect=lambda host: Kernel(body))
+    assert outcome == {"reached": True, "status": 503, "body": body}
+    # The 503 body is accepted rather than raised, so the failing checks are named.
+    assert asked[0] == ("/readyz", {"params": params, "accept": (503,), "timeout": 30})
+    refused = Kernel(ClientError("principal_disabled", 403))
+    assert module.ready(example(), connect=lambda host: refused) == {
+        "reached": True,
+        "status": 403,
+        "error": "principal_disabled",
+    }
+    down = Kernel(ConnectionError("no socket"))
+    assert module.ready(example(), connect=lambda host: down) == {
+        "reached": False,
+        "error": "ConnectionError",
+    }
 
 
 def test_workspace_roles_edit_in_their_own_checkout_instead_of_code_session() -> None:

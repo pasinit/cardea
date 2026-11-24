@@ -482,6 +482,8 @@ class Kernel:
         self.event_triggers = EventTriggers()
         # What may leave the host (ADR-037 decision 4); unset refuses every check.
         self.content_gate: ContentGateConfig | None = None
+        # Set once this process has launched DBOS (`Runtime.launch`); readiness reports it.
+        self.workflows_launched = False
         # Unfinished tasks of a profile whose adapters are missing could never recover.
         missing: tuple[tuple[str, str, Callable[[Profile], bool]], ...] = (
             (

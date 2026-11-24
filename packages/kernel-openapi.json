@@ -4208,6 +4208,28 @@
         "title": "KernelFailure",
         "type": "object"
       },
+      "Liveness": {
+        "additionalProperties": false,
+        "description": "`GET /v0.2/livez`: the kernel process answers. It reads no state.",
+        "properties": {
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "status": {
+            "const": "ok",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "Liveness",
+        "type": "object"
+      },
       "MailDelivery": {
         "additionalProperties": false,
         "properties": {
@@ -5586,6 +5608,67 @@
           "expectations_truncated"
         ],
         "title": "OverviewSpend",
+        "type": "object"
+      },
+      "Readiness": {
+        "additionalProperties": false,
+        "description": "`GET /v0.2/readyz`: whether every check passed (HTTP 200) or not (HTTP 503).",
+        "properties": {
+          "as_of": {
+            "description": "When the checks ran (UTC, ISO 8601).",
+            "title": "As Of",
+            "type": "string"
+          },
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/ReadinessCheck"
+            },
+            "title": "Checks",
+            "type": "array"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ready",
+          "checks",
+          "as_of"
+        ],
+        "title": "Readiness",
+        "type": "object"
+      },
+      "ReadinessCheck": {
+        "additionalProperties": false,
+        "description": "One readiness check: its name, whether it passed and a short reason.",
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "name": {
+            "description": "For example `database`, `repository:<alias>`.",
+            "title": "Name",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "ok",
+          "detail"
+        ],
+        "title": "ReadinessCheck",
         "type": "object"
       },
       "ReceiptRequirement": {
@@ -14027,6 +14110,145 @@
         "summary": "Submit Host"
       }
     },
+    "/v0.2/livez": {
+      "get": {
+        "description": "The kernel process answers. No credential and no state: it reads nothing, so it\nanswers even while the store is locked or a dependency is down.",
+        "operationId": "livez_v0_2_livez_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Liveness"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Method Not Allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Livez"
+      }
+    },
     "/v0.2/mailbox": {
       "get": {
         "description": "Messages of a namespace the caller sent, supervises or receives, oldest first,\neach with every delivery and its history; one size-bounded page.",
@@ -14874,6 +15096,196 @@
           }
         ],
         "summary": "Operations"
+      }
+    },
+    "/v0.2/readyz": {
+      "get": {
+        "description": "Whether this kernel can do its work: HTTP 200 when every check passes, 503\notherwise. Any enabled principal may ask, as for `/v0.2/system`; group names, task\nIDs and agent IDs appear only for namespaces where the caller holds\n`tasks.inspect`. `allow_paused=true` accepts a paused group (disabled supervisor).",
+        "operationId": "readyz_v0_2_readyz_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "allow_paused",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Allow Paused",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "mirror_max_age_seconds",
+            "required": false,
+            "schema": {
+              "default": 900,
+              "maximum": 604800,
+              "minimum": 60,
+              "title": "Mirror Max Age Seconds",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "lease_grace_seconds",
+            "required": false,
+            "schema": {
+              "default": 600,
+              "maximum": 86400,
+              "minimum": 0,
+              "title": "Lease Grace Seconds",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-cardea-auth",
+            "required": false,
+            "schema": {
+              "default": "spiffe",
+              "title": "X-Cardea-Auth",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Readiness"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Method Not Allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Readiness"
+                }
+              }
+            },
+            "description": "A readiness check failed"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Readyz"
       }
     },
     "/v0.2/system": {
