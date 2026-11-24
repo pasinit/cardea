@@ -124,7 +124,8 @@
         "proxy": "127.0.10.7:3128",
         "hosts": [
           "pypi.org",
-          "files.pythonhosted.org"
+          "files.pythonhosted.org",
+          "github.com"
         ]
       },
       "concurrency": 1,
