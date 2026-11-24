@@ -117,7 +117,7 @@ class ClaudeAgentSession:
         space = request.workspace
         return {
             "system_prompt": request.system_prompt
-            + (workspace.instructions(space.repositories) if space else ""),
+            + (workspace.instructions(space.repositories, workdir) if space else ""),
             # No built-in tools at all: shell, files, web, scheduling and subagents are off,
             # unless the run has a workspace (ADR-037 amendment 2026-11-24): then editing
             # and a shell, with the file tools scoped to the working directory.
@@ -148,7 +148,9 @@ class ClaudeAgentSession:
                 **{name: os.environ[name] for name in PROXY_VARIABLES if name in os.environ},
                 **direct_endpoint(request.mcp_url),
                 **(
-                    workspace.environment(workdir, space.upload_url, request.mcp_token)
+                    workspace.environment(
+                        workdir, space.upload_url, request.mcp_token, space.memory_url
+                    )
                     if space
                     else {}
                 ),
@@ -165,7 +167,9 @@ class ClaudeAgentSession:
             os.chmod(directory, 0o700)
             if request.workspace is not None:
                 try:
-                    workspace.prepare(Path(directory), request.workspace.repositories)
+                    workspace.prepare(
+                        Path(directory), request.workspace.repositories, request.memory
+                    )
                 except workspace.WorkspaceRefused as refused:
                     activity.event(f"workspace refused: {refused}", logging.WARNING)
                     return HarnessResult.failed("workspace_unavailable")

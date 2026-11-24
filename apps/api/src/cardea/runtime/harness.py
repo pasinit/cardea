@@ -36,6 +36,10 @@ class HarnessWorkspace(_Frozen):
 
     repositories: tuple[str, ...]
     upload_url: str
+    # The member's memory (`cardea-memory save` posts here) and its newest archive, which
+    # the session unpacks into ./memory before it starts. The archive never travels in the
+    # request document: a confined session gets it as a staged input file.
+    memory_url: str | None = None
 
 
 class HarnessRequest(_Frozen):
@@ -68,6 +72,8 @@ class HarnessRequest(_Frozen):
     # Set only for a run with a workspace: built-in tools and a checkout. Unset, the
     # session has no built-in tools at all (ADR-033).
     workspace: HarnessWorkspace | None = None
+    # The member's newest memory archive (gzipped tar), for a run with a workspace.
+    memory: bytes | None = Field(default=None, exclude=True, repr=False)
 
 
 def tool_timeout_ms(request: HarnessRequest) -> int | None:

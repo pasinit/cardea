@@ -225,3 +225,158 @@ def test_a_workspace_change_reaches_env_try_without_a_push(tmp_path: Path, sourc
 def test_a_workspace_names_only_registered_repositories(tmp_path: Path, source: Path) -> None:
     with pytest.raises(workspace.WorkspaceRefused, match="unknown"):
         workspace.prepare(tmp_path, ("other",))
+
+
+# A member's memory
+
+
+def archive(files: dict[str, bytes]) -> bytes:
+    import io
+    import tarfile
+
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as packed:
+        for name, content in files.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(content)
+            packed.addfile(info, io.BytesIO(content))
+    return buffer.getvalue()
+
+
+def test_a_memory_archive_holds_only_plain_relative_files() -> None:
+    import io
+    import tarfile
+
+    from cardea.service import memory
+
+    assert memory.check(archive({"INDEX.md": b"x", "notes/a.md": b"yy"})) == 3
+    for bad in ("/etc/passwd", "../escape", "notes/../../escape"):
+        with pytest.raises(memory.MemoryRefused, match="plain relative"):
+            memory.check(archive({bad: b"x"}))
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as packed:
+        link = tarfile.TarInfo("link")
+        link.type, link.linkname = tarfile.SYMTYPE, "/etc/passwd"
+        packed.addfile(link)
+    with pytest.raises(memory.MemoryRefused, match="plain relative"):
+        memory.check(buffer.getvalue())
+    with pytest.raises(memory.MemoryRefused, match="gzipped tar"):
+        memory.check(b"not an archive")
+    with pytest.raises(memory.MemoryRefused, match="bytes"):
+        memory.check(b"")
+
+
+def test_memory_is_recalled_into_the_workspace_and_its_index_reaches_the_prompt(
+    tmp_path: Path,
+) -> None:
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    folder = workspace.recall(fresh, None)
+    assert (folder / "INDEX.md").read_text().startswith("# Memory index")
+    kept = tmp_path / "kept"
+    kept.mkdir()
+    workspace.recall(kept, archive({"INDEX.md": b"- reviewer wants small PRs\n", "a.md": b"z"}))
+    assert (kept / "memory" / "a.md").read_text() == "z"
+    prompt = workspace.instructions(("app",), kept)
+    assert "reviewer wants small PRs" in prompt and "cardea-memory save" in prompt
+    # Only the head of a long index goes into the prompt.
+    (kept / "memory" / "INDEX.md").write_text("i" * 20000)
+    assert workspace.instructions(("app",), kept).count("i" * 100) <= 82
+
+
+class CaptureMemory(BaseHTTPRequestHandler):
+    bodies: list[bytes] = []
+
+    def do_POST(self) -> None:  # noqa: N802 (http.server's name)
+        body = self.rfile.read(int(self.headers["Content-Length"]))
+        CaptureMemory.bodies.append(body)
+        reply = json.dumps({"version": 1, "bytes": len(body)}).encode()
+        self.send_response(201)
+        self.send_header("Content-Length", str(len(reply)))
+        self.end_headers()
+        self.wfile.write(reply)
+
+    def log_message(self, *args: Any) -> None:
+        pass
+
+
+@pytest.mark.loopback
+def test_cardea_memory_save_round_trips_through_recall(tmp_path: Path, source: Path) -> None:
+    from cardea.service import memory
+
+    workdir = tmp_path / "session"
+    workdir.mkdir()
+    workspace.prepare(workdir, ("app",))
+    (workdir / "memory" / "lessons.md").write_text("run targeted tests first\n")
+    server = HTTPServer(("127.0.0.1", 0), CaptureMemory)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        env = {
+            **os.environ,
+            "HOME": str(workdir),
+            **workspace.environment(
+                workdir,
+                "http://127.0.0.1:1/objects",
+                "token",
+                f"http://127.0.0.1:{server.server_port}/memory",
+            ),
+        }
+        tool = [sys.executable, "-I", str(workdir / workspace.BIN / "cardea-memory"), "save"]
+        done = subprocess.run(tool, cwd=workdir, env=env, capture_output=True, text=True)
+        assert done.returncode == 0, done.stderr
+    finally:
+        server.shutdown()
+    saved = CaptureMemory.bodies[-1]
+    memory.check(saved)  # what the tool packs, the kernel accepts
+    later = tmp_path / "next-run"
+    later.mkdir()
+    workspace.recall(later, saved)
+    assert (later / "memory" / "lessons.md").read_text() == "run targeted tests first\n"
+
+
+@pytest.mark.loopback
+def test_the_memory_route_is_absent_without_a_workspace() -> None:
+    async def remember(content: bytes) -> dict[str, Any]:
+        return {"version": 1}
+
+    with ToolEndpoint([], no_call, memory=remember) as tools:
+        assert post(tools.memory_url, b"x", tools.token) == (201, {"version": 1})
+    with ToolEndpoint([], no_call) as tools:
+        assert post(tools.memory_url, b"x", tools.token)[0] == 404
+
+
+def test_a_confined_session_gets_its_memory_as_a_staged_file_not_in_the_request() -> None:
+    import asyncio
+    import base64
+    import hashlib
+
+    from test_confined import WorkerHost, finished
+
+    from cardea.service.confined import ConfinedAgentSession, Workers
+
+    class StagingHost(WorkerHost):
+        def start_confined(
+            self,
+            job: str,
+            content: bytes,
+            deadline: float,
+            profile: str,
+            worker: str,
+            inputs: list[dict[str, str]] | None = None,
+        ) -> None:
+            super().start_confined(job, content, deadline, profile, worker)
+            self.starts[-1]["inputs"] = inputs
+
+    host = StagingHost()
+    host.outcome = finished({"output": {"text": "done", "success": True, "turns": 1}})
+    session = ConfinedAgentSession(Workers(host), "session", "agent", "m")
+    saved = archive({"INDEX.md": b"notes"})
+    space = HarnessWorkspace(repositories=("app",), upload_url="http://127.0.0.1:1/objects")
+    asyncio.run(session.run(harness_request(workspace=space, memory=saved)))
+    (started,) = host.starts
+    assert "memory" not in started["payload"]["request"]
+    digest = hashlib.sha256(saved).hexdigest()
+    assert started["payload"]["inputs"] == {
+        "/memory": {"file": "0", "sha256": digest, "bytes": len(saved)}
+    }
+    assert started["inputs"] == [{"sha256": digest, "data": base64.b64encode(saved).decode()}]

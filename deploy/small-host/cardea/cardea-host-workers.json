@@ -6,6 +6,7 @@
       "tasks": 256,
       "wall_seconds": 1800,
       "scratch_mb": 256,
+      "input_kb": 2048,
       "output_kb": 64,
       "network": {
         "policy": "model_api_only",

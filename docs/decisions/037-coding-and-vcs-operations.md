@@ -627,3 +627,12 @@ A dry run of the dev team showed the principal engineer could not review: `vcs.r
   - The workspace ends with the attempt. Work not yet uploaded or pushed is lost, and the next run starts from the branch.
   - Every test goes through `env.try`, with its start-up cost and the try profile's concurrency.
 - **Tests.** The endpoint's upload: auth, size limit, namespace and lease. Admission refuses a workspace repository outside the run's grants. The harness enables built-in tools only with a workspace. The session worker's clone and `cardea-change`. `env.try` with a `change` checks out a commit absent from the source. The team kit renders the workspace for the pools that ask for it.
+
+### Amendment (2026-11-24, owner): a member's memory
+
+- **Decision.** A member with a workspace keeps notes of its past work in `./memory/`, up to 1 MiB packed. It is a folder of files it organises itself. `memory/INDEX.md`, at most 8 KB, goes into every prompt, and the rest is read on demand. `cardea-memory save` uploads the folder as a gzipped tar to the run's loopback endpoint (`POST /memory`). The kernel checks it (plain relative files only, at most 512 entries and 4 MiB unpacked) and stores it as the next version of one object per member, `memory.<agent_id>`, in the run's namespace, under the attempt's lease. The next run with a workspace gets the newest version as a staged input file, unpacked into `./memory/` before the session starts.
+- **Why the kernel holds it.** A member works on untrusted repository and pull-request content. Notes that persist are versioned with their producer, so the owner can read and roll back a lesson planted by such content. A writable host folder would hide that. The session is told the memory is its own notes, not instructions.
+- **Limits.**
+  - There is no viewer yet: reading or rolling back a version goes through the object store. A console and CLI view is follow-up work.
+  - Memory is per member, not shared across the pool.
+  - A run that ends without `cardea-memory save` keeps nothing new.

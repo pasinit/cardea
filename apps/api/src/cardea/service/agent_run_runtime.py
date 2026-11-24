@@ -46,6 +46,7 @@ from cardea.service import (
     context_sources,
     invocation,
     mailbox,
+    memory,
     spend,
 )
 from cardea.service.approvals import ApprovalRequirement
@@ -817,7 +818,15 @@ class AgentRunRuntime:
         )
         tool_timeout = self._tool_timeout(request, lease, timeout)
         upload = self._upload(task_id, lease.lease_id, request) if request.workspace else None
-        with ToolEndpoint(tools, call, self.kernel.endpoint_host, upload=upload) as endpoint:
+        remember = self._remember(task_id, lease.lease_id, request) if request.workspace else None
+        recalled = (
+            memory.latest(self.kernel.database, request.namespace, request.agent_id)
+            if request.workspace
+            else None
+        )
+        with ToolEndpoint(
+            tools, call, self.kernel.endpoint_host, upload=upload, memory=remember
+        ) as endpoint:
             # Defence in depth: the token is never logged, and is scrubbed from harness output.
             self._current(task_id).redact(endpoint.token)
             session_request = HarnessRequest(
@@ -837,10 +846,12 @@ class AgentRunRuntime:
                     HarnessWorkspace(
                         repositories=request.workspace.repositories,
                         upload_url=endpoint.upload_url,
+                        memory_url=endpoint.memory_url,
                     )
                     if request.workspace is not None
                     else None
                 ),
+                memory=recalled,
             )
             self._current(task_id).event(
                 "harness session starting",
@@ -892,6 +903,30 @@ class AgentRunRuntime:
                 raise ValueError(error.code) from None
 
         return upload
+
+    def _remember(
+        self, task_id: str, lease_id: str, request: AgentRunRequest
+    ) -> Callable[[bytes], Awaitable[dict[str, Any]]]:
+        """The member's `cardea-memory save`: a new version of its own memory, under the
+        attempt's lease. Refusals come back to the session as `ValueError`."""
+
+        async def save(content: bytes) -> dict[str, Any]:
+            try:
+                return await asyncio.to_thread(
+                    memory.save,
+                    self.kernel.database,
+                    request.namespace,
+                    request.agent_id,
+                    task_id,
+                    lease_id,
+                    content,
+                )
+            except memory.MemoryRefused as refused:
+                raise ValueError(str(refused)) from None
+            except StoreError as error:
+                raise ValueError(error.code) from None
+
+        return save
 
     def _tool_timeout(
         self, request: AgentRunRequest, lease: DispatchLease, session_timeout: float
