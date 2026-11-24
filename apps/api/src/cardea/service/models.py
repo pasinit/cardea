@@ -2,6 +2,7 @@
 
 import json
 import re
+import threading
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -147,8 +148,24 @@ RIGHTS: tuple[Right, ...] = (
 DISABLED_REQUEST_PREFIX = "disabled."
 
 
-def now() -> datetime:
+_clock_lock = threading.Lock()
+_latest = datetime.min.replace(tzinfo=UTC)
+
+
+def _wall_clock() -> datetime:
     return datetime.now(UTC)
+
+
+def now() -> datetime:
+    """The wall clock, never earlier than any time this process already read.
+
+    A task is stamped with the time of its last write and a worker must not predate it, so
+    a clock that steps backwards must not make a live worker look stale.
+    """
+    global _latest
+    with _clock_lock:
+        _latest = max(_latest, _wall_clock())
+        return _latest
 
 
 class Record(BaseModel):

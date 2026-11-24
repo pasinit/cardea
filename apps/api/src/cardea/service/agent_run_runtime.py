@@ -288,26 +288,11 @@ class AgentRunRuntime:
                         return state
                     continue
                 return started
-            request, lease, attempt = started
-            with self._observe(task_id, request, lease, attempt) as activity:
-                self.kernel.fault("agent_run.attempt_started")
-                # Requests whose outcome this attempt's prompt reports (ADR-036); one set
-                # per attempt, never shared between runs on this runtime.
-                reported: set[str] = set()
-                result = self._attempt(task_id, request, lease, attempt, reported)
-                self.kernel.fault("agent_run.before_finish")
-                outcome = self._finish(task_id, request, lease, attempt, result, reported)
-                activity.event(
-                    "attempt finished",
-                    logging.INFO
-                    if outcome in {"succeeded", "retry", "waiting"}
-                    else logging.WARNING,
-                    outcome=outcome,
-                    reason=_reason(result) if result.is_error else None,
-                    code=self._failure_code(task_id) if outcome == "failed" else None,
-                    duration_s=round(activity.clock() - activity.started, 3),
-                    **activity.summary(),
-                )
+            try:
+                outcome = self._run_attempt(task_id, *started)
+            except BaseException:
+                self._abandon(task_id)
+                raise
             if outcome == "retry":
                 continue
             if outcome == "uncertain":
@@ -316,6 +301,54 @@ class AgentRunRuntime:
                     return state
                 continue
             return outcome
+
+    def _run_attempt(
+        self, task_id: str, request: AgentRunRequest, lease: DispatchLease, attempt: int
+    ) -> str:
+        with self._observe(task_id, request, lease, attempt) as activity:
+            self.kernel.fault("agent_run.attempt_started")
+            # Requests whose outcome this attempt's prompt reports (ADR-036); one set
+            # per attempt, never shared between runs on this runtime.
+            reported: set[str] = set()
+            result = self._attempt(task_id, request, lease, attempt, reported)
+            self.kernel.fault("agent_run.before_finish")
+            outcome = self._finish(task_id, request, lease, attempt, result, reported)
+            activity.event(
+                "attempt finished",
+                logging.INFO if outcome in {"succeeded", "retry", "waiting"} else logging.WARNING,
+                outcome=outcome,
+                reason=_reason(result) if result.is_error else None,
+                code=self._failure_code(task_id) if outcome == "failed" else None,
+                duration_s=round(activity.clock() - activity.started, 3),
+                **activity.summary(),
+            )
+        return outcome
+
+    def _abandon(self, task_id: str) -> None:
+        """Fail a task whose attempt raised, so it never stays running behind its lease.
+
+        Never raises: it runs while another exception propagates, and recovery still fences
+        whatever this could not.
+        """
+        try:
+            with self.kernel.database.engine.begin() as conn, borrow(conn) as tx:
+                if tx.get_task(task_id).state is not TaskState.RUNNING:
+                    return
+                conn.exec_driver_sql(
+                    "UPDATE effect_scopes SET state='unknown' WHERE task_id=? AND state='running'",
+                    (task_id,),
+                )
+                state = tx.abandon_task(
+                    task_id,
+                    at=now(),
+                    failure=KernelFailure(
+                        code="attempt_abandoned", message="The attempt ended with an exception."
+                    ),
+                ).state.value
+                mailbox.settle(conn, tx, task_id, state, self.kernel.runtime_id, now())
+            log.error("abandoned a failed attempt", extra={"task_id": task_id})
+        except Exception:
+            log.exception("could not abandon a failed attempt", extra={"task_id": task_id})
 
     def _start_attempt(self, task_id: str) -> str | tuple[AgentRunRequest, DispatchLease, int]:
         with self.kernel.database.engine.begin() as conn, borrow(conn) as tx:
