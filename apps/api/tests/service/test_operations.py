@@ -382,7 +382,7 @@ def test_interrupted_intent_after_restart_is_fenced_not_replayed(
 ) -> None:
     task_id = submit(kernel)
 
-    class Crash(Exception):
+    class Crash(BaseException):
         pass
 
     def crash(stage: str) -> None:

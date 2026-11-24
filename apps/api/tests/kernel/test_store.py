@@ -15,6 +15,7 @@ from cardea.kernel.models import (
     Checkpoint,
     DispatchLease,
     EventWait,
+    KernelFailure,
     OperationRequest,
     OperationState,
     ResourceRef,
@@ -700,3 +701,55 @@ def test_pending_operations_prevent_task_completion_or_yield(
                     lease_id=lease.lease_id,
                 )
             assert error.value.code == "unresolved_operations"
+
+
+def test_abandon_fails_a_running_task_and_fences_its_operations(
+    tmp_path: Path,
+    task: Task,
+    lease: DispatchLease,
+    now: datetime,
+    operation_request: OperationRequest,
+) -> None:
+    directory = tmp_path / "state"
+    seed_running(directory, task, lease, now)
+    failure = KernelFailure(code="attempt_abandoned", message="The attempt died.")
+    with SQLiteKernelStore(directory) as store, store.transaction() as transaction:
+        transaction.admit_operation(
+            operation_request,
+            grant_ids=("grant-output",),
+            retry_class=RetryClass.IDEMPOTENT,
+            expected_task_revision=1,
+            lease_id=lease.lease_id,
+            at=now + timedelta(seconds=5),
+        )
+        transaction.change_operation(
+            task.task_id,
+            operation_request.operation_id,
+            OperationState.RUNNING,
+            expected_revision=0,
+            at=now + timedelta(seconds=5),
+            lease_id=lease.lease_id,
+        )
+    with SQLiteKernelStore(directory) as store, store.transaction() as transaction:
+        # An earlier clock reading is clamped to the task's and the receipt's last update.
+        abandoned = transaction.abandon_task(task.task_id, at=now, failure=failure)
+        assert abandoned.state is TaskState.FAILED
+        assert abandoned.lease is None
+        assert abandoned.failure == failure
+        assert abandoned.updated_at == now
+        receipt = transaction.get_operation(task.task_id, operation_request.operation_id)
+        assert receipt.state is OperationState.OUTCOME_UNKNOWN
+        assert receipt.updated_at == now + timedelta(seconds=5)
+        # Not running any more: abandoning again changes nothing.
+        again = transaction.abandon_task(task.task_id, at=now, failure=failure)
+        assert again == abandoned
+
+
+def test_abandon_leaves_a_task_that_is_not_running(
+    tmp_path: Path, task: Task, now: datetime
+) -> None:
+    directory = tmp_path / "state"
+    with SQLiteKernelStore(directory) as store, store.transaction() as transaction:
+        transaction.submit_task(task)
+        failure = KernelFailure(code="attempt_abandoned", message="The attempt died.")
+        assert transaction.abandon_task(task.task_id, at=now, failure=failure) == task

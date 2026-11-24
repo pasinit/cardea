@@ -317,7 +317,7 @@ def test_a_crashed_attempt_keeps_its_mail_for_the_retry(
     monkeypatch.setattr(agent_run_runtime, "attempt_lease_seconds", lambda request: 4.0)
     monkeypatch.setattr(agent_run_runtime, "LEASE_MARGIN", 1.0)
 
-    class Crash(Exception):
+    class Crash(BaseException):
         pass
 
     def crash(stage: str) -> None:

@@ -168,7 +168,7 @@ def test_mail_coalesced_into_a_started_run_gets_one_follow_up(
     monkeypatch.setattr(agent_run_runtime, "attempt_lease_seconds", lambda request: 4.0)
     monkeypatch.setattr(agent_run_runtime, "LEASE_MARGIN", 1.0)
 
-    class Crash(Exception):
+    class Crash(BaseException):
         pass
 
     def crash(stage: str) -> None:

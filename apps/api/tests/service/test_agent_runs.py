@@ -16,7 +16,7 @@ from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 from pydantic import JsonValue, ValidationError
 
-from cardea.kernel.models import OperationState, ResourceRef
+from cardea.kernel.models import OperationState, ResourceRef, TaskState
 from cardea.runtime.agent_session import ClaudeAgentSession, SessionRequest, SessionResult
 from cardea.service import agent_run_runtime
 from cardea.service import kernel as handlers
@@ -524,7 +524,7 @@ def test_crash_after_effect_resumes_without_resending(
     # retry passed only when it finished within one poll; give it the lease's 3 s.
     monkeypatch.setattr(agent_run_runtime, "LEASE_MARGIN", 1.0)
 
-    class Crash(Exception):
+    class Crash(BaseException):
         pass
 
     def crash(stage: str) -> None:
@@ -1288,3 +1288,43 @@ def test_a_cancel_during_a_context_call_is_seen(kernel: Kernel, session: FakeSes
     task_id = submit(kernel, context=[{"operation": "listings.search"}])
     assert AgentRunRuntime(kernel).execute(task_id) == "cancelled"
     assert seen == ["cancel_requested"]
+
+
+@pytest.mark.loopback
+def test_an_exception_in_an_attempt_fails_the_task(
+    kernel: Kernel, tools: Tools, session: FakeSession
+) -> None:
+    def dies(stage: str) -> None:
+        if stage == "agent_run.attempt_started":
+            raise RuntimeError
+
+    task_id = submit(kernel)
+    kernel.fault = dies
+    with pytest.raises(RuntimeError):
+        AgentRunRuntime(kernel).execute(task_id)
+    with kernel.database.engine.begin() as conn, borrow(conn) as tx:
+        task = tx.get_task(task_id)
+    assert task.state is TaskState.FAILED
+    assert task.lease is None
+    assert task.failure is not None and task.failure.code == "attempt_abandoned"
+
+
+@pytest.mark.loopback
+@pytest.mark.parametrize("error", [KeyboardInterrupt, SystemExit, asyncio.CancelledError])
+def test_a_base_exception_in_an_attempt_leaves_the_task_running(
+    kernel: Kernel, tools: Tools, session: FakeSession, error: type[BaseException]
+) -> None:
+    def dies(stage: str) -> None:
+        if stage == "agent_run.attempt_started":
+            raise error
+
+    task_id = submit(kernel)
+    kernel.fault = dies
+    with pytest.raises(error):
+        AgentRunRuntime(kernel).execute(task_id)
+    with kernel.database.engine.begin() as conn, borrow(conn) as tx:
+        task = tx.get_task(task_id)
+    # Process death: nothing settles the task, so lease recovery reconciles it later.
+    assert task.state is TaskState.RUNNING
+    assert task.lease is not None
+    assert task.failure is None

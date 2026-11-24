@@ -77,8 +77,10 @@ def store(
 ) -> dict[str, JsonValue]:
     """Store artifacts and the output in one transaction, fenced by the call's lease."""
     listed: list[JsonValue] = []
-    at = now()
     with database.engine.begin() as conn, borrow(conn) as tx:
+        # Read under the write lock: a write that lands first stamps the task, and a worker
+        # must not predate that, so a time taken before the lock can look like a regression.
+        at = now()
         state = conn.exec_driver_sql(
             "SELECT state FROM operations WHERE receipt_id=?", (context.receipt_id,)
         ).scalar()
