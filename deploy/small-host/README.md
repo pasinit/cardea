@@ -211,7 +211,7 @@ python3 /opt/cardea/packaging/fetch_opencode.py /opt/cardea/opencode
 
 10. Optional: throwaway test environments (`env.try`, [ADR-038](../../docs/decisions/038-throwaway-test-environments.md)), in the `try` profile. Reviewers and product-manager agents use it to run a commit's scenarios before accepting it.
    1. `cardea/cardea-host-workers.json` holds the `try` profile and the `env-try` worker.
-      - The profile allows only `pypi.org` and `files.pythonhosted.org`, through proxy port `127.0.10.7`. It has no credential and a concurrency of 1.
+      - The profile allows only `pypi.org`, `files.pythonhosted.org` and `github.com` (the repository host, for fetching a commit the mirror has not caught up with, without credentials), through proxy port `127.0.10.7`. It has no credential and a concurrency of 1.
       - It has 3 GiB of memory and 2 GiB of scratch, sized to run beside `coding` (4 GiB) on an 8 GB host. Scratch is a tmpfs charged to the unit's memory, so the helper refuses a profile whose `scratch_mb` exceeds its `memory_mb`.
       - The worker binds the registry, the repository mirrors and `/opt/cardea-try/toolchain` read-only.
    2. Add an `environment` catalog to each repository that offers `env.try` in `/opt/cardea-code/repositories.json`. The catalog holds the scenarios' fixed argv, time limits and artifact paths; see `cardea/repositories.json`.

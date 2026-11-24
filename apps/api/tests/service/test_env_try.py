@@ -734,6 +734,53 @@ def test_the_second_phase_is_pinned_into_the_run_key(
     assert record is not None and record["then"]["profile_sha256"] == "p-loopback"  # type: ignore[index,call-overload]
 
 
+def test_the_registry_git_url_is_passed_to_stage_without_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo: dict[str, Any]
+) -> None:
+    from datetime import timedelta
+
+    from cardea_env_ops import try_
+
+    from cardea.service.models import now
+    from cardea.service.operations import OperationContext
+
+    registry = registry_file(tmp_path, repo["source"])
+    document_ = json.loads(registry.read_text())
+    document_["repositories"]["app"].update(
+        owner="acme",
+        name="app",
+        api_url="https://api.github.com",
+        git_url="https://github.com/acme/app.git",
+    )
+    registry.write_text(json.dumps(document_))
+    monkeypatch.setenv("CARDEA_REPOSITORIES", str(registry))
+    seen: list[tuple[str, str | None]] = []
+
+    class Staged(Exception):
+        pass
+
+    def fake_stage(source: str, commit: str, scratch: Path, host_url: str | None = None) -> Path:
+        seen.append((source, host_url))
+        raise Staged
+
+    monkeypatch.setattr(try_, "stage", fake_stage)
+    context = OperationContext(
+        task_id="t",
+        namespace="n",
+        receipt_id="r",
+        deadline=now() + timedelta(minutes=5),
+        effect_key="r",
+        previous=None,
+    )
+    arguments: Any = {"repo": "app", "commit": repo["good"], "scenarios": ["try"]}
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    with pytest.raises(Staged):
+        try_.try_commit(arguments, context, scratch)
+    assert seen == [(str(repo["source"]), "https://github.com/acme/app.git")]
+    assert seen[0][1] is not None and "@" not in seen[0][1]
+
+
 def test_a_second_phase_that_does_not_match_the_first_is_refused(
     env_kernel: tuple[Kernel, EnvHost], repo: dict[str, Any], tmp_path: Path
 ) -> None:
