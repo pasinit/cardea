@@ -494,6 +494,16 @@
             "default": false,
             "title": "Wait For Event",
             "type": "boolean"
+          },
+          "workspace": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunWorkspace"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -6373,6 +6383,16 @@
             "minItems": 1,
             "title": "Operations",
             "type": "array"
+          },
+          "workspace": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunWorkspace"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -6484,6 +6504,16 @@
             "minItems": 1,
             "title": "Operations",
             "type": "array"
+          },
+          "workspace": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunWorkspace"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -6648,6 +6678,27 @@
           "calls_next"
         ],
         "title": "RunView",
+        "type": "object"
+      },
+      "RunWorkspace": {
+        "additionalProperties": false,
+        "description": "The run's own checkout (ADR-037 amendment 2026-11-24): the session gets these\nrepositories cloned from the host's read-only sources, built-in edit and shell tools in\nthem, and an upload route for handing a change bundle to operations. Each alias needs\nthe run's `repo:<alias>` grant.",
+        "properties": {
+          "repositories": {
+            "items": {
+              "pattern": "^[a-z][a-z0-9-]{0,63}$",
+              "type": "string"
+            },
+            "maxItems": 4,
+            "minItems": 1,
+            "title": "Repositories",
+            "type": "array"
+          }
+        },
+        "required": [
+          "repositories"
+        ],
+        "title": "RunWorkspace",
         "type": "object"
       },
       "SendMessage": {

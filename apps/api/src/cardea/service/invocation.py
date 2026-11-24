@@ -148,6 +148,10 @@ def _stage_inputs(
     staged: dict[str, bytes] = {}
     for pointer in descriptor.cardea.inputs or ():
         value = _argument(arguments, pointer)
+        if value is None:
+            # An optional input the caller left out (env.try's `change`); the operation's
+            # schema decides which inputs are required.
+            continue
         expected = value.get("sha256") if isinstance(value, dict) else None
         listed = value.get("parts") if isinstance(value, dict) and "parts" in value else [value]
         try:

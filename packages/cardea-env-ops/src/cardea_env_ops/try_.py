@@ -133,7 +133,13 @@ def environment(scratch: Path, catalog: repositories.Environment) -> dict[str, s
     return env
 
 
-def stage(source: str, commit: str, scratch: Path, host_url: str | None = None) -> Path:
+def stage(
+    source: str,
+    commit: str,
+    scratch: Path,
+    host_url: str | None = None,
+    bundle: bytes | None = None,
+) -> Path:
     """A checkout of exactly `commit`, cloned from the read-only source.
 
     The mirror is refreshed from outside the sandbox and can lag a fresh push. If the commit
@@ -149,6 +155,8 @@ def stage(source: str, commit: str, scratch: Path, host_url: str | None = None) 
     cloned = _git(scratch, env, "clone", "--quiet", "--no-checkout", source, str(checkout))
     if cloned.returncode:
         raise OperationRejected("the repository source could not be read", "env_source_unavailable")
+    if bundle is not None:
+        _unbundle(checkout, env, scratch, bundle)
     switched = _git(checkout, env, "checkout", "--quiet", "--detach", commit)
     if switched.returncode:
         # A clone takes only the mirror's branch heads; a PR or agent head may sit in
@@ -167,6 +175,23 @@ def stage(source: str, commit: str, scratch: Path, host_url: str | None = None) 
     if head != commit:
         raise OperationRejected("the checkout is not the named commit", "env_commit_unknown")
     return checkout
+
+
+def _unbundle(checkout: Path, env: dict[str, str], scratch: Path, bundle: bytes) -> None:
+    """Add a change's commits (a git bundle the caller staged, ADR-037 amendment
+    2026-11-24) to the clone, so a commit nobody pushed yet can be checked out. The bundle's
+    prerequisites must already be in the clone: it holds only the commits on top of them."""
+    path = scratch / "change.bundle"
+    path.write_bytes(bundle)
+    checked = _git(checkout, env, "bundle", "verify", "--quiet", str(path))
+    if checked.returncode:
+        raise OperationRejected(
+            "the change bundle does not apply to this repository (its base is missing)",
+            "env_change_invalid",
+        )
+    unbundled = _git(checkout, env, "bundle", "unbundle", str(path))
+    if unbundled.returncode:
+        raise OperationRejected("the change bundle could not be read", "env_change_invalid")
 
 
 def _run(argv: tuple[str, ...], cwd: Path, env: dict[str, str], timeout: float) -> dict[str, Any]:
@@ -321,7 +346,7 @@ def try_commit(
             )
         scratch = workspace  # the second phase inherits it, checkout and fetched dependencies
     env = environment(scratch, catalog)
-    checkout = stage(entry.source, commit, scratch, entry.git_url)
+    checkout = stage(entry.source, commit, scratch, entry.git_url, context.inputs.get("/change"))
     deadline = context.deadline.timestamp() - 5  # leave time to report
     dropped = {"artifacts": 0, "log_bytes": 0}
     kept: dict[str, bytes] = {}

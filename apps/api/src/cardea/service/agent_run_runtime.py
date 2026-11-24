@@ -10,7 +10,7 @@ import json
 import logging
 import threading
 import time
-from collections.abc import Callable, Iterator, Set
+from collections.abc import Awaitable, Callable, Iterator, Set
 from contextlib import ExitStack, contextmanager, suppress
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
@@ -34,12 +34,13 @@ from cardea.kernel.models import (
     TaskState,
     VerificationRecord,
 )
-from cardea.kernel.store import KernelTransaction
+from cardea.kernel.store import KernelTransaction, StoreError
 from cardea.runtime import activity as activities
 from cardea.runtime.activity import AttemptActivity, OutputLimits
-from cardea.runtime.harness import Harness, HarnessRequest, HarnessResult
+from cardea.runtime.harness import Harness, HarnessRequest, HarnessResult, HarnessWorkspace
 from cardea.service import (
     approval_requests,
+    artifacts,
     claims,
     confined,
     context_sources,
@@ -815,7 +816,8 @@ class AgentRunRuntime:
             (lease.expires_at - now()).total_seconds() - LEASE_MARGIN,
         )
         tool_timeout = self._tool_timeout(request, lease, timeout)
-        with ToolEndpoint(tools, call, self.kernel.endpoint_host) as endpoint:
+        upload = self._upload(task_id, lease.lease_id, request) if request.workspace else None
+        with ToolEndpoint(tools, call, self.kernel.endpoint_host, upload=upload) as endpoint:
             # Defence in depth: the token is never logged, and is scrubbed from harness output.
             self._current(task_id).redact(endpoint.token)
             session_request = HarnessRequest(
@@ -831,6 +833,14 @@ class AgentRunRuntime:
                 timeout_seconds=timeout,
                 model=model or None,
                 job_key=f"{task_id}:{attempt}",
+                workspace=(
+                    HarnessWorkspace(
+                        repositories=request.workspace.repositories,
+                        upload_url=endpoint.upload_url,
+                    )
+                    if request.workspace is not None
+                    else None
+                ),
             )
             self._current(task_id).event(
                 "harness session starting",
@@ -857,6 +867,31 @@ class AgentRunRuntime:
                 # The harness ran without ever connecting to its tools (ADR-033).
                 return HarnessResult.failed("harness_tools_unavailable", text=result.text)
             return result
+
+    def _upload(
+        self, task_id: str, lease_id: str, request: AgentRunRequest
+    ) -> Callable[[bytes], Awaitable[dict[str, Any]]]:
+        """The workspace's route for handing a change bundle to operations (ADR-037
+        amendment 2026-11-24): task-owned objects in the run's namespace, fenced by the
+        attempt's lease. Refusals come back to the session as `ValueError`."""
+
+        async def upload(content: bytes) -> dict[str, Any]:
+            try:
+                return await asyncio.to_thread(
+                    artifacts.store_upload,
+                    self.kernel.database,
+                    request.namespace,
+                    task_id,
+                    lease_id,
+                    content,
+                    request.agent_id,
+                )
+            except artifacts.ArtifactRefused as refused:
+                raise ValueError(refused.summary) from None
+            except StoreError as error:
+                raise ValueError(error.code) from None
+
+        return upload
 
     def _tool_timeout(
         self, request: AgentRunRequest, lease: DispatchLease, session_timeout: float

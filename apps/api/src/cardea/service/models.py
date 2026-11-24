@@ -131,6 +131,8 @@ RepoGrant = Annotated[str, Field(strict=True, pattern=r"^repo:[a-z][a-z0-9-]{0,6
 # registry at provisioning, admission and dispatch; harness grants against the installed
 # harnesses.
 Grant = Right | OperationName | HarnessGrant | RecordGrant | MailGrant | ApproveGrant | RepoGrant
+RepoAlias = Annotated[str, Field(strict=True, pattern=r"^[a-z][a-z0-9-]{0,63}$")]
+
 
 RIGHTS: tuple[Right, ...] = (
     "objects.read",
@@ -424,6 +426,15 @@ class InboundEvent(Record):
     data: JsonValue = None
 
 
+class RunWorkspace(Record):
+    """The run's own checkout (ADR-037 amendment 2026-11-24): the session gets these
+    repositories cloned from the host's read-only sources, built-in edit and shell tools in
+    them, and an upload route for handing a change bundle to operations. Each alias needs
+    the run's `repo:<alias>` grant."""
+
+    repositories: Annotated[tuple[RepoAlias, ...], Field(min_length=1, max_length=4)]
+
+
 class AgentRunRequest(TaskRequest):
     """One bounded agent session whose only tools are installed operations (ADR-027)."""
 
@@ -463,12 +474,15 @@ class AgentRunRequest(TaskRequest):
     approval_wait_seconds: Annotated[int, Field(strict=True, ge=0, le=MAX_APPROVAL_WAIT)] | None = (
         None
     )
+    # The run's own checkout and built-in tools (ADR-037 amendment 2026-11-24); unset keeps
+    # the session tool-less and the request's digest unchanged.
+    workspace: RunWorkspace | None = None
 
     @model_serializer(mode="wrap")
     def _omit_unset_approval_fields(self, handler: SerializerFunctionWrapHandler) -> Any:
         document = handler(self)
         if isinstance(document, dict):
-            for key in ("max_approval_waits", "approval_wait_seconds"):
+            for key in ("max_approval_waits", "approval_wait_seconds", "workspace"):
                 if document.get(key, 0) is None:
                     del document[key]
         return document
@@ -493,6 +507,10 @@ class AgentRunRequest(TaskRequest):
         context = {c.operation for c in self.context if c.operation not in RECORD_OPERATIONS}
         if not context <= set(self.grants):
             raise ValueError("Context operations must be granted")
+        if self.workspace is not None and not {
+            f"repo:{alias}" for alias in self.workspace.repositories
+        } <= set(self.grants):
+            raise ValueError("A workspace repository needs the run's repo:<alias> grant")
         return self
 
     def digest(self, principal: str) -> str:
@@ -1040,6 +1058,8 @@ class RunTemplate(Record):
     model: ModelID | None = None
     bounds: RunBounds = RunBounds()
     expect: Annotated[tuple[ExpectEntry, ...], Field(max_length=16)] = ()
+    # The members' own checkout and built-in tools (ADR-037 amendment 2026-11-24).
+    workspace: RunWorkspace | None = None
 
 
 class GroupSpend(Record):
