@@ -4,7 +4,7 @@ import asyncio
 import json
 import time
 from collections.abc import Awaitable, Callable, Iterator
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
@@ -18,7 +18,7 @@ from pydantic import JsonValue, ValidationError
 
 from cardea.kernel.models import OperationState, ResourceRef
 from cardea.runtime.agent_session import ClaudeAgentSession, SessionRequest, SessionResult
-from cardea.service import agent_run_runtime
+from cardea.service import agent_run_runtime, models
 from cardea.service import kernel as handlers
 from cardea.service.agent_run_runtime import AgentRunRuntime
 from cardea.service.app import create_app
@@ -524,7 +524,7 @@ def test_crash_after_effect_resumes_without_resending(
     # retry passed only when it finished within one poll; give it the lease's 3 s.
     monkeypatch.setattr(agent_run_runtime, "LEASE_MARGIN", 1.0)
 
-    class Crash(Exception):
+    class Crash(BaseException):
         pass
 
     def crash(stage: str) -> None:
@@ -544,6 +544,108 @@ def test_crash_after_effect_resumes_without_resending(
     kernel.fault = lambda stage: None
     assert AgentRunRuntime(kernel).execute(task_id) == "succeeded"
     assert len(tools.sent) == 1
+
+
+def task_state(kernel: Kernel, task_id: str) -> Any:
+    with kernel.database.engine.begin() as conn, borrow(conn) as tx:
+        return tx.get_task(task_id)
+
+
+@pytest.mark.parametrize("stage", ["context", "finish"])
+def test_attempt_that_raises_leaves_the_task_terminal(
+    kernel: Kernel, session: FakeSession, monkeypatch: pytest.MonkeyPatch, stage: str
+) -> None:
+    if stage == "context":
+
+        async def broken(*args: Any, **kwargs: Any) -> tuple[str, ...]:
+            raise RuntimeError("context source exploded")
+
+        monkeypatch.setattr(AgentRunRuntime, "_context", broken)
+    else:
+
+        def explode(at: str) -> None:
+            if at == "agent_run.before_finish":
+                raise RuntimeError("finish exploded")
+
+        kernel.fault = explode
+    session.scripts = [routine]
+    task_id = submit(kernel, max_attempts=1)
+    assert AgentRunRuntime(kernel).execute(task_id) == "failed"
+    task = task_state(kernel, task_id)
+    assert task.state.value == "failed"
+    assert cast(Any, task.failure).code == "session_failed"
+    assert "RuntimeError" in cast(Any, task.failure).message
+
+
+@pytest.mark.loopback
+def test_attempt_that_raises_is_retried(
+    kernel: Kernel, session: FakeSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    broken = [True]
+
+    def explode_once(at: str) -> None:
+        if at == "agent_run.attempt_started" and broken:
+            broken.pop()
+            raise RuntimeError("first attempt exploded")
+
+    kernel.fault = explode_once
+    session.scripts = [routine]
+    task_id = submit(kernel, max_attempts=2)
+    assert AgentRunRuntime(kernel).execute(task_id) == "succeeded"
+
+
+@pytest.mark.loopback
+def test_unsettleable_attempt_is_recovered(
+    kernel: Kernel, session: FakeSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(agent_run_runtime, "attempt_lease_seconds", lambda request: 2.0)
+    monkeypatch.setattr(agent_run_runtime, "LEASE_MARGIN", 0.5)
+
+    def explode(at: str) -> None:
+        if at == "agent_run.attempt_started":
+            raise RuntimeError("attempt exploded")
+
+    def unsettleable(*args: Any, **kwargs: Any) -> str:
+        raise RuntimeError("cannot settle")
+
+    kernel.fault = explode
+    monkeypatch.setattr(AgentRunRuntime, "_finish", unsettleable)
+    task_id = submit(kernel, max_attempts=1)
+    assert AgentRunRuntime(kernel).execute(task_id) == "failed"
+    assert task_state(kernel, task_id).state.value == "failed"
+
+
+def test_now_repeats_the_last_reading_for_small_backward_steps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base = datetime(2026, 11, 24, 12, 0, 0, tzinfo=UTC)
+    readings = [base, base - timedelta(seconds=2), base + timedelta(seconds=1)]
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz: Any = None) -> datetime:  # type: ignore[override]
+            return readings.pop(0)
+
+    monkeypatch.setattr(models, "datetime", Clock)
+    monkeypatch.setattr(models, "_last_now", None)
+    assert models.now() == base
+    assert models.now() == base
+    assert models.now() == base + timedelta(seconds=1)
+
+
+def test_now_passes_large_backward_steps_through(monkeypatch: pytest.MonkeyPatch) -> None:
+    base = datetime(2026, 11, 24, 12, 0, 0, tzinfo=UTC)
+    readings = [base, base - timedelta(seconds=30)]
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz: Any = None) -> datetime:  # type: ignore[override]
+            return readings.pop(0)
+
+    monkeypatch.setattr(models, "datetime", Clock)
+    monkeypatch.setattr(models, "_last_now", None)
+    assert models.now() == base
+    assert models.now() == base - timedelta(seconds=30)
 
 
 @pytest.mark.loopback

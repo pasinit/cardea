@@ -302,7 +302,11 @@ class KernelTransaction:
         if task.lease.lease_id != lease_id or now >= task.lease.expires_at:
             raise StoreError("stale_lease", "Worker lease is wrong or expired.")
         if now < task.updated_at:
-            raise ContractError(ContractErrorCode.TIME_REGRESSION, "Worker predates task state.")
+            raise ContractError(
+                ContractErrorCode.TIME_REGRESSION,
+                f"Worker predates task state: worker time {now.isoformat()}, "
+                f"task updated {task.updated_at.isoformat()}.",
+            )
 
     def _unresolved(self, task_id: str) -> bool:
         row = self._connection.execute(
