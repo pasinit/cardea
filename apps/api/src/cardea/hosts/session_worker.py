@@ -26,10 +26,12 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 
+from cardea.hosts.operation_worker import staged_inputs
 from cardea.runtime import activity as activities
 from cardea.runtime.agent_session import ClaudeAgentSession
 from cardea.runtime.harness import Harness, HarnessRequest, HarnessResult
 from cardea.runtime.opencode import OpenCodeHarness, Price
+from cardea.service.operations import OperationRejected
 
 MAX_INPUT = 262144
 # A failed session reports this much of the harness's own output (already scrubbed).
@@ -123,7 +125,14 @@ def run(document: dict[str, Any], kind: str, attempt: activities.AttemptActivity
         harness = KINDS[kind](document)
     except Refused as refused:
         return HarnessResult.failed(str(refused))
-    request = HarnessRequest.model_validate({**document["request"], "model": document.get("model")})
+    try:
+        # The member's memory archive, staged as an input file (never in the document).
+        memory = staged_inputs(document.get("inputs")).get("/memory")
+    except OperationRejected as refused:
+        return HarnessResult.failed(refused.code)
+    request = HarnessRequest.model_validate(
+        {**document["request"], "model": document.get("model"), "memory": memory}
+    )
     attempt.redact(credential(), request.mcp_token)
     try:
         return asyncio.run(harness.run(request))
