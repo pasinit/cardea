@@ -118,6 +118,8 @@ def compile_trigger(
         "attempt_timeout_seconds": bounds.timeout_seconds,
         "timeout_seconds": bounds.run_timeout_seconds,
     }
+    if run.workspace is not None:
+        template["workspace"] = run.workspace.model_dump(mode="json")
     source: dict[str, JsonValue]
     if trigger.schedule is not None:
         source = {

@@ -370,6 +370,48 @@ def test_a_head_outside_the_clone_refs_is_staged(
     assert unknown.value.code == "env_commit_unknown"
 
 
+def test_a_change_bundle_stages_a_commit_nobody_pushed(
+    tmp_path: Path, repo: dict[str, Any]
+) -> None:
+    # A workspace's commits, never pushed, arrive as a bundle on top of the source's main.
+    work = tmp_path / "workspace"
+    git(tmp_path, "clone", "--quiet", str(repo["source"]), str(work))
+    git(work, "config", "user.email", "a@example.com")
+    git(work, "config", "user.name", "a")
+    (work / "mode").write_text("unpushed\n")
+    git(work, "commit", "--quiet", "-am", "unpushed")
+    head = git(work, "rev-parse", "HEAD")
+    bundle = tmp_path / "change.bundle"
+    git(work, "bundle", "create", "--quiet", str(bundle), "origin/main..HEAD")
+    without = tmp_path / "scratch-none"
+    without.mkdir()
+    with pytest.raises(OperationRejected) as unknown:
+        stage(str(repo["source"]), head, without)
+    assert unknown.value.code == "env_commit_unknown"
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    checkout = stage(str(repo["source"]), head, scratch, bundle=bundle.read_bytes())
+    assert (checkout / "mode").read_text() == "unpushed\n"
+    # A bundle whose base the source lacks, or one that is not a bundle, is refused.
+    other = tmp_path / "other"
+    git(tmp_path, "init", "--quiet", "--initial-branch=main", str(other))
+    git(other, "config", "user.email", "a@example.com")
+    git(other, "config", "user.name", "a")
+    (other / "x").write_text("1\n")
+    git(other, "add", "x")
+    git(other, "commit", "--quiet", "-m", "base")
+    (other / "x").write_text("2\n")
+    git(other, "commit", "--quiet", "-am", "next")
+    foreign = tmp_path / "foreign.bundle"
+    git(other, "bundle", "create", "--quiet", str(foreign), "HEAD~1..HEAD")
+    for name, content in (("foreign", foreign.read_bytes()), ("junk", b"not a bundle")):
+        target = tmp_path / f"scratch-{name}"
+        target.mkdir()
+        with pytest.raises(OperationRejected) as refused:
+            stage(str(repo["source"]), head, target, bundle=content)
+        assert refused.value.code == "env_change_invalid"
+
+
 def test_a_push_the_mirror_lacks_is_fetched_from_the_host(
     tmp_path: Path, repo: dict[str, Any]
 ) -> None:
@@ -759,7 +801,13 @@ def test_the_registry_git_url_is_passed_to_stage_without_credentials(
     class Staged(Exception):
         pass
 
-    def fake_stage(source: str, commit: str, scratch: Path, host_url: str | None = None) -> Path:
+    def fake_stage(
+        source: str,
+        commit: str,
+        scratch: Path,
+        host_url: str | None = None,
+        bundle: bytes | None = None,
+    ) -> Path:
         seen.append((source, host_url))
         raise Staged
 

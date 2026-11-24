@@ -2033,3 +2033,28 @@ def test_ready_reports_the_kernels_readiness_and_refusals_as_one_document() -> N
         "reached": False,
         "error": "ConnectionError",
     }
+
+
+def test_workspace_roles_edit_in_their_own_checkout_instead_of_code_session() -> None:
+    # ADR-037 amendment 2026-11-24: host option `workspace_roles`.
+    from cardea.service.models import GroupSpec
+
+    plain = pools_of(example())
+    assert "workspace" not in plain["dev"]["run"]
+    document = {**example(), "workspace_roles": ["dev", "ux"]}
+    pools = pools_of(document)
+    repo = next(g for g in pools["dev"]["grants"] if g.startswith("repo:"))[5:]
+    for name in ("dev", "ux"):
+        run = pools[name]["run"]
+        assert run["workspace"] == {"repositories": [repo]}
+        assert "code.session" not in run["operations"]
+        assert "code.session" not in pools[name]["grants"]
+        assert {"env.try", "vcs.push_branch"} <= set(run["operations"])
+        assert "cardea-change" in run["instructions"]
+        assert run["bounds"]["max_turns"] == kit().WORKSPACE_MAX_TURNS
+    # The other roles are unchanged, and the kernel accepts the rendered group.
+    assert pools["pe"] == plain["pe"] and pools["tl"] == plain["tl"]
+    GroupSpec.model_validate(kit().group_document(document)["spec"])
+    module = kit()
+    with pytest.raises(module.HostError, match="workspace_roles"):
+        module.group_document({**example(), "workspace_roles": ["pe"]})

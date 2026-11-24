@@ -157,10 +157,13 @@
         "session"
       ],
       "read_only": [
-        "/opt/cardea"
+        "/opt/cardea",
+        "/opt/cardea-code/repositories.json",
+        "/opt/cardea-code/repos"
       ],
       "env": {
-        "CARDEA_CREDENTIAL_KIND": "oauth_token"
+        "CARDEA_CREDENTIAL_KIND": "oauth_token",
+        "CARDEA_REPOSITORIES": "/opt/cardea-code/repositories.json"
       }
     },
     "browser-open": {

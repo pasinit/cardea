@@ -253,6 +253,7 @@ used by the examples.
 | `deadline_exceeded` | Task deadline elapsed. | `cardea.kernel.store` |
 | `dependencies_mismatch` | dependencies is registries, but this worker's profile allows no package registry; dependencies is cache, but this worker's profile allows package registries ({…}); remove them from the profile and the proxy, or set dependencies to registries | `cardea_coding_ops.session` |
 | `effect_not_applied` | Destination shows no effect | `cardea.service.operation_runtime` |
+| `env_change_invalid` | the change bundle does not apply to this repository (its base is missing); the change bundle could not be read | `cardea_env_ops.try_` |
 | `env_commit_unknown` | the commit is not in the repository; the checkout is not the named commit | `cardea_env_ops.try_` |
 | `env_invalid` | the scenario environment may not set {…} | `cardea_env_ops.try_` |
 | `env_loopback_unavailable` | Scenarios {…} need loopback, whose second phase this host does not offer | `cardea_env_ops.try_` |

@@ -343,6 +343,44 @@ def merge_scenarios(host: dict[str, Any]) -> list[str]:
     return list((host.get("env_try") or {}).get("merge_scenarios", ["try"]))
 
 
+WORKSPACE_ROLES = ("dev", "ux")
+# A workspace session edits with built-in tools, so it needs many more model turns than a
+# session whose only tools are operations.
+WORKSPACE_MAX_TURNS = 150
+WORKSPACE_NOTE = (
+    " You have your own workspace (see the end of your system prompt) instead of a "
+    "separate coding session: wherever these instructions say coding session, edit and "
+    "commit in your workspace instead. Your loop for every change: edit; commit; run "
+    "`cardea-change` in the repository; call env.try with repo, commit (its head), change "
+    "and the scenarios you need; read every failing scenario's log tail and fix the code, "
+    "then repeat until it passes. Only then push with vcs.push_branch (change, head, "
+    "branch, record_id), open or update the pull request and continue as instructed. A "
+    "review asking for changes: check out your branch from origin, fix, and run the same "
+    "loop. Never push a head that has not passed."
+)
+
+
+def workspace_roles(host: dict[str, Any]) -> list[str]:
+    """Roles whose members get their own workspace (host option `workspace_roles`, ADR-037
+    amendment 2026-11-24): developers and the UX designer edit in a checkout and hand their
+    commits to env.try and vcs.push_branch, instead of calling code.session."""
+    roles = list(host.get("workspace_roles") or [])
+    unknown = [role for role in roles if role not in WORKSPACE_ROLES]
+    if unknown:
+        raise HostError(f"workspace_roles: only {', '.join(WORKSPACE_ROLES)} may have one")
+    return roles
+
+
+def with_workspace(pool: dict[str, Any], repo: str) -> None:
+    """Turn a pool's code.session into its own workspace, in place."""
+    run = pool["run"]
+    pool["grants"] = [grant for grant in pool["grants"] if grant != "code.session"]
+    run["operations"] = [op for op in run["operations"] if op != "code.session"]
+    run["workspace"] = {"repositories": [repo]}
+    run["bounds"]["max_turns"] = WORKSPACE_MAX_TURNS
+    run["instructions"] += WORKSPACE_NOTE
+
+
 def developer_instructions(
     group: str, scenarios: list[str] | None = None, merge_check: list[str] | None = None
 ) -> str:
@@ -1234,6 +1272,9 @@ def group_document(host: dict[str, Any]) -> dict[str, Any]:
             "spend": spend("ux"),
         },
     ]
+    for pool in pools:
+        if pool["name"] in workspace_roles(host):
+            with_workspace(pool, repo)
     team = {k: v for k, v in budgets["team"].items() if k in ("runs", "usd")}
     return {
         "apiVersion": "cardea/v1alpha1",
