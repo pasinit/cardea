@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
+from threading import Lock
 from typing import Annotated, Any, Literal, Self
 from zoneinfo import ZoneInfo
 
@@ -147,8 +148,24 @@ RIGHTS: tuple[Right, ...] = (
 DISABLED_REQUEST_PREFIX = "disabled."
 
 
-def now() -> datetime:
+_clock_lock = Lock()
+_latest = datetime.min.replace(tzinfo=UTC)
+
+
+def _wall_clock() -> datetime:
     return datetime.now(UTC)
+
+
+def now() -> datetime:
+    """The wall clock, never behind a time this process already handed out.
+
+    Task records reject a worker that predates their last update, so a clock step backwards
+    must not reach them.
+    """
+    global _latest
+    with _clock_lock:
+        _latest = max(_latest, _wall_clock())
+        return _latest
 
 
 class Record(BaseModel):

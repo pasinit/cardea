@@ -15,6 +15,7 @@ from cardea.kernel.models import (
     Checkpoint,
     DispatchLease,
     EventWait,
+    KernelFailure,
     OperationRequest,
     OperationState,
     ResourceRef,
@@ -700,3 +701,43 @@ def test_pending_operations_prevent_task_completion_or_yield(
                     lease_id=lease.lease_id,
                 )
             assert error.value.code == "unresolved_operations"
+
+
+def test_abandon_fails_a_running_task_and_fences_its_operations(
+    tmp_path: Path,
+    task: Task,
+    lease: DispatchLease,
+    now: datetime,
+    operation_request: OperationRequest,
+) -> None:
+    directory = tmp_path / "state"
+    seed_running(directory, task, lease, now)
+    failure = KernelFailure(code="attempt_abandoned", message="The attempt ended with an error.")
+    with SQLiteKernelStore(directory) as store, store.transaction() as transaction:
+        transaction.admit_operation(
+            operation_request,
+            grant_ids=("grant-output",),
+            retry_class=RetryClass.IDEMPOTENT,
+            expected_task_revision=1,
+            lease_id=lease.lease_id,
+            at=now,
+        )
+        transaction.change_operation(
+            task.task_id,
+            operation_request.operation_id,
+            OperationState.RUNNING,
+            expected_revision=0,
+            at=now,
+            lease_id=lease.lease_id,
+        )
+        # The lease is still live, and the caller's clock is behind the task's last update.
+        abandoned = transaction.abandon_task(
+            task.task_id, at=now - timedelta(seconds=30), failure=failure
+        )
+        assert abandoned.state is TaskState.FAILED and abandoned.lease is None
+        assert abandoned.failure == failure
+        assert abandoned.updated_at >= now
+        receipt = transaction.get_operation(task.task_id, operation_request.operation_id)
+        assert receipt.state is OperationState.OUTCOME_UNKNOWN
+        # A task that is no longer running is left as it is.
+        assert transaction.abandon_task(task.task_id, at=now, failure=failure) == abandoned

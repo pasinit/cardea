@@ -16,7 +16,7 @@ from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 from pydantic import JsonValue, ValidationError
 
-from cardea.kernel.models import OperationState, ResourceRef
+from cardea.kernel.models import OperationState, ResourceRef, TaskState
 from cardea.runtime.agent_session import ClaudeAgentSession, SessionRequest, SessionResult
 from cardea.service import agent_run_runtime
 from cardea.service import kernel as handlers
@@ -515,6 +515,29 @@ def test_reconciler_sees_the_original_call_context(
     assert reconciling.slot_time == "2026-10-20T08:30:00+01:00"
 
 
+@pytest.mark.parametrize(
+    "error",
+    [RuntimeError("boom"), KeyboardInterrupt(), SystemExit(1), asyncio.CancelledError()],
+    ids=["exception", "keyboard-interrupt", "system-exit", "cancelled"],
+)
+def test_an_error_in_an_attempt_fails_the_task_instead_of_leaving_it_running(
+    kernel: Kernel, error: BaseException
+) -> None:
+    def crash(stage: str) -> None:
+        if stage == "agent_run.attempt_started":
+            raise error
+
+    task_id = submit(kernel)
+    kernel.fault = crash
+    with pytest.raises(type(error)):
+        AgentRunRuntime(kernel).execute(task_id)
+    kernel.fault = lambda stage: None
+    with kernel.database.engine.begin() as conn, borrow(conn) as tx:
+        task = tx.get_task(task_id)
+    assert task.state is TaskState.FAILED and task.lease is None
+    assert cast(Any, task.failure).code == "attempt_abandoned"
+
+
 @pytest.mark.loopback
 def test_crash_after_effect_resumes_without_resending(
     kernel: Kernel, tools: Tools, session: FakeSession, monkeypatch: pytest.MonkeyPatch
@@ -523,6 +546,8 @@ def test_crash_after_effect_resumes_without_resending(
     # With the default 30 s margin a 4 s lease leaves the session no time at all, so the
     # retry passed only when it finished within one poll; give it the lease's 3 s.
     monkeypatch.setattr(agent_run_runtime, "LEASE_MARGIN", 1.0)
+    # The crash simulated here is a lost process, which cannot abandon its own task.
+    monkeypatch.setattr(AgentRunRuntime, "_abandon", lambda self, task_id: None)
 
     class Crash(Exception):
         pass

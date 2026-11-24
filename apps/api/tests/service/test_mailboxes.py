@@ -316,6 +316,8 @@ def test_a_crashed_attempt_keeps_its_mail_for_the_retry(
 ) -> None:
     monkeypatch.setattr(agent_run_runtime, "attempt_lease_seconds", lambda request: 4.0)
     monkeypatch.setattr(agent_run_runtime, "LEASE_MARGIN", 1.0)
+    # The crash simulated here is a lost process, which cannot abandon its own task.
+    monkeypatch.setattr(AgentRunRuntime, "_abandon", lambda self, task_id: None)
 
     class Crash(Exception):
         pass

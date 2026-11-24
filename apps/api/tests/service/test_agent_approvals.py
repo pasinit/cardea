@@ -425,6 +425,8 @@ def test_lease_loss_after_proposing_parks_without_a_session(
 ) -> None:
     monkeypatch.setattr(agent_run_runtime, "attempt_lease_seconds", lambda request: 3.0)
     monkeypatch.setattr(agent_run_runtime, "LEASE_MARGIN", 1.0)
+    # The crash simulated here is a lost process, which cannot abandon its own task.
+    monkeypatch.setattr(AgentRunRuntime, "_abandon", lambda self, task_id: None)
     setup(kernel)
 
     def dies(stage: str) -> None:

@@ -433,6 +433,30 @@ class KernelTransaction:
         return self._save_task(task, updated, "task.woken")
 
     @_mutation
+    def abandon_task(self, task_id: str, *, at: datetime, failure: KernelFailure) -> Task:
+        """Fail a running task whose worker died in-process, without waiting for its lease.
+
+        Fences in-flight operations as recovery does, then fails the task. A clock behind the
+        task's last update is tolerated: the record never moves backwards.
+        """
+        task = self.get_task(task_id)
+        if task.state is not TaskState.RUNNING:
+            return task
+        now = max(_timestamp.validate_python(at), task.updated_at)
+        self._fence(task_id, now)
+        updated = Task.model_validate(
+            task.model_dump()
+            | {
+                "state": TaskState.FAILED,
+                "lease": None,
+                "revision": task.revision + 1,
+                "updated_at": now,
+                "failure": failure,
+            }
+        )
+        return self._save_task(task, updated, "task.abandoned")
+
+    @_mutation
     def recover_task(self, task_id: str, *, expected_revision: int, at: datetime) -> Task:
         """Fence an expired worker; never dispatch or assume an external effect succeeded."""
         task = self.get_task(task_id)
@@ -440,33 +464,7 @@ class KernelTransaction:
         _expect_revision(task.revision, expected_revision)
         if task.lease is None or now < task.lease.expires_at:
             raise StoreError("lease_not_expired", "Recovery requires an expired running lease.")
-        rows = self._connection.execute(
-            "SELECT snapshot FROM operations WHERE task_id = ? "
-            "AND state IN ('accepted', 'running')",
-            (task_id,),
-        ).fetchall()
-        for row in rows:
-            receipt = OperationReceipt.model_validate_json(row["snapshot"])
-            running = receipt.state is OperationState.RUNNING
-            # A read-only operation has no external effect by declaration, so an interrupted
-            # one failed rather than leaving an effect to reconcile.
-            target = (
-                OperationState.CANCELLED
-                if not running
-                else OperationState.FAILED
-                if receipt.retry_class is RetryClass.READ_ONLY
-                else OperationState.OUTCOME_UNKNOWN
-            )
-            updated = transition_operation(
-                receipt,
-                target,
-                expected_revision=receipt.revision,
-                at=now,
-                failure=KernelFailure(code="worker_lost", message="Worker lease expired.")
-                if running
-                else None,
-            )
-            self._save_operation(receipt, updated)
+        self._fence(task_id, now)
         reason: KernelFailure | None = None
         if self._unresolved(task_id):
             reason = KernelFailure(
@@ -498,6 +496,36 @@ class KernelTransaction:
             }
         )
         return self._save_task(task, updated_task, "task.recovered")
+
+    def _fence(self, task_id: str, now: datetime) -> None:
+        """Settle every in-flight operation of a task whose worker is gone."""
+        rows = self._connection.execute(
+            "SELECT snapshot FROM operations WHERE task_id = ? "
+            "AND state IN ('accepted', 'running')",
+            (task_id,),
+        ).fetchall()
+        for row in rows:
+            receipt = OperationReceipt.model_validate_json(row["snapshot"])
+            running = receipt.state is OperationState.RUNNING
+            # A read-only operation has no external effect by declaration, so an interrupted
+            # one failed rather than leaving an effect to reconcile.
+            target = (
+                OperationState.CANCELLED
+                if not running
+                else OperationState.FAILED
+                if receipt.retry_class is RetryClass.READ_ONLY
+                else OperationState.OUTCOME_UNKNOWN
+            )
+            updated = transition_operation(
+                receipt,
+                target,
+                expected_revision=receipt.revision,
+                at=max(now, receipt.updated_at),
+                failure=KernelFailure(code="worker_lost", message="Worker lease expired.")
+                if running
+                else None,
+            )
+            self._save_operation(receipt, updated)
 
     def get_operation(self, task_id: str, operation_id: str) -> OperationReceipt:
         self._check()

@@ -167,6 +167,8 @@ def test_mail_coalesced_into_a_started_run_gets_one_follow_up(
 ) -> None:
     monkeypatch.setattr(agent_run_runtime, "attempt_lease_seconds", lambda request: 4.0)
     monkeypatch.setattr(agent_run_runtime, "LEASE_MARGIN", 1.0)
+    # The crash simulated here is a lost process, which cannot abandon its own task.
+    monkeypatch.setattr(AgentRunRuntime, "_abandon", lambda self, task_id: None)
 
     class Crash(Exception):
         pass
