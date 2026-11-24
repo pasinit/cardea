@@ -40,6 +40,7 @@ import re
 import sys
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -94,9 +95,10 @@ class TeamsBackend:
     def one(self, name: str) -> dict[str, Any]:
         try:
             view = self.sources[name]()
-            return {"name": name, "state": base.team_state(view), "view": view}
+            controls = name in self.hosts
+            return {"name": name, "state": base.team_state(view), "view": view, "controls": controls}
         except Exception as error:  # an unreachable team must not hide the others
-            return {"name": name, "error": error_code(error)}
+            return {"name": name, "error": error_code(error), "controls": name in self.hosts}
 
     def overview(self) -> dict[str, Any]:
         with ThreadPoolExecutor(max_workers=max(1, len(self.sources))) as pool:
@@ -111,6 +113,64 @@ class TeamsBackend:
             raise DashboardError("unknown_team", 404)
         read = self.mails.get(team)
         return read(query) if read else {"total": 0, "items": [], "next": None}
+
+    def control(self, body: object) -> dict[str, Any]:
+        """Pause or resume the whole team: `{team, action, confirm: true[, reason]}`.
+
+        Nothing happens without `confirm: true` (the page asks first). Pausing needs the
+        kernel to accept the supervisor's live read of the team. A paused team's supervisor is
+        disabled, so for a resume the kernel's `principal_disabled` refusal is the expected
+        answer; any other refusal stops it. The kit's own `pause` and `resume` do the work and
+        every attempt is appended to the settings audit file.
+        """
+        if not isinstance(body, dict) or not {"team", "action", "confirm"} <= set(body):
+            raise DashboardError("invalid_control")
+        if set(body) - {"team", "action", "confirm", "reason"}:
+            raise DashboardError("invalid_control")
+        name, action, reason = body["team"], body["action"], body.get("reason")
+        if action not in ("pause", "resume") or body["confirm"] is not True:
+            raise DashboardError("invalid_control")
+        if reason is not None and not isinstance(reason, str):
+            raise DashboardError("invalid_control")
+        if not isinstance(name, str) or name not in self.sources:
+            raise DashboardError("unknown_team", 404)
+        if name not in self.hosts:
+            raise DashboardError("controls_unavailable", 404)
+        try:
+            self.sources[name]()  # the kernel decides, live, who may read the team
+            readable = True
+        except Exception as error:
+            if action != "resume" or error_code(error) != "principal_disabled":
+                raise
+            readable = False
+        if action == "pause" and not readable:
+            raise DashboardError("already_paused", 409)
+        if action == "resume" and readable:
+            raise DashboardError("not_paused", 409)
+        kit, _, applier = apply_modules()
+        host = kit.load_host(self.hosts[name])
+        audit = applier.audit_path(kit, host)
+
+        def record(outcome: str) -> None:
+            line = {"at": datetime.now(UTC).isoformat(timespec="seconds"), "control": action}
+            line |= {"by": "dashboard", "outcome": outcome}
+            with audit.open("a") as out:
+                out.write(json.dumps(line) + "\n")
+
+        try:
+            record("started")  # a change that cannot be recorded is not made
+        except OSError:
+            raise DashboardError("audit_unavailable", 500) from None
+        try:
+            if action == "pause":
+                kit.pause(host, reason)
+            else:
+                kit.resume(host)
+        except Exception:
+            record("failed")
+            raise DashboardError("control_failed", 500) from None
+        record("done")
+        return {"status": "paused" if action == "pause" else "resumed"}
 
     def _settings_team(self, name: object) -> Path:
         """The team's host file, once the kernel has confirmed the caller is its supervisor."""

@@ -30,6 +30,12 @@
   .message { background: #fff; border: 1px solid #d0d7de; border-radius: 6px; padding: .5rem .7rem; margin-bottom: .5rem; }
   .message .head { color: #57606a; font-size: .85rem; }
   .message pre { margin: .35rem 0 0; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
+  #controls button { font: inherit; min-height: 44px; padding: .35rem .9rem; border: 1px solid #d0d7de; border-radius: 6px; background: #fff; color: inherit; cursor: pointer; }
+  #controls button.danger { border-color: #b42318; color: #b42318; }
+  #controls button:focus-visible { outline: 3px solid #0969da; outline-offset: 2px; }
+  #controls .confirm { border: 1px solid #9a6700; border-radius: 6px; padding: .6rem .8rem; margin: .5rem 0; background: #fff8c5; }
+  #controls input { font: inherit; min-height: 44px; width: 100%; max-width: 30rem; padding: .3rem .5rem; margin: .3rem 0; }
+  #controls .actions { display: flex; flex-wrap: wrap; gap: .5rem; }
   @media (max-width: 600px) { body { margin: .6rem; font-size: 15px; } .filters > * { flex: 1 1 100%; } }
 </style>
 </head>
@@ -37,6 +43,7 @@
 <h1>Teams <span class="muted">(read-only)</span></h1>
 <div id="tabs" role="tablist">Loading…</div>
 <div id="team"></div>
+<div id="controls"></div>
 <h3>Mail</h3>
 <div id="mail"></div>
 <script src="/dashboard_teams.js"></script>
