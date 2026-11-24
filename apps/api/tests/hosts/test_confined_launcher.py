@@ -7,6 +7,7 @@ import json
 import os
 import platform
 import pwd
+import shutil
 import subprocess
 import sys
 import time
@@ -15,6 +16,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from cardea_env_ops import try_
 from test_m2_completion import helper as helper
 
 from cardea.hosts import launcher, operation_worker
@@ -1064,13 +1066,12 @@ def test_the_loopback_unit_has_a_private_namespace_and_no_route_out(
     phases: list[list[str]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Nothing in the unit can name an address outside its own namespace's loopback."""
+    layer = MountLayer(monkeypatch)  # no mount, chown or chmod: this runs without root
     first, second = "a" * 32, "b" * 32
     launcher.handle(start(first, "try", "fetch"))
     mounted = launcher.ROOT / first / "work"
-    monkeypatch.setattr(os.path, "ismount", lambda path: Path(path) == mounted)
-    monkeypatch.setattr(launcher, "run", _finished(phases))
     launcher.handle(start(second, "try-loopback", "serve", workspace_from=first))
-    command = phases[-1]
+    command = layer.commands[-1]
     props = properties(command)
     env = environment(command)
     # The namespace is the unit's own: `PrivateNetwork` stays, and with it only `lo`.
@@ -1101,6 +1102,69 @@ def _finished(commands: list[list[str]]) -> Any:
         return subprocess.CompletedProcess(args, 0, "SubState=exited\n", "")
 
     return run
+
+
+class MountLayer:
+    """The mount and ownership calls of both phases, recorded instead of performed."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.commands: list[list[str]] = []
+        self.mounted: list[Path] = []
+        self.owner: dict[Path, tuple[int, int]] = {}
+        self.mode: dict[Path, int] = {}
+        monkeypatch.setattr(launcher, "run", self.run)
+        monkeypatch.setattr(os.path, "ismount", lambda path: Path(path) in self.mounted)
+        monkeypatch.setattr(os, "chown", self.chown)
+        monkeypatch.setattr(os, "chmod", self.chmod)
+
+    def run(self, args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        self.commands.append(args)
+        if args[0] == "/usr/bin/mount":
+            self.mounted.append(Path(args[-1]))
+            self.owner[Path(args[-1])] = (994, 994)
+        return subprocess.CompletedProcess(args, 0, "SubState=exited\n", "")
+
+    def chown(self, path: Any, uid: int, gid: int, *, follow_symlinks: bool = True) -> None:
+        assert not follow_symlinks
+        self.owner[Path(path)] = (uid, gid)
+
+    def chmod(self, path: Any, mode: int, **kwargs: Any) -> None:
+        self.mode[Path(path)] = mode
+
+
+def test_the_second_phase_reuses_the_workspace_and_hands_it_to_the_worker(
+    phases: list[list[str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    layer = MountLayer(monkeypatch)
+    first, second = "a" * 32, "b" * 32
+    launcher.handle(start(first, "try", "fetch"))
+    work = launcher.ROOT / first / "work"
+    # A root-owned root, as a helper running as root leaves one.
+    layer.owner[work], layer.mode[work] = (0, 0o755), 0o755
+    layer.commands.clear()
+    launcher.handle(start(second, "try-loopback", "serve", workspace_from=first))
+    # One mount in all, from the first phase; the second binds the same directory.
+    assert not [c for c in layer.commands if c[0] == "/usr/bin/mount"]
+    assert layer.mounted == [work] and not (launcher.ROOT / second / "work").exists()
+    assert layer.owner[work] == (994, 994) and layer.mode[work] == 0o700
+    command = layer.commands[-1]
+    assert command[command.index(str(work)) - 1] == "--bind"
+    # Handing the workspace over grants the second phase no credential.
+    props = properties(command)
+    assert not [v for v in props.values() if "Credential" in v or "credentials" in v]
+    assert not [name for name in props if name == "LoadCredential"]
+    assert not any("credential" in arg.lower() for arg in command)
+    assert not [name for name in environment(command) if "CREDENTIAL" in name]
+
+
+def test_a_loopback_scenario_can_create_its_home_in_the_workspace(
+    tmp_path: Path,
+) -> None:
+    work = tmp_path / "work"
+    work.mkdir(mode=0o700)
+    catalog = cast(Any, SimpleNamespace(toolchain=None, env={}))
+    env = try_.environment(work, catalog)
+    assert (work / "home").is_dir() and env["HOME"] == str(work / "home")
 
 
 def test_the_first_phase_keeps_its_proxy_and_gets_a_capped_workspace(
@@ -1273,3 +1337,32 @@ def test_a_fresh_network_namespace_has_no_route_outside_loopback() -> None:
     assert "connected" not in seen["answers"].values()
     # ENETUNREACH or EHOSTUNREACH: no route, not a refusal from something that answered.
     assert set(seen["answers"].values()) <= {101, 113}, seen
+
+
+def test_a_bwrap_loopback_namespace_has_only_lo_and_no_route_out() -> None:
+    """End to end, as the loopback unit's sandbox is built: bubblewrap's own network
+    namespace. Needs root and bwrap; CI runs unprivileged and skips it. The owner runs it on
+    the host (see the PR description)."""
+    if sys.platform != "linux" or os.geteuid() != 0:
+        pytest.skip("needs root on a Linux host")
+    bwrap = shutil.which("bwrap")
+    if bwrap is None:
+        pytest.skip("bwrap is not installed")
+    probe = (
+        "import pathlib, socket\n"
+        "routes = pathlib.Path('/proc/net/route').read_text().splitlines()[1:]\n"
+        "table = pathlib.Path('/proc/net/dev').read_text().splitlines()[2:]\n"
+        "print(routes, sorted(line.split(':')[0].strip() for line in table))\n"
+        "try:\n"
+        "    socket.create_connection(('93.184.216.34', 80), 2).close()\n"
+        "    print('connected')\n"
+        "except OSError as error:\n"
+        "    print(error.errno)\n"
+    )
+    done = subprocess.run(
+        [bwrap, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--unshare-net",
+         "--disable-userns", sys.executable, "-c", probe],
+        capture_output=True, text=True, timeout=30, check=False,
+    )  # fmt: skip
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.split("\n")[:2] == ["[] ['lo']", "101"], done.stdout
