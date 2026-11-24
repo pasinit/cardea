@@ -124,6 +124,7 @@ def test_the_catalog_names_screenshots_as_a_loopback_scenario_with_its_artifacts
     assert workers["profiles"]["try"]["network"]["hosts"] == [
         "pypi.org",
         "files.pythonhosted.org",
+        "github.com",
     ]
     assert workers["profiles"]["try-loopback"]["network"] == {"policy": "loopback"}
 
