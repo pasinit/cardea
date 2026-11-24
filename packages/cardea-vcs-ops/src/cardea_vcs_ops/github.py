@@ -130,6 +130,22 @@ class GitHub:
         """The ruleset rules that apply to a branch name, whether or not it exists."""
         return await self._list(f"/rules/branches/{quote(branch, safe='/')}")
 
+    async def may_write(self, permission: str) -> str | None:
+        """Why the token cannot use `permission`, or None when it can (`/readyz`).
+
+        Sends a request the host rejects as invalid (a ref to no commit, a pull request
+        with no fields) after it has checked the token's permission, so nothing is created:
+        422 means allowed, 401/403/404 means not."""
+        if permission == "contents:write":
+            path, body = "/git/refs", {"ref": "refs/heads/cardea-readiness-probe", "sha": "0" * 40}
+        else:
+            path, body = "/pulls", {}
+        try:
+            await self._request("POST", path, json=body)
+        except HostRefused as refused:
+            return None if refused.status == 422 else str(refused)
+        return "the host accepted a request that should be invalid"
+
     # Pull requests
 
     async def create_pull(

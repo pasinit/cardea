@@ -229,7 +229,8 @@
         "-m",
         "cardea.hosts.operation_worker",
         "vcs.push_branch",
-        "vcs.find_branch"
+        "vcs.find_branch",
+        "vcs.check_token"
       ],
       "profiles": [
         "vcs"
@@ -296,7 +297,8 @@
         "-m",
         "cardea.hosts.operation_worker",
         "vcs.review",
-        "vcs.find_review"
+        "vcs.find_review",
+        "vcs.check_token"
       ],
       "profiles": [
         "vcs"

@@ -24,6 +24,7 @@ from cardea.service import (
     host_operations,
     mailbox,
     pages,
+    readiness,
     records,
     spend,
     team_status,
@@ -298,6 +299,18 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
             },
             status_code=500,
         )
+
+    probe = readiness.Readiness(kernel)
+
+    # Probes for a supervisor or load balancer: unauthenticated, not part of the v0.2 contract.
+    @app.get("/livez", include_in_schema=False)
+    def livez() -> dict[str, str]:
+        return {"status": "ok"}
+
+    @app.get("/readyz", include_in_schema=False)
+    def readyz() -> JSONResponse:
+        report = probe.report()
+        return JSONResponse(report, status_code=200 if report["status"] == "ok" else 503)
 
     @app.get("/v0.2/system", response_model=SystemView)
     def describe(proof: Credential) -> dict[str, Any]:

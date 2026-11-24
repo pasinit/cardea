@@ -468,6 +468,29 @@ class Vcs:
         }
         return Reconciliation(applied=True, output=output)
 
+    # vcs.check_token: only for the kernel's `/readyz`, served as a reconciler (read-only)
+
+    async def check_token(
+        self, arguments: dict[str, JsonValue], context: OperationContext
+    ) -> Reconciliation:
+        """Whether the caller's token is valid and has what its role needs: `contents:write`
+        for a pusher, `pull_requests:write` for a reviewer. `applied` says so; the token
+        is never in the answer."""
+        repository = self.repository(arguments["repository"])
+        permission: Permission = (
+            "contents:write" if arguments.get("role") == "pusher" else "pull_requests:write"
+        )
+        try:
+            credential = await self.credentials.credential(repository, (permission,), context)
+        except CredentialUnavailable as missing:
+            return Reconciliation(applied=False, output={"reason": str(missing)})
+        async with GitHub(repository, credential, self.transport) as host:
+            try:
+                reason = await host.may_write(permission)
+            except HostRefused as refused:
+                reason = str(refused)
+        return Reconciliation(applied=reason is None, output={"reason": reason or "ok"})
+
     # vcs.open_change
 
     @staticmethod
@@ -972,6 +995,7 @@ class Vcs:
             "vcs.read_branch": self.read_branch,
             "vcs.list_changes": self.list_changes,
             "vcs.check_repository": self.check_repository,
+            "vcs.check_token": self.check_token,
             "vcs.merge": self.merge,
             "vcs.find_merge": self.find_merge,
         }

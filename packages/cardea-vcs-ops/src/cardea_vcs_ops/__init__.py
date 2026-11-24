@@ -119,3 +119,7 @@ async def merge(arguments: dict[str, JsonValue], ctx: OperationContext) -> JsonV
 
 async def find_merge(arguments: dict[str, JsonValue], ctx: OperationContext) -> Reconciliation:
     return await _vcs().find_merge(arguments, ctx)
+
+
+async def check_token(arguments: dict[str, JsonValue], ctx: OperationContext) -> Reconciliation:
+    return await _vcs().check_token(arguments, ctx)
