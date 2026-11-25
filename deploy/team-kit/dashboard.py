@@ -350,8 +350,8 @@ def handler(
                 if url.path == "/api/settings" and hasattr(backend, "settings_current"):
                     current = cast(Any, backend).settings_current(mail_query(url.query))
                     return self.json(HTTPStatus.OK, current)
-                if self.path in static:
-                    name, kind = static[self.path]
+                if url.path in static:
+                    name, kind = static[url.path]
                     return self.reply(HTTPStatus.OK, (HERE / name).read_bytes(), kind)
                 if self.path == "/api/status":
                     return self.json(HTTPStatus.OK, backend.overview())
