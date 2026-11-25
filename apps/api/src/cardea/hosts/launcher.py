@@ -161,6 +161,12 @@ CREDENTIAL = "/run/cardea/credential"
 # job's staging, bound writable here, which a later `loopback` job may inherit.
 WORKSPACE = "/work"
 WORKSPACE_MB = (1, 8192)
+# A persistent tool cache (uv's packages, mypy's results) a profile may keep between jobs:
+# a host directory under CACHE_ROOT, owned by the worker account, bound writable at CACHE.
+# It only speeds jobs up; a job must not depend on what it holds.
+CACHE_ROOT = Path("/var/cache/cardea-host")
+CACHE = "/cache"
+CACHE_NAME = r"[a-z][a-z0-9-]{0,31}"
 # A profile's named credentials (ADR-037 amendment 2026-11-17): one file per name here.
 CREDENTIALS = "/run/cardea/credentials"
 CREDENTIAL_PATH = r"/etc/cardea/credentials/[a-z0-9-]{1,64}"
@@ -197,6 +203,7 @@ def validate_profile(entry: object) -> dict[str, Any]:
         "kernel_callback",
         "workspace_mb",
         "inherit_workspace",
+        "cache",
     }
     if not {*LIMITS, "network"} <= set(entry) <= {*LIMITS, "network", *optional}:
         raise ValueError("invalid_profile")
@@ -231,6 +238,9 @@ def validate_profile(entry: object) -> dict[str, Any]:
     ):
         raise ValueError("invalid_profile")
     if type(inherit) is not bool or (inherit and declared.get("policy") != "loopback"):
+        raise ValueError("invalid_profile")
+    cache = entry.get("cache")
+    if cache is not None and (not isinstance(cache, str) or not re.fullmatch(CACHE_NAME, cache)):
         raise ValueError("invalid_profile")
     concurrency = entry.get("concurrency", 1)
     if type(concurrency) is not int or not CONCURRENCY[0] <= concurrency <= CONCURRENCY[1]:
@@ -491,6 +501,13 @@ def confined_command(
     if workspace is not None:
         binds += ["--bind", str(workspace), WORKSPACE]
         environment["CARDEA_WORKSPACE"] = WORKSPACE
+    if profile.get("cache"):
+        binds += ["--bind", str(cache_dir(profile["cache"])), CACHE]
+        environment |= {
+            "XDG_CACHE_HOME": CACHE,
+            "UV_CACHE_DIR": f"{CACHE}/uv",
+            "MYPY_CACHE_DIR": f"{CACHE}/mypy",
+        }
     for path in worker.get("read_only", []):
         binds += ["--ro-bind", path, path]
     environment |= worker.get("env", {})
@@ -931,6 +948,21 @@ def host_mounted(path: Path, mountinfo: Path = HOST_MOUNTINFO) -> bool:
         if len(fields) > 4 and fields[4].encode().decode("unicode_escape") == target:
             return True
     return False
+
+
+def cache_dir(name: str) -> Path:
+    """The profile's persistent cache directory, created private to the worker account."""
+    account = pwd.getpwnam("cardea-worker")
+    CACHE_ROOT.mkdir(mode=0o711, exist_ok=True)
+    path = CACHE_ROOT / name
+    if path.is_symlink():
+        raise ValueError("unsafe_cache")
+    path.mkdir(mode=0o700, exist_ok=True)
+    info = path.stat()
+    if (info.st_uid, info.st_gid) != (account.pw_uid, account.pw_gid):
+        os.chown(path, account.pw_uid, account.pw_gid, follow_symlinks=False)
+    os.chmod(path, 0o700)
+    return path
 
 
 def make_workspace(directory: Path, megabytes: int) -> Path:
