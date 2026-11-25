@@ -157,7 +157,9 @@ def tool_images(
     read: Callable[[dict[str, Any]], bytes], output: object
 ) -> list[types.ImageContent]:
     """The output's PNG artifacts as image content, in listed order, within the limits.
-    An artifact that cannot be read is left out: the text listing still names it."""
+    Artifacts are stored under opaque names (env.try lists `a0`, `a1`, ...), so a PNG is
+    known by its signature, not its name. An artifact that cannot be read is left out:
+    the text listing still names it."""
     listed = output.get("artifacts") if isinstance(output, dict) else None
     if not isinstance(listed, list):
         return []
@@ -169,7 +171,6 @@ def tool_images(
         size = artifact.get("bytes") if isinstance(artifact, dict) else None
         if not (
             isinstance(artifact, dict)
-            and str(artifact.get("name", "")).lower().endswith(".png")
             and isinstance(size, int)
             and 0 < size <= MAX_IMAGE_BYTES
             and total + size <= MAX_IMAGES_BYTES
