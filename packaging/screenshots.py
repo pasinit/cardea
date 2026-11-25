@@ -49,6 +49,7 @@ MAX_PAGES = 7
 # A text report of what each page shows, for a reader who cannot open images: one artifact.
 REPORT = "report.txt"
 REPORT_BYTES = 64 * 1024
+LOG_REPORT = 4000
 REPORT_TEXT = 3000
 # The rendered DOM of each page, scripts and external references removed, as one HTML file.
 DOM = "dom.html"
@@ -346,7 +347,9 @@ def capture(binary: str, urls: list[str], out: Path) -> list[tuple[str, bool, st
     limit = min(MAX_BYTES, (MAX_TOTAL - REPORT_BYTES - DOM_BYTES) // (2 * max(len(urls), 1)))
     with tempfile.TemporaryDirectory(prefix="shots-") as scratch:
         for number, url in enumerate(urls, 1):
-            sys.stdout.write(f"p{number}: {url.split('/', 3)[-1] or '/'}\n")
+            name = url.split("/", 3)[-1]
+            shown = name if name.startswith("docs/") or name.endswith(".html") else f"/{name}"
+            sys.stdout.write(f"p{number}: {shown}\n")
             LINES.append(f"p{number}: /{url.split('/', 3)[-1]}")
             for kind, width, tall in WIDTHS:
                 label = f"p{number}-{kind}"
@@ -482,6 +485,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         server.shutdown()
         if running is not None:
             running[0].kill()
+    # The log reaches a reader even when an artifact does not: the layout report, bounded.
+    sys.stdout.write("layout report:\n" + "\n".join(LINES)[:LOG_REPORT] + "\n")
     (args.out / REPORT).write_text("\n".join(LINES)[:REPORT_BYTES] + "\n")
     (args.out / DOM).write_text("\n".join(DOMS)[:DOM_BYTES] + "\n")
     if not all(ok for _, ok, _ in results):
