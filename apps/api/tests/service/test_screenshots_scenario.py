@@ -367,8 +367,8 @@ def test_the_report_gives_a_reader_without_images_the_text_and_the_overflow() ->
     assert "elements past the right edge: DIV.card,TABLE" in text
     assert "| Team overview" in text and "| columns" in text
     assert "var a" not in text and "x{}" not in text
-    fine = "\n".join(module.summary('<html data-scroll-width="390" data-client-width="390" '
-                                  'data-wide=""><body>hi</body></html>', 390))
+    ok = '<html data-scroll-width="390" data-client-width="390" data-wide=""><body>hi</body></html>'
+    fine = "\n".join(module.summary(ok, 390))
     assert "no horizontal overflow" in fine and "past the right edge" not in fine
     unmeasured = "\n".join(module.summary("<html><body>hi</body></html>", 1280))
     assert "layout not measured" in unmeasured
