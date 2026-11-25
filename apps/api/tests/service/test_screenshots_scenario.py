@@ -111,10 +111,13 @@ def test_the_catalog_names_screenshots_as_a_loopback_scenario_with_its_artifacts
     assert scenario.network == "loopback" and scenario.fetch is None
     # Two per page, for as many pages as the runner takes, and no more than env.try keeps.
     module = runner()
-    assert scenario.artifacts == tuple(
-        f"screenshots/p{n}-{kind}.png"
-        for n in range(1, module.MAX_PAGES + 1)
-        for kind in ("mobile-390", "desktop-1280")
+    assert scenario.artifacts == (
+        *(
+            f"screenshots/p{n}-{kind}.png"
+            for n in range(1, module.MAX_PAGES + 1)
+            for kind in ("mobile-390", "desktop-1280")
+        ),
+        "screenshots/dom.html",
     )
     assert len(scenario.artifacts) <= 16
     makefile = (ROOT / "Makefile").read_text()
@@ -177,13 +180,13 @@ def test_screenshots_are_retaken_smaller_to_fit_the_artifact_limit(
         data = (out / name).read_bytes()
         assert len(data) <= module.MAX_BYTES
         assert b" 0.5 " in data or b" 0.35 " in data
-    # Eight such pages share the 1 MiB an env.try call keeps.
-    pages = {f"docs/mocks/p{n}.html": mock(size=600_000) for n in range(8)}
+    # Seven such pages share the 1 MiB an env.try call keeps.
+    pages = {f"docs/mocks/p{n}.html": mock(size=600_000) for n in range(7)}
     commit(repo, "many", pages)
     many = tmp_path / "many"
     assert module.main(["--root", str(repo), "--out", str(many)]) == 0
     sizes = [f.stat().st_size for f in many.iterdir()]
-    assert len(sizes) == 16 and sum(sizes) <= module.MAX_TOTAL
+    assert len(sizes) == 15 and sum(sizes) <= module.MAX_TOTAL
     # A page that cannot be made to fit fails, naming the limit.
     commit(repo, "huge", {"docs/mocks/huge.html": mock(size=50_000_000)})
     capsys.readouterr()
@@ -197,12 +200,12 @@ def test_more_pages_than_the_catalog_has_artifact_paths_for_fail_loudly(
     tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     module = runner()
-    commit(repo, "nine", {f"docs/mocks/m{n}.html": mock() for n in range(9)})
+    commit(repo, "eight", {f"docs/mocks/m{n}.html": mock() for n in range(8)})
     assert module.main(["--root", str(repo), "--out", str(tmp_path / "o")]) == 1
     out = capsys.readouterr().out
-    assert "not captured, over 8 pages: docs/mocks/m8.html" in out
+    assert "not captured, over 7 pages: docs/mocks/m7.html" in out
     assert out.endswith("screenshots: FAIL\n")
-    assert len(list((tmp_path / "o").iterdir())) == 16
+    assert len(list((tmp_path / "o").iterdir())) == 15
 
 
 @pytest.mark.loopback

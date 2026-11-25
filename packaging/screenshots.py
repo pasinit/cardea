@@ -9,8 +9,8 @@ Serves `--root` (default the current directory, the checkout) on an ephemeral po
 loopback interface. The pages are the HTML files HEAD adds under `docs/mocks/`, or just
 `--page` (a path under the root) when it is given. Each page gets two screenshots as tall as
 the page, `p<N>-mobile-390.png` and `p<N>-desktop-1280.png` (N from 1, in path order, at most
-`MAX_PAGES`) and `p<N>-dom.html` (the settled DOM as text), written to `--out` (default
-`screenshots`), the scenario's artifact paths; the
+`MAX_PAGES`) and one `dom.html` (every page's settled DOM as text, for reviewers who cannot
+open PNGs), written to `--out` (default `screenshots`), the scenario's artifact paths; the
 log names the page behind each N. `env.try` keeps at most 256 KiB per artifact and 1 MiB in
 all, so a screenshot over its share is retaken at a lower device pixel ratio, and a page that
 still does not fit fails. It needs only a loopback, so the catalog declares `network:
@@ -41,10 +41,12 @@ WIDTHS: tuple[tuple[str, int, int], ...] = (("mobile-390", 390, 844), ("desktop-
 BROWSERS = ("chromium", "chromium-browser", "google-chrome")
 MOCKS = "docs/mocks"
 # env.try keeps artifacts of at most 256 KiB each and 1 MiB in all, and a scenario's artifact
-# paths are fixed in the catalog: two per page, so at most 16 files, 8 pages.
+# paths are fixed in the catalog: two per page and one DOM file, so at most 16 files, 7 pages.
 MAX_BYTES = 256 * 1024
 MAX_TOTAL = 1024 * 1024
-MAX_PAGES = 8
+MAX_PAGES = 7
+# The share of the total a DOM text file may take, kept out of the screenshots' share.
+DOM_BYTES = 128 * 1024
 # Tried in turn until the screenshot fits its share of the limit.
 SCALES = (1.0, 0.75, 0.5, 0.35, 0.25)
 MAX_HEIGHT = 10000
@@ -251,16 +253,16 @@ def shoot(
     return f"{target.stat().st_size} bytes at scale {SCALES[-1]}, over its {limit} byte share"
 
 
-def dump_dom(binary: str, scratch: Path, url: str, target: Path) -> None:
-    """The settled page's DOM as a readable HTML artifact, for reviewers who cannot open PNGs."""
+def dump_dom(binary: str, scratch: Path, url: str) -> str:
+    """The settled page's DOM as text, for reviewers who cannot open PNGs."""
     shown, problem = run(command(binary, scratch / "dom", url, WIDTHS[0][1], WIDTHS[0][2]))
-    if not problem and shown:
-        target.write_text(shown[: MAX_BYTES // 2], encoding="utf-8")
+    return "" if problem else shown
 
 
 def capture(binary: str, urls: list[str], out: Path) -> list[tuple[str, bool, str]]:
     results: list[tuple[str, bool, str]] = []
-    limit = min(MAX_BYTES, MAX_TOTAL // (2 * max(len(urls), 1)))
+    limit = min(MAX_BYTES, (MAX_TOTAL - DOM_BYTES) // (2 * max(len(urls), 1)))
+    dumps: list[str] = []
     with tempfile.TemporaryDirectory(prefix="shots-") as scratch:
         for number, url in enumerate(urls, 1):
             sys.stdout.write(f"p{number}: {url.split('/', 3)[-1] or '/'}\n")
@@ -269,7 +271,11 @@ def capture(binary: str, urls: list[str], out: Path) -> list[tuple[str, bool, st
                 target = out / f"{label}.png"
                 problem = shoot(binary, Path(scratch), url, (label, width, tall), target, limit)
                 results.append((label, not problem, problem))
-            dump_dom(binary, Path(scratch), url, out / f"p{number}-dom.html")
+            dumps.append(f"<!-- p{number}: {url.split('/', 3)[-1] or '/'} -->\n")
+            dumps.append(dump_dom(binary, Path(scratch), url))
+    share = DOM_BYTES // max(len(urls), 1)
+    text = "\n".join(part[:share] for part in dumps)
+    (out / "dom.html").write_text(text, encoding="utf-8")
     return results
 
 
