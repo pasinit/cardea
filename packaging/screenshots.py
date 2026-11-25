@@ -33,6 +33,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.parse
 import urllib.request
 from collections.abc import Sequence
 from pathlib import Path
@@ -70,10 +71,17 @@ MEASURE = (
     b" ? '.' + e.className.trim().split(/\\s+/)[0] : '')).replace(/[^\\w#.-]/g, '');"
     b" d.setAttribute('data-scroll-width', d.scrollWidth); d.setAttribute('data-client-width', w);"
     b" d.setAttribute('data-wide', [...document.body.querySelectorAll('*')].filter((e) =>"
-    b" e.getBoundingClientRect().right > w + 1).slice(0, 8).map(id).join(','))}, 4000)</script>"
+    b" e.getBoundingClientRect().right > w + 1).slice(0, 8).map(id).join(','));"
+    b" d.setAttribute('data-outline', encodeURIComponent([...document.body.querySelectorAll('*')]"
+    b".filter((e) => !['SCRIPT', 'STYLE'].includes(e.tagName)).slice(0, 250).map((e) => {const r ="
+    b" e.getBoundingClientRect(), t = [...e.childNodes].filter((n) => n.nodeType === 3)"
+    b".map((n) => n.textContent.trim()).join(' ').slice(0, 40);"
+    b" return [e.tagName.toLowerCase(), t, Math.round(r.x + scrollX), Math.round(r.y + scrollY),"
+    b" Math.round(r.width), Math.round(r.height), r.right > w + 1 ? 'OVERFLOW' : ''].join(' | ')})"
+    b".join('\\n')))}, 4000)</script>"
 )
 HEIGHT = re.compile(r'data-page-height="(\d+)"')
-ATTRIBUTE = re.compile(r'data-(scroll-width|client-width|wide)="([^"]*)"')
+ATTRIBUTE = re.compile(r'data-(scroll-width|client-width|wide|outline)="([^"]*)"')
 # The report lines of the run, written to REPORT at the end.
 LINES: list[str] = []
 
@@ -114,6 +122,9 @@ def summary(dom: str, width: int) -> list[str]:
             out.append(f"  elements past the right edge: {seen['wide']}")
     else:
         out.append(f"  viewport {width}px (layout not measured: page not served by the runner)")
+    if seen.get("outline"):
+        out.append("  layout outline (tag | own text | x | y | width | height | overflow):")
+        out.extend(f"    {row}" for row in urllib.parse.unquote(seen["outline"]).split("\n"))
     out.append(f"  {len(text)} text blocks; first lines:")
     shown = 0
     for line in text:
