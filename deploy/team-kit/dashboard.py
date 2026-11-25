@@ -280,9 +280,8 @@ def handler(
         def do_POST(self) -> None:
             def post() -> None:
                 step = self.path.removeprefix("/api/settings/")
-                if step in ("preview", "apply") and hasattr(backend, "settings_change"):
-                    pass
-                elif self.path == "/api/control" and hasattr(backend, "control"):
+                settings = step in ("preview", "apply") and hasattr(backend, "settings_change")
+                if settings or (self.path == "/api/control" and hasattr(backend, "control")):
                     pass
                 elif self.path != "/api/message" or not writable:
                     return self.json(HTTPStatus.NOT_FOUND, {"code": "not_found"})
