@@ -165,7 +165,9 @@ WORKSPACE_MB = (1, 8192)
 # A persistent tool cache (uv's packages, mypy's results) a profile may keep between jobs:
 # a host directory under CACHE_ROOT, owned by the worker account, bound writable at CACHE.
 # It only speeds jobs up; a job must not depend on what it holds.
-CACHE_ROOT = Path("/var/cache/cardea-host")
+# Under the helper's own state directory: the only place it may write when it runs inside the
+# kernel service's namespace (ProtectSystem=strict leaves /var/cache read-only there).
+CACHE_ROOT = ROOT / "cache"
 CACHE = "/cache"
 CACHE_NAME = r"[a-z][a-z0-9-]{0,31}"
 # Packages of removed or older dependencies accumulate; past this a cache starts over empty,
@@ -855,7 +857,7 @@ def admit_start(job: str, request: dict[str, Any]) -> bytes:
         raise ValueError("input_too_large")
     if retired(job):
         raise ValueError("retired_job")
-    if sum(1 for p in ROOT.iterdir() if p.is_dir()) >= 256:
+    if sum(1 for p in ROOT.iterdir() if p.is_dir() and p != CACHE_ROOT) >= 256:
         raise ValueError("spool_capacity")
     return content
 
@@ -1044,7 +1046,7 @@ def admit_confined(
     staged = admit_inputs(request.get("inputs"), profile)
     if retired(job):
         raise ValueError("retired_job")
-    if sum(1 for p in ROOT.iterdir() if p.is_dir()) >= 256:
+    if sum(1 for p in ROOT.iterdir() if p.is_dir() and p != CACHE_ROOT) >= 256:
         raise ValueError("spool_capacity")
     return content, profile, worker, staged
 
