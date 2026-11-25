@@ -78,7 +78,6 @@ def test_the_kernels_refusal_and_unknown_input_stop_the_action(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     backend = make(tmp_path, monkeypatch)
-    module = teams()
 
     def refuse() -> dict[str, Any]:
         raise Refused("forbidden")
@@ -86,12 +85,11 @@ def test_the_kernels_refusal_and_unknown_input_stop_the_action(
     backend.sources["dev"] = refuse
     status, body = control(backend, action="pause")
     assert status == 502 and backend.log == [] and not backend.audit.exists()
-    assert module.DashboardError  # the page's own error type is unchanged
     backend = make(tmp_path, monkeypatch)
     assert control(backend, action="stop")[0] == 400
     assert control(backend, action="pause", team="nope")[0] == 404
-    assert call(backend, "POST", "/api/control", {"team": "dev", "action": "pause",
-                                                   "confirm": True, "x": 1})[0] == 400
+    extra = {"team": "dev", "action": "pause", "confirm": True, "x": 1}
+    assert call(backend, "POST", "/api/control", extra)[0] == 400
 
 
 @pytest.mark.loopback

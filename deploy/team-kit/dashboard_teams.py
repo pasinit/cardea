@@ -95,8 +95,8 @@ class TeamsBackend:
     def one(self, name: str) -> dict[str, Any]:
         try:
             view = self.sources[name]()
-            controls = name in self.hosts
-            return {"name": name, "state": base.team_state(view), "view": view, "controls": controls}
+            state = base.team_state(view)
+            return {"name": name, "state": state, "view": view, "controls": name in self.hosts}
         except Exception as error:  # an unreachable team must not hide the others
             return {"name": name, "error": error_code(error), "controls": name in self.hosts}
 
