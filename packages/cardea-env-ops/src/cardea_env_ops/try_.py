@@ -104,6 +104,10 @@ def _git(cwd: Path, env: dict[str, str], *args: str) -> subprocess.CompletedProc
     )
 
 
+# The profile's persistent tool cache, when the host gives it one (launcher `cache`).
+CACHES = ("XDG_CACHE_HOME", "UV_CACHE_DIR", "MYPY_CACHE_DIR")
+
+
 def environment(scratch: Path, catalog: repositories.Environment) -> dict[str, str]:
     """A scenario's whole environment, built from nothing."""
     home = scratch / "home"
@@ -123,7 +127,7 @@ def environment(scratch: Path, catalog: repositories.Environment) -> dict[str, s
         "CI": "1",
     }
     (scratch / "tmp").mkdir(exist_ok=True)
-    for name in PROXY:
+    for name in (*PROXY, *CACHES):
         if name in os.environ:
             env[name] = os.environ[name]
     for name, value in catalog.env.items():
