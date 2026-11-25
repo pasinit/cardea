@@ -156,7 +156,8 @@ def test_a_commit_that_adds_several_mocks_gets_both_widths_of_each_full_page(
     assert log.endswith("screenshots: PASS\n")
     assert "p1: docs/mocks/b/two.html" in log and "p2: docs/mocks/one.html" in log
     assert sorted(f.name for f in out.iterdir()) == [
-        "p1-desktop-1280.png", "p1-mobile-390.png", "p2-desktop-1280.png", "p2-mobile-390.png",
+        "dom.html", "p1-desktop-1280.png", "p1-mobile-390.png", "p2-desktop-1280.png",
+        "p2-mobile-390.png",
     ]  # fmt: skip
     # Each is as tall as its page, at its width.
     for name, size in (
