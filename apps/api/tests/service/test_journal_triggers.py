@@ -460,6 +460,8 @@ def test_the_waker_admits_mail_without_waiting_for_the_minute_tick(kernel: Kerne
     assert admitted(kernel) == []
     assert waker.step() is True
     (task_id,) = admitted(kernel)
+    # The admission's own events move the end once more; the pass after that finds it idle.
+    waker.step()
     assert waker.step() is False
     # The minute tick finds the event already decided: one admission per event id.
     tick(kernel)
