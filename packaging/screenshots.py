@@ -22,6 +22,7 @@ host fails to load rather than reaching for it. The last line is `screenshots: P
 
 import argparse
 import functools
+import html.parser
 import http.server
 import io
 import os
@@ -47,6 +48,8 @@ MAX_TOTAL = 1024 * 1024
 MAX_PAGES = 7
 # The share of the total a DOM text file may take, kept out of the screenshots' share.
 DOM_BYTES = 128 * 1024
+# How much of the pages' visible text goes into the log, which env.try keeps the tail of.
+LOG_TEXT = 6000
 # Tried in turn until the screenshot fits its share of the limit.
 SCALES = (1.0, 0.75, 0.5, 0.35, 0.25)
 MAX_HEIGHT = 10000
@@ -259,6 +262,32 @@ def dump_dom(binary: str, scratch: Path, url: str) -> str:
     return "" if problem else shown
 
 
+class _Text(html.parser.HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.parts: list[str] = []
+        self.skip = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in ("script", "style"):
+            self.skip += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in ("script", "style") and self.skip:
+            self.skip -= 1
+
+    def handle_data(self, data: str) -> None:
+        if not self.skip and data.strip():
+            self.parts.append(" ".join(data.split()))
+
+
+def visible_text(markup: str) -> str:
+    """The text a reader sees in `markup`, one run per line."""
+    parser = _Text()
+    parser.feed(markup)
+    return "\n".join(parser.parts)
+
+
 def capture(binary: str, urls: list[str], out: Path) -> list[tuple[str, bool, str]]:
     results: list[tuple[str, bool, str]] = []
     limit = min(MAX_BYTES, (MAX_TOTAL - DOM_BYTES) // (2 * max(len(urls), 1)))
@@ -276,6 +305,8 @@ def capture(binary: str, urls: list[str], out: Path) -> list[tuple[str, bool, st
     share = DOM_BYTES // max(len(urls), 1)
     text = "\n".join(part[:share] for part in dumps)
     (out / "dom.html").write_text(text, encoding="utf-8")
+    # The catalog may not list dom.html as an artifact: the log carries the visible text too.
+    sys.stdout.write(f"--- page text ---\n{visible_text(text)[:LOG_TEXT]}\n--- end ---\n")
     return results
 
 
