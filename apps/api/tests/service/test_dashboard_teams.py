@@ -77,7 +77,7 @@ def test_an_unreachable_team_shows_an_error_and_hides_nothing() -> None:
     assert status == 200
     dev, other = body["teams"]
     assert dev["view"] == fixture() and "error" not in dev
-    assert other == {"name": "aerarium", "error": "unreachable"}
+    assert other == {"name": "aerarium", "error": "unreachable", "controls": False}
     refused = backend(dev=raising(ClientError("forbidden", 403)))
     teams_ = call(refused, "GET", "/api/status")[1]["teams"]
     assert teams_[0]["error"] == "forbidden" and teams_[1]["view"] == aerarium()

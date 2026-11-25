@@ -154,7 +154,7 @@ function controls(team) {
         await post("/api/control", { team: team.name, action: verb, confirm: true, ...(paused ? {} : { reason: reason.value }) });
         controlMessage = paused ? "Team resumed." : "Team paused.";
       } catch (error) {
-        controlMessage = `Could not ${verb} the team. Nothing was changed unless the team now shows a new state. Try again.`;
+        controlMessage = `Could not ${verb} the team. Check the team status, then try again.`;
       }
       await refresh();
       controls(teams.find((t) => t.name === team.name));
