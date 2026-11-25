@@ -1,2 +1,3 @@
 /
-/member?name=dev-team.dev.1
+/member?team=dev-team&member=dev-team.dev.1
+/member?team=dev-team&member=nobody

@@ -168,6 +168,66 @@ class FixtureBackend:
     def mail(self, query: dict[str, Any]) -> dict[str, Any]:
         return {"total": 0, "items": [], "next": None}
 
+    def detail(self, kind: str, query: dict[str, Any]) -> dict[str, Any]:
+        """A member page from the recorded overview, with made-up runs, calls and memory."""
+        if kind == "calls":
+            calls = [
+                {
+                    "operation_id": f"fixture-call-{i}",
+                    "tool": "records.transition" if i else "vcs.merge",
+                    "state": "succeeded" if i else "failed",
+                    "failure_code": None if i else "merge_behind_base",
+                    "failure_message": None if i else "the head is behind main",
+                    "arguments": '{"transition": "submit"}',
+                    "result": "ok",
+                    "created_at": f"2026-11-21T08:3{i}:00+00:00",
+                    "updated_at": f"2026-11-21T08:3{i}:02+00:00",
+                }
+                for i in range(3)
+            ]
+            return {"total": len(calls), "items": calls, "next": None}
+        name = query.get("member", "")
+        found = next((m for m in members_of(self.view) if m["principal_id"] == name), None)
+        if found is None:
+            raise DashboardError("member_not_found", 404)
+        run = {
+            "task_id": "7f0c1d52-3a39-4d0e-9a53-0d3f6f1d1a03",
+            "created_at": "2026-11-21T08:30:00+00:00",
+            "updated_at": "2026-11-21T08:40:00+00:00",
+            "outcome": "succeeded",
+            "failure_code": None,
+            "cost_usd": 1.25,
+        }
+        note = {
+            "name": "notes.md",
+            "bytes": 120,
+            "changed_at": "2026-11-21T08:40:00+00:00",
+            "text": "Lessons from earlier runs.",
+            "truncated": False,
+        }
+        return {
+            "member": name,
+            "pool": found["pool"],
+            "state": found["state"],
+            "disabled": found["disabled"],
+            "active_task_id": found["active_task_id"],
+            "claims": found["claims"],
+            "capabilities": [
+                {"operation": "repo:cardea", "mode": "allow"},
+                {"operation": "mail:dev-team.tl", "mode": "allow"},
+                {"operation": "groups.manage", "mode": "deny"},
+            ],
+            "capabilities_truncated": 0,
+            "memory": {
+                "version": 3,
+                "archive_bytes": 2048,
+                "limit_bytes": 1048576,
+                "files": [note],
+            },
+            "runs": [run],
+            "runs_next": None,
+        }
+
 
 class KernelBackend:
     """The kernel, as the supervisor: `request` is `KernelClient.request`."""
@@ -237,6 +297,12 @@ class KernelBackend:
             "runs": runs["items"],
             "runs_next": runs["next"],
         }
+
+    def detail(self, kind: str, query: dict[str, Any]) -> dict[str, Any]:
+        """The member page's two reads: `member` (the whole page) or `calls` (one run's)."""
+        if kind == "member":
+            return self.member_detail(str(query.get("member", "")))
+        return self.calls(str(query.get("task", "")), str(query.get("after", "")), query["limit"])
 
     def runs(self, member: str, after: str, limit: int) -> dict[str, Any]:
         page: dict[str, Any] = self.request(
