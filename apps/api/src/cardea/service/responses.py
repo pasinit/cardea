@@ -424,6 +424,61 @@ class StatusRuns(StatusSection):
     next: str | None = Field(description="Pass as `after` for the next page.")
 
 
+class StatusCapability(Record):
+    operation: str = Field(description="The grant, as the policy names it: `mail:<address>`, ...")
+    mode: str
+    expires_at: float = Field(description="Unix seconds.")
+
+
+class StatusMemoryFile(Record):
+    name: str
+    bytes: int
+    changed_at: str
+    text: str = Field(description="The file as untrusted text, clipped; never markup.")
+    truncated: bool
+
+
+class StatusMemory(Record):
+    version: int | None = Field(description="Null before the first save.")
+    archive_bytes: int
+    limit_bytes: int
+    files: list[StatusMemoryFile]
+
+
+class StatusMember(StatusSection):
+    """`GET /v0.2/groups/{name}/status/members/{member}`: grants and memory, supervisor only."""
+
+    member: str
+    pool: str
+    state: str
+    disabled: bool
+    capabilities: list[StatusCapability]
+    capabilities_truncated: int
+    memory: StatusMemory
+
+
+class StatusCall(Record):
+    operation_id: str
+    tool: str
+    state: str | None
+    created_at: str | None
+    updated_at: str | None
+    arguments: str | None = Field(description="Clipped text of the call's arguments.")
+    result: str | None
+    failure_code: str | None
+    failure_message: str | None
+
+
+class StatusCalls(StatusSection):
+    """`GET /v0.2/groups/{name}/status/calls`: one run's receipted tool calls, newest first."""
+
+    task_id: str
+    member: str
+    total: int
+    items: list[StatusCall]
+    next: str | None = Field(description="Pass as `after` for the next page.")
+
+
 class StatusParty(Record):
     address: str
     role: str | None = Field(description="A pool name, `supervisor`, or null.")

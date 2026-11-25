@@ -7067,6 +7067,203 @@
         "title": "StatusAllocation",
         "type": "object"
       },
+      "StatusCall": {
+        "additionalProperties": false,
+        "properties": {
+          "arguments": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Clipped text of the call's arguments.",
+            "title": "Arguments"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "failure_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Code"
+          },
+          "failure_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Message"
+          },
+          "operation_id": {
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "tool": {
+            "title": "Tool",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "operation_id",
+          "tool",
+          "state",
+          "created_at",
+          "updated_at",
+          "arguments",
+          "result",
+          "failure_code",
+          "failure_message"
+        ],
+        "title": "StatusCall",
+        "type": "object"
+      },
+      "StatusCalls": {
+        "additionalProperties": false,
+        "description": "`GET /v0.2/groups/{name}/status/calls`: one run's receipted tool calls, newest first.",
+        "properties": {
+          "as_of": {
+            "title": "As Of",
+            "type": "string"
+          },
+          "group": {
+            "title": "Group",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/StatusCall"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "member": {
+            "title": "Member",
+            "type": "string"
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pass as `after` for the next page.",
+            "title": "Next"
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "group",
+          "namespace",
+          "as_of",
+          "task_id",
+          "member",
+          "total",
+          "items",
+          "next"
+        ],
+        "title": "StatusCalls",
+        "type": "object"
+      },
+      "StatusCapability": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_at": {
+            "description": "Unix seconds.",
+            "title": "Expires At",
+            "type": "number"
+          },
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          },
+          "operation": {
+            "description": "The grant, as the policy names it: `mail:<address>`, ...",
+            "title": "Operation",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation",
+          "mode",
+          "expires_at"
+        ],
+        "title": "StatusCapability",
+        "type": "object"
+      },
       "StatusCeiling": {
         "additionalProperties": false,
         "properties": {
@@ -7452,6 +7649,149 @@
           "next"
         ],
         "title": "StatusMailText",
+        "type": "object"
+      },
+      "StatusMember": {
+        "additionalProperties": false,
+        "description": "`GET /v0.2/groups/{name}/status/members/{member}`: grants and memory, supervisor only.",
+        "properties": {
+          "as_of": {
+            "title": "As Of",
+            "type": "string"
+          },
+          "capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/StatusCapability"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "capabilities_truncated": {
+            "title": "Capabilities Truncated",
+            "type": "integer"
+          },
+          "disabled": {
+            "title": "Disabled",
+            "type": "boolean"
+          },
+          "group": {
+            "title": "Group",
+            "type": "string"
+          },
+          "member": {
+            "title": "Member",
+            "type": "string"
+          },
+          "memory": {
+            "$ref": "#/components/schemas/StatusMemory"
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "pool": {
+            "title": "Pool",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "group",
+          "namespace",
+          "as_of",
+          "member",
+          "pool",
+          "state",
+          "disabled",
+          "capabilities",
+          "capabilities_truncated",
+          "memory"
+        ],
+        "title": "StatusMember",
+        "type": "object"
+      },
+      "StatusMemory": {
+        "additionalProperties": false,
+        "properties": {
+          "archive_bytes": {
+            "title": "Archive Bytes",
+            "type": "integer"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/StatusMemoryFile"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "limit_bytes": {
+            "title": "Limit Bytes",
+            "type": "integer"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null before the first save.",
+            "title": "Version"
+          }
+        },
+        "required": [
+          "version",
+          "archive_bytes",
+          "limit_bytes",
+          "files"
+        ],
+        "title": "StatusMemory",
+        "type": "object"
+      },
+      "StatusMemoryFile": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes": {
+            "title": "Bytes",
+            "type": "integer"
+          },
+          "changed_at": {
+            "title": "Changed At",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "text": {
+            "description": "The file as untrusted text, clipped; never markup.",
+            "title": "Text",
+            "type": "string"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "bytes",
+          "changed_at",
+          "text",
+          "truncated"
+        ],
+        "title": "StatusMemoryFile",
         "type": "object"
       },
       "StatusMessage": {
@@ -12157,6 +12497,216 @@
         "summary": "Group Overview"
       }
     },
+    "/v0.2/groups/{name}/status/calls": {
+      "get": {
+        "description": "Read-only, supervisor only: one run's tool calls (receipts), newest first.",
+        "operationId": "status_calls_v0_2_groups__name__status_calls_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z][a-z0-9-]{0,39}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "namespace",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "Namespace",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 128,
+              "title": "After",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-cardea-auth",
+            "required": false,
+            "schema": {
+              "default": "spiffe",
+              "title": "X-Cardea-Auth",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusCalls"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Method Not Allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Status Calls"
+      }
+    },
     "/v0.2/groups/{name}/status/changes": {
       "get": {
         "description": "Read-only: pull requests the group opened and their review state, from the\nkernel's receipts.",
@@ -12804,9 +13354,195 @@
         "summary": "Status Mail Text"
       }
     },
+    "/v0.2/groups/{name}/status/members/{member}": {
+      "get": {
+        "description": "Read-only, supervisor only: one member's standing grants and saved memory.",
+        "operationId": "status_member_v0_2_groups__name__status_members__member__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z][a-z0-9-]{0,39}$",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "member",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "Member",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "namespace",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+              "title": "Namespace",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-cardea-auth",
+            "required": false,
+            "schema": {
+              "default": "spiffe",
+              "title": "X-Cardea-Auth",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusMember"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Method Not Allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Status Member"
+      }
+    },
     "/v0.2/groups/{name}/status/runs": {
       "get": {
-        "description": "Read-only: the members' runs, newest first, with outcome and cost.",
+        "description": "Read-only: the members' runs, newest first, with outcome and cost; `member`\nkeeps one principal's runs.",
         "operationId": "status_runs_v0_2_groups__name__status_runs_get",
         "parameters": [
           {
@@ -12837,6 +13573,24 @@
               "default": false,
               "title": "Active",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "member",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Member"
             }
           },
           {

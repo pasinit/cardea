@@ -15,7 +15,12 @@ function table(head, rows) {
   t.append(tr);
   rows.forEach((row) => {
     const r = el("tr");
-    row.forEach((cell) => r.append(el("td", cell === null || cell === undefined ? "-" : cell)));
+    row.forEach((cell) => {
+      const td = el("td", cell instanceof Node || cell === null || cell === undefined ? null : cell);
+      if (cell instanceof Node) td.append(cell);
+      else if (cell === null || cell === undefined) td.textContent = "-";
+      r.append(td);
+    });
     t.append(r);
   });
   return t;
@@ -29,12 +34,20 @@ function note(text) {
   return el("p", text, "muted");
 }
 
-function members(view) {
+// The member's own page. It opens by a button, not a link: nothing from the API becomes a link.
+// The team and member go in the query as encoded data, never as markup.
+function memberLink(team, id) {
+  const open = el("button", id);
+  open.addEventListener("click", () => location.assign(`/member?${new URLSearchParams({ team, member: id })}`));
+  return open;
+}
+
+function members(view, team) {
   const rows = [];
   view.pools.forEach((pool) =>
     pool.members.forEach((m) => {
       const last = m.last_run ? m.last_run.outcome + (m.last_run.failure_code ? ` (${m.last_run.failure_code})` : "") : "-";
-      rows.push([pool.name, m.principal_id, m.disabled ? `${m.state}, disabled` : m.state, m.active_task_id || "idle", last]);
+      rows.push([pool.name, memberLink(team, m.principal_id), m.disabled ? `${m.state}, disabled` : m.state, m.active_task_id || "idle", last]);
     }),
   );
   return rows.length ? table(["Pool", "Member", "State", "Running", "Last run"], rows) : note("No members.");
@@ -83,7 +96,7 @@ function overview(team) {
   }
   const view = team.view;
   box.append(note(`${view.group} (${view.namespace}): ${view.state}; as of ${view.as_of}`));
-  box.append(...section("Members", members(view)), ...section("Work", work(view)), ...section("Mail", mail(view)));
+  box.append(...section("Members", members(view, team.name)), ...section("Work", work(view)), ...section("Mail", mail(view)));
   box.append(...section("Approvals", approvals(view)), ...section("Spend", spend(view)), ...section("Latest events", events(view)));
   return box;
 }

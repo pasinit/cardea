@@ -49,6 +49,8 @@ DEFAULT_PORT = 8766
 NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 CONFIRM = re.compile(r"^[0-9a-f]{64}$")
 STATIC = {
+    "/member": ("dashboard_member.html", "text/html; charset=utf-8"),
+    "/dashboard_member.js": ("dashboard_member.js", "text/javascript; charset=utf-8"),
     "/": ("dashboard_teams.html", "text/html; charset=utf-8"),
     "/settings": ("dashboard_settings.html", "text/html; charset=utf-8"),
     "/dashboard_settings.js": ("dashboard_settings.js", "text/javascript; charset=utf-8"),
@@ -87,8 +89,10 @@ class TeamsBackend:
         mails: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] | None = None,
         hosts: dict[str, Path] | None = None,
         connect: Callable[[dict[str, Any]], Any] | None = None,
+        details: dict[str, Callable[[str, dict[str, Any]], dict[str, Any]]] | None = None,
     ) -> None:
         self.sources, self.mails = sources, mails or {}
+        self.details = details or {}
         self.hosts, self.connect = hosts or {}, connect
 
     def one(self, name: str) -> dict[str, Any]:
@@ -111,6 +115,17 @@ class TeamsBackend:
             raise DashboardError("unknown_team", 404)
         read = self.mails.get(team)
         return read(query) if read else {"total": 0, "items": [], "next": None}
+
+    def detail(self, kind: str, query: dict[str, Any]) -> dict[str, Any]:
+        """A member's page (`kind` "member") or one run's tool calls ("calls"), as the team's
+        supervisor: the kernel refuses anyone else and a member or run outside the group."""
+        team = query.get("team")
+        if team not in self.sources:
+            raise DashboardError("unknown_team", 404)
+        read = self.details.get(team)
+        if read is None:
+            raise DashboardError("detail_unavailable", 404)
+        return read(kind, query)
 
     def _settings_team(self, name: object) -> Path:
         """The team's host file, once the kernel has confirmed the caller is its supervisor."""
@@ -209,6 +224,33 @@ def kernel_source(
     return read, read_mail
 
 
+def kernel_detail(host_file: Path) -> Callable[[str, dict[str, Any]], dict[str, Any]]:
+    """One team's member page and run calls, read as its supervisor through its host file."""
+    kit = load("teamkit")
+    host = kit.load_host(host_file)
+    namespace, group, _, _ = kit._names(host)
+
+    def read(kind: str, query: dict[str, Any]) -> dict[str, Any]:
+        kernel = kit.client(host)
+        try:
+            backend = base.KernelBackend(kernel.request, namespace, group)
+            if kind == "member":
+                if "member" not in query:
+                    raise DashboardError("invalid_query")
+                found: dict[str, Any] = backend.member_detail(query["member"])
+                return found
+            if "task" not in query:
+                raise DashboardError("invalid_query")
+            page: dict[str, Any] = backend.calls(
+                query["task"], query.get("after", ""), query["limit"]
+            )
+            return page
+        finally:
+            kernel.close()
+
+    return read
+
+
 def fixture_source(path: Path) -> Callable[[], dict[str, Any]]:
     view = json.loads(path.read_text())
     return lambda: view
@@ -233,6 +275,7 @@ def main(argv: list[str]) -> int:
                 {n: read for n, (read, _) in kernels.items()},
                 {n: mail for n, (_, mail) in kernels.items()},
                 dict(read_teams(args.teams)),
+                details={n: kernel_detail(h) for n, h in read_teams(args.teams)},
             )
         else:
             pairs = [item.partition("=") for item in args.fixtures]

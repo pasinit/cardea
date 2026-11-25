@@ -82,9 +82,11 @@ from cardea.service.responses import (
     RecordHistory,
     RunOutput,
     RunView,
+    StatusCalls,
     StatusChanges,
     StatusMail,
     StatusMailText,
+    StatusMember,
     StatusRuns,
     StatusSpend,
     StatusStanding,
@@ -116,6 +118,7 @@ TaskID = Annotated[str, Path(pattern=r"^task-[0-9a-f]{32}$")]
 TriggerPath = Annotated[str, Path(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,110}$")]
 OperationID = Annotated[str, Path(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")]
 GroupPath = Annotated[str, Path(pattern=r"^[a-z][a-z0-9-]{0,39}$")]
+MemberPath = Annotated[str, Path(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")]
 Namespace = Annotated[str, Query(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")]
 ITEM = f"^{COLLECTION_NAME}/[A-Za-z0-9][A-Za-z0-9._:-]{{0,127}}$"
 CollectionPath = Annotated[str, Path(pattern=f"^{COLLECTION_NAME}$")]
@@ -719,12 +722,35 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
         namespace: Namespace,
         proof: Credential,
         active: bool = False,
+        member: Annotated[str | None, Query(pattern=mailbox.IDENTIFIER, max_length=128)] = None,
         after: Annotated[str, Query(max_length=64)] = "",
         limit: Annotated[int, Query(ge=1, le=100)] = 25,
     ) -> dict[str, Any]:
-        """Read-only: the members' runs, newest first, with outcome and cost."""
+        """Read-only: the members' runs, newest first, with outcome and cost; `member`
+        keeps one principal's runs."""
         return team_status.runs(
-            kernel, proof, namespace, name, active=active, after=after, limit=limit
+            kernel, proof, namespace, name, active=active, after=after, limit=limit, member=member
+        )
+
+    @app.get("/v0.2/groups/{name}/status/members/{member}", response_model=StatusMember)
+    def status_member(
+        name: GroupPath, member: MemberPath, namespace: Namespace, proof: Credential
+    ) -> dict[str, Any]:
+        """Read-only, supervisor only: one member's standing grants and saved memory."""
+        return team_status.member(kernel, proof, namespace, name, member)
+
+    @app.get("/v0.2/groups/{name}/status/calls", response_model=StatusCalls)
+    def status_calls(
+        name: GroupPath,
+        namespace: Namespace,
+        proof: Credential,
+        task_id: Annotated[str, Query(pattern=mailbox.IDENTIFIER, max_length=128)],
+        after: Annotated[str, Query(max_length=128)] = "",
+        limit: Annotated[int, Query(ge=1, le=100)] = 25,
+    ) -> dict[str, Any]:
+        """Read-only, supervisor only: one run's tool calls (receipts), newest first."""
+        return team_status.calls(
+            kernel, proof, namespace, name, task_id=task_id, after=after, limit=limit
         )
 
     @app.get("/v0.2/groups/{name}/status/mail", response_model=StatusMail)

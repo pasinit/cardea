@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Team member</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font: 14px/1.4 system-ui, sans-serif; margin: 1rem; color: #1b1f24; background: #fafafa; overflow-wrap: anywhere; max-width: 64rem; }
+  h1 { font-size: 1.3rem; margin: 0; }
+  h3 { font-size: .95rem; margin: 1rem 0 .3rem; border-bottom: 1px solid #d0d7de; }
+  a { color: #0969da; }
+  a, button, summary { min-height: 44px; }
+  a:focus-visible, button:focus-visible, summary:focus-visible { outline: 3px solid #0969da; outline-offset: 2px; }
+  .crumb { display: inline-flex; align-items: center; margin-bottom: .5rem; }
+  .jump { display: flex; flex-wrap: wrap; gap: .4rem; margin: .5rem 0; }
+  .jump a { display: inline-flex; align-items: center; padding: 0 .7rem; border: 1px solid #d0d7de; border-radius: 6px; background: #fff; text-decoration: none; }
+  .state { font-size: .8rem; margin-left: .4rem; padding: 0 .35rem; border-radius: 4px; border: 1px solid currentColor; }
+  .state-running { color: #1a7f37; }
+  .state-stalled { color: #b42318; }
+  .state-paused { color: #9a6700; }
+  .state-idle { color: #57606a; }
+  .muted { color: #57606a; }
+  .bad, .no { color: #b42318; }
+  .ok { color: #1a7f37; }
+  .live { color: #1a7f37; font-weight: 600; }
+  .tool { font-family: ui-monospace, monospace; font-weight: 600; }
+  button { font: inherit; padding: 0 .9rem; border: 1px solid #d0d7de; border-radius: 6px; background: #fff; cursor: pointer; }
+  button[aria-pressed="true"] { border-color: #1b1f24; font-weight: 600; }
+  .detail-cols { display: grid; gap: 1rem; }
+  @media (min-width: 900px) { .detail-cols { grid-template-columns: 3fr 2fr; } body { margin: 1.5rem; } }
+  @media (max-width: 600px) { body { margin: .6rem; font-size: 15px; } }
+  .tl { list-style: none; margin: 0; padding: 0; border-left: 2px solid #d0d7de; }
+  .tl li { margin: 0 0 .4rem .6rem; }
+  details { background: #fff; border: 1px solid #d0d7de; border-radius: 6px; margin-bottom: .5rem; }
+  summary { padding: .2rem .6rem; display: flex; flex-wrap: wrap; gap: .2rem .6rem; align-items: center; cursor: pointer; }
+  details pre { margin: 0; padding: 0 .6rem .5rem; font: 12px/1.4 ui-monospace, monospace; white-space: pre-wrap; max-height: 16rem; overflow: auto; }
+  .tablewrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: .35rem .6rem .35rem 0; vertical-align: top; }
+  th { font-weight: 600; color: #57606a; }
+  .meter { height: 8px; background: #eaeef2; border-radius: 4px; overflow: hidden; margin: .3rem 0; }
+  .meter i { display: block; height: 100%; background: #1a7f37; }
+  .meter.warn i { background: #9a6700; }
+  .head { color: #57606a; font-size: .85rem; }
+</style>
+</head>
+<body>
+<a class="crumb" id="back" href="/">← Back to the teams</a>
+<header><h1 id="title">Member</h1></header>
+<p id="summary" class="muted" role="status">Loading…</p>
+<nav class="jump" aria-label="On this page">
+  <a href="#timeline">Timeline</a><a href="#capabilities">Capabilities</a><a href="#memory">Memory</a><a href="#history">History</a><a href="#mail">Mail</a>
+</nav>
+<div class="detail-cols">
+  <div>
+    <section id="timeline" aria-labelledby="tl-h">
+      <h3 id="tl-h">Timeline <span class="muted">(newest first, each call: tap for details)</span></h3>
+      <p id="tl-controls"></p>
+      <div id="tl-body"><p class="muted">Loading…</p></div>
+    </section>
+    <section id="history" aria-labelledby="hi-h">
+      <h3 id="hi-h">History <span class="muted">(past runs)</span></h3>
+      <div id="hi-body"><p class="muted">Loading…</p></div>
+    </section>
+  </div>
+  <div>
+    <section id="capabilities" aria-labelledby="cap-h">
+      <h3 id="cap-h">Capabilities <span class="muted">(what this member may do)</span></h3>
+      <div id="cap-body"><p class="muted">Loading…</p></div>
+    </section>
+    <section id="memory" aria-labelledby="mem-h">
+      <h3 id="mem-h">Memory <span class="muted">(kept between runs)</span></h3>
+      <div id="mem-body"><p class="muted">Loading…</p></div>
+    </section>
+    <section id="mail" aria-labelledby="mail-h">
+      <h3 id="mail-h">Mail with this member</h3>
+      <div id="mail-body"><p class="muted">Loading…</p></div>
+    </section>
+  </div>
+</div>
+<script src="/dashboard_member.js"></script>
+</body>
+</html>
