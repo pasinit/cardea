@@ -448,3 +448,30 @@ def test_record_events_carry_their_state_and_transition_for_filters(kernel: Kern
         }
     )
     assert wake.matches(event, readied, "dev") and not wake.matches(first, opened, "dev")
+
+
+@pytest.mark.loopback
+def test_the_waker_admits_mail_without_waiting_for_the_minute_tick(kernel: Kernel) -> None:
+    team(kernel)
+    waker = journal.Waker(kernel)
+    # The first look reconciles what the journal already holds; an unchanged end is idle.
+    assert waker.step() is True and waker.step() is False
+    post(kernel, {"instance": "team.dev.0"})
+    assert admitted(kernel) == []
+    assert waker.step() is True
+    (task_id,) = admitted(kernel)
+    assert waker.step() is False
+    # The minute tick finds the event already decided: one admission per event id.
+    tick(kernel)
+    assert admitted(kernel) == [task_id] and deliveries(kernel) == [("admitted", None)]
+
+
+@pytest.mark.loopback
+def test_a_restarted_waker_reconciles_mail_sent_while_it_was_down(kernel: Kernel) -> None:
+    team(kernel)
+    post(kernel, {"instance": "team.dev.0"})
+    # A new waker has seen nothing: its first look admits the mail the old one never read.
+    assert journal.Waker(kernel).step() is True
+    assert len(admitted(kernel)) == 1
+    assert journal.Waker(kernel).step() is True
+    assert len(admitted(kernel)) == 1 and deliveries(kernel) == [("admitted", None)]
