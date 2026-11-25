@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Team overview (fixture)</title>
+<style>
+  body { font: 16px/1.4 sans-serif; margin: 0; padding: 16px; background: #f6f7f9; color: #1b1f24; }
+  h1 { font-size: 1.25rem; margin: 0 0 12px; }
+  .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+  .card { background: #fff; border: 1px solid #d0d7de; border-radius: 6px; padding: 12px; }
+  .card h2 { font-size: 1rem; margin: 0 0 4px; }
+  .state { font-size: .8rem; color: #57606a; }
+</style>
+</head>
+<body>
+<h1>Team overview</h1>
+<div id="teams" class="grid"><p>Loading…</p></div>
+<script>
+  fetch("data/teams.json").then((r) => r.json()).then((teams) => {
+    document.getElementById("teams").innerHTML = teams.map((t) =>
+      `<div class="card"><h2>${t.name}</h2><div class="state">${t.state} · ${t.open} open</div></div>`
+    ).join("");
+  });
+</script>
+</body>
+</html>
