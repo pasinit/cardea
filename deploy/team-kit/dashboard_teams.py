@@ -96,9 +96,12 @@ class TeamsBackend:
         try:
             view = self.sources[name]()
             state = base.team_state(view)
-            return {"name": name, "state": state, "view": view, "controls": name in self.hosts}
+            found: dict[str, Any] = {"name": name, "state": state, "view": view}
         except Exception as error:  # an unreachable team must not hide the others
-            return {"name": name, "error": error_code(error), "controls": name in self.hosts}
+            found = {"name": name, "error": error_code(error)}
+        if name in self.hosts:
+            found["controls"] = True
+        return found
 
     def overview(self) -> dict[str, Any]:
         with ThreadPoolExecutor(max_workers=max(1, len(self.sources))) as pool:
@@ -140,7 +143,7 @@ class TeamsBackend:
             self.sources[name]()  # the kernel decides, live, who may read the team
             readable = True
         except Exception as error:
-            if action != "resume" or error_code(error) != "principal_disabled":
+            if error_code(error) != "principal_disabled":
                 raise
             readable = False
         if action == "pause" and not readable:
