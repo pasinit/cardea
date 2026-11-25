@@ -82,6 +82,16 @@ function shortName(id) {
   return parts.length > 1 ? parts.slice(1).join(".") : String(id);
 }
 
+const FAILURE_WORDS = {
+  attempt_timeout: "it ran out of time",
+  budget_exceeded: "it hit its spending limit",
+  cancelled: "it was stopped",
+};
+
+function failureWords(code) {
+  return FAILURE_WORDS[code] || "it did not finish";
+}
+
 function allMembers(view) {
   return view.pools.flatMap((pool) => pool.members.map((m) => ({ pool: pool.name, m })));
 }
@@ -107,7 +117,7 @@ function needsYou(view) {
     .forEach((a) => items.push(`${a.dead} undeliverable mail for ${a.address}.`));
   allMembers(view)
     .filter(({ m }) => !m.active_task_id && m.last_run && m.last_run.outcome === "failed")
-    .forEach(({ m }) => items.push(`${shortName(m.principal_id)}: last run failed (${m.last_run.failure_code || "unknown"}).`));
+    .forEach(({ m }) => items.push(`${shortName(m.principal_id)}: last run failed: ${failureWords(m.last_run.failure_code)}.`));
   const box = el("section", null, "needs");
   box.setAttribute("role", "status");
   box.append(el("h3", items.length ? `Needs you (${items.length})` : "Needs you"));
@@ -172,8 +182,9 @@ function memberCard(pool, m) {
   const claim = m.claims && m.claims[0];
   card.append(el("div", running ? (claim ? `Working on ${claim}` : "Working") : "Waiting for work"));
   if (m.last_run) {
-    const outcome = m.last_run.outcome + (m.last_run.failure_code ? ` (${m.last_run.failure_code})` : "");
-    card.append(el("div", `Last run: ${outcome}, ${ago(m.last_run.finished_at)}`, m.last_run.outcome === "failed" ? "bad" : "muted"));
+    const failed = m.last_run.outcome === "failed" || Boolean(m.last_run.failure_code);
+    const outcome = failed ? `failed, ${failureWords(m.last_run.failure_code)}` : m.last_run.outcome === "succeeded" ? "finished" : String(m.last_run.outcome);
+    card.append(el("div", `Last run ${outcome}, ${ago(m.last_run.finished_at)}`, m.last_run.outcome === "failed" ? "bad" : "muted"));
   } else {
     card.append(el("div", "Has not run yet", "muted"));
   }
@@ -192,7 +203,7 @@ function overview(team) {
     banner.setAttribute("role", "status");
     box.append(banner);
   }
-  box.append(note(`${view.group} (${view.namespace}): ${team.state}. Updated ${view.as_of}. Refreshes every 15 seconds.`));
+  box.append(note(`${view.group} (${view.namespace}): ${team.state}. Updated ${ago(view.as_of)}. Refreshes every 15 seconds.`));
   box.append(needsYou(view), summary(view));
   const grid = el("div", null, "grid");
   allMembers(view).forEach(({ pool, m }) => grid.append(memberCard(pool, m)));
