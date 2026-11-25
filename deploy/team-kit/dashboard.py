@@ -298,12 +298,6 @@ class KernelBackend:
             "runs_next": runs["next"],
         }
 
-    def detail(self, kind: str, query: dict[str, Any]) -> dict[str, Any]:
-        """The member page's two reads: `member` (the whole page) or `calls` (one run's)."""
-        if kind == "member":
-            return self.member_detail(str(query.get("member", "")))
-        return self.calls(str(query.get("task", "")), str(query.get("after", "")), query["limit"])
-
     def runs(self, member: str, after: str, limit: int) -> dict[str, Any]:
         page: dict[str, Any] = self.request(
             "GET",

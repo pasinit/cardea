@@ -279,7 +279,11 @@ def main(argv: list[str]) -> int:
             )
         else:
             pairs = [item.partition("=") for item in args.fixtures]
-            backend = TeamsBackend({n: fixture_source(Path(f)) for n, _, f in pairs})
+            views = {n: json.loads(Path(f).read_text()) for n, _, f in pairs}
+            backend = TeamsBackend(
+                {n: fixture_source(Path(f)) for n, _, f in pairs},
+                details={n: base.FixtureBackend(v).detail for n, v in views.items()},
+            )
         httpd = server(backend, args.port, args.bind)
     except DashboardError as error:
         print(f"dashboard: {error.code}", file=sys.stderr)
