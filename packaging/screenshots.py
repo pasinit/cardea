@@ -9,7 +9,8 @@ Serves `--root` (default the current directory, the checkout) on an ephemeral po
 loopback interface. The pages are the HTML files HEAD adds under `docs/mocks/`, or just
 `--page` (a path under the root) when it is given. Each page gets two screenshots as tall as
 the page, `p<N>-mobile-390.png` and `p<N>-desktop-1280.png` (N from 1, in path order, at most
-`MAX_PAGES`) and `p<N>-dom.html`, the settled DOM as text, written to `--out` (default `screenshots`), the scenario's artifact paths; the
+`MAX_PAGES`) and `p<N>-dom.html` (the settled DOM as text), written to `--out` (default
+`screenshots`), the scenario's artifact paths; the
 log names the page behind each N. `env.try` keeps at most 256 KiB per artifact and 1 MiB in
 all, so a screenshot over its share is retaken at a lower device pixel ratio, and a page that
 still does not fit fails. It needs only a loopback, so the catalog declares `network:
