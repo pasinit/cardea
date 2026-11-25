@@ -262,8 +262,10 @@ def test_a_missing_browser_or_page_fails_with_a_reason(
     stand_in(tmp_path)
     monkeypatch.setenv("PATH", f"{tmp_path}:{Path(shutil.which('git') or '/usr/bin/git').parent}")
     commit(repo, "no mock", {"src/page.html": mock()})
-    assert module.main(["--root", str(repo), "--out", str(tmp_path / "o")]) == 1
-    assert "no page: HEAD adds nothing under docs/mocks/" in capsys.readouterr().out
+    assert module.main(["--root", str(repo), "--out", str(tmp_path / "o")]) == 0
+    out = capsys.readouterr().out
+    assert "nothing to render: HEAD adds nothing under docs/mocks/" in out
+    assert out.endswith("screenshots: PASS\n")
     args = ["--root", str(tmp_path), "--page", "gone.html", "--out", str(tmp_path / "o")]
     assert module.main(args) == 1
     assert "no page gone.html" in capsys.readouterr().out
@@ -312,3 +314,38 @@ def test_a_toolchain_chromium_starts_without_its_wrapper(
     plain = runner()
     assert plain.browser() == str(wrapper)
     assert plain.EXTRA_ENV == {}
+
+
+def test_a_commit_that_changes_the_dashboard_gets_its_real_pages_captured(
+    tmp_path: Path,
+) -> None:
+    # UX reviews the dashboard as built, not only a mock: a change under deploy/team-kit to a
+    # dashboard file makes the scenario start the commit's dashboard on its fixtures.
+    import subprocess as sp
+
+    shots = runner()
+    root = tmp_path / "repo"
+    (root / "deploy/team-kit").mkdir(parents=True)
+
+    def git(*args: str) -> None:
+        sp.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args],
+               cwd=root, check=True, capture_output=True)  # fmt: skip
+
+    git("init", "-q", "--initial-branch=main")
+    (root / "deploy/team-kit/teamkit.py").write_text("x = 1\n")
+    git("add", ".")
+    git("commit", "-qm", "base")
+    git("update-ref", "refs/remotes/origin/main", "HEAD")
+    assert not shots.dashboard_changed(root)
+    (root / "deploy/team-kit/teamkit.py").write_text("x = 2\n")
+    git("commit", "-qam", "not the dashboard")
+    assert not shots.dashboard_changed(root)
+    (root / "deploy/team-kit/dashboard_teams.js").write_text("// new\n")
+    git("add", ".")
+    git("commit", "-qm", "dashboard")
+    assert shots.dashboard_changed(root)
+    assert shots.dashboard_routes(root) == ["/"]
+    (root / "deploy/team-kit/screenshots.routes").write_text(
+        "/\n/member?team=dev&member=dev-team.dev.1\nnot-a-route\n"
+    )
+    assert shots.dashboard_routes(root) == ["/", "/member?team=dev&member=dev-team.dev.1"]

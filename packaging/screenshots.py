@@ -25,11 +25,14 @@ import http.server
 import io
 import os
 import re
+import resource
 import shutil
 import subprocess
 import sys
 import tempfile
 import threading
+import time
+import urllib.request
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -44,9 +47,15 @@ MAX_PAGES = 8
 # Tried in turn until the screenshot fits its share of the limit.
 SCALES = (1.0, 0.75, 0.5, 0.35, 0.25)
 MAX_HEIGHT = 10000
+UNMEASURED = 2400
 # Lets the page's fetch of its fixture data finish before the capture.
 VIRTUAL_TIME_MS = 5000
 TIMEOUT = 120
+# One Chromium run, and the whole scenario, must end well inside env.try's 300 s: a hung
+# browser fails fast with its own output instead of a silent timeout.
+RUN_TIMEOUT = 40
+DEADLINE = 240
+STARTED = time.monotonic()
 # Served with every HTML page: records the page's height for the capture of its full length.
 MEASURE = (
     b"<script>setTimeout(() => document.documentElement.setAttribute("
@@ -105,8 +114,22 @@ def direct(found: str) -> str:
         if folder.is_dir()
     ] + [real.parent]
     EXTRA_ENV["LD_LIBRARY_PATH"] = ":".join(str(folder) for folder in libraries)
+    # The toolchain's fonts.conf names /usr/share/fonts, which the worker does not have: write
+    # one that names the toolchain's own fonts and a cache directory the worker can write.
     fonts = root / "etc" / "fonts" / "fonts.conf"
-    if fonts.is_file():
+    shipped = root / "usr" / "share" / "fonts"
+    if fonts.is_file() and shipped.is_dir():
+        scratch = Path(tempfile.mkdtemp(prefix="fontconfig-"))
+        config = scratch / "fonts.conf"
+        config.write_text(
+            '<?xml version="1.0"?><!DOCTYPE fontconfig SYSTEM "fonts.dtd"><fontconfig>'
+            f"<dir>{shipped}</dir><cachedir>{scratch}/cache</cachedir>"
+            f"<include ignore_missing=\"yes\">{root}/etc/fonts/conf.d</include></fontconfig>"
+        )
+        EXTRA_ENV["FONTCONFIG_FILE"] = str(config)
+        EXTRA_ENV["FONTCONFIG_PATH"] = str(root / "etc" / "fonts")
+        EXTRA_ENV["XDG_CACHE_HOME"] = str(scratch)
+    elif fonts.is_file():
         EXTRA_ENV["FONTCONFIG_FILE"] = str(fonts)
     return str(real)
 
@@ -134,6 +157,11 @@ def command(
         "--disable-gpu",
         # The worker's own confinement is the sandbox; Chromium's cannot nest inside it.
         "--no-sandbox",
+        # Under a memory limit a renderer cannot reserve V8's code range: run without the JIT
+        # reservation, and do not wait on crashpad when it dies.
+        "--js-flags=--jitless",
+        "--disable-crash-reporter",
+        "--disable-breakpad",
         f"--user-data-dir={profile}",
         "--no-proxy-server",
         "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1",
@@ -158,18 +186,36 @@ def pages(root: Path, page: str | None) -> list[str]:
     return sorted(n for n in names if n.lower().endswith((".html", ".htm")))
 
 
+def lift_limits() -> None:
+    """Raise the soft address-space limit to its hard one: V8 reserves a large code range
+    at start and a renderer that cannot dies ("Failed to reserve virtual memory for
+    CodeRange") while the browser waits for it until the timeout."""
+    for name in (resource.RLIMIT_AS, resource.RLIMIT_DATA):
+        _, hard = resource.getrlimit(name)
+        resource.setrlimit(name, (hard, hard))
+
+
 def run(argv: list[str]) -> tuple[str, str]:
     """Chromium's stdout and a problem, empty when it exited cleanly."""
+    left = DEADLINE - (time.monotonic() - STARTED)
+    if left < 5:
+        return "", "scenario deadline reached"
     try:
         done = subprocess.run(
             argv,
             capture_output=True,
             text=True,
-            timeout=TIMEOUT,
+            timeout=min(RUN_TIMEOUT, left),
             check=False,
             env={**os.environ, **EXTRA_ENV} if EXTRA_ENV else None,
+            preexec_fn=lift_limits,
         )
-    except (OSError, subprocess.TimeoutExpired) as error:
+    except subprocess.TimeoutExpired as error:
+        seen = error.stderr or b""
+        text = seen if isinstance(seen, str) else seen.decode("utf-8", "replace")
+        sys.stdout.write(f"chromium hung after {error.timeout:.0f}s: {text[-1000:]}\n")
+        return "", "TimeoutExpired"
+    except OSError as error:
         return "", type(error).__name__
     if done.returncode:
         sys.stdout.write(done.stderr[-1000:])
@@ -181,7 +227,8 @@ def height(binary: str, scratch: Path, url: str, width: int, tall: int) -> int:
     """The page's full height at `width`, from the DOM after it has settled."""
     shown, problem = run(command(binary, scratch / "measure", url, width, tall))
     found = None if problem else HEIGHT.search(shown)
-    return min(max(int(found.group(1)), tall), MAX_HEIGHT) if found else tall
+    # A page we did not serve (the dashboard) has no measuring script: capture a long window.
+    return min(max(int(found.group(1)), tall), MAX_HEIGHT) if found else max(tall, UNMEASURED)
 
 
 def shoot(
@@ -203,20 +250,99 @@ def shoot(
     return f"{target.stat().st_size} bytes at scale {SCALES[-1]}, over its {limit} byte share"
 
 
-def capture(binary: str, base: str, names: list[str], out: Path) -> list[tuple[str, bool, str]]:
+def capture(binary: str, urls: list[str], out: Path) -> list[tuple[str, bool, str]]:
     results: list[tuple[str, bool, str]] = []
-    limit = min(MAX_BYTES, MAX_TOTAL // (2 * max(len(names), 1)))
+    limit = min(MAX_BYTES, MAX_TOTAL // (2 * max(len(urls), 1)))
     with tempfile.TemporaryDirectory(prefix="shots-") as scratch:
-        for number, page in enumerate(names, 1):
-            sys.stdout.write(f"p{number}: {page}\n")
+        for number, url in enumerate(urls, 1):
+            sys.stdout.write(f"p{number}: {url.split('/', 3)[-1] or '/'}\n")
             for kind, width, tall in WIDTHS:
                 label = f"p{number}-{kind}"
                 target = out / f"{label}.png"
-                problem = shoot(
-                    binary, Path(scratch), f"{base}/{page}", (label, width, tall), target, limit
-                )
+                problem = shoot(binary, Path(scratch), url, (label, width, tall), target, limit)
                 results.append((label, not problem, problem))
     return results
+
+
+# The team dashboard, rendered from the commit's own code against its recorded fixtures, when
+# the commit changes it (compared with its base): UX reviews the real page, not only a mock.
+DASHBOARD = "deploy/team-kit"
+DASHBOARD_FILES = ("dashboard",)
+DASHBOARD_SERVER = f"{DASHBOARD}/dashboard_teams.py"
+DASHBOARD_FIXTURES = (
+    ("dev", "dashboard.fixture.json"),
+    ("aerarium", "dashboard.fixture.aerarium.json"),
+)
+# Extra routes a commit wants captured, one per line (for example a member page), else "/".
+DASHBOARD_ROUTES = f"{DASHBOARD}/screenshots.routes"
+
+
+def dashboard_changed(root: Path) -> bool:
+    base = ""
+    for ref in ("origin/main", "origin/HEAD", "main"):
+        found = subprocess.run(
+            ["git", "-C", str(root), "merge-base", "HEAD", ref],
+            capture_output=True, text=True, timeout=TIMEOUT, check=False,
+        )  # fmt: skip
+        if found.returncode == 0 and found.stdout.strip():
+            base = found.stdout.strip()
+            break
+    if not base:
+        return False
+    listed = subprocess.run(
+        ["git", "-C", str(root), "diff", "--name-only", f"{base}..HEAD", "--", DASHBOARD],
+        capture_output=True, text=True, timeout=TIMEOUT, check=False,
+    )  # fmt: skip
+    return any(Path(name).name.startswith(DASHBOARD_FILES) for name in listed.stdout.splitlines())
+
+
+def dashboard_routes(root: Path) -> list[str]:
+    path = root / DASHBOARD_ROUTES
+    routes = path.read_text().splitlines() if path.is_file() else []
+    cleaned = [r.strip() for r in routes if r.strip().startswith("/")]
+    return cleaned or ["/"]
+
+
+def start_dashboard(root: Path) -> tuple[subprocess.Popen[bytes], str] | None:
+    """The commit's dashboard on a free loopback port, reading its fixtures; None if it fails."""
+    probe = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Quiet)
+    port = probe.server_port
+    probe.server_close()
+    fixtures = [f"{name}={root / DASHBOARD / file}" for name, file in DASHBOARD_FIXTURES]
+    process = subprocess.Popen(
+        [sys.executable, "-I", str(root / DASHBOARD_SERVER), "--fixtures", *fixtures,
+         "--port", str(port)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )  # fmt: skip
+    url = f"http://127.0.0.1:{port}"
+    for _ in range(100):
+        try:
+            with urllib.request.urlopen(url + "/", timeout=1):
+                return process, url
+        except OSError:
+            if process.poll() is not None:
+                return None
+            time.sleep(0.1)
+    process.kill()
+    return None
+
+
+def diagnose() -> None:
+    """What the browser has for fonts, printed when it failed: a headless Chromium without
+    any font dies in Skia ("SkFontMgr_FontConfigInterface ... Not implemented")."""
+    sys.stdout.write(f"browser env: {EXTRA_ENV}\n")
+    for folder in ("/usr/share/fonts", "/etc/fonts"):
+        found = sorted(str(p) for p in Path(folder).rglob("*"))[:5] if Path(folder).is_dir() else []
+        sys.stdout.write(f"{folder}: {found}\n")
+    fonts = EXTRA_ENV.get("FONTCONFIG_FILE")
+    present = fonts is not None and Path(fonts).is_file()
+    sys.stdout.write(f"FONTCONFIG_FILE: {fonts} exists={present}\n")
+    root = Path(EXTRA_ENV["LD_LIBRARY_PATH"].split(":")[0]).parents[2] if EXTRA_ENV else None
+    if root:
+        for sub in ("usr/share/fonts", "etc/fonts"):
+            there = root / sub
+            names = sorted(str(p) for p in there.rglob("*"))[:12] if there.is_dir() else []
+            sys.stdout.write(f"{there}: {names}\n")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -227,11 +353,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     binary = browser()
     names = [] if binary is None else pages(args.root, args.page)
+    dashboard = binary is not None and not args.page and dashboard_changed(args.root)
     problem = ""
     if binary is None:
         problem = "no Chromium on PATH"
-    elif not names:
-        problem = f"no page: HEAD adds nothing under {MOCKS}/ and no --page was given"
+    elif not names and not dashboard:
+        sys.stdout.write(
+            f"nothing to render: HEAD adds nothing under {MOCKS}/, the dashboard is unchanged, "
+            "and no --page was given\nscreenshots: PASS\n"
+        )
+        return 0
     else:
         root = args.root.resolve()
         for name in names:
@@ -241,18 +372,30 @@ def main(argv: Sequence[str] | None = None) -> int:
     if problem or binary is None:
         sys.stdout.write(f"{problem}\nscreenshots: FAIL\n")
         return 1
-    skipped = names[MAX_PAGES:]
     args.out.mkdir(parents=True, exist_ok=True)
     server = serve(args.root)
+    running = start_dashboard(args.root) if dashboard else None
+    if dashboard and running is None:
+        server.shutdown()
+        sys.stdout.write("the dashboard did not start\nscreenshots: FAIL\n")
+        return 1
     try:
         base = f"http://127.0.0.1:{server.server_port}"
-        results = capture(binary, base, names[:MAX_PAGES], args.out)
+        urls = [f"{base}/{name}" for name in names]
+        if running is not None:
+            urls += [running[1] + route for route in dashboard_routes(args.root)]
+        skipped = urls[MAX_PAGES:]
+        results = capture(binary, urls[:MAX_PAGES], args.out)
     finally:
         server.shutdown()
+        if running is not None:
+            running[0].kill()
+    if not all(ok for _, ok, _ in results):
+        diagnose()
     for name, ok, problem in results:
         sys.stdout.write(f"{name}: {'pass' if ok else 'FAIL ' + problem}\n")
-    for name in skipped:
-        sys.stdout.write(f"not captured, over {MAX_PAGES} pages: {name}\n")
+    for url in skipped:
+        sys.stdout.write(f"not captured, over {MAX_PAGES} pages: {url.split('/', 3)[-1]}\n")
     passed = all(ok for _, ok, _ in results) and not skipped
     sys.stdout.write(f"screenshots: {'PASS' if passed else 'FAIL'}\n")
     return 0 if passed else 1

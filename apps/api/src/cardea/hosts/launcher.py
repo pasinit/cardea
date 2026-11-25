@@ -2,6 +2,7 @@
 """Root-owned fixed-command helper. Install via the M2 host instructions, never setuid."""
 
 import base64
+import contextlib
 import fcntl
 import hashlib
 import json
@@ -161,6 +162,17 @@ CREDENTIAL = "/run/cardea/credential"
 # job's staging, bound writable here, which a later `loopback` job may inherit.
 WORKSPACE = "/work"
 WORKSPACE_MB = (1, 8192)
+# A persistent tool cache (uv's packages, mypy's results) a profile may keep between jobs:
+# a host directory under CACHE_ROOT, owned by the worker account, bound writable at CACHE.
+# It only speeds jobs up; a job must not depend on what it holds.
+# Under the helper's own state directory: the only place it may write when it runs inside the
+# kernel service's namespace (ProtectSystem=strict leaves /var/cache read-only there).
+CACHE_ROOT = ROOT / "cache"
+CACHE = "/cache"
+CACHE_NAME = r"[a-z][a-z0-9-]{0,31}"
+# Packages of removed or older dependencies accumulate; past this a cache starts over empty,
+# which costs one cold job.
+CACHE_MAX_BYTES = 3 * 1024**3
 # A profile's named credentials (ADR-037 amendment 2026-11-17): one file per name here.
 CREDENTIALS = "/run/cardea/credentials"
 CREDENTIAL_PATH = r"/etc/cardea/credentials/[a-z0-9-]{1,64}"
@@ -197,6 +209,7 @@ def validate_profile(entry: object) -> dict[str, Any]:
         "kernel_callback",
         "workspace_mb",
         "inherit_workspace",
+        "cache",
     }
     if not {*LIMITS, "network"} <= set(entry) <= {*LIMITS, "network", *optional}:
         raise ValueError("invalid_profile")
@@ -231,6 +244,9 @@ def validate_profile(entry: object) -> dict[str, Any]:
     ):
         raise ValueError("invalid_profile")
     if type(inherit) is not bool or (inherit and declared.get("policy") != "loopback"):
+        raise ValueError("invalid_profile")
+    cache = entry.get("cache")
+    if cache is not None and (not isinstance(cache, str) or not re.fullmatch(CACHE_NAME, cache)):
         raise ValueError("invalid_profile")
     concurrency = entry.get("concurrency", 1)
     if type(concurrency) is not int or not CONCURRENCY[0] <= concurrency <= CONCURRENCY[1]:
@@ -491,6 +507,13 @@ def confined_command(
     if workspace is not None:
         binds += ["--bind", str(workspace), WORKSPACE]
         environment["CARDEA_WORKSPACE"] = WORKSPACE
+    if profile.get("cache"):
+        binds += ["--bind", str(cache_dir(profile["cache"])), CACHE]
+        environment |= {
+            "XDG_CACHE_HOME": CACHE,
+            "UV_CACHE_DIR": f"{CACHE}/uv",
+            "MYPY_CACHE_DIR": f"{CACHE}/mypy",
+        }
     for path in worker.get("read_only", []):
         binds += ["--ro-bind", path, path]
     environment |= worker.get("env", {})
@@ -834,7 +857,7 @@ def admit_start(job: str, request: dict[str, Any]) -> bytes:
         raise ValueError("input_too_large")
     if retired(job):
         raise ValueError("retired_job")
-    if sum(1 for p in ROOT.iterdir() if p.is_dir()) >= 256:
+    if sum(1 for p in ROOT.iterdir() if p.is_dir() and p != CACHE_ROOT) >= 256:
         raise ValueError("spool_capacity")
     return content
 
@@ -933,6 +956,33 @@ def host_mounted(path: Path, mountinfo: Path = HOST_MOUNTINFO) -> bool:
     return False
 
 
+def _size(path: Path) -> int:
+    """Bytes under `path`, without following links."""
+    total = 0
+    for root, _, files in os.walk(path, followlinks=False):
+        for name in files:
+            with contextlib.suppress(OSError):
+                total += os.lstat(os.path.join(root, name)).st_size
+    return total
+
+
+def cache_dir(name: str) -> Path:
+    """The profile's persistent cache directory, created private to the worker account."""
+    account = pwd.getpwnam("cardea-worker")
+    CACHE_ROOT.mkdir(mode=0o711, exist_ok=True)
+    path = CACHE_ROOT / name
+    if path.is_symlink():
+        raise ValueError("unsafe_cache")
+    if path.is_dir() and _size(path) > CACHE_MAX_BYTES:
+        shutil.rmtree(path)
+    path.mkdir(mode=0o700, exist_ok=True)
+    info = path.stat()
+    if (info.st_uid, info.st_gid) != (account.pw_uid, account.pw_gid):
+        os.chown(path, account.pw_uid, account.pw_gid, follow_symlinks=False)
+    os.chmod(path, 0o700)
+    return path
+
+
 def make_workspace(directory: Path, megabytes: int) -> Path:
     """A size-capped tmpfs under the job's staging, owned by the worker account. Its pages
     are charged to whoever fills them, the job's unit, so the unit's memory cap holds."""
@@ -996,7 +1046,7 @@ def admit_confined(
     staged = admit_inputs(request.get("inputs"), profile)
     if retired(job):
         raise ValueError("retired_job")
-    if sum(1 for p in ROOT.iterdir() if p.is_dir()) >= 256:
+    if sum(1 for p in ROOT.iterdir() if p.is_dir() and p != CACHE_ROOT) >= 256:
         raise ValueError("spool_capacity")
     return content, profile, worker, staged
 

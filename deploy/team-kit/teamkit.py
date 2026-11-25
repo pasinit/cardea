@@ -352,8 +352,10 @@ WORKSPACE_NOTE = (
     "separate coding session: wherever these instructions say coding session, edit and "
     "commit in your workspace instead. Your loop for every change: edit; commit; run "
     "`cardea-change` in the repository; call env.try with repo, commit (its head), change "
-    "and the scenarios you need; read every failing scenario's log tail and fix the code, "
-    "then repeat until it passes. Only then push with vcs.push_branch (change, head, "
+    'and scenarios ["test-changed"] (lint and only the tests for what you changed, in '
+    "seconds); read every failing scenario's log tail and fix the code, then repeat until "
+    "it passes. Before you push for review, run the full scenarios once the same way. "
+    "Only then push with vcs.push_branch (change, head, "
     "branch, record_id), open or update the pull request and continue as instructed. A "
     "review asking for changes: check out your branch from origin, fix, and run the same "
     "loop. Never push a head that has not passed."

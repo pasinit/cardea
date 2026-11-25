@@ -90,6 +90,8 @@ incident-demo-check: check-uv
 
 # Parallel (pytest-xdist), one worker per core; PYTEST_WORKERS=0 runs serially.
 PYTEST_WORKERS ?= auto
+# env.try's check scenario runs on a 3-CPU team host; more workers only add memory.
+CHECK_WORKERS ?= 3
 
 api-test: check-uv
 	cd $(API_DIR) && "$(UV)" run pytest -n $(PYTEST_WORKERS)
@@ -104,7 +106,12 @@ screenshots:
 	python3 packaging/screenshots.py
 
 check-test: check-uv
-	cd $(API_DIR) && CARDEA_NO_LOOPBACK=1 "$(UV)" run pytest -m "not loopback" -q -rfE --tb=short -p no:cacheprovider
+	cd $(API_DIR) && CARDEA_NO_LOOPBACK=1 "$(UV)" run pytest -m "not loopback" -q -rfE --tb=short -p no:cacheprovider -n $(CHECK_WORKERS)
+
+# Fast feedback inside env.try: only the tests for what the commit changed since its base
+# (`test-changed` scenario, packaging/test_changed.py). The full `check` still gates merges.
+test-changed: check-uv
+	python3 packaging/test_changed.py
 
 kernel-test: check-uv
 	cd $(API_DIR) && "$(UV)" run pytest tests/kernel
