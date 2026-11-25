@@ -30,6 +30,8 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
+import urllib.request
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -44,6 +46,7 @@ MAX_PAGES = 8
 # Tried in turn until the screenshot fits its share of the limit.
 SCALES = (1.0, 0.75, 0.5, 0.35, 0.25)
 MAX_HEIGHT = 10000
+UNMEASURED = 2400
 # Lets the page's fetch of its fixture data finish before the capture.
 VIRTUAL_TIME_MS = 5000
 TIMEOUT = 120
@@ -181,7 +184,8 @@ def height(binary: str, scratch: Path, url: str, width: int, tall: int) -> int:
     """The page's full height at `width`, from the DOM after it has settled."""
     shown, problem = run(command(binary, scratch / "measure", url, width, tall))
     found = None if problem else HEIGHT.search(shown)
-    return min(max(int(found.group(1)), tall), MAX_HEIGHT) if found else tall
+    # A page we did not serve (the dashboard) has no measuring script: capture a long window.
+    return min(max(int(found.group(1)), tall), MAX_HEIGHT) if found else max(tall, UNMEASURED)
 
 
 def shoot(
@@ -203,20 +207,81 @@ def shoot(
     return f"{target.stat().st_size} bytes at scale {SCALES[-1]}, over its {limit} byte share"
 
 
-def capture(binary: str, base: str, names: list[str], out: Path) -> list[tuple[str, bool, str]]:
+def capture(binary: str, urls: list[str], out: Path) -> list[tuple[str, bool, str]]:
     results: list[tuple[str, bool, str]] = []
-    limit = min(MAX_BYTES, MAX_TOTAL // (2 * max(len(names), 1)))
+    limit = min(MAX_BYTES, MAX_TOTAL // (2 * max(len(urls), 1)))
     with tempfile.TemporaryDirectory(prefix="shots-") as scratch:
-        for number, page in enumerate(names, 1):
-            sys.stdout.write(f"p{number}: {page}\n")
+        for number, url in enumerate(urls, 1):
+            sys.stdout.write(f"p{number}: {url.split('/', 3)[-1] or '/'}\n")
             for kind, width, tall in WIDTHS:
                 label = f"p{number}-{kind}"
                 target = out / f"{label}.png"
-                problem = shoot(
-                    binary, Path(scratch), f"{base}/{page}", (label, width, tall), target, limit
-                )
+                problem = shoot(binary, Path(scratch), url, (label, width, tall), target, limit)
                 results.append((label, not problem, problem))
     return results
+
+
+# The team dashboard, rendered from the commit's own code against its recorded fixtures, when
+# the commit changes it (compared with its base): UX reviews the real page, not only a mock.
+DASHBOARD = "deploy/team-kit"
+DASHBOARD_FILES = ("dashboard",)
+DASHBOARD_SERVER = f"{DASHBOARD}/dashboard_teams.py"
+DASHBOARD_FIXTURES = (
+    ("dev", "dashboard.fixture.json"),
+    ("aerarium", "dashboard.fixture.aerarium.json"),
+)
+# Extra routes a commit wants captured, one per line (for example a member page), else "/".
+DASHBOARD_ROUTES = f"{DASHBOARD}/screenshots.routes"
+
+
+def dashboard_changed(root: Path) -> bool:
+    base = ""
+    for ref in ("origin/main", "origin/HEAD", "main"):
+        found = subprocess.run(
+            ["git", "-C", str(root), "merge-base", "HEAD", ref],
+            capture_output=True, text=True, timeout=TIMEOUT, check=False,
+        )  # fmt: skip
+        if found.returncode == 0 and found.stdout.strip():
+            base = found.stdout.strip()
+            break
+    if not base:
+        return False
+    listed = subprocess.run(
+        ["git", "-C", str(root), "diff", "--name-only", f"{base}..HEAD", "--", DASHBOARD],
+        capture_output=True, text=True, timeout=TIMEOUT, check=False,
+    )  # fmt: skip
+    return any(Path(name).name.startswith(DASHBOARD_FILES) for name in listed.stdout.splitlines())
+
+
+def dashboard_routes(root: Path) -> list[str]:
+    path = root / DASHBOARD_ROUTES
+    routes = path.read_text().splitlines() if path.is_file() else []
+    cleaned = [r.strip() for r in routes if r.strip().startswith("/")]
+    return cleaned or ["/"]
+
+
+def start_dashboard(root: Path) -> tuple[subprocess.Popen[bytes], str] | None:
+    """The commit's dashboard on a free loopback port, reading its fixtures; None if it fails."""
+    probe = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Quiet)
+    port = probe.server_port
+    probe.server_close()
+    fixtures = [f"{name}={root / DASHBOARD / file}" for name, file in DASHBOARD_FIXTURES]
+    process = subprocess.Popen(
+        [sys.executable, "-I", str(root / DASHBOARD_SERVER), "--fixtures", *fixtures,
+         "--port", str(port)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )  # fmt: skip
+    url = f"http://127.0.0.1:{port}"
+    for _ in range(100):
+        try:
+            with urllib.request.urlopen(url + "/", timeout=1):
+                return process, url
+        except OSError:
+            if process.poll() is not None:
+                return None
+            time.sleep(0.1)
+    process.kill()
+    return None
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -227,13 +292,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     binary = browser()
     names = [] if binary is None else pages(args.root, args.page)
+    dashboard = binary is not None and not args.page and dashboard_changed(args.root)
     problem = ""
     if binary is None:
         problem = "no Chromium on PATH"
-    elif not names:
+    elif not names and not dashboard:
         sys.stdout.write(
-            f"nothing to render: HEAD adds nothing under {MOCKS}/ and no --page was given\n"
-            "screenshots: PASS\n"
+            f"nothing to render: HEAD adds nothing under {MOCKS}/, the dashboard is unchanged, "
+            "and no --page was given\nscreenshots: PASS\n"
         )
         return 0
     else:
@@ -245,18 +311,28 @@ def main(argv: Sequence[str] | None = None) -> int:
     if problem or binary is None:
         sys.stdout.write(f"{problem}\nscreenshots: FAIL\n")
         return 1
-    skipped = names[MAX_PAGES:]
     args.out.mkdir(parents=True, exist_ok=True)
     server = serve(args.root)
+    running = start_dashboard(args.root) if dashboard else None
+    if dashboard and running is None:
+        server.shutdown()
+        sys.stdout.write("the dashboard did not start\nscreenshots: FAIL\n")
+        return 1
     try:
         base = f"http://127.0.0.1:{server.server_port}"
-        results = capture(binary, base, names[:MAX_PAGES], args.out)
+        urls = [f"{base}/{name}" for name in names]
+        if running is not None:
+            urls += [running[1] + route for route in dashboard_routes(args.root)]
+        skipped = urls[MAX_PAGES:]
+        results = capture(binary, urls[:MAX_PAGES], args.out)
     finally:
         server.shutdown()
+        if running is not None:
+            running[0].kill()
     for name, ok, problem in results:
         sys.stdout.write(f"{name}: {'pass' if ok else 'FAIL ' + problem}\n")
-    for name in skipped:
-        sys.stdout.write(f"not captured, over {MAX_PAGES} pages: {name}\n")
+    for url in skipped:
+        sys.stdout.write(f"not captured, over {MAX_PAGES} pages: {url.split('/', 3)[-1]}\n")
     passed = all(ok for _, ok, _ in results) and not skipped
     sys.stdout.write(f"screenshots: {'PASS' if passed else 'FAIL'}\n")
     return 0 if passed else 1
