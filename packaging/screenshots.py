@@ -335,7 +335,7 @@ def diagnose() -> None:
         found = sorted(str(p) for p in Path(folder).rglob("*"))[:5] if Path(folder).is_dir() else []
         sys.stdout.write(f"{folder}: {found}\n")
     fonts = EXTRA_ENV.get("FONTCONFIG_FILE")
-    sys.stdout.write(f"FONTCONFIG_FILE: {fonts} exists={bool(fonts) and Path(fonts).is_file()}\n")
+    sys.stdout.write(f"FONTCONFIG_FILE: {fonts} exists={fonts is not None and Path(fonts).is_file()}\n")
     root = Path(EXTRA_ENV["LD_LIBRARY_PATH"].split(":")[0]).parents[2] if EXTRA_ENV else None
     if root:
         for sub in ("usr/share/fonts", "etc/fonts"):
