@@ -157,7 +157,7 @@ def test_a_commit_that_adds_several_mocks_gets_both_widths_of_each_full_page(
     assert "p1: docs/mocks/b/two.html" in log and "p2: docs/mocks/one.html" in log
     assert sorted(f.name for f in out.iterdir()) == [
         "p1-desktop-1280.png", "p1-mobile-390.png", "p2-desktop-1280.png", "p2-mobile-390.png",
-        "report.txt",
+        "dom.html", "report.txt",
     ]  # fmt: skip
     # Each is as tall as its page, at its width.
     for name, size in (
@@ -379,6 +379,19 @@ def test_the_served_pages_measure_their_own_overflow() -> None:
     module = runner()
     for name in (b"data-scroll-width", b"data-client-width", b"data-wide"):
         assert name in module.MEASURE
+
+
+def test_the_dom_artifact_has_no_scripts_external_loads_or_measuring_attributes() -> None:
+    module = runner()
+    dom = (
+        '<html data-page-height="9" data-outline="a%20b"><head><link rel="stylesheet" '
+        'href="http://x/y.css"><script>var a</script></head><body><a href="#top">in</a>'
+        '<img src="http://evil/p.png"><p>kept</p></body></html>'
+    )
+    clean = module.sanitize(dom)
+    assert "kept" in clean and 'href="#top"' in clean
+    for gone in ("script", "evil", "link", "data-page-height", "data-outline"):
+        assert gone not in clean
 
 
 def test_the_report_lists_a_layout_outline_with_boxes_and_overflow_flags() -> None:
