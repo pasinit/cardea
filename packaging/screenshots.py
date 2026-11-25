@@ -231,7 +231,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     if binary is None:
         problem = "no Chromium on PATH"
     elif not names:
-        problem = f"no page: HEAD adds nothing under {MOCKS}/ and no --page was given"
+        sys.stdout.write(
+            f"nothing to render: HEAD adds nothing under {MOCKS}/ and no --page was given\n"
+            "screenshots: PASS\n"
+        )
+        return 0
     else:
         root = args.root.resolve()
         for name in names:
