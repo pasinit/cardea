@@ -272,8 +272,10 @@ def test_resuming_pages_cut_on_line_boundaries(vcs: Vcs, host: FakeGitHub, tmp_p
 def test_resuming_reads_many_files_and_large_ones_without_gaps(
     vcs: Vcs, host: FakeGitHub, tmp_path: Path
 ) -> None:
-    big = "".join(f'line {i} "quoted" \\ escaped\n' for i in range(3000)).encode()
-    head: dict[str, bytes | None] = {f"f{i}.txt": big for i in range(3)}
+    # Each big patch spans two diff pages (32 KiB each), so resuming crosses a page inside a
+    # file and a file boundary; larger files only made the test slower (18 s), not stronger.
+    big = "".join(f'line {i} "quoted" \\ escaped\n' for i in range(1500)).encode()
+    head: dict[str, bytes | None] = {f"f{i}.txt": big for i in range(2)}
     head.update({f"s{i}.py": f"v = {i}\n".encode() for i in range(5)})
     head["logo.png"] = b"\x89PNG\x00\x02"
     number = change(host, tmp_path, {"README": b"r\n"}, head)
@@ -282,8 +284,9 @@ def test_resuming_reads_many_files_and_large_ones_without_gaps(
         for p in host.repositories["acme/cardea"].changed_files(number)
         if isinstance(p.get("patch"), str)
     }
-    texts, _ = read_whole(vcs, number)
+    texts, calls = read_whole(vcs, number)
     assert texts == expected
+    assert calls >= 4  # paged within files and across them
 
 
 def test_old_style_calls_are_unchanged(vcs: Vcs, host: FakeGitHub, tmp_path: Path) -> None:
