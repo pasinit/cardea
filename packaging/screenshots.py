@@ -54,6 +54,7 @@ REPORT_BYTES = 64 * 1024
 # escaped text per width (nothing in it loads or runs).
 DOM_REPORT = "dom.html"
 DOM_BYTES = 192 * 1024
+LOG_REPORT = 4000
 REPORT_TEXT = 3000
 # Tried in turn until the screenshot fits its share of the limit.
 SCALES = (1.0, 0.75, 0.5, 0.35, 0.25)
@@ -501,6 +502,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         if running is not None:
             running[0].kill()
     write_dom_report(args.out)
+    # The log reaches a reader even when an artifact does not: the layout report, bounded.
+    sys.stdout.write("layout report:\n" + "\n".join(LINES)[:LOG_REPORT] + "\n")
     (args.out / REPORT).write_text("\n".join(LINES)[:REPORT_BYTES] + "\n")
     if not all(ok for _, ok, _ in results):
         diagnose()
