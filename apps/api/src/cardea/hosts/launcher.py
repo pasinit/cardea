@@ -4,6 +4,7 @@
 import base64
 import fcntl
 import hashlib
+import contextlib
 import json
 import math
 import os
@@ -167,6 +168,9 @@ WORKSPACE_MB = (1, 8192)
 CACHE_ROOT = Path("/var/cache/cardea-host")
 CACHE = "/cache"
 CACHE_NAME = r"[a-z][a-z0-9-]{0,31}"
+# Packages of removed or older dependencies accumulate; past this a cache starts over empty,
+# which costs one cold job.
+CACHE_MAX_BYTES = 3 * 1024**3
 # A profile's named credentials (ADR-037 amendment 2026-11-17): one file per name here.
 CREDENTIALS = "/run/cardea/credentials"
 CREDENTIAL_PATH = r"/etc/cardea/credentials/[a-z0-9-]{1,64}"
@@ -950,6 +954,16 @@ def host_mounted(path: Path, mountinfo: Path = HOST_MOUNTINFO) -> bool:
     return False
 
 
+def _size(path: Path) -> int:
+    """Bytes under `path`, without following links."""
+    total = 0
+    for root, _, files in os.walk(path, followlinks=False):
+        for name in files:
+            with contextlib.suppress(OSError):
+                total += os.lstat(os.path.join(root, name)).st_size
+    return total
+
+
 def cache_dir(name: str) -> Path:
     """The profile's persistent cache directory, created private to the worker account."""
     account = pwd.getpwnam("cardea-worker")
@@ -957,6 +971,8 @@ def cache_dir(name: str) -> Path:
     path = CACHE_ROOT / name
     if path.is_symlink():
         raise ValueError("unsafe_cache")
+    if path.is_dir() and _size(path) > CACHE_MAX_BYTES:
+        shutil.rmtree(path)
     path.mkdir(mode=0o700, exist_ok=True)
     info = path.stat()
     if (info.st_uid, info.st_gid) != (account.pw_uid, account.pw_gid):

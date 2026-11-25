@@ -1415,6 +1415,14 @@ def test_a_profile_cache_is_a_private_host_directory_bound_writable(
     folder = launcher.cache_dir("try")
     assert folder == tmp_path / "cache" / "try" and folder.is_dir()
     assert owned == [(folder, 994, 994)]
+    owned.clear()
+    # Past its size cap, a cache starts over empty.
+    (folder / "old.whl").write_bytes(b"x" * 64)
+    monkeypatch.setattr(launcher, "CACHE_MAX_BYTES", 32)
+    assert not (launcher.cache_dir("try") / "old.whl").exists()
+    monkeypatch.setattr(launcher, "CACHE_MAX_BYTES", 3 * 1024**3)
+    owned.clear()
+    launcher.cache_dir("try")
     (tmp_path / "cache" / "evil").symlink_to(tmp_path)
     with pytest.raises(ValueError, match="unsafe_cache"):
         launcher.cache_dir("evil")
