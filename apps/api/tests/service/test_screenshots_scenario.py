@@ -379,3 +379,17 @@ def test_the_served_pages_measure_their_own_overflow() -> None:
     module = runner()
     for name in (b"data-scroll-width", b"data-client-width", b"data-wide"):
         assert name in module.MEASURE
+
+
+def test_the_report_lists_a_layout_outline_with_boxes_and_overflow_flags() -> None:
+    module = runner()
+    outline = "h1 | Title | 0 | 8 | 390 | 30 | \ndiv | wide | 0 | 40 | 500 | 20 | OVERFLOW"
+    dom = (
+        '<html data-scroll-width="500" data-client-width="390" data-wide="DIV" '
+        f'data-outline="{module.urllib.parse.quote(outline)}"><body>hi</body></html>'
+    )
+    text = "\n".join(module.summary(dom, 390))
+    assert "layout outline (tag | own text | x | y | width | height | overflow)" in text
+    assert "h1 | Title | 0 | 8 | 390 | 30 |" in text
+    assert "div | wide | 0 | 40 | 500 | 20 | OVERFLOW" in text
+    assert b"data-outline" in module.MEASURE
