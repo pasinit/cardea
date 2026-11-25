@@ -1399,3 +1399,39 @@ def test_workspace_mounts_happen_in_the_hosts_mount_namespace(
     assert launcher.host_mounted(Path("/var/lib/cardea-host/aa/work"), mountinfo)
     assert launcher.host_mounted(Path("/var/lib/with space"), mountinfo)
     assert not launcher.host_mounted(Path("/var/lib/cardea-host/bb/work"), mountinfo)
+
+
+def test_a_profile_cache_is_a_private_host_directory_bound_writable(
+    phases: list[list[str]], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Tool caches (uv, mypy) persist between jobs of one profile; they only speed jobs up.
+    launcher.validate_profile({**FETCHING, "cache": "try"})
+    for bad in ("", "../etc", "Try", "a" * 40, 3):
+        with pytest.raises(ValueError, match="invalid_profile"):
+            launcher.validate_profile({**FETCHING, "cache": bad})
+    monkeypatch.setattr(launcher, "CACHE_ROOT", tmp_path / "cache")
+    owned: list[tuple[Path, int, int]] = []
+    monkeypatch.setattr(os, "chown", lambda p, u, g, **k: owned.append((Path(p), u, g)))
+    folder = launcher.cache_dir("try")
+    assert folder == tmp_path / "cache" / "try" and folder.is_dir()
+    assert owned == [(folder, 994, 994)]
+    owned.clear()
+    # Past its size cap, a cache starts over empty.
+    (folder / "old.whl").write_bytes(b"x" * 64)
+    monkeypatch.setattr(launcher, "CACHE_MAX_BYTES", 32)
+    assert not (launcher.cache_dir("try") / "old.whl").exists()
+    monkeypatch.setattr(launcher, "CACHE_MAX_BYTES", 3 * 1024**3)
+    owned.clear()
+    launcher.cache_dir("try")
+    (tmp_path / "cache" / "evil").symlink_to(tmp_path)
+    with pytest.raises(ValueError, match="unsafe_cache"):
+        launcher.cache_dir("evil")
+    command = launcher.confined_command(
+        "a" * 32, time.time() + 60, {**FETCHING, "cache": "try"}, WORKER, False, None
+    )
+    bind = command.index(str(folder))
+    assert command[bind - 1] == "--bind" and command[bind + 1] == "/cache"
+    env = environment(command)
+    assert env["UV_CACHE_DIR"] == "/cache/uv" and env["MYPY_CACHE_DIR"] == "/cache/mypy"
+    plain = launcher.confined_command("a" * 32, time.time() + 60, FETCHING, WORKER, False, None)
+    assert "/cache" not in plain

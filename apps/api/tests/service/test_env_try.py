@@ -1010,3 +1010,20 @@ def test_a_cached_result_is_linked_to_another_item_by_its_own_receipt(
     # The same call again adds nothing.
     attach_call(kernel, "c", commit=repo["good"], scenarios=["try"])
     assert len(stored(kernel)["links"]) == 1
+
+
+def test_the_profile_cache_reaches_the_scenarios(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The launcher sets these when the try profile has a cache; scenarios keep them.
+    from cardea_env_ops import try_
+
+    from cardea.service.repositories import Environment
+
+    monkeypatch.setenv("UV_CACHE_DIR", "/cache/uv")
+    monkeypatch.setenv("MYPY_CACHE_DIR", "/cache/mypy")
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+    catalog = Environment.model_validate({"scenarios": {"try": {"argv": ["/bin/true"]}}})
+    env = try_.environment(tmp_path, catalog)
+    assert env["UV_CACHE_DIR"] == "/cache/uv" and env["MYPY_CACHE_DIR"] == "/cache/mypy"
+    assert "XDG_CACHE_HOME" not in env
