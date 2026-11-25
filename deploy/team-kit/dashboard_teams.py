@@ -99,8 +99,7 @@ class TeamsBackend:
             found: dict[str, Any] = {"name": name, "state": state, "view": view}
         except Exception as error:  # an unreachable team must not hide the others
             found = {"name": name, "error": error_code(error)}
-        if name in self.hosts:
-            found["controls"] = True
+        found["controls"] = name in self.hosts
         return found
 
     def overview(self) -> dict[str, Any]:
