@@ -25,6 +25,7 @@ import http.server
 import io
 import os
 import re
+import resource
 import shutil
 import subprocess
 import sys
@@ -50,6 +51,11 @@ UNMEASURED = 2400
 # Lets the page's fetch of its fixture data finish before the capture.
 VIRTUAL_TIME_MS = 5000
 TIMEOUT = 120
+# One Chromium run, and the whole scenario, must end well inside env.try's 300 s: a hung
+# browser fails fast with its own output instead of a silent timeout.
+RUN_TIMEOUT = 40
+DEADLINE = 240
+STARTED = time.monotonic()
 # Served with every HTML page: records the page's height for the capture of its full length.
 MEASURE = (
     b"<script>setTimeout(() => document.documentElement.setAttribute("
@@ -108,8 +114,22 @@ def direct(found: str) -> str:
         if folder.is_dir()
     ] + [real.parent]
     EXTRA_ENV["LD_LIBRARY_PATH"] = ":".join(str(folder) for folder in libraries)
+    # The toolchain's fonts.conf names /usr/share/fonts, which the worker does not have: write
+    # one that names the toolchain's own fonts and a cache directory the worker can write.
     fonts = root / "etc" / "fonts" / "fonts.conf"
-    if fonts.is_file():
+    shipped = root / "usr" / "share" / "fonts"
+    if fonts.is_file() and shipped.is_dir():
+        scratch = Path(tempfile.mkdtemp(prefix="fontconfig-"))
+        config = scratch / "fonts.conf"
+        config.write_text(
+            '<?xml version="1.0"?><!DOCTYPE fontconfig SYSTEM "fonts.dtd"><fontconfig>'
+            f"<dir>{shipped}</dir><cachedir>{scratch}/cache</cachedir>"
+            f"<include ignore_missing=\"yes\">{root}/etc/fonts/conf.d</include></fontconfig>"
+        )
+        EXTRA_ENV["FONTCONFIG_FILE"] = str(config)
+        EXTRA_ENV["FONTCONFIG_PATH"] = str(root / "etc" / "fonts")
+        EXTRA_ENV["XDG_CACHE_HOME"] = str(scratch)
+    elif fonts.is_file():
         EXTRA_ENV["FONTCONFIG_FILE"] = str(fonts)
     return str(real)
 
@@ -137,6 +157,11 @@ def command(
         "--disable-gpu",
         # The worker's own confinement is the sandbox; Chromium's cannot nest inside it.
         "--no-sandbox",
+        # Under a memory limit a renderer cannot reserve V8's code range: run without the JIT
+        # reservation, and do not wait on crashpad when it dies.
+        "--js-flags=--jitless",
+        "--disable-crash-reporter",
+        "--disable-breakpad",
         f"--user-data-dir={profile}",
         "--no-proxy-server",
         "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1",
@@ -161,18 +186,36 @@ def pages(root: Path, page: str | None) -> list[str]:
     return sorted(n for n in names if n.lower().endswith((".html", ".htm")))
 
 
+def lift_limits() -> None:
+    """Raise the soft address-space limit to its hard one: V8 reserves a large code range
+    at start and a renderer that cannot dies ("Failed to reserve virtual memory for
+    CodeRange") while the browser waits for it until the timeout."""
+    for name in (resource.RLIMIT_AS, resource.RLIMIT_DATA):
+        _, hard = resource.getrlimit(name)
+        resource.setrlimit(name, (hard, hard))
+
+
 def run(argv: list[str]) -> tuple[str, str]:
     """Chromium's stdout and a problem, empty when it exited cleanly."""
+    left = DEADLINE - (time.monotonic() - STARTED)
+    if left < 5:
+        return "", "scenario deadline reached"
     try:
         done = subprocess.run(
             argv,
             capture_output=True,
             text=True,
-            timeout=TIMEOUT,
+            timeout=min(RUN_TIMEOUT, left),
             check=False,
             env={**os.environ, **EXTRA_ENV} if EXTRA_ENV else None,
+            preexec_fn=lift_limits,
         )
-    except (OSError, subprocess.TimeoutExpired) as error:
+    except subprocess.TimeoutExpired as error:
+        seen = error.stderr or b""
+        text = seen if isinstance(seen, str) else seen.decode("utf-8", "replace")
+        sys.stdout.write(f"chromium hung after {error.timeout:.0f}s: {text[-1000:]}\n")
+        return "", "TimeoutExpired"
+    except OSError as error:
         return "", type(error).__name__
     if done.returncode:
         sys.stdout.write(done.stderr[-1000:])
@@ -284,6 +327,23 @@ def start_dashboard(root: Path) -> tuple[subprocess.Popen[bytes], str] | None:
     return None
 
 
+def diagnose() -> None:
+    """What the browser has for fonts, printed when it failed: a headless Chromium without
+    any font dies in Skia ("SkFontMgr_FontConfigInterface ... Not implemented")."""
+    sys.stdout.write(f"browser env: {EXTRA_ENV}\n")
+    for folder in ("/usr/share/fonts", "/etc/fonts"):
+        found = sorted(str(p) for p in Path(folder).rglob("*"))[:5] if Path(folder).is_dir() else []
+        sys.stdout.write(f"{folder}: {found}\n")
+    fonts = EXTRA_ENV.get("FONTCONFIG_FILE")
+    sys.stdout.write(f"FONTCONFIG_FILE: {fonts} exists={bool(fonts) and Path(fonts).is_file()}\n")
+    root = Path(EXTRA_ENV["LD_LIBRARY_PATH"].split(":")[0]).parents[2] if EXTRA_ENV else None
+    if root:
+        for sub in ("usr/share/fonts", "etc/fonts"):
+            there = root / sub
+            names = sorted(str(p) for p in there.rglob("*"))[:12] if there.is_dir() else []
+            sys.stdout.write(f"{there}: {names}\n")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=Path("."))
@@ -329,6 +389,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         server.shutdown()
         if running is not None:
             running[0].kill()
+    if not all(ok for _, ok, _ in results):
+        diagnose()
     for name, ok, problem in results:
         sys.stdout.write(f"{name}: {'pass' if ok else 'FAIL ' + problem}\n")
     for url in skipped:
