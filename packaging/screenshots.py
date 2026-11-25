@@ -9,7 +9,7 @@ Serves `--root` (default the current directory, the checkout) on an ephemeral po
 loopback interface. The pages are the HTML files HEAD adds under `docs/mocks/`, or just
 `--page` (a path under the root) when it is given. Each page gets two screenshots as tall as
 the page, `p<N>-mobile-390.png` and `p<N>-desktop-1280.png` (N from 1, in path order, at most
-`MAX_PAGES`), written to `--out` (default `screenshots`), the scenario's artifact paths; the
+`MAX_PAGES`) and `p<N>-dom.html`, the settled DOM as text, written to `--out` (default `screenshots`), the scenario's artifact paths; the
 log names the page behind each N. `env.try` keeps at most 256 KiB per artifact and 1 MiB in
 all, so a screenshot over its share is retaken at a lower device pixel ratio, and a page that
 still does not fit fails. It needs only a loopback, so the catalog declares `network:
@@ -250,6 +250,13 @@ def shoot(
     return f"{target.stat().st_size} bytes at scale {SCALES[-1]}, over its {limit} byte share"
 
 
+def dump_dom(binary: str, scratch: Path, url: str, target: Path) -> None:
+    """The settled page's DOM as a readable HTML artifact, for reviewers who cannot open PNGs."""
+    shown, problem = run(command(binary, scratch / "dom", url, WIDTHS[0][1], WIDTHS[0][2]))
+    if not problem and shown:
+        target.write_text(shown[: MAX_BYTES // 2], encoding="utf-8")
+
+
 def capture(binary: str, urls: list[str], out: Path) -> list[tuple[str, bool, str]]:
     results: list[tuple[str, bool, str]] = []
     limit = min(MAX_BYTES, MAX_TOTAL // (2 * max(len(urls), 1)))
@@ -261,6 +268,7 @@ def capture(binary: str, urls: list[str], out: Path) -> list[tuple[str, bool, st
                 target = out / f"{label}.png"
                 problem = shoot(binary, Path(scratch), url, (label, width, tall), target, limit)
                 results.append((label, not problem, problem))
+            dump_dom(binary, Path(scratch), url, out / f"p{number}-dom.html")
     return results
 
 
