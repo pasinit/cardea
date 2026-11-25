@@ -502,7 +502,7 @@ def test_watch_reports_lease_loss_and_cancellation(kernel: Kernel) -> None:
 def test_recovery_stops_a_worker_left_by_a_crash(kernel: Kernel, host: WorkerHost) -> None:
     task_id = submit(kernel, "pages.post")
 
-    class Crash(Exception):
+    class Crash(BaseException):
         pass
 
     def crash(stage: str) -> None:

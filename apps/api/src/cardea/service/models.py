@@ -1,6 +1,8 @@
 """Explicit v0.2 wire/config records; existing v0.1 task and receipt bytes are preserved."""
 
 import json
+import re
+import threading
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -129,6 +131,8 @@ RepoGrant = Annotated[str, Field(strict=True, pattern=r"^repo:[a-z][a-z0-9-]{0,6
 # registry at provisioning, admission and dispatch; harness grants against the installed
 # harnesses.
 Grant = Right | OperationName | HarnessGrant | RecordGrant | MailGrant | ApproveGrant | RepoGrant
+RepoAlias = Annotated[str, Field(strict=True, pattern=r"^[a-z][a-z0-9-]{0,63}$")]
+
 
 RIGHTS: tuple[Right, ...] = (
     "objects.read",
@@ -146,8 +150,24 @@ RIGHTS: tuple[Right, ...] = (
 DISABLED_REQUEST_PREFIX = "disabled."
 
 
-def now() -> datetime:
+_clock_lock = threading.Lock()
+_latest = datetime.min.replace(tzinfo=UTC)
+
+
+def _wall_clock() -> datetime:
     return datetime.now(UTC)
+
+
+def now() -> datetime:
+    """The wall clock, never earlier than any time this process already read.
+
+    A task is stamped with the time of its last write and a worker must not predate it, so
+    a clock that steps backwards must not make a live worker look stale.
+    """
+    global _latest
+    with _clock_lock:
+        _latest = max(_latest, _wall_clock())
+        return _latest
 
 
 class Record(BaseModel):
@@ -406,6 +426,15 @@ class InboundEvent(Record):
     data: JsonValue = None
 
 
+class RunWorkspace(Record):
+    """The run's own checkout (ADR-037 amendment 2026-11-24): the session gets these
+    repositories cloned from the host's read-only sources, built-in edit and shell tools in
+    them, and an upload route for handing a change bundle to operations. Each alias needs
+    the run's `repo:<alias>` grant."""
+
+    repositories: Annotated[tuple[RepoAlias, ...], Field(min_length=1, max_length=4)]
+
+
 class AgentRunRequest(TaskRequest):
     """One bounded agent session whose only tools are installed operations (ADR-027)."""
 
@@ -445,12 +474,15 @@ class AgentRunRequest(TaskRequest):
     approval_wait_seconds: Annotated[int, Field(strict=True, ge=0, le=MAX_APPROVAL_WAIT)] | None = (
         None
     )
+    # The run's own checkout and built-in tools (ADR-037 amendment 2026-11-24); unset keeps
+    # the session tool-less and the request's digest unchanged.
+    workspace: RunWorkspace | None = None
 
     @model_serializer(mode="wrap")
     def _omit_unset_approval_fields(self, handler: SerializerFunctionWrapHandler) -> Any:
         document = handler(self)
         if isinstance(document, dict):
-            for key in ("max_approval_waits", "approval_wait_seconds"):
+            for key in ("max_approval_waits", "approval_wait_seconds", "workspace"):
                 if document.get(key, 0) is None:
                     del document[key]
         return document
@@ -475,6 +507,10 @@ class AgentRunRequest(TaskRequest):
         context = {c.operation for c in self.context if c.operation not in RECORD_OPERATIONS}
         if not context <= set(self.grants):
             raise ValueError("Context operations must be granted")
+        if self.workspace is not None and not {
+            f"repo:{alias}" for alias in self.workspace.repositories
+        } <= set(self.grants):
+            raise ValueError("A workspace repository needs the run's repo:<alias> grant")
         return self
 
     def digest(self, principal: str) -> str:
@@ -972,11 +1008,18 @@ class GroupEventMatch(Record):
 
 
 class GroupTrigger(Record):
+    # A named trigger's ID is `<member>.<name>`; an unnamed one's is `<member>.t<n>`, `n`
+    # counting the unnamed triggers only. A trigger's kind is immutable, so a name keeps an
+    # optional trigger's ID from shifting the others' when it comes and goes.
+    name: Annotated[str, Field(strict=True, pattern=r"^[a-z][a-z0-9-]{0,23}$")] | None = None
     schedule: GroupSchedule | None = None
     event: GroupEventMatch | None = None
 
     @model_validator(mode="after")
     def one_kind(self) -> Self:
+        # `t<n>` is reserved for unnamed triggers (the regex engine has no look-ahead).
+        if self.name is not None and re.fullmatch(r"t[0-9]+", self.name):
+            raise ValueError("A trigger name may not look like t<n>; those IDs are positional")
         if (self.schedule is None) == (self.event is None):
             raise ValueError("A group trigger has exactly one of schedule or event")
         return self
@@ -1015,6 +1058,8 @@ class RunTemplate(Record):
     model: ModelID | None = None
     bounds: RunBounds = RunBounds()
     expect: Annotated[tuple[ExpectEntry, ...], Field(max_length=16)] = ()
+    # The members' own checkout and built-in tools (ADR-037 amendment 2026-11-24).
+    workspace: RunWorkspace | None = None
 
 
 class GroupSpend(Record):
@@ -1152,6 +1197,13 @@ class GroupPool(Record):
     def distinct_grants(self) -> Self:
         if len(set(self.grants)) != len(self.grants):
             raise ValueError("A pool repeats a grant")
+        return self
+
+    @model_validator(mode="after")
+    def distinct_trigger_names(self) -> Self:
+        names = [t.name for t in self.triggers if t.name is not None]
+        if len(set(names)) != len(names):
+            raise ValueError("A pool repeats a trigger name")
         return self
 
 

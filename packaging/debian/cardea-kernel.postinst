@@ -8,8 +8,14 @@ if [ "$1" = configure ]; then
         test "$(id -u "$account")" != 0
     done
     test "$(id -u cardea-kernel)" != "$(id -u cardea-worker)"
+    # Members may run `cardea team`: it acts as the team supervisor, whose identity is bound
+    # to cardea-kernel (/etc/sudoers.d/cardea-team). The host owner adds people to the group.
+    if ! getent group cardea-operators >/dev/null; then
+        addgroup --system cardea-operators
+    fi
     install -d -o root -g cardea-kernel -m 0750 /etc/cardea
     install -d -o cardea-kernel -g cardea-kernel -m 0700 /var/lib/cardea
+    install -d -o cardea-kernel -g cardea-kernel -m 0700 /var/lib/cardea/team
     install -d -o root -g root -m 0700 /var/lib/cardea-host
     python3 -I - <<'PY'
 import json, os, pwd
@@ -32,5 +38,7 @@ else:
 PY
     chmod 0440 /etc/sudoers.d/cardea-host
     visudo -cf /etc/sudoers.d/cardea-host
+    chmod 0440 /etc/sudoers.d/cardea-team
+    visudo -cf /etc/sudoers.d/cardea-team
 fi
 #DEBHELPER#

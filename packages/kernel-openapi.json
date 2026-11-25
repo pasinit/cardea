@@ -494,6 +494,16 @@
             "default": false,
             "title": "Wait For Event",
             "type": "boolean"
+          },
+          "workspace": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunWorkspace"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -3477,6 +3487,18 @@
               }
             ]
           },
+          "name": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z][a-z0-9-]{0,23}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
           "schedule": {
             "anyOf": [
               {
@@ -3503,6 +3525,18 @@
                 "type": "null"
               }
             ]
+          },
+          "name": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z][a-z0-9-]{0,23}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
           },
           "schedule": {
             "anyOf": [
@@ -4172,6 +4206,28 @@
           "message"
         ],
         "title": "KernelFailure",
+        "type": "object"
+      },
+      "Liveness": {
+        "additionalProperties": false,
+        "description": "`GET /v0.2/livez`: the kernel process answers. It reads no state.",
+        "properties": {
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "status": {
+            "const": "ok",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "Liveness",
         "type": "object"
       },
       "MailDelivery": {
@@ -5554,6 +5610,67 @@
         "title": "OverviewSpend",
         "type": "object"
       },
+      "Readiness": {
+        "additionalProperties": false,
+        "description": "`GET /v0.2/readyz`: whether every check passed (HTTP 200) or not (HTTP 503).",
+        "properties": {
+          "as_of": {
+            "description": "When the checks ran (UTC, ISO 8601).",
+            "title": "As Of",
+            "type": "string"
+          },
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/ReadinessCheck"
+            },
+            "title": "Checks",
+            "type": "array"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          },
+          "schema_version": {
+            "const": "0.2",
+            "default": "0.2",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ready",
+          "checks",
+          "as_of"
+        ],
+        "title": "Readiness",
+        "type": "object"
+      },
+      "ReadinessCheck": {
+        "additionalProperties": false,
+        "description": "One readiness check: its name, whether it passed and a short reason.",
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "name": {
+            "description": "For example `database`, `repository:<alias>`.",
+            "title": "Name",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "ok",
+          "detail"
+        ],
+        "title": "ReadinessCheck",
+        "type": "object"
+      },
       "ReceiptRequirement": {
         "additionalProperties": false,
         "description": "Evidence a transition needs: a successful call of `operation` by the caller.\n\n`same_task` accepts a call of the caller's own task (its run). `same_caller` accepts one\nof any task of the same agent principal within `window_seconds` before the transition.\nThe cited call must name this record: its `record_id` argument, or an idempotency\ncontext `<record_id>.<epoch>`.\n\n`result` (ADR-034 amendment, 2026-11-16) is a CEL guard over the cited call's output,\nas `result`: for example `result.passed == true` accepts only a passing `env.try`\nrun. It has the record guards' limits (no comprehension macros), so an operation\nthat wants such a guard reports a summary field. False, an error, or a receipt with\nno output refuses the transition (`receipt_result_refused`).\n\n`sets` (2026-11-21) copies values from the cited call's output into the record's data,\nas `{field: JSON pointer}`: for example `{\"change\": \"/number\"}` records the pull\nrequest a `vcs.open_change` call opened. The new data must still match the schema; a\npointer the output lacks refuses the transition (`receipt_result_refused`).",
@@ -6349,6 +6466,16 @@
             "minItems": 1,
             "title": "Operations",
             "type": "array"
+          },
+          "workspace": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunWorkspace"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -6460,6 +6587,16 @@
             "minItems": 1,
             "title": "Operations",
             "type": "array"
+          },
+          "workspace": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunWorkspace"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -6624,6 +6761,27 @@
           "calls_next"
         ],
         "title": "RunView",
+        "type": "object"
+      },
+      "RunWorkspace": {
+        "additionalProperties": false,
+        "description": "The run's own checkout (ADR-037 amendment 2026-11-24): the session gets these\nrepositories cloned from the host's read-only sources, built-in edit and shell tools in\nthem, and an upload route for handing a change bundle to operations. Each alias needs\nthe run's `repo:<alias>` grant.",
+        "properties": {
+          "repositories": {
+            "items": {
+              "pattern": "^[a-z][a-z0-9-]{0,63}$",
+              "type": "string"
+            },
+            "maxItems": 4,
+            "minItems": 1,
+            "title": "Repositories",
+            "type": "array"
+          }
+        },
+        "required": [
+          "repositories"
+        ],
+        "title": "RunWorkspace",
         "type": "object"
       },
       "SendMessage": {
@@ -13952,6 +14110,145 @@
         "summary": "Submit Host"
       }
     },
+    "/v0.2/livez": {
+      "get": {
+        "description": "The kernel process answers. No credential and no state: it reads nothing, so it\nanswers even while the store is locked or a dependency is down.",
+        "operationId": "livez_v0_2_livez_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Liveness"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Method Not Allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Livez"
+      }
+    },
     "/v0.2/mailbox": {
       "get": {
         "description": "Messages of a namespace the caller sent, supervises or receives, oldest first,\neach with every delivery and its history; one size-bounded page.",
@@ -14799,6 +15096,196 @@
           }
         ],
         "summary": "Operations"
+      }
+    },
+    "/v0.2/readyz": {
+      "get": {
+        "description": "Whether this kernel can do its work: HTTP 200 when every check passes, 503\notherwise. Any enabled principal may ask, as for `/v0.2/system`; group names, task\nIDs and agent IDs appear only for namespaces where the caller holds\n`tasks.inspect`. `allow_paused=true` accepts a paused group (disabled supervisor).",
+        "operationId": "readyz_v0_2_readyz_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "allow_paused",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Allow Paused",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "mirror_max_age_seconds",
+            "required": false,
+            "schema": {
+              "default": 900,
+              "maximum": 604800,
+              "minimum": 60,
+              "title": "Mirror Max Age Seconds",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "lease_grace_seconds",
+            "required": false,
+            "schema": {
+              "default": 600,
+              "maximum": 86400,
+              "minimum": 0,
+              "title": "Lease Grace Seconds",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-cardea-auth",
+            "required": false,
+            "schema": {
+              "default": "spiffe",
+              "title": "X-Cardea-Auth",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Readiness"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Method Not Allowed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Readiness"
+                }
+              }
+            },
+            "description": "A readiness check failed"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Readyz"
       }
     },
     "/v0.2/system": {

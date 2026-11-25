@@ -890,7 +890,7 @@ def admit_workspace(job: str, request: dict[str, Any], profile: dict[str, Any]) 
         or work.is_symlink()
         or not work.is_dir()
         or directory.stat().st_uid != os.geteuid()
-        or not os.path.ismount(work)
+        or not host_mounted(work)
     ):
         raise ValueError("workspace_missing")
     shown = run(["/usr/bin/systemctl", "show", f"cardea-host-{source}.service"], check=False)
@@ -900,6 +900,39 @@ def admit_workspace(job: str, request: dict[str, Any], profile: dict[str, Any]) 
     return work
 
 
+# The host's mount namespace: where systemd starts the job units. The helper runs under
+# sudo from the kernel's service, which has its own namespace (ProtectSystem, PrivateTmp),
+# so a mount made there is invisible to the units: they see the bare, root-owned directory
+# under it (`PermissionError: /work/home`). Workspace mounts are made, checked and removed
+# in the host's namespace.
+HOST_MOUNT_NAMESPACE = Path("/proc/1/ns/mnt")
+HOST_MOUNTINFO = Path("/proc/1/mountinfo")
+
+
+def in_host_namespace(args: list[str]) -> list[str]:
+    """`args` run in the host's mount namespace: as they are when the helper already is
+    there, otherwise through nsenter."""
+    if not HOST_MOUNT_NAMESPACE.exists() or os.readlink("/proc/self/ns/mnt") == os.readlink(
+        HOST_MOUNT_NAMESPACE
+    ):
+        return args
+    return ["/usr/bin/nsenter", f"--mount={HOST_MOUNT_NAMESPACE}", "--", *args]
+
+
+def host_mounted(path: Path, mountinfo: Path = HOST_MOUNTINFO) -> bool:
+    """Whether `path` is a mount point in the host's namespace (field 5 of mountinfo, with
+    its octal escapes)."""
+    target = str(path)
+    if not mountinfo.exists():
+        # No /proc (not Linux): there is no other namespace to look into.
+        return os.path.ismount(path)
+    for line in mountinfo.read_text().splitlines():
+        fields = line.split()
+        if len(fields) > 4 and fields[4].encode().decode("unicode_escape") == target:
+            return True
+    return False
+
+
 def make_workspace(directory: Path, megabytes: int) -> Path:
     """A size-capped tmpfs under the job's staging, owned by the worker account. Its pages
     are charged to whoever fills them, the job's unit, so the unit's memory cap holds."""
@@ -907,8 +940,18 @@ def make_workspace(directory: Path, megabytes: int) -> Path:
     work = directory / "work"
     work.mkdir(mode=0o700)
     options = f"size={megabytes}m,mode=0700,uid={account.pw_uid},gid={account.pw_gid},nosuid,nodev"
-    run(["/usr/bin/mount", "-t", "tmpfs", "-o", options, "tmpfs", str(work)])
+    run(in_host_namespace(["/usr/bin/mount", "-t", "tmpfs", "-o", options, "tmpfs", str(work)]))
     return work
+
+
+def hand_over_workspace(work: Path) -> None:
+    """Give an inherited workspace's mount root to the worker account for the second phase.
+
+    Nothing is widened: the root stays private to the worker (0700) and is never followed
+    through a link."""
+    account = pwd.getpwnam("cardea-worker")
+    os.chown(work, account.pw_uid, account.pw_gid, follow_symlinks=False)
+    os.chmod(work, 0o700)
 
 
 MOUNTINFO = Path("/proc/self/mountinfo")
@@ -1052,7 +1095,9 @@ def handle(request: dict[str, Any]) -> dict[str, Any]:
         stage(directory, content, profile["output_kb"] * 1024, staged)
         if request["deadline"] <= time.time():
             raise ValueError("expired_authority")
-        if profile.get("workspace_mb"):
+        if workspace is not None:
+            hand_over_workspace(workspace)
+        elif profile.get("workspace_mb"):
             workspace = make_workspace(directory, profile["workspace_mb"])
         run(confined_command(job, request["deadline"], profile, worker, bool(staged), workspace))
         return {"started": True}
@@ -1078,7 +1123,10 @@ def handle(request: dict[str, Any]) -> dict[str, Any]:
         if work.is_symlink():
             raise ValueError("unsafe_job")
         # Never delete through a mount: it goes first, or the cleanup is refused.
-        if os.path.ismount(work) and run(["/usr/bin/umount", str(work)], check=False).returncode:
+        if (
+            host_mounted(work)
+            and run(in_host_namespace(["/usr/bin/umount", str(work)]), check=False).returncode
+        ):
             raise ValueError("workspace_busy")
         retired(job, record=True)  # Commit the replay fence before deleting anything.
         if directory.exists():

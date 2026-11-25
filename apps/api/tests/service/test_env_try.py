@@ -370,6 +370,48 @@ def test_a_head_outside_the_clone_refs_is_staged(
     assert unknown.value.code == "env_commit_unknown"
 
 
+def test_a_change_bundle_stages_a_commit_nobody_pushed(
+    tmp_path: Path, repo: dict[str, Any]
+) -> None:
+    # A workspace's commits, never pushed, arrive as a bundle on top of the source's main.
+    work = tmp_path / "workspace"
+    git(tmp_path, "clone", "--quiet", str(repo["source"]), str(work))
+    git(work, "config", "user.email", "a@example.com")
+    git(work, "config", "user.name", "a")
+    (work / "mode").write_text("unpushed\n")
+    git(work, "commit", "--quiet", "-am", "unpushed")
+    head = git(work, "rev-parse", "HEAD")
+    bundle = tmp_path / "change.bundle"
+    git(work, "bundle", "create", "--quiet", str(bundle), "origin/main..HEAD")
+    without = tmp_path / "scratch-none"
+    without.mkdir()
+    with pytest.raises(OperationRejected) as unknown:
+        stage(str(repo["source"]), head, without)
+    assert unknown.value.code == "env_commit_unknown"
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    checkout = stage(str(repo["source"]), head, scratch, bundle=bundle.read_bytes())
+    assert (checkout / "mode").read_text() == "unpushed\n"
+    # A bundle whose base the source lacks, or one that is not a bundle, is refused.
+    other = tmp_path / "other"
+    git(tmp_path, "init", "--quiet", "--initial-branch=main", str(other))
+    git(other, "config", "user.email", "a@example.com")
+    git(other, "config", "user.name", "a")
+    (other / "x").write_text("1\n")
+    git(other, "add", "x")
+    git(other, "commit", "--quiet", "-m", "base")
+    (other / "x").write_text("2\n")
+    git(other, "commit", "--quiet", "-am", "next")
+    foreign = tmp_path / "foreign.bundle"
+    git(other, "bundle", "create", "--quiet", str(foreign), "HEAD~1..HEAD")
+    for name, content in (("foreign", foreign.read_bytes()), ("junk", b"not a bundle")):
+        target = tmp_path / f"scratch-{name}"
+        target.mkdir()
+        with pytest.raises(OperationRejected) as refused:
+            stage(str(repo["source"]), head, target, bundle=content)
+        assert refused.value.code == "env_change_invalid"
+
+
 def test_a_push_the_mirror_lacks_is_fetched_from_the_host(
     tmp_path: Path, repo: dict[str, Any]
 ) -> None:
@@ -732,6 +774,59 @@ def test_the_second_phase_is_pinned_into_the_run_key(
     kernel, _ = env_kernel
     record = kernel.executor_record("env.try")
     assert record is not None and record["then"]["profile_sha256"] == "p-loopback"  # type: ignore[index,call-overload]
+
+
+def test_the_registry_git_url_is_passed_to_stage_without_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo: dict[str, Any]
+) -> None:
+    from datetime import timedelta
+
+    from cardea_env_ops import try_
+
+    from cardea.service.models import now
+    from cardea.service.operations import OperationContext
+
+    registry = registry_file(tmp_path, repo["source"])
+    document_ = json.loads(registry.read_text())
+    document_["repositories"]["app"].update(
+        owner="acme",
+        name="app",
+        api_url="https://api.github.com",
+        git_url="https://github.com/acme/app.git",
+    )
+    registry.write_text(json.dumps(document_))
+    monkeypatch.setenv("CARDEA_REPOSITORIES", str(registry))
+    seen: list[tuple[str, str | None]] = []
+
+    class Staged(Exception):
+        pass
+
+    def fake_stage(
+        source: str,
+        commit: str,
+        scratch: Path,
+        host_url: str | None = None,
+        bundle: bytes | None = None,
+    ) -> Path:
+        seen.append((source, host_url))
+        raise Staged
+
+    monkeypatch.setattr(try_, "stage", fake_stage)
+    context = OperationContext(
+        task_id="t",
+        namespace="n",
+        receipt_id="r",
+        deadline=now() + timedelta(minutes=5),
+        effect_key="r",
+        previous=None,
+    )
+    arguments: Any = {"repo": "app", "commit": repo["good"], "scenarios": ["try"]}
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    with pytest.raises(Staged):
+        try_.try_commit(arguments, context, scratch)
+    assert seen == [(str(repo["source"]), "https://github.com/acme/app.git")]
+    assert seen[0][1] is not None and "@" not in seen[0][1]
 
 
 def test_a_second_phase_that_does_not_match_the_first_is_refused(

@@ -47,6 +47,8 @@ from cardea.service.operations import (
 )
 
 log = logging.getLogger(__name__)
+# How often the kernel reads the helper's installed worker profiles again.
+PROFILES_REFRESH_SECONDS = 60.0
 POLL_SECONDS = 0.25
 # Queue wait for a profile slot when the helper reports none (older helpers).
 DEFAULT_QUEUE_TIMEOUT_SECONDS = 600
@@ -221,18 +223,24 @@ class Workers:
     def __init__(self, host: WorkerHost) -> None:
         self.host = host
         self._installed: dict[str, Any] | None = None
+        self._installed_at = 0.0
         # Per-profile slots. Threading, not asyncio: each attempt runs its own event loop.
         self._slots: dict[str, threading.BoundedSemaphore] = {}
         self._slots_lock = threading.Lock()
 
     def installed(self) -> dict[str, Any]:
-        # Profiles are root-owned host configuration; changing them requires a restart.
-        if self._installed is None:
+        # Profiles are root-owned host configuration. They are read again every
+        # PROFILES_REFRESH_SECONDS, so a host owner's change takes effect without a restart;
+        # a failed read keeps the last good copy.
+        stale = time.monotonic() - self._installed_at >= PROFILES_REFRESH_SECONDS
+        if self._installed is None or stale:
             try:
                 self._installed = self.host.profiles()
+                self._installed_at = time.monotonic()
             except Fault:
                 log.warning("worker profiles unavailable", exc_info=True)
-                return {"profiles": {}, "workers": {}}
+                if self._installed is None:
+                    return {"profiles": {}, "workers": {}}
         return self._installed
 
     def require(
@@ -322,6 +330,7 @@ class Workers:
         deadline: float,
         watch: Watch | None = None,
         timeout_seconds: float | None = None,
+        inputs: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         """Wait for a profile slot, run, and return the worker's output."""
         status = await self.status_of(
@@ -332,6 +341,7 @@ class Workers:
             deadline=deadline,
             watch=watch,
             timeout_seconds=timeout_seconds,
+            inputs=inputs,
         )
         return _result(status)
 
@@ -679,6 +689,13 @@ class ConfinedAgentSession:
             job=job,
             unit=f"cardea-host-{job}.service",
         )
+        # The member's memory travels as a staged input file, never in the request document.
+        staged: dict[str, Any] = {}
+        files: list[dict[str, str]] = []
+        if request.memory is not None:
+            digest = hashlib.sha256(request.memory).hexdigest()
+            staged = {"/memory": {"file": "0", "sha256": digest, "bytes": len(request.memory)}}
+            files = [{"sha256": digest, "data": base64.b64encode(request.memory).decode()}]
         try:
             self.check()
             output = await self.workers.run(
@@ -689,10 +706,12 @@ class ConfinedAgentSession:
                         mode="json", exclude={"model"}, exclude_none=True
                     ),
                     **({"harness": self.settings} if self.settings is not None else {}),
+                    **({"inputs": staged} if staged else {}),
                 },
                 profile=self.profile,
                 worker=self.worker,
                 deadline=time.time() + max(1.0, request.timeout_seconds),
+                inputs=files or None,
             )
         except Fault as refused:
             activity.event("confined session refused", logging.WARNING, code=refused.code, job=job)

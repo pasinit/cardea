@@ -1,0 +1,9 @@
+[Unit]
+Description=Cardea: deploy the newest main commit (hot, or drained restart)
+After=cardea-kernel.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I /opt/cardea/deploy/small-host/cardea/cardea-update.py --host /etc/cardea/team.host.json --require-ci
+TimeoutStartSec=3600

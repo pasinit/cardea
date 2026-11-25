@@ -2,6 +2,9 @@ src/cardea usr/lib/cardea
 debian/main.py usr/lib/cardea
 debian/cardea usr/bin
 debian/cardea-host etc/sudoers.d
+debian/cardea-team etc/sudoers.d
+debian/cardea-team.1 usr/share/man/man1
+teamkit/*.py usr/lib/cardea/teamkit
 debian/config.example.json usr/share/doc/cardea-kernel
 requirements.txt usr/share/doc/cardea-kernel
 uv.lock usr/share/doc/cardea-kernel

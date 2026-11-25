@@ -29,6 +29,19 @@ class _Frozen(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
 
+class HarnessWorkspace(_Frozen):
+    """The session's own checkout (ADR-037 amendment 2026-11-24): repository aliases to clone
+    from the host's read-only sources before the session starts, and the run's loopback
+    route that stores a change bundle for operations (same bearer token as the tools)."""
+
+    repositories: tuple[str, ...]
+    upload_url: str
+    # The member's memory (`cardea-memory save` posts here) and its newest archive, which
+    # the session unpacks into ./memory before it starts. The archive never travels in the
+    # request document: a confined session gets it as a staged input file.
+    memory_url: str | None = None
+
+
 class HarnessRequest(_Frozen):
     """Input of one harness run: one attempt of an agent run."""
 
@@ -56,6 +69,11 @@ class HarnessRequest(_Frozen):
     # Stable identity of this attempt (task and attempt number); a confined harness's
     # worker job derives from it so recovery can stop it (ADR-028).
     job_key: str = ""
+    # Set only for a run with a workspace: built-in tools and a checkout. Unset, the
+    # session has no built-in tools at all (ADR-033).
+    workspace: HarnessWorkspace | None = None
+    # The member's newest memory archive (gzipped tar), for a run with a workspace.
+    memory: bytes | None = Field(default=None, exclude=True, repr=False)
 
 
 def tool_timeout_ms(request: HarnessRequest) -> int | None:

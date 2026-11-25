@@ -463,3 +463,14 @@ def test_the_kit_json_files_have_no_duplicate_keys() -> None:
 
     for path in sorted((KIT / "cardea").glob("*.json")):
         json.loads(path.read_text(), object_pairs_hook=unique)
+
+
+def test_the_try_profile_reaches_the_repository_host_without_a_credential() -> None:
+    # env.try fetches a commit the mirror lacks from the host (registry git_url), through
+    # the proxy and unauthenticated; the sandbox never holds a credential.
+    workers = json.loads((KIT / "cardea" / "cardea-host-workers.json").read_text())
+    profile = workers["profiles"]["try"]
+    assert profile["network"]["hosts"] == ["pypi.org", "files.pythonhosted.org", "github.com"]
+    assert "credentials" not in profile and "credential" not in profile
+    squid = (KIT / "cardea" / "squid-workers.conf").read_text()
+    assert "acl try_hosts dstdomain pypi.org files.pythonhosted.org github.com\n" in squid

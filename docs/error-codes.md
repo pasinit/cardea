@@ -223,11 +223,12 @@ used by the examples.
 | `approve_refused` | APPROVE reviews are not allowed on this host | `cardea_vcs_ops.ops` |
 | `artifact_refused` | — | `cardea.service.kernel` |
 | `attachment_external_reference` | The HTML attachment must be self-contained | `cardea_email_ops.attachments` |
-| `attachment_invalid` | An attachment needs a unique plain filename that matches its content type; An attachment's data is not valid base64 | `cardea_email_ops.attachments` |
+| `attachment_invalid` | An attachment has base64 `data`, or `text` if it is HTML, and not both; An attachment needs a unique plain filename that matches its content type; An attachment's data is not valid base64; for an HTML page send `text` instead | `cardea_email_ops.attachments` |
 | `attachment_too_large` | An attachment may be 1 to {…} bytes | `cardea_email_ops.attachments` |
 | `attachment_type_mismatch` | The attachment is not HTML text; The attachment is not a PNG image | `cardea_email_ops.attachments` |
 | `attachments_too_large` | Attachments may total {…} bytes | `cardea_email_ops.attachments` |
 | `attachments_too_many` | At most {…} attachments are allowed | `cardea_email_ops.attachments` |
+| `attempt_abandoned` | The attempt ended with an exception. | `cardea.service.agent_run_runtime` |
 | `bad_cursor` | cursor is not one this operation returned | `cardea.service.records` |
 | `branch_moved` | The branch moved since the caller read it | `cardea_vcs_ops.ops` |
 | `branch_not_allowed` | Only agent-group members push branches or open changes; Branches must be named {…}<name> | `cardea_vcs_ops.ops` |
@@ -252,6 +253,7 @@ used by the examples.
 | `deadline_exceeded` | Task deadline elapsed. | `cardea.kernel.store` |
 | `dependencies_mismatch` | dependencies is registries, but this worker's profile allows no package registry; dependencies is cache, but this worker's profile allows package registries ({…}); remove them from the profile and the proxy, or set dependencies to registries | `cardea_coding_ops.session` |
 | `effect_not_applied` | Destination shows no effect | `cardea.service.operation_runtime` |
+| `env_change_invalid` | the change bundle does not apply to this repository (its base is missing); the change bundle could not be read | `cardea_env_ops.try_` |
 | `env_commit_unknown` | the commit is not in the repository; the checkout is not the named commit | `cardea_env_ops.try_` |
 | `env_invalid` | the scenario environment may not set {…} | `cardea_env_ops.try_` |
 | `env_loopback_unavailable` | Scenarios {…} need loopback, whose second phase this host does not offer | `cardea_env_ops.try_` |

@@ -6,7 +6,7 @@ from hashlib import sha256
 from typing import Annotated, Any, Literal
 
 import sqlalchemy as sa
-from fastapi import Depends, FastAPI, Header, Path, Query, Request
+from fastapi import Depends, FastAPI, Header, Path, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -20,6 +20,7 @@ from cardea.kernel.store import StoreError
 from cardea.service import (
     approval_requests,
     groups,
+    health,
     host_budget,
     host_operations,
     mailbox,
@@ -70,11 +71,13 @@ from cardea.service.responses import (
     GroupOverview,
     GroupView,
     HostBudgetView,
+    Liveness,
     MailboxMessage,
     MailboxPage,
     MessageSent,
     OperationCatalog,
     OperationView,
+    Readiness,
     ReconcileResult,
     RecordHistory,
     RunOutput,
@@ -315,6 +318,45 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
             "max_task_request_bytes": kernel.max_task_request_bytes,
             "max_response_bytes": MAX_RESPONSE_BYTES,
         }
+
+    @app.get("/v0.2/livez", response_model=Liveness)
+    def livez() -> dict[str, Any]:
+        """The kernel process answers. No credential and no state: it reads nothing, so it
+        answers even while the store is locked or a dependency is down."""
+        return {"schema_version": "0.2", "status": "ok"}
+
+    @app.get(
+        "/v0.2/readyz",
+        response_model=Readiness,
+        responses={503: {"model": Readiness, "description": "A readiness check failed"}},
+    )
+    def readyz(
+        proof: Credential,
+        response: Response,
+        allow_paused: bool = False,
+        mirror_max_age_seconds: Annotated[int, Query(ge=60, le=604800)] = (
+            health.DEFAULT_MIRROR_AGE_SECONDS
+        ),
+        lease_grace_seconds: Annotated[int, Query(ge=0, le=86400)] = (
+            health.DEFAULT_LEASE_GRACE_SECONDS
+        ),
+    ) -> dict[str, Any]:
+        """Whether this kernel can do its work: HTTP 200 when every check passes, 503
+        otherwise. Any enabled principal may ask, as for `/v0.2/system`; group names, task
+        IDs and agent IDs appear only for namespaces where the caller holds
+        `tasks.inspect`. `allow_paused=true` accepts a paused group (disabled supervisor)."""
+        with kernel.database.read() as conn:
+            principal = proof.resolve(conn)
+        result = health.readiness(
+            kernel,
+            principal,
+            allow_paused=allow_paused,
+            mirror_max_age_seconds=mirror_max_age_seconds,
+            lease_grace_seconds=lease_grace_seconds,
+        )
+        if not result["ready"]:
+            response.status_code = 503
+        return result
 
     @app.get("/v0.2/operations", response_model=OperationCatalog)
     def operations(proof: Credential, namespace: Namespace) -> dict[str, Any]:

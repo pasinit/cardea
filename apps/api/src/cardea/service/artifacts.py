@@ -77,8 +77,10 @@ def store(
 ) -> dict[str, JsonValue]:
     """Store artifacts and the output in one transaction, fenced by the call's lease."""
     listed: list[JsonValue] = []
-    at = now()
     with database.engine.begin() as conn, borrow(conn) as tx:
+        # Read under the write lock: a write that lands first stamps the task, and a worker
+        # must not predate that, so a time taken before the lock can look like a regression.
+        at = now()
         state = conn.exec_driver_sql(
             "SELECT state FROM operations WHERE receipt_id=?", (context.receipt_id,)
         ).scalar()
@@ -150,3 +152,54 @@ def reconciler(database: Database) -> Reconciler:
         return Reconciliation(applied=output is not None, output=output)
 
     return reconcile
+
+
+# A workspace upload (ADR-037 amendment 2026-11-24): a change bundle a session hands to
+# operations through its loopback endpoint. Larger changes go through a pull request.
+MAX_UPLOAD_BYTES = 8 * 1048576
+
+
+def store_upload(
+    database: Database,
+    namespace: str,
+    task_id: str,
+    lease_id: str,
+    content: bytes,
+    producer_id: str,
+    name: str = "change.bundle",
+) -> dict[str, JsonValue]:
+    """Store an attempt's upload as task-owned objects, fenced by its lease; the listing has
+    the shape operations take as an input (`{name, bytes, sha256, parts}`).
+
+    Objects are named by the content's digest, so the same bytes uploaded again within the
+    task return the stored parts instead of a second copy.
+    """
+    if not content or len(content) > MAX_UPLOAD_BYTES:
+        raise ArtifactRefused(f"an upload holds 1 to {MAX_UPLOAD_BYTES} bytes")
+    digest = sha256(content).hexdigest()
+    parts: list[JsonValue] = []
+    with database.engine.begin() as conn, borrow(conn) as tx:
+        at = now()
+        for index, start in enumerate(range(0, len(content), MAX_OBJECT_BYTES)):
+            chunk = content[start : start + MAX_OBJECT_BYTES]
+            reference = ResourceRef(
+                namespace=namespace, resource_id=f"{task_id}.upload.{digest[:32]}.{index:03d}"
+            )
+            try:
+                existing = tx.latest_object(reference)
+            except StoreError:
+                existing = None
+            if existing is not None and existing.content_digest == sha256(chunk).hexdigest():
+                version = existing
+            else:
+                version = tx.put_object(
+                    reference,
+                    chunk,
+                    expected_version=existing.version if existing is not None else 0,
+                    producer_id=producer_id,
+                    task_id=task_id,
+                    lease_id=lease_id,
+                    at=at,
+                )
+            parts.append(version.model_dump(mode="json"))
+    return {"name": name, "bytes": len(content), "sha256": digest, "parts": parts}

@@ -1,8 +1,11 @@
 """Checks on `email.send` attachments (ADR-039 amendment 2026-11-23).
 
-An attachment is `{filename, content_type, data}` with `data` the base64 of the bytes, so
-the whole attachment is in the call's arguments: the receipt, the idempotency scope and
-the content gate all see exactly what is sent. Only two types are accepted:
+An attachment is `{filename, content_type, data}` with `data` the base64 of the bytes, or
+`{filename, content_type, text}` for `text/html`, with `text` the page itself (a model
+cannot be trusted to base64 a page by hand, so it need not). Base64 may carry line breaks or
+omit its padding. Either way the whole attachment is in the call's arguments: the receipt,
+the idempotency scope and the content gate all see exactly what is sent. Only two types
+are accepted:
 - `image/png`: the bytes must start with the PNG signature and an IHDR chunk;
 - `text/html`: the bytes must be UTF-8 text without control characters, and self-contained:
   no script, frame, form or link element and no `src`, `href`, `url()` or `@import`
@@ -60,12 +63,7 @@ def check(raw: JsonValue, limits: AttachmentLimits) -> tuple[Attachment, ...]:
                 "An attachment needs a unique plain filename that matches its content type",
                 "attachment_invalid",
             )
-        try:
-            content = base64.b64decode(str(item["data"]), validate=True)
-        except (binascii.Error, ValueError):
-            raise OperationRejected(
-                "An attachment's data is not valid base64", "attachment_invalid"
-            ) from None
+        content = _bytes(item, content_type)
         if not content or len(content) > limits.max_file_bytes:
             raise OperationRejected(
                 f"An attachment may be 1 to {limits.max_file_bytes} bytes", "attachment_too_large"
@@ -77,6 +75,25 @@ def check(raw: JsonValue, limits: AttachmentLimits) -> tuple[Attachment, ...]:
             f"Attachments may total {limits.max_total_bytes} bytes", "attachments_too_large"
         )
     return tuple(checked)
+
+
+def _bytes(item: dict[str, JsonValue], content_type: str) -> bytes:
+    """The attachment's bytes, from exactly one of `data` (base64) and `text` (an HTML page)."""
+    if ("data" in item) == ("text" in item) or ("text" in item and content_type != "text/html"):
+        raise OperationRejected(
+            "An attachment has base64 `data`, or `text` if it is HTML, and not both",
+            "attachment_invalid",
+        )
+    if "text" in item:
+        return str(item["text"]).encode()
+    encoded = "".join(str(item["data"]).split())
+    try:
+        return base64.b64decode(encoded + "=" * (-len(encoded) % 4), validate=True)
+    except (binascii.Error, ValueError):
+        raise OperationRejected(
+            "An attachment's data is not valid base64; for an HTML page send `text` instead",
+            "attachment_invalid",
+        ) from None
 
 
 def _content(content_type: str, content: bytes) -> None:

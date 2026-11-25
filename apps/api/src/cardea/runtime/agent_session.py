@@ -15,6 +15,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from cardea.runtime import activity as activities
+from cardea.runtime import workspace
 from cardea.runtime.activity import AttemptActivity
 from cardea.runtime.harness import (
     PROXY_VARIABLES,
@@ -29,6 +30,10 @@ from cardea.runtime.harness import (
 INHERITED = frozenset(
     {"PATH", "LANG", "LC_ALL", "TZ", "SSL_CERT_FILE", "SSL_CERT_DIR", *PROXY_VARIABLES}
 )
+# A workspace's built-in tools; file tools only under the working directory (as in the
+# `code.session` harness, ADR-037).
+WORKSPACE_TOOLS = ("Bash", "Read", "Edit", "Write", "Glob", "Grep")
+WORKSPACE_ALLOWED = ("Bash", "Read(./**)", "Edit(./**)", "Write(./**)", "Glob", "Grep")
 # Name of the MCP server entry; Claude Code exposes its tools as mcp__cardea__<tool>.
 SERVER_NAME = "cardea"
 
@@ -108,11 +113,16 @@ class ClaudeAgentSession:
         timeout = tool_timeout_ms(request)
         if timeout is not None:
             server["timeout"] = timeout
+        mcp_tools = [f"mcp__{SERVER_NAME}__{name}" for name in request.tool_names]
+        space = request.workspace
         return {
-            "system_prompt": request.system_prompt,
-            # No built-in tools at all: shell, files, web, scheduling and subagents are off.
-            "tools": [],
-            "allowed_tools": [f"mcp__{SERVER_NAME}__{name}" for name in request.tool_names],
+            "system_prompt": request.system_prompt
+            + (workspace.instructions(space.repositories, workdir) if space else ""),
+            # No built-in tools at all: shell, files, web, scheduling and subagents are off,
+            # unless the run has a workspace (ADR-037 amendment 2026-11-24): then editing
+            # and a shell, with the file tools scoped to the working directory.
+            "tools": list(WORKSPACE_TOOLS) if space else [],
+            "allowed_tools": [*WORKSPACE_ALLOWED, *mcp_tools] if space else mcp_tools,
             "mcp_servers": {SERVER_NAME: server},
             # Ignore any MCP servers, settings, skills or plugins found on the host.
             "strict_mcp_config": True,
@@ -137,6 +147,13 @@ class ClaudeAgentSession:
                 # Explicit rather than left to the SDK's merge of the parent environment.
                 **{name: os.environ[name] for name in PROXY_VARIABLES if name in os.environ},
                 **direct_endpoint(request.mcp_url),
+                **(
+                    workspace.environment(
+                        workdir, space.upload_url, request.mcp_token, space.memory_url
+                    )
+                    if space
+                    else {}
+                ),
             },
         }
 
@@ -148,6 +165,15 @@ class ClaudeAgentSession:
         began = time.monotonic()
         with tempfile.TemporaryDirectory(prefix="cardea-session-") as directory:
             os.chmod(directory, 0o700)
+            if request.workspace is not None:
+                try:
+                    workspace.prepare(
+                        Path(directory), request.workspace.repositories, request.memory
+                    )
+                except workspace.WorkspaceRefused as refused:
+                    activity.event(f"workspace refused: {refused}", logging.WARNING)
+                    return HarnessResult.failed("workspace_unavailable")
+                activity.event("workspace ready", repositories=len(request.workspace.repositories))
             options = ClaudeAgentOptions(
                 **self.options(request, Path(directory)),
                 # The CLI's stderr, line by line, bounded and scrubbed (never a debug dump).

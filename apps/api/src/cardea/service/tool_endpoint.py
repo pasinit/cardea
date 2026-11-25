@@ -31,6 +31,13 @@ from cardea.service import loopback
 
 # A call: tool name, arguments, and whether its client has given up on it.
 CallTool = Callable[[str, dict[str, Any], Callable[[], bool]], Awaitable[types.CallToolResult]]
+# A workspace upload (ADR-037 amendment 2026-11-24): bytes in, an object listing out. It
+# raises ValueError for content it refuses.
+Upload = Callable[[bytes], Awaitable[dict[str, Any]]]
+UPLOAD_PATH = "/objects"
+# A member's memory archive (cardea-memory save); same token, same size bound.
+MEMORY_PATH = "/memory"
+MAX_UPLOAD_BYTES = 8 * 1048576
 # The abandonment signal of the HTTP request being served, seen by the tool handler it runs.
 _GONE: ContextVar[asyncio.Event | None] = ContextVar("cardea_tool_request_gone", default=None)
 
@@ -56,6 +63,56 @@ class _Bearer:
                 await send({"type": "http.response.body", "body": b""})
                 return
         await self.app(scope, receive, send)
+
+
+async def _reply(send: Send, status: int, body: dict[str, Any]) -> None:
+    payload = json.dumps(body).encode()
+    headers = [
+        (b"content-type", b"application/json"),
+        (b"content-length", str(len(payload)).encode()),
+    ]
+    await send({"type": "http.response.start", "status": status, "headers": headers})
+    await send({"type": "http.response.body", "body": payload})
+
+
+class _Uploads:
+    """`POST /objects`: a session's workspace hands a change bundle to the kernel. Every
+    other request goes to the MCP app. Behind the same bearer token as the tools."""
+
+    def __init__(self, app: ASGIApp, upload: Upload | None, memory: Upload | None = None) -> None:
+        self.app, self.routes = app, {UPLOAD_PATH: upload, MEMORY_PATH: memory}
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope.get("path") not in self.routes:
+            await self.app(scope, receive, send)
+            return
+        handler = self.routes[scope["path"]]
+        if handler is None:
+            await _reply(send, 404, {"error": "no_workspace"})
+            return
+        if scope.get("method") != "POST":
+            await _reply(send, 405, {"error": "method_not_allowed"})
+            return
+        chunks: list[bytes] = []
+        size = 0
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            chunk = message.get("body", b"")
+            size += len(chunk)
+            if size > MAX_UPLOAD_BYTES:
+                await _reply(send, 413, {"error": "upload_too_large", "limit": MAX_UPLOAD_BYTES})
+                return
+            chunks.append(chunk)
+            if not message.get("more_body", False):
+                break
+        try:
+            listing = await handler(b"".join(chunks))
+        except ValueError as refused:
+            await _reply(send, 422, {"error": "upload_refused", "detail": str(refused)})
+            return
+        await _reply(send, 201, listing)
 
 
 class _Abandonment:
@@ -137,13 +194,21 @@ def _never() -> bool:
 
 class ToolEndpoint:
     def __init__(
-        self, tools: list[types.Tool], call: CallTool, host: str = loopback.DEFAULT_HOST
+        self,
+        tools: list[types.Tool],
+        call: CallTool,
+        host: str = loopback.DEFAULT_HOST,
+        upload: Upload | None = None,
+        memory: Upload | None = None,
     ) -> None:
         # The one loopback address a confined session may reach (ADR-028).
         self.host = host
         self.token = secrets.token_urlsafe(32)
         self.tools = tools
         self.call = call
+        # Set only for a run with a workspace; otherwise `POST /objects` is 404.
+        self.upload = upload
+        self.memory = memory
         self.port = 0
         # Authenticated tools/list requests served; a harness that never lists tools never
         # connected to its tools (ADR-033).
@@ -153,6 +218,14 @@ class ToolEndpoint:
     @property
     def url(self) -> str:
         return f"http://{self.host}:{self.port}/mcp"
+
+    @property
+    def upload_url(self) -> str:
+        return f"http://{self.host}:{self.port}{UPLOAD_PATH}"
+
+    @property
+    def memory_url(self) -> str:
+        return f"http://{self.host}:{self.port}{MEMORY_PATH}"
 
     def _app(self) -> ASGIApp:
         tools = self.tools
@@ -186,7 +259,7 @@ class ToolEndpoint:
         app = server.streamable_http_app(
             json_response=True, stateless_http=True, host=self.host, transport_security=security
         )
-        return _Bearer(_Abandonment(app), self.token)
+        return _Bearer(_Uploads(_Abandonment(app), self.upload, self.memory), self.token)
 
     def __enter__(self) -> "ToolEndpoint":
         self._server, self.port = loopback.start(

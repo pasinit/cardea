@@ -211,7 +211,7 @@ python3 /opt/cardea/packaging/fetch_opencode.py /opt/cardea/opencode
 
 10. Optional: throwaway test environments (`env.try`, [ADR-038](../../docs/decisions/038-throwaway-test-environments.md)), in the `try` profile. Reviewers and product-manager agents use it to run a commit's scenarios before accepting it.
    1. `cardea/cardea-host-workers.json` holds the `try` profile and the `env-try` worker.
-      - The profile allows only `pypi.org` and `files.pythonhosted.org`, through proxy port `127.0.10.7`. It has no credential and a concurrency of 1.
+      - The profile allows only `pypi.org`, `files.pythonhosted.org` and `github.com` (the repository host, for fetching a commit the mirror has not caught up with, without credentials), through proxy port `127.0.10.7`. It has no credential and a concurrency of 1.
       - It has 3 GiB of memory and 2 GiB of scratch, sized to run beside `coding` (4 GiB) on an 8 GB host. Scratch is a tmpfs charged to the unit's memory, so the helper refuses a profile whose `scratch_mb` exceeds its `memory_mb`.
       - The worker binds the registry, the repository mirrors and `/opt/cardea-try/toolchain` read-only.
    2. Add an `environment` catalog to each repository that offers `env.try` in `/opt/cardea-code/repositories.json`. The catalog holds the scenarios' fixed argv, time limits and artifact paths; see `cardea/repositories.json`.
@@ -245,3 +245,53 @@ docker compose -f docker-compose.yml -f docker-compose.cardea.yml up -d
 - With confined workers: `systemctl list-units 'cardea-host-*'` shows one unit per running worker, and none after a run.
 - From the Telos container: a request to `https://CARDEA_PRIVATE_IP:8443/v0.2/system` using the token file gets 200; without the token it gets 401.
 - `GET /v0.2/triggers` lists `telos.<routine-id>` triggers within a minute of Telos starting.
+
+## Unattended updates
+
+`cardea/cardea-update.py` (with `cardea-update.service` and `cardea-update.timer`, every 10
+minutes) deploys the newest `main` commit once every GitHub check on it has passed:
+
+- **Hot** (team kit, role instructions, dashboard pages, operation workers, docs): check out,
+  reinstall ops packages installed as copies, add new descriptors, worker profiles and
+  workers, re-apply the team. No restart, no run cancelled. The kernel reads the helper's
+  worker profiles again every minute, so a changed profile needs no restart either.
+- **Restart** (kernel code and dependencies, operation descriptors): `teamkit.py drain`
+  first (no new runs; the running ones finish), then the same steps, a kernel restart and
+  `apply`, which admits again.
+- **Owner approval**: a change to the host helper or to `deploy/small-host` (what runs as
+  root) waits until the script is run with `--approve`.
+
+It then checks the kernel, the helper and the team's status and goes back to the previous
+commit if any check fails. Each run appends a JSON line to `/var/log/cardea-update.log`.
+
+### Readiness check
+
+`cardea/cardea-ready.py` tells whether the host actually works. Run it as root:
+
+```sh
+python3 -I /opt/cardea/deploy/small-host/cardea/cardea-ready.py --host /etc/cardea/team.host.json
+```
+
+It prints one line per check and exits 0 when all pass, 1 otherwise (`--json` for
+machine output, `--allow-paused` to accept a paused team). It checks:
+
+- the kernel's `GET /v0.2/readyz` (database, DBOS, host helper, repository mirrors, runs
+  stuck on an expired lease, paused groups; see [operations](../../docs/operations.md#liveness-and-readiness)),
+  asked as the team's supervisor through `teamkit.py ready`, run as `cardea-kernel`;
+- that `squid` is active;
+- each token named in `/opt/cardea-vcs/vcs.json` `credentials.tokens`, read from the file
+  the `vcs` profile loads (`/etc/cardea/credentials/<name>`): not past `expires_on`,
+  valid, able to read every registry repository `vcs.*` acts on, and holding what its
+  pools need: `contents: write` for `default` and the tokens of pools outside
+  `allow_approve` (they push), `pull_requests: write` for the tokens of pools in
+  `allow_approve`. A classic token must hold the `repo` scope. A fine-grained token's
+  permissions are not listed by the API, so each is probed with an empty-body `POST` to
+  `git/refs` or `pulls`, which the host refuses with 403 without the permission and with
+  422 (invalid body, nothing created) with it. The token is read in-process, sent only to
+  the repository host and never printed.
+
+After a deploy, `cardea-update.py` runs the same checks (loaded once, before the checkout
+changes) for up to two minutes and rolls back if a check that passed before the deploy
+still fails. A check that was already failing (a lapsed token, a stale mirror) is reported
+by `cardea-ready.py` but does not roll a deploy back. `cardea-ready.py` lives under
+`deploy/small-host`, so its own changes wait for `--approve`.

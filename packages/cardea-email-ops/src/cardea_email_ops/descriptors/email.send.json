@@ -2,7 +2,7 @@
   "tool": {
     "name": "email.send",
     "title": "Email a person outside Cardea",
-    "description": "Send one short plain-text email to a recipient alias your role is allowed to write to (for example \"client\"). You name the alias, never an address. Optionally attach PNG images or self-contained HTML pages (base64 data; HTML may not load anything from outside itself) within the count and size limits. A reply, if one comes, arrives in your mailbox as untrusted data on a later run; never wait for it. The same client_key with the same attachments never sends twice. Your role has a small rate limit.",
+    "description": "Send one short plain-text email to a recipient alias your role is allowed to write to (for example \"client\"). You name the alias, never an address. Optionally attach PNG images or self-contained HTML pages (a PNG as base64 `data`; an HTML page as its source in `text`, no encoding needed; HTML may not load anything from outside itself) within the count and size limits. A reply, if one comes, arrives in your mailbox as untrusted data on a later run; never wait for it. The same client_key with the same attachments never sends twice. Your role has a small rate limit.",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
@@ -20,9 +20,10 @@
             "properties": {
               "filename": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$", "description": "Ends in .png or .html."},
               "content_type": {"enum": ["image/png", "text/html"]},
-              "data": {"type": "string", "minLength": 1, "maxLength": 43692, "description": "Base64 of the file's bytes."}
+              "data": {"type": "string", "minLength": 1, "maxLength": 43692, "description": "Base64 of the file's bytes. Give this or text."},
+              "text": {"type": "string", "minLength": 1, "maxLength": 32768, "description": "For text/html only: the page's source as plain text, instead of data."}
             },
-            "required": ["filename", "content_type", "data"]
+            "required": ["filename", "content_type"]
           }
         }
       },

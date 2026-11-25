@@ -33,6 +33,28 @@ class SystemView(Wire):
     max_response_bytes: int
 
 
+class Liveness(Wire):
+    """`GET /v0.2/livez`: the kernel process answers. It reads no state."""
+
+    status: Literal["ok"]
+
+
+class ReadinessCheck(Record):
+    """One readiness check: its name, whether it passed and a short reason."""
+
+    name: str = Field(description="For example `database`, `repository:<alias>`.")
+    ok: bool
+    detail: str
+
+
+class Readiness(Wire):
+    """`GET /v0.2/readyz`: whether every check passed (HTTP 200) or not (HTTP 503)."""
+
+    ready: bool
+    checks: list[ReadinessCheck]
+    as_of: str = Field(description="When the checks ran (UTC, ISO 8601).")
+
+
 # Operations
 
 

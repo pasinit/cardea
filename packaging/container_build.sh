@@ -34,6 +34,10 @@ docker run --rm --pull always --platform "$platform" -v "$out:/out:ro" "$image" 
     dpkg -V cardea-kernel
     id cardea-kernel && id cardea-worker
     test "$(stat -c %a /etc/sudoers.d/cardea-host)" = 440
+    test "$(stat -c %a /etc/sudoers.d/cardea-team)" = 440
+    getent group cardea-operators >/dev/null
+    cardea team --help >/dev/null
+    test -f /usr/share/man/man1/cardea-team.1.gz
     /opt/venvs/cardea-kernel/bin/pip check
     cardea --help >/dev/null
     /opt/venvs/cardea-kernel/bin/python -I -c "import sys; sys.path.insert(0, \"/usr/lib/cardea\"); import cardea.service, cardea.hosts.launcher"
