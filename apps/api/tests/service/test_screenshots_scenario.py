@@ -118,6 +118,7 @@ def test_the_catalog_names_screenshots_as_a_loopback_scenario_with_its_artifacts
             for kind in ("mobile-390", "desktop-1280")
         ),
         f"screenshots/{module.REPORT}",
+        f"screenshots/{module.DOM}",
     )
     assert len(scenario.artifacts) <= 16
     makefile = (ROOT / "Makefile").read_text()
@@ -156,8 +157,8 @@ def test_a_commit_that_adds_several_mocks_gets_both_widths_of_each_full_page(
     assert log.endswith("screenshots: PASS\n")
     assert "p1: docs/mocks/b/two.html" in log and "p2: docs/mocks/one.html" in log
     assert sorted(f.name for f in out.iterdir()) == [
-        "p1-desktop-1280.png", "p1-mobile-390.png", "p2-desktop-1280.png", "p2-mobile-390.png",
-        "report.txt",
+        "dom.html", "p1-desktop-1280.png", "p1-mobile-390.png", "p2-desktop-1280.png",
+        "p2-mobile-390.png", "report.txt",
     ]  # fmt: skip
     # Each is as tall as its page, at its width.
     for name, size in (
@@ -187,7 +188,7 @@ def test_screenshots_are_retaken_smaller_to_fit_the_artifact_limit(
     many = tmp_path / "many"
     assert module.main(["--root", str(repo), "--out", str(many)]) == 0
     sizes = [f.stat().st_size for f in many.iterdir()]
-    assert len(sizes) == 15 and sum(sizes) <= module.MAX_TOTAL
+    assert len(sizes) == 16 and sum(sizes) <= module.MAX_TOTAL
     # A page that cannot be made to fit fails, naming the limit.
     commit(repo, "huge", {"docs/mocks/huge.html": mock(size=50_000_000)})
     capsys.readouterr()
@@ -206,7 +207,7 @@ def test_more_pages_than_the_catalog_has_artifact_paths_for_fail_loudly(
     out = capsys.readouterr().out
     assert "not captured, over 7 pages: docs/mocks/m7.html" in out
     assert out.endswith("screenshots: FAIL\n")
-    assert len(list((tmp_path / "o").iterdir())) == 15
+    assert len(list((tmp_path / "o").iterdir())) == 16
 
 
 @pytest.mark.loopback
@@ -379,6 +380,19 @@ def test_the_served_pages_measure_their_own_overflow() -> None:
     module = runner()
     for name in (b"data-scroll-width", b"data-client-width", b"data-wide"):
         assert name in module.MEASURE
+
+
+def test_the_dom_artifact_has_no_scripts_external_loads_or_measuring_attributes() -> None:
+    module = runner()
+    dom = (
+        '<html data-page-height="9" data-outline="a%20b"><head><link rel="stylesheet" '
+        'href="http://x/y.css"><script>var a</script></head><body><a href="#top">in</a>'
+        '<img src="http://evil/p.png"><p>kept</p></body></html>'
+    )
+    clean = module.sanitize(dom)
+    assert "kept" in clean and 'href="#top"' in clean
+    for gone in ("script", "evil", "link", "data-page-height", "data-outline"):
+        assert gone not in clean
 
 
 def test_the_report_lists_a_layout_outline_with_boxes_and_overflow_flags() -> None:

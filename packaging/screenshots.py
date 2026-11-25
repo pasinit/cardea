@@ -50,6 +50,9 @@ MAX_PAGES = 7
 REPORT = "report.txt"
 REPORT_BYTES = 64 * 1024
 REPORT_TEXT = 3000
+# The rendered DOM of each page, scripts and external references removed, as one HTML file.
+DOM = "dom.html"
+DOM_BYTES = 128 * 1024
 # Tried in turn until the screenshot fits its share of the limit.
 SCALES = (1.0, 0.75, 0.5, 0.35, 0.25)
 MAX_HEIGHT = 10000
@@ -84,6 +87,8 @@ HEIGHT = re.compile(r'data-page-height="(\d+)"')
 ATTRIBUTE = re.compile(r'data-(scroll-width|client-width|wide|outline)="([^"]*)"')
 # The report lines of the run, written to REPORT at the end.
 LINES: list[str] = []
+# The rendered DOM of each page and width, for DOM.
+DOMS: list[str] = []
 
 
 class Texts(html.parser.HTMLParser):
@@ -206,6 +211,16 @@ def direct(found: str) -> str:
     return str(real)
 
 
+SCRIPTS = re.compile(r"<script\b.*?</script\s*>|<link\b[^>]*>|<meta\b[^>]*>", re.S | re.I)
+EXTERNAL = re.compile(r"""\s(src|href|srcset|action|poster)\s*=\s*(["'])(?!#)[^"']*\2""", re.I)
+MEASURED = re.compile(r'\sdata-(?:page-height|scroll-width|client-width|wide|outline)="[^"]*"')
+
+
+def sanitize(dom: str) -> str:
+    """The DOM as text for a reader: no scripts, no external loads, no measuring attributes."""
+    return MEASURED.sub("", EXTERNAL.sub("", SCRIPTS.sub("", dom)))
+
+
 def serve(root: Path) -> http.server.ThreadingHTTPServer:
     handler = functools.partial(Quiet, directory=str(root))
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
@@ -301,6 +316,7 @@ def height(binary: str, scratch: Path, url: str, width: int, tall: int) -> int:
     LINES.append(f"{width}px wide:" if not problem else f"{width}px wide: could not be read")
     if not problem:
         LINES.extend(summary(shown, width))
+        DOMS.append(f"<!-- {url.split('/', 3)[-1] or '/'} at {width}px -->\n{sanitize(shown)}")
     found = None if problem else HEIGHT.search(shown)
     # A page we did not serve (the dashboard) has no measuring script: capture a long window.
     return min(max(int(found.group(1)), tall), MAX_HEIGHT) if found else max(tall, UNMEASURED)
@@ -327,7 +343,7 @@ def shoot(
 
 def capture(binary: str, urls: list[str], out: Path) -> list[tuple[str, bool, str]]:
     results: list[tuple[str, bool, str]] = []
-    limit = min(MAX_BYTES, (MAX_TOTAL - REPORT_BYTES) // (2 * max(len(urls), 1)))
+    limit = min(MAX_BYTES, (MAX_TOTAL - REPORT_BYTES - DOM_BYTES) // (2 * max(len(urls), 1)))
     with tempfile.TemporaryDirectory(prefix="shots-") as scratch:
         for number, url in enumerate(urls, 1):
             sys.stdout.write(f"p{number}: {url.split('/', 3)[-1] or '/'}\n")
@@ -467,6 +483,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if running is not None:
             running[0].kill()
     (args.out / REPORT).write_text("\n".join(LINES)[:REPORT_BYTES] + "\n")
+    (args.out / DOM).write_text("\n".join(DOMS)[:DOM_BYTES] + "\n")
     if not all(ok for _, ok, _ in results):
         diagnose()
     for name, ok, problem in results:
