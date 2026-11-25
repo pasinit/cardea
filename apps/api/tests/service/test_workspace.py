@@ -393,7 +393,7 @@ def test_png_artifacts_come_back_as_images_within_the_limits() -> None:
 
     from cardea.service import agent_run_runtime as runtime
 
-    stored = {"a.png": PNG, "a1": PNG + b"b", "fake.png": b"not a png", "log.txt": b"x"}
+    stored = {"a.png": PNG, "b.PNG": PNG + b"b", "fake.png": b"not a png", "log.txt": b"x"}
 
     def listed(name: str, size: int | None = None) -> dict[str, Any]:
         return {"name": name, "bytes": size or len(stored.get(name, b"?")), "sha256": "s"}
@@ -410,8 +410,7 @@ def test_png_artifacts_come_back_as_images_within_the_limits() -> None:
             listed("fake.png"),
             listed("gone.png"),
             listed("huge.png", runtime.MAX_IMAGE_BYTES + 1),
-            # env.try names its artifacts a0, a1, ...: a PNG is known by its content.
-            listed("a1"),
+            listed("b.PNG"),
         ]
     }
     images = runtime.tool_images(read, output)
