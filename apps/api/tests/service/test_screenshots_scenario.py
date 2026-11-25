@@ -262,8 +262,10 @@ def test_a_missing_browser_or_page_fails_with_a_reason(
     stand_in(tmp_path)
     monkeypatch.setenv("PATH", f"{tmp_path}:{Path(shutil.which('git') or '/usr/bin/git').parent}")
     commit(repo, "no mock", {"src/page.html": mock()})
-    assert module.main(["--root", str(repo), "--out", str(tmp_path / "o")]) == 1
-    assert "no page: HEAD adds nothing under docs/mocks/" in capsys.readouterr().out
+    assert module.main(["--root", str(repo), "--out", str(tmp_path / "o")]) == 0
+    out = capsys.readouterr().out
+    assert "nothing to render: HEAD adds nothing under docs/mocks/" in out
+    assert out.endswith("screenshots: PASS\n")
     args = ["--root", str(tmp_path), "--page", "gone.html", "--out", str(tmp_path / "o")]
     assert module.main(args) == 1
     assert "no page gone.html" in capsys.readouterr().out
