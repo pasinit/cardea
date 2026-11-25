@@ -118,6 +118,7 @@ def test_the_catalog_names_screenshots_as_a_loopback_scenario_with_its_artifacts
             for kind in ("mobile-390", "desktop-1280")
         ),
         f"screenshots/{module.REPORT}",
+        f"screenshots/{module.DOM}",
     )
     assert len(scenario.artifacts) <= 16
     makefile = (ROOT / "Makefile").read_text()
