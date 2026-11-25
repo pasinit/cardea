@@ -21,7 +21,6 @@ host fails to load rather than reaching for it. The last line is `screenshots: P
 
 import argparse
 import functools
-import html
 import html.parser
 import http.server
 import io
@@ -50,12 +49,11 @@ MAX_PAGES = 7
 # A text report of what each page shows, for a reader who cannot open images: one artifact.
 REPORT = "report.txt"
 REPORT_BYTES = 64 * 1024
-# A self-contained HTML file: each page's rendered DOM, with its computed styles inline, as
-# escaped text per width (nothing in it loads or runs).
-DOM_REPORT = "dom.html"
-DOM_BYTES = 192 * 1024
 LOG_REPORT = 4000
 REPORT_TEXT = 3000
+# The rendered DOM of each page, scripts and external references removed, as one HTML file.
+DOM = "dom.html"
+DOM_BYTES = 128 * 1024
 # Tried in turn until the screenshot fits its share of the limit.
 SCALES = (1.0, 0.75, 0.5, 0.35, 0.25)
 MAX_HEIGHT = 10000
@@ -84,25 +82,14 @@ MEASURE = (
     b".map((n) => n.textContent.trim()).join(' ').slice(0, 40);"
     b" return [e.tagName.toLowerCase(), t, Math.round(r.x + scrollX), Math.round(r.y + scrollY),"
     b" Math.round(r.width), Math.round(r.height), r.right > w + 1 ? 'OVERFLOW' : ''].join(' | ')})"
-    b".join('\\n')));"
-    b" const keep = ['display', 'position', 'box-sizing', 'width', 'height', 'margin', 'padding',"
-    b" 'border', 'font-size', 'font-weight', 'font-family', 'line-height', 'color',"
-    b" 'background-color', 'text-align', 'overflow-x', 'flex-direction', 'white-space'],"
-    b" all = [...document.body.querySelectorAll('*')].slice(0, 600), copy = document.body"
-    b".cloneNode(true), twins = [...copy.querySelectorAll('*')].slice(0, 600);"
-    b" all.forEach((e, i) => {const c = getComputedStyle(e); twins[i].setAttribute('style',"
-    b" keep.map((k) => k + ':' + c.getPropertyValue(k)).join(';'))});"
-    b" copy.querySelectorAll('script').forEach((e) => e.remove());"
-    b" d.setAttribute('data-dom', encodeURIComponent(copy.outerHTML))}, 4000)</script>"
+    b".join('\\n')))}, 4000)</script>"
 )
-ATTRIBUTE_DOM = re.compile(r'data-dom="([^"]*)"')
 HEIGHT = re.compile(r'data-page-height="(\d+)"')
-ATTRIBUTE = re.compile(r'data-(scroll-width|client-width|wide|outline|dom)="([^"]*)"')
+ATTRIBUTE = re.compile(r'data-(scroll-width|client-width|wide|outline)="([^"]*)"')
 # The report lines of the run, written to REPORT at the end.
 LINES: list[str] = []
-# (page label, width, serialised DOM) of each capture, written to DOM_REPORT at the end.
-DOMS: list[tuple[str, int, str]] = []
-PAGE = [""]
+# The rendered DOM of each page and width, for DOM.
+DOMS: list[str] = []
 
 
 class Texts(html.parser.HTMLParser):
@@ -225,6 +212,16 @@ def direct(found: str) -> str:
     return str(real)
 
 
+SCRIPTS = re.compile(r"<script\b.*?</script\s*>|<link\b[^>]*>|<meta\b[^>]*>", re.S | re.I)
+EXTERNAL = re.compile(r"""\s(src|href|srcset|action|poster)\s*=\s*(["'])(?!#)[^"']*\2""", re.I)
+MEASURED = re.compile(r'\sdata-(?:page-height|scroll-width|client-width|wide|outline)="[^"]*"')
+
+
+def sanitize(dom: str) -> str:
+    """The DOM as text for a reader: no scripts, no external loads, no measuring attributes."""
+    return MEASURED.sub("", EXTERNAL.sub("", SCRIPTS.sub("", dom)))
+
+
 def serve(root: Path) -> http.server.ThreadingHTTPServer:
     handler = functools.partial(Quiet, directory=str(root))
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
@@ -320,9 +317,7 @@ def height(binary: str, scratch: Path, url: str, width: int, tall: int) -> int:
     LINES.append(f"{width}px wide:" if not problem else f"{width}px wide: could not be read")
     if not problem:
         LINES.extend(summary(shown, width))
-        dom = ATTRIBUTE_DOM.search(shown)
-        if dom:
-            DOMS.append((PAGE[0], width, urllib.parse.unquote(dom.group(1))))
+        DOMS.append(f"<!-- {url.split('/', 3)[-1] or '/'} at {width}px -->\n{sanitize(shown)}")
     found = None if problem else HEIGHT.search(shown)
     # A page we did not serve (the dashboard) has no measuring script: capture a long window.
     return min(max(int(found.group(1)), tall), MAX_HEIGHT) if found else max(tall, UNMEASURED)
@@ -347,16 +342,6 @@ def shoot(
     return f"{target.stat().st_size} bytes at scale {SCALES[-1]}, over its {limit} byte share"
 
 
-def write_dom_report(out: Path) -> None:
-    """DOM_REPORT: one section per page and width, the DOM as escaped text within its share."""
-    share = DOM_BYTES // max(len(DOMS), 1) - 300
-    parts = ["<!doctype html><meta charset=utf-8><title>rendered DOM</title><body>"]
-    for label, width, dom in DOMS:
-        cut = html.escape(dom[:share]) + (" ...[cut]" if len(dom) > share else "")
-        parts.append(f"<h2>{html.escape(label)} at {width}px</h2><pre>{cut}</pre>")
-    (out / DOM_REPORT).write_text("".join(parts)[:DOM_BYTES], encoding="utf-8")
-
-
 def capture(binary: str, urls: list[str], out: Path) -> list[tuple[str, bool, str]]:
     results: list[tuple[str, bool, str]] = []
     limit = min(MAX_BYTES, (MAX_TOTAL - REPORT_BYTES - DOM_BYTES) // (2 * max(len(urls), 1)))
@@ -364,8 +349,7 @@ def capture(binary: str, urls: list[str], out: Path) -> list[tuple[str, bool, st
         for number, url in enumerate(urls, 1):
             name = url.split("/", 3)[-1]
             shown = name if name.startswith("docs/") or name.endswith(".html") else f"/{name}"
-            PAGE[0] = f"p{number}: {shown}"
-            sys.stdout.write(f"{PAGE[0]}\n")
+            sys.stdout.write(f"p{number}: {shown}\n")
             LINES.append(f"p{number}: /{url.split('/', 3)[-1]}")
             for kind, width, tall in WIDTHS:
                 label = f"p{number}-{kind}"
@@ -501,10 +485,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         server.shutdown()
         if running is not None:
             running[0].kill()
-    write_dom_report(args.out)
     # The log reaches a reader even when an artifact does not: the layout report, bounded.
     sys.stdout.write("layout report:\n" + "\n".join(LINES)[:LOG_REPORT] + "\n")
     (args.out / REPORT).write_text("\n".join(LINES)[:REPORT_BYTES] + "\n")
+    (args.out / DOM).write_text("\n".join(DOMS)[:DOM_BYTES] + "\n")
     if not all(ok for _, ok, _ in results):
         diagnose()
     for name, ok, problem in results:
