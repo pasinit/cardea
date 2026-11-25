@@ -2,9 +2,9 @@
 """Root-owned fixed-command helper. Install via the M2 host instructions, never setuid."""
 
 import base64
+import contextlib
 import fcntl
 import hashlib
-import contextlib
 import json
 import math
 import os
