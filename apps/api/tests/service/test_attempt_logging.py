@@ -30,6 +30,7 @@ from test_opencode import found, harness, listing_tools, request
 from cardea.runtime import activity as activities
 from cardea.runtime.activity import AttemptActivity, OutputLimits, scrub
 from cardea.runtime.agent_session import SessionRequest, SessionResult, observe
+from cardea.service import tracing
 from cardea.service.agent_run_runtime import AgentRunRuntime
 from cardea.service.confined import ConfinedAgentSession, Workers
 from cardea.service.kernel import Kernel
@@ -517,3 +518,39 @@ def test_the_session_worker_writes_nothing_to_stderr(tmp_path: Path) -> None:
     assert 0 < len(diagnostics) <= 20 and all(len(line.encode()) <= 512 for line in diagnostics)
     assert any("retrying with key [redacted]" in line for line in diagnostics)
     assert "sk-provider-secret" not in json.dumps(output)
+
+
+@pytest.mark.loopback
+def test_attempts_are_task_spans_of_one_run_trace(
+    kernel: Kernel, session: FakeSession, logs: pytest.LogCaptureFixture
+) -> None:
+    async def failing(client: ClientSession, req: SessionRequest) -> SessionResult:
+        return SessionResult(text="", is_error=True, stop_reason="error")
+
+    session.scripts = [failing, routine]
+    task_id = submit(kernel, max_attempts=2)
+    assert AgentRunRuntime(kernel).execute(task_id) == "succeeded"
+
+    first, second = records(logs, "attempt started")
+    with kernel.database.read() as conn:
+        (stored,) = conn.exec_driver_sql(
+            "SELECT traceparent FROM agent_runs WHERE task_id=?", (task_id,)
+        ).one()
+    root = tracing.parse(stored)
+    assert root is not None
+    for started in (first, second):
+        fields = started.__dict__
+        # The task span's parent is the run span; a retry keeps the trace id.
+        assert fields["trace_id"] == root.trace_id
+        assert fields["parent_span_id"] == root.span_id
+        assert fields["span_id"] != root.span_id
+    assert first.__dict__["span_id"] != second.__dict__["span_id"]
+
+
+def test_traceparents_parse_and_children_keep_the_trace() -> None:
+    root = tracing.new_root()
+    assert tracing.parse(root.traceparent) == root
+    kid = tracing.child(root)
+    assert kid.trace_id == root.trace_id and kid.parent_span_id == root.span_id
+    assert tracing.parse("00-" + "0" * 32 + "-" + "1" * 16 + "-01") is None
+    assert tracing.parse("nonsense") is None
