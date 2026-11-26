@@ -352,6 +352,11 @@ async function load(first) {
       document.title = "Member not found";
       document.getElementById("title").textContent = "Member not found";
       clearInterval(timer);
+      for (const id of ["tl-body", "hi-body", "cap-body", "mem-body", "mail-body"]) {
+        const section = document.getElementById(id).closest("section");
+        if (section) section.remove();
+      }
+      document.querySelectorAll(".jump, .detail-cols").forEach((node) => node.remove());
     }
     return;
   }
