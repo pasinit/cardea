@@ -968,6 +968,17 @@ class CollectionDeleted(Wire):
     records: int
 
 
+class ReleaseRequest(Wire):
+    """`POST /v0.2/collections/{name}/records/{record_id}/release`."""
+
+    reason: str = Field(min_length=1, max_length=500, description="Why the claim is taken back.")
+
+
+class ClaimReleased(Wire):
+    released: bool = Field(description="False when nobody held the record.")
+    record: dict[str, JsonValue]
+
+
 class RecordEvent(Record):
     event_id: int
     version: int

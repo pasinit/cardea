@@ -540,6 +540,7 @@ def test_m3_upgrade_preserves_existing_host_receipt(kernel: Kernel) -> None:
         conn.exec_driver_sql("DROP TABLE group_members")
         conn.exec_driver_sql("DROP TABLE agent_groups")
         conn.exec_driver_sql("DROP TABLE recovery_epochs")
+        conn.exec_driver_sql("ALTER TABLE agent_runs DROP COLUMN traceparent")
         conn.exec_driver_sql("DROP TABLE record_events")
         conn.exec_driver_sql("DROP TABLE records")
         conn.exec_driver_sql("DROP TABLE collections")

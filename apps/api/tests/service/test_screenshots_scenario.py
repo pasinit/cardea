@@ -44,7 +44,7 @@ def stand_in(directory: Path) -> Path:
         "args = sys.argv[1:]\n"
         "assert '--no-proxy-server' in args\n"
         "get = urllib.request.build_opener(urllib.request.ProxyHandler({})).open\n"
-        "url = args[-1]\n"
+        "url = args[-1].split('?frame=')[0]\n"
         "body = get(url).read().decode()\n"
         "if 'setAttribute' not in body:\n"
         "    sys.exit(3)\n"
@@ -407,3 +407,26 @@ def test_the_report_lists_a_layout_outline_with_boxes_and_overflow_flags() -> No
     assert "h1 | Title | 0 | 8 | 390 | 30 |" in text
     assert "div | wide | 0 | 40 | 500 | 20 | OVERFLOW" in text
     assert b"data-outline" in module.MEASURE
+
+
+def test_content_wider_than_the_requested_width_is_overflow_even_if_the_viewport_grew() -> None:
+    module = runner()
+    module.OVERFLOWS.clear()
+    grown = (
+        '<html data-scroll-width="485" data-client-width="485" data-wide=""><body>x</body></html>'
+    )
+    text = "\n".join(module.summary(grown, 390))
+    assert "HORIZONTAL OVERFLOW" in text
+    assert module.OVERFLOWS == ["390px: content 485px wide"]
+    module.OVERFLOWS.clear()
+
+
+def test_a_phone_width_page_of_the_runner_is_measured_in_a_frame_of_that_width(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = runner()
+    monkeypatch.setattr(module, "RUNNER", "http://127.0.0.1:1")
+    url = "http://127.0.0.1:1/docs/mocks/a.html"
+    assert module.framed(url, 390, 844) == url + "?frame=390&tall=844"
+    assert module.framed(url, 1280, 800) == url
+    assert module.framed("http://127.0.0.1:2/", 390, 844) == "http://127.0.0.1:2/"
