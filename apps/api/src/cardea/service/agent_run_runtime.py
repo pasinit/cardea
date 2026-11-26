@@ -860,6 +860,7 @@ class AgentRunRuntime:
                 timeout_seconds=timeout,
                 model=model or None,
                 job_key=f"{task_id}:{attempt}",
+                traceparent=span.traceparent if (span := self.spans.get(task_id)) else "",
                 workspace=(
                     HarnessWorkspace(
                         repositories=request.workspace.repositories,
