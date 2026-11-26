@@ -825,7 +825,14 @@ class AgentRunRuntime:
             else None
         )
         with ToolEndpoint(
-            tools, call, self.kernel.endpoint_host, upload=upload, memory=remember
+            tools,
+            call,
+            self.kernel.endpoint_host,
+            upload=upload,
+            memory=remember,
+            read_artifact=(
+                partial(artifacts.read, self.kernel.database) if request.workspace else None
+            ),
         ) as endpoint:
             # Defence in depth: the token is never logged, and is scrubbed from harness output.
             self._current(task_id).redact(endpoint.token)

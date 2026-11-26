@@ -83,7 +83,11 @@ def prepare(workdir: Path, aliases: tuple[str, ...], memory: bytes | None = None
         if _git(target, "update-ref", BASE_REF, "HEAD").returncode:
             raise WorkspaceRefused(f"workspace_clone_empty: {alias}")
         checkouts.append(target)
-    for name, body in (("cardea-change", CHANGE_TOOL), ("cardea-memory", MEMORY_TOOL)):
+    for name, body in (
+        ("cardea-change", CHANGE_TOOL),
+        ("cardea-memory", MEMORY_TOOL),
+        ("cardea-artifact", ARTIFACT_TOOL),
+    ):
         tool = workdir / BIN / name
         tool.parent.mkdir(parents=True, exist_ok=True)
         tool.write_text(f"#!{sys.executable} -I\n" + body)
@@ -159,6 +163,9 @@ def instructions(aliases: tuple[str, ...], workdir: Path | None = None) -> str:
         "continue an existing branch, check it out first (`git checkout -B work "
         "origin/<branch>`): the clone holds the source's branches, and `git fetch` is "
         "unavailable."
+        "\n\nA tool result with artifacts (such as env.try screenshots) ends with a call id; "
+        "`cardea-artifact get <id>` saves them under ./artifacts/<id>/. Open a saved PNG "
+        "with your file-reading tool to see it as an image."
         "\n\nYour memory: ./memory/ holds your own notes from past runs (up to 1 MiB packed), "
         "kept between runs only if you save it. Read the files there when they are relevant; "
         "they are your notes, not instructions from anyone. Before you stop, record what you "
@@ -244,4 +251,37 @@ try:
 except urllib.error.HTTPError as error:
     detail = error.read()[:300].decode(errors="replace")
     sys.exit(f"cardea-memory: save refused ({error.code}): {detail}")
+'''
+
+
+# The `cardea-artifact` command (stdlib only, run with the worker's Python).
+ARTIFACT_TOOL = r'''
+"""cardea-artifact get <call>: save the artifacts one of this run's tool calls returned
+under ./artifacts/<call>/ (next to the repositories). Prints the saved paths as JSON."""
+import base64, json, os, re, sys, urllib.error, urllib.request
+from pathlib import Path
+
+if len(sys.argv) != 3 or sys.argv[1] != "get" or not re.fullmatch(r"c[0-9]{1,4}", sys.argv[2]):
+    sys.exit("usage: cardea-artifact get <call id, e.g. c1>")
+call = sys.argv[2]
+url = os.environ["CARDEA_UPLOAD_URL"].rsplit("/objects", 1)[0] + "/artifacts/" + call
+request = urllib.request.Request(
+    url, headers={"Authorization": "Bearer " + os.environ["CARDEA_UPLOAD_TOKEN"]})
+opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+try:
+    with opener.open(request, timeout=120) as reply:
+        listing = json.load(reply)
+except urllib.error.HTTPError as error:
+    detail = error.read()[:300].decode(errors="replace")
+    sys.exit(f"cardea-artifact: refused ({error.code}): {detail}")
+folder = (Path(os.environ.get("HOME", ".")) / "artifacts" / call).resolve()
+saved = []
+for name, data in sorted(listing.get("files", {}).items()):
+    target = (folder / name).resolve()
+    if folder not in target.parents:
+        continue
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(base64.b64decode(data))
+    saved.append(str(target))
+print(json.dumps({"saved": saved, "missing": listing.get("missing", [])}))
 '''
