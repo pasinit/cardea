@@ -572,9 +572,7 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
         record's history and the journal. Releasing a free record changes nothing."""
         with kernel.database.engine.begin() as conn:
             principal = proof.resolve(conn)
-            result = records.release_claim(
-                conn, principal, namespace, name, record_id, body.reason
-            )
+            result = records.release_claim(conn, principal, namespace, name, record_id, body.reason)
         return {"schema_version": "0.2", **result}
 
     @app.get("/v0.2/collections/{name}", response_model=CollectionView)

@@ -789,6 +789,7 @@ def test_a_holder_whose_attempts_all_fail_loses_the_claim_within_the_bound(
 
 # Supervisor release over HTTP
 
+
 def release_http(
     kernel: Kernel, record: dict[str, Any], token: str = "supervisor", reason: str = "stuck"
 ) -> Any:
