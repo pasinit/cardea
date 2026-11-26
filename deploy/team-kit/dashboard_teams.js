@@ -71,8 +71,13 @@ function spend(view) {
 }
 
 function events(view) {
-  const rows = view.journal.events.map((e) => [e.cursor, e.at, e.type, e.subject]);
-  return rows.length ? table(["#", "At", "Event", "Subject"], rows) : note("No events.");
+  const list = el("ul", null, "tl");
+  view.journal.events.forEach((e) => {
+    const li = el("li");
+    li.append(el("span", e.at, "nw"), " ", el("span", `#${e.cursor}`, "nw"), " ", el("span", e.type), " ", el("span", e.subject, "muted"));
+    list.append(li);
+  });
+  return list.children.length ? list : note("No events.");
 }
 
 function overview(team) {
@@ -124,16 +129,20 @@ function tabs() {
 
 // One message: every string is put in as text, never as markup, and nothing becomes a link.
 function message(m) {
-  const box = el("div", null, "message");
+  const box = el("details", null, "message");
   const who = (p) => (p.role ? `${p.role} (${p.address})` : p.address);
   const kind = m.kind === "notice" ? " [notice]" : "";
   const item = m.item ? `; about ${m.item.collection}/${m.item.record_id}` : "";
   const delivery = Object.entries(m.deliveries).map(([k, v]) => `${k} ${v}`).join(", ");
-  box.append(el("div", `${m.sent_at}${kind}: ${who(m.from)} to ${who(m.to)}${item}${delivery ? `; ${delivery}` : ""}`, "head"));
-  m.parts.forEach((part) => {
-    const text = typeof part.text === "string" ? part.text : JSON.stringify(part.data === undefined ? part : part.data, null, 2);
-    box.append(el("pre", text));
-  });
+  const texts = m.parts.map((part) => (typeof part.text === "string" ? part.text : JSON.stringify(part.data === undefined ? part : part.data, null, 2)));
+  const first = (texts[0] || "").split("\n")[0];
+  const summary = el("summary", `${m.sent_at}${kind}: ${who(m.from)} to ${who(m.to)}`);
+  summary.append(el("div", first, "muted"));
+  box.append(summary);
+  box.append(el("div", `${item.slice(2)}${delivery ? `${item ? "; " : ""}${delivery}` : ""}`, "head"));
+  const body = el("div", null, "body");
+  texts.forEach((t) => body.append(el("pre", t)));
+  box.append(body);
   return box;
 }
 
