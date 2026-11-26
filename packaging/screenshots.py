@@ -162,7 +162,7 @@ def summary(dom: str, width: int) -> list[str]:
         scroll, client = seen["scroll-width"], seen["client-width"]
         over = int(scroll) > width
         if seen.get("narrow") and width < 500:
-            # headless Chromium's window is at least ~500px wide; the 390px iframe above is the real test
+            # headless window is >=500px wide; the 390px iframe is the real test
             over = False
         if over:
             OVERFLOWS.append(f"{width}px: content {scroll}px wide")
