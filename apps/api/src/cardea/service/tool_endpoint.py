@@ -340,7 +340,13 @@ class ToolEndpoint:
 
     def _fetch(self, call_id: str) -> dict[str, Any] | None:
         """`GET /artifacts/<call>`: that call's artifacts, base64 by path, within a bound;
-        one that cannot be read is named under `missing`."""
+        one that cannot be read is named under `missing`. `GET /artifacts/` lists every
+        call's paths, and `latest` is the newest call: a session need not see the note
+        (a client may show a result's structured content instead of its text)."""
+        if call_id == "":
+            return {"calls": {key: sorted(found) for key, found in self.fetchable.items()}}
+        if call_id == "latest" and self.fetchable:
+            call_id = list(self.fetchable)[-1]
         found = self.fetchable.get(call_id)
         if found is None or self.read_artifact is None:
             return None
