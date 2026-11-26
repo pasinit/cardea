@@ -71,8 +71,15 @@ function spend(view) {
 }
 
 function events(view) {
-  const rows = view.journal.events.map((e) => [e.cursor, e.at, e.type, e.subject]);
-  return rows.length ? table(["#", "At", "Event", "Subject"], rows) : note("No events.");
+  const items = view.journal.events;
+  if (!items.length) return note("No events.");
+  const list = el("ul", null, "tl");
+  items.forEach((e) => {
+    const row = el("li");
+    row.append(el("span", `#${e.cursor}`, "id"), el("time", e.at, "when"), el("span", e.type, "tool"), el("span", e.subject));
+    list.append(row);
+  });
+  return list;
 }
 
 function overview(team) {
@@ -122,18 +129,25 @@ function tabs() {
   );
 }
 
-// One message: every string is put in as text, never as markup, and nothing becomes a link.
+// One message, collapsed to a heading line; the body opens on tap. Every string is put in as text,
+// never as markup, and nothing becomes a link.
 function message(m) {
-  const box = el("div", null, "message");
+  const box = el("details", null, "message");
   const who = (p) => (p.role ? `${p.role} (${p.address})` : p.address);
   const kind = m.kind === "notice" ? " [notice]" : "";
   const item = m.item ? `; about ${m.item.collection}/${m.item.record_id}` : "";
   const delivery = Object.entries(m.deliveries).map(([k, v]) => `${k} ${v}`).join(", ");
-  box.append(el("div", `${m.sent_at}${kind}: ${who(m.from)} to ${who(m.to)}${item}${delivery ? `; ${delivery}` : ""}`, "head"));
-  m.parts.forEach((part) => {
-    const text = typeof part.text === "string" ? part.text : JSON.stringify(part.data === undefined ? part : part.data, null, 2);
-    box.append(el("pre", text));
-  });
+  const texts = m.parts.map((part) =>
+    typeof part.text === "string" ? part.text : JSON.stringify(part.data === undefined ? part : part.data, null, 2),
+  );
+  const first = (texts[0] || "").split("\n").find((l) => l.trim()) || "(no text)";
+  const summary = el("summary");
+  summary.append(
+    el("span", `${m.sent_at}${kind}: ${who(m.from)} to ${who(m.to)}${item}${delivery ? `; ${delivery}` : ""}`, "head"),
+    el("span", first.length > 100 ? `${first.slice(0, 100)}…` : first, "first"),
+  );
+  box.append(summary);
+  texts.forEach((text) => box.append(el("pre", text)));
   return box;
 }
 
