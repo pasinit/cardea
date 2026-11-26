@@ -380,3 +380,96 @@ def test_a_confined_session_gets_its_memory_as_a_staged_file_not_in_the_request(
         "/memory": {"file": "0", "sha256": digest, "bytes": len(saved)}
     }
     assert started["inputs"] == [{"sha256": digest, "data": base64.b64encode(saved).decode()}]
+
+
+# Artifacts a member saves as files
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"\0" * 32
+# The shape of a real env.try screenshots result (cardea-dev, 2026-11-26): artifacts are
+# listed as a0, a1, ... and mapped to their paths per scenario.
+TRY_OUTPUT: dict[str, Any] = {
+    "passed": True,
+    "artifacts": [
+        {"name": "a0", "bytes": len(PNG), "sha256": "s0", "parts": []},
+        {"name": "a1", "bytes": len(PNG) + 1, "sha256": "s1", "parts": []},
+        {"name": "a2", "bytes": 3, "sha256": "s2", "parts": []},
+    ],
+    "scenarios": [
+        {
+            "name": "screenshots",
+            "artifacts": [
+                {"name": "a0", "path": "screenshots/p1-mobile-390.png", "bytes": len(PNG)},
+                {"name": "a1", "path": "screenshots/p1-desktop-1280.png", "bytes": len(PNG) + 1},
+                {"name": "a2", "path": "../../escape.txt", "bytes": 3},
+            ],
+        }
+    ],
+}
+
+
+def test_artifacts_are_listed_by_their_scenario_paths_without_escapes() -> None:
+    found = tool_endpoint.listed_artifacts(TRY_OUTPUT)
+    assert sorted(found) == [
+        "escape.txt",
+        "screenshots/p1-desktop-1280.png",
+        "screenshots/p1-mobile-390.png",
+    ]
+    assert found["screenshots/p1-mobile-390.png"]["name"] == "a0"
+    assert tool_endpoint.listed_artifacts({"ok": True}) == {}
+    assert tool_endpoint.listed_artifacts("text") == {}
+
+
+@pytest.mark.loopback
+def test_cardea_artifact_saves_a_calls_screenshots_as_files(tmp_path: Path, source: Path) -> None:
+    stored = {"a0": PNG, "a1": PNG + b"d"}
+
+    def read(artifact: dict[str, Any]) -> bytes:
+        if artifact["name"] not in stored:
+            raise ValueError("artifact digest mismatch")
+        return stored[artifact["name"]]
+
+    async def call(name: str, arguments: dict[str, Any], gone: Any) -> types.CallToolResult:
+        return types.CallToolResult(
+            content=[types.TextContent(type="text", text="{}")], structured_content=TRY_OUTPUT
+        )
+
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    workspace.prepare(workdir, ())
+    with ToolEndpoint([], call, read_artifact=read) as tools:
+        offered = tools._offer(
+            types.CallToolResult(
+                content=[types.TextContent(type="text", text="{}")],
+                structured_content=TRY_OUTPUT,
+            )
+        )
+        note = offered.content[-1]
+        assert isinstance(note, types.TextContent) and "cardea-artifact get c1" in note.text
+        env = {
+            **os.environ,
+            **workspace.environment(workdir, tools.upload_url, tools.token),
+            "HOME": str(workdir),
+        }
+        tool = str(workdir / workspace.BIN / "cardea-artifact")
+        done = subprocess.run(
+            [tool, "get", "c1"], env=env, capture_output=True, text=True, check=False
+        )
+        assert done.returncode == 0, done.stderr
+        report = json.loads(done.stdout)
+        assert report["missing"] == ["escape.txt"]
+        saved = workdir / "artifacts" / "c1" / "screenshots"
+        assert (saved / "p1-mobile-390.png").read_bytes() == PNG
+        assert (saved / "p1-desktop-1280.png").read_bytes() == PNG + b"d"
+        assert not (tmp_path / "escape.txt").exists()
+        unknown = subprocess.run(
+            [tool, "get", "c9"], env=env, capture_output=True, text=True, check=False
+        )
+        assert unknown.returncode != 0 and "404" in unknown.stderr
+        bad = subprocess.run(
+            [tool, "get", "../x"], env=env, capture_output=True, text=True, check=False
+        )
+        assert bad.returncode != 0
+    # A run without a workspace offers nothing and serves no artifacts.
+    with ToolEndpoint([], call) as tools:
+        plain = types.CallToolResult(content=[], structured_content=TRY_OUTPUT)
+        assert tools._offer(plain) is plain

@@ -974,6 +974,24 @@ def proxied_options(tmp_path: Path, mcp_url: str = "http://127.0.0.1:1/mcp") -> 
     return env
 
 
+def test_claude_session_passes_the_traceparent(tmp_path: Path) -> None:
+    parent = "00-" + "a" * 32 + "-" + "b" * 16 + "-01"
+    adapter = ClaudeAgentSession(model="claude-sonnet-5-5", api_key="k")
+    request = SessionRequest(
+        system_prompt="s",
+        prompt="p",
+        mcp_url="http://127.0.0.1:1/mcp",
+        mcp_token="t",
+        tool_names=("mail-send",),
+        max_turns=5,
+        max_cost_usd=1.0,
+        timeout_seconds=60,
+        traceparent=parent,
+    )
+    assert adapter.options(request, tmp_path)["env"]["TRACEPARENT"] == parent
+    assert "TRACEPARENT" not in proxied_options(tmp_path)
+
+
 def test_claude_session_keeps_a_confined_workers_egress_proxy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -44,7 +44,7 @@ def stand_in(directory: Path) -> Path:
         "args = sys.argv[1:]\n"
         "assert '--no-proxy-server' in args\n"
         "get = urllib.request.build_opener(urllib.request.ProxyHandler({})).open\n"
-        "url = args[-1]\n"
+        "url = args[-1].split('?frame=')[0]\n"
         "body = get(url).read().decode()\n"
         "if 'setAttribute' not in body:\n"
         "    sys.exit(3)\n"
@@ -111,10 +111,14 @@ def test_the_catalog_names_screenshots_as_a_loopback_scenario_with_its_artifacts
     assert scenario.network == "loopback" and scenario.fetch is None
     # Two per page, for as many pages as the runner takes, and no more than env.try keeps.
     module = runner()
-    assert scenario.artifacts == tuple(
-        f"screenshots/p{n}-{kind}.png"
-        for n in range(1, module.MAX_PAGES + 1)
-        for kind in ("mobile-390", "desktop-1280")
+    assert scenario.artifacts == (
+        *(
+            f"screenshots/p{n}-{kind}.png"
+            for n in range(1, module.MAX_PAGES + 1)
+            for kind in ("mobile-390", "desktop-1280")
+        ),
+        f"screenshots/{module.REPORT}",
+        f"screenshots/{module.DOM}",
     )
     assert len(scenario.artifacts) <= 16
     makefile = (ROOT / "Makefile").read_text()
@@ -153,7 +157,8 @@ def test_a_commit_that_adds_several_mocks_gets_both_widths_of_each_full_page(
     assert log.endswith("screenshots: PASS\n")
     assert "p1: docs/mocks/b/two.html" in log and "p2: docs/mocks/one.html" in log
     assert sorted(f.name for f in out.iterdir()) == [
-        "p1-desktop-1280.png", "p1-mobile-390.png", "p2-desktop-1280.png", "p2-mobile-390.png",
+        "dom.html", "p1-desktop-1280.png", "p1-mobile-390.png", "p2-desktop-1280.png",
+        "p2-mobile-390.png", "report.txt",
     ]  # fmt: skip
     # Each is as tall as its page, at its width.
     for name, size in (
@@ -177,8 +182,8 @@ def test_screenshots_are_retaken_smaller_to_fit_the_artifact_limit(
         data = (out / name).read_bytes()
         assert len(data) <= module.MAX_BYTES
         assert b" 0.5 " in data or b" 0.35 " in data
-    # Eight such pages share the 1 MiB an env.try call keeps.
-    pages = {f"docs/mocks/p{n}.html": mock(size=600_000) for n in range(8)}
+    # Seven such pages share the 1 MiB an env.try call keeps.
+    pages = {f"docs/mocks/p{n}.html": mock(size=600_000) for n in range(7)}
     commit(repo, "many", pages)
     many = tmp_path / "many"
     assert module.main(["--root", str(repo), "--out", str(many)]) == 0
@@ -200,7 +205,7 @@ def test_more_pages_than_the_catalog_has_artifact_paths_for_fail_loudly(
     commit(repo, "nine", {f"docs/mocks/m{n}.html": mock() for n in range(9)})
     assert module.main(["--root", str(repo), "--out", str(tmp_path / "o")]) == 1
     out = capsys.readouterr().out
-    assert "not captured, over 8 pages: docs/mocks/m8.html" in out
+    assert "not captured, over 7 pages: docs/mocks/m7.html" in out
     assert out.endswith("screenshots: FAIL\n")
     assert len(list((tmp_path / "o").iterdir())) == 16
 
@@ -349,3 +354,79 @@ def test_a_commit_that_changes_the_dashboard_gets_its_real_pages_captured(
         "/\n/member?team=dev&member=dev-team.dev.1\nnot-a-route\n"
     )
     assert shots.dashboard_routes(root) == ["/", "/member?team=dev&member=dev-team.dev.1"]
+
+
+def test_the_report_gives_a_reader_without_images_the_text_and_the_overflow() -> None:
+    module = runner()
+    dom = (
+        '<html data-scroll-width="500" data-client-width="390" data-wide="DIV.card,TABLE">'
+        "<head><title>t</title><style>x{}</style></head><body><h1>Team  overview</h1>"
+        "<script>var a</script><p>two <b>columns</b></p></body></html>"
+    )
+    text = "\n".join(module.summary(dom, 390))
+    assert "viewport 390px, content 500px: HORIZONTAL OVERFLOW" in text
+    assert "elements past the right edge: DIV.card,TABLE" in text
+    assert "| Team overview" in text and "| columns" in text
+    assert "var a" not in text and "x{}" not in text
+    ok = '<html data-scroll-width="390" data-client-width="390" data-wide=""><body>hi</body></html>'
+    fine = "\n".join(module.summary(ok, 390))
+    assert "no horizontal overflow" in fine and "past the right edge" not in fine
+    unmeasured = "\n".join(module.summary("<html><body>hi</body></html>", 1280))
+    assert "layout not measured" in unmeasured
+
+
+@pytest.mark.loopback
+def test_the_served_pages_measure_their_own_overflow() -> None:
+    module = runner()
+    for name in (b"data-scroll-width", b"data-client-width", b"data-wide"):
+        assert name in module.MEASURE
+
+
+def test_the_dom_artifact_has_no_scripts_external_loads_or_measuring_attributes() -> None:
+    module = runner()
+    dom = (
+        '<html data-page-height="9" data-outline="a%20b"><head><link rel="stylesheet" '
+        'href="http://x/y.css"><script>var a</script></head><body><a href="#top">in</a>'
+        '<img src="http://evil/p.png"><p>kept</p></body></html>'
+    )
+    clean = module.sanitize(dom)
+    assert "kept" in clean and 'href="#top"' in clean
+    for gone in ("script", "evil", "link", "data-page-height", "data-outline"):
+        assert gone not in clean
+
+
+def test_the_report_lists_a_layout_outline_with_boxes_and_overflow_flags() -> None:
+    module = runner()
+    outline = "h1 | Title | 0 | 8 | 390 | 30 | \ndiv | wide | 0 | 40 | 500 | 20 | OVERFLOW"
+    dom = (
+        '<html data-scroll-width="500" data-client-width="390" data-wide="DIV" '
+        f'data-outline="{module.urllib.parse.quote(outline)}"><body>hi</body></html>'
+    )
+    text = "\n".join(module.summary(dom, 390))
+    assert "layout outline (tag | own text | x | y | width | height | overflow)" in text
+    assert "h1 | Title | 0 | 8 | 390 | 30 |" in text
+    assert "div | wide | 0 | 40 | 500 | 20 | OVERFLOW" in text
+    assert b"data-outline" in module.MEASURE
+
+
+def test_content_wider_than_the_requested_width_is_overflow_even_if_the_viewport_grew() -> None:
+    module = runner()
+    module.OVERFLOWS.clear()
+    grown = (
+        '<html data-scroll-width="485" data-client-width="485" data-wide=""><body>x</body></html>'
+    )
+    text = "\n".join(module.summary(grown, 390))
+    assert "HORIZONTAL OVERFLOW" in text
+    assert module.OVERFLOWS == ["390px: content 485px wide"]
+    module.OVERFLOWS.clear()
+
+
+def test_a_phone_width_page_of_the_runner_is_measured_in_a_frame_of_that_width(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = runner()
+    monkeypatch.setattr(module, "RUNNER", "http://127.0.0.1:1")
+    url = "http://127.0.0.1:1/docs/mocks/a.html"
+    assert module.framed(url, 390, 844) == url + "?frame=390&tall=844"
+    assert module.framed(url, 1280, 800) == url
+    assert module.framed("http://127.0.0.1:2/", 390, 844) == "http://127.0.0.1:2/"

@@ -13,6 +13,7 @@ never meets the request it names) and never reads the connection again after the
 """
 
 import asyncio
+import base64
 import hmac
 import json
 import secrets
@@ -38,6 +39,38 @@ UPLOAD_PATH = "/objects"
 # A member's memory archive (cardea-memory save); same token, same size bound.
 MEMORY_PATH = "/memory"
 MAX_UPLOAD_BYTES = 8 * 1048576
+# The artifacts the run's own tool calls returned, for `cardea-artifact get <call>`: a
+# workspace member saves them as files (screenshots it then opens with its file tools).
+ARTIFACTS_PATH = "/artifacts/"
+# Reads one listed artifact's bytes (checked against its digest); raises on any failure.
+ReadArtifact = Callable[[dict[str, Any]], bytes]
+MAX_FETCH_BYTES = 16 * 1048576
+
+
+def listed_artifacts(output: object) -> dict[str, dict[str, Any]]:
+    """An operation output's artifacts by file path: env.try names its artifacts `a0`,
+    `a1`, ... and maps each to its path under `scenarios[].artifacts`; an artifact without
+    a mapped path keeps its name. Paths are made relative and free of `..`."""
+    if not isinstance(output, dict) or not isinstance(output.get("artifacts"), list):
+        return {}
+    paths: dict[str, str] = {}
+    for scenario in output.get("scenarios") or ():
+        for entry in (scenario.get("artifacts") or ()) if isinstance(scenario, dict) else ():
+            if isinstance(entry, dict) and entry.get("name") and entry.get("path"):
+                paths[str(entry["name"])] = str(entry["path"])
+    found: dict[str, dict[str, Any]] = {}
+    for artifact in output["artifacts"]:
+        if not isinstance(artifact, dict) or not artifact.get("name"):
+            continue
+        raw = paths.get(str(artifact["name"]), str(artifact["name"]))
+        parts = [part for part in raw.replace("\\", "/").split("/") if part not in ("", ".", "..")]
+        if parts:
+            found["/".join(parts)] = artifact
+        if len(found) >= 64:
+            break
+    return found
+
+
 # The abandonment signal of the HTTP request being served, seen by the tool handler it runs.
 _GONE: ContextVar[asyncio.Event | None] = ContextVar("cardea_tool_request_gone", default=None)
 
@@ -79,10 +112,30 @@ class _Uploads:
     """`POST /objects`: a session's workspace hands a change bundle to the kernel. Every
     other request goes to the MCP app. Behind the same bearer token as the tools."""
 
-    def __init__(self, app: ASGIApp, upload: Upload | None, memory: Upload | None = None) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        upload: Upload | None,
+        memory: Upload | None = None,
+        fetch: Callable[[str], dict[str, Any] | None] | None = None,
+    ) -> None:
         self.app, self.routes = app, {UPLOAD_PATH: upload, MEMORY_PATH: memory}
+        self.fetch = fetch
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        path = str(scope.get("path", ""))
+        if scope["type"] == "http" and path.startswith(ARTIFACTS_PATH):
+            if self.fetch is None:
+                await _reply(send, 404, {"error": "no_workspace"})
+            elif scope.get("method") != "GET":
+                await _reply(send, 405, {"error": "method_not_allowed"})
+            else:
+                files = await asyncio.to_thread(self.fetch, path[len(ARTIFACTS_PATH) :])
+                if files is None:
+                    await _reply(send, 404, {"error": "unknown_call"})
+                else:
+                    await _reply(send, 200, files)
+            return
         if scope["type"] != "http" or scope.get("path") not in self.routes:
             await self.app(scope, receive, send)
             return
@@ -200,6 +253,7 @@ class ToolEndpoint:
         host: str = loopback.DEFAULT_HOST,
         upload: Upload | None = None,
         memory: Upload | None = None,
+        read_artifact: ReadArtifact | None = None,
     ) -> None:
         # The one loopback address a confined session may reach (ADR-028).
         self.host = host
@@ -209,6 +263,9 @@ class ToolEndpoint:
         # Set only for a run with a workspace; otherwise `POST /objects` is 404.
         self.upload = upload
         self.memory = memory
+        # Set only for a run with a workspace: each call's artifacts by call id (`c1`, ...).
+        self.read_artifact = read_artifact
+        self.fetchable: dict[str, dict[str, dict[str, Any]]] = {}
         self.port = 0
         # Authenticated tools/list requests served; a harness that never lists tools never
         # connected to its tools (ADR-033).
@@ -242,9 +299,10 @@ class ToolEndpoint:
                     content=[types.TextContent(type="text", text="unknown_tool")], is_error=True
                 )
             gone = _GONE.get()
-            return await call(
+            result = await call(
                 params.name, dict(params.arguments or {}), gone.is_set if gone else _never
             )
+            return self._offer(result)
 
         server: Server[Any] = Server(
             "cardea", version="1", on_list_tools=list_tools, on_call_tool=call_tool
@@ -259,7 +317,49 @@ class ToolEndpoint:
         app = server.streamable_http_app(
             json_response=True, stateless_http=True, host=self.host, transport_security=security
         )
-        return _Bearer(_Uploads(_Abandonment(app), self.upload, self.memory), self.token)
+        fetch = self._fetch if self.read_artifact is not None else None
+        return _Bearer(_Uploads(_Abandonment(app), self.upload, self.memory, fetch), self.token)
+
+    def _offer(self, result: types.CallToolResult) -> types.CallToolResult:
+        """Keep a successful result's artifacts fetchable by a new call id, and say so in the
+        result's text, so the session can save them as files."""
+        if self.read_artifact is None or result.is_error:
+            return result
+        found = listed_artifacts(result.structured_content)
+        if not found:
+            return result
+        call_id = f"c{len(self.fetchable) + 1}"
+        self.fetchable[call_id] = found
+        note = (
+            f"Artifacts of this call: run `cardea-artifact get {call_id}` to save them as "
+            f"files under ./artifacts/{call_id}/ ({', '.join(sorted(found))}), then open "
+            "them with your file tools (a PNG shows as an image)."
+        )
+        content = [*result.content, types.TextContent(type="text", text=note)]
+        return result.model_copy(update={"content": content})
+
+    def _fetch(self, call_id: str) -> dict[str, Any] | None:
+        """`GET /artifacts/<call>`: that call's artifacts, base64 by path, within a bound;
+        one that cannot be read is named under `missing`."""
+        found = self.fetchable.get(call_id)
+        if found is None or self.read_artifact is None:
+            return None
+        files: dict[str, str] = {}
+        missing: list[str] = []
+        total = 0
+        for path, artifact in sorted(found.items()):
+            size = artifact.get("bytes")
+            if not isinstance(size, int) or total + size > MAX_FETCH_BYTES:
+                missing.append(path)
+                continue
+            try:
+                content = self.read_artifact(artifact)
+            except Exception:  # an unreadable artifact is reported, never raised
+                missing.append(path)
+                continue
+            total += len(content)
+            files[path] = base64.b64encode(content).decode()
+        return {"call": call_id, "files": files, "missing": missing}
 
     def __enter__(self) -> "ToolEndpoint":
         self._server, self.port = loopback.start(
