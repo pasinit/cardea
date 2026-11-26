@@ -122,6 +122,8 @@ LINES: list[str] = []
 DOMS: list[str] = []
 # One short line per page and width, printed first so a truncated log still has it.
 DIGEST: list[str] = []
+# The page's text in reading order at the widest width, printed last: the log tail keeps it.
+TEXTS: list[str] = []
 
 
 class Texts(html.parser.HTMLParser):
@@ -422,6 +424,11 @@ def height(binary: str, scratch: Path, url: str, width: int, tall: int) -> int:
         DIGEST.extend(f"{url.split('/', 3)[-1] or '/'} @{width}: {r.strip()}" for r in rows[:3]
                       if "viewport" in r)
         DOMS.append(f"<!-- {url.split('/', 3)[-1] or '/'} at {width}px -->\n{sanitize(shown)}")
+        if width >= MIN_WINDOW:
+            reader = Texts()
+            reader.feed(shown)
+            body = "\n".join(f"  | {t[:160]}" for t in reader.lines)
+            TEXTS.append(f"text of {url.split('/', 3)[-1] or '/'} at {width}px:\n{body[:2200]}")
     found = None if problem else HEIGHT.search(shown)
     # A page we did not serve (the dashboard) has no measuring script: capture a long window.
     return min(max(int(found.group(1)), tall), MAX_HEIGHT) if found else max(tall, UNMEASURED)
@@ -618,6 +625,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     for name, ok, problem in results:
         sys.stdout.write(f"{name}: {'pass' if ok else 'FAIL ' + problem}\n")
     sys.stdout.write("widths:\n" + "\n".join(DIGEST)[:1500] + "\n")
+    sys.stdout.write("\n".join(TEXTS) + "\n")
     for url in skipped:
         sys.stdout.write(f"not captured, over {MAX_PAGES} pages: {url.split('/', 3)[-1]}\n")
     for line in OVERFLOWS:
