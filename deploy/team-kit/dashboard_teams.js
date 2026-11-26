@@ -269,6 +269,81 @@ async function get(path) {
   return body;
 }
 
+async function post(path, body) {
+  const response = await fetch(path, {
+    method: "POST",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.code);
+  return result;
+}
+
+// A paused team's supervisor is disabled, so its overview cannot be read: that refusal means paused.
+function isPaused(team) {
+  return team.state === "paused" || team.error === "principal_disabled";
+}
+
+function controlKeyOf(team) {
+  return team && team.controls && (!team.error || isPaused(team)) ? `${team.name}/${isPaused(team)}` : null;
+}
+
+let controlKey = null;
+let controlMessage = "";
+
+// Team-wide Pause / Resume. Every action asks first; the kernel and the host decide, not this page.
+function controls(team) {
+  const root = document.getElementById("controls");
+  controlKey = controlKeyOf(team);
+  if (!controlKey) return root.replaceChildren();
+  const paused = isPaused(team);
+  const verb = paused ? "resume" : "pause";
+  const label = paused ? "Resume team" : "Pause team";
+  const status = el("p", controlMessage, "muted");
+  status.setAttribute("role", "status");
+  const start = el("button", label, paused ? "" : "danger");
+  const actions = el("div", null, "actions");
+  actions.append(start);
+  start.addEventListener("click", () => {
+    const box = el("div", null, "confirm");
+    box.setAttribute("role", "alertdialog");
+    box.setAttribute("aria-labelledby", "confirm-title");
+    const title = el("b", paused ? `Resume ${team.name}?` : `Pause ${team.name}?`);
+    title.id = "confirm-title";
+    const text = paused
+      ? "The members can start new runs again. This is recorded in the audit log."
+      : "Every unfinished run stops and nothing new starts until you resume. This is recorded in the audit log.";
+    const reason = el("input");
+    reason.placeholder = "Reason (optional)";
+    reason.maxLength = 200;
+    reason.setAttribute("aria-label", "Reason");
+    const yes = el("button", paused ? "Yes, resume the team" : "Yes, pause the team", "danger");
+    const cancel = el("button", "Cancel");
+    cancel.addEventListener("click", () => controls(team));
+    yes.addEventListener("click", async () => {
+      yes.disabled = cancel.disabled = true;
+      try {
+        await post("/api/control", { team: team.name, action: verb, confirm: true, ...(paused ? {} : { reason: reason.value }) });
+        controlMessage = paused ? "Team resumed." : "Team paused.";
+      } catch (error) {
+        controlMessage = `Could not ${verb} the team. Check the team status, then try again.`;
+      }
+      await refresh();
+      controls(teams.find((t) => t.name === team.name));
+    });
+    const row = el("div", null, "actions");
+    row.append(yes, cancel);
+    box.append(title, el("p", text));
+    if (!paused) box.append(reason);
+    box.append(row);
+    root.replaceChildren(box, status);
+    (paused ? yes : reason).focus();
+  });
+  root.replaceChildren(actions, status);
+}
+
 let teams = [];
 let selected = null;
 let filter = { member: "", item: "" };
@@ -374,6 +449,7 @@ function draw() {
   scroll.append(overview(team));
   target.replaceChildren(el("h2", team.name), scroll);
   mailView(team);
+  controls(team);
 }
 
 async function refresh() {
@@ -386,6 +462,7 @@ async function refresh() {
       tabs();
       const team = teams.find((t) => t.name === selected);
       if (team) document.querySelector("#team .scroll").replaceChildren(overview(team));
+      if (team && controlKeyOf(team) !== controlKey) controls(team);
     } else {
       draw();
     }

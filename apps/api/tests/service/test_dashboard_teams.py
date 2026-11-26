@@ -77,7 +77,7 @@ def test_an_unreachable_team_shows_an_error_and_hides_nothing() -> None:
     assert status == 200
     dev, other = body["teams"]
     assert dev["view"] == fixture() and "error" not in dev
-    assert other == {"name": "aerarium", "error": "unreachable"}
+    assert other == {"name": "aerarium", "error": "unreachable", "controls": False}
     refused = backend(dev=raising(ClientError("forbidden", 403)))
     teams_ = call(refused, "GET", "/api/status")[1]["teams"]
     assert teams_[0]["error"] == "forbidden" and teams_[1]["view"] == aerarium()
@@ -94,7 +94,7 @@ def test_no_token_appears_in_any_output() -> None:
     assert call(down, "GET", "/api/status")[1]["teams"][1]["error"] == "unreachable"
     # The page code has no path for a credential: it reads only /api/status.
     script = (KIT / "dashboard_teams.js").read_text()
-    assert script.count("fetch(") == 1 and "token" not in script.lower()
+    assert script.count("fetch(") == 2 and "token" not in script.lower()
     assert "authorization" not in script.lower() and "bearer" not in script.lower()
 
 
@@ -105,7 +105,8 @@ def test_the_page_is_read_only() -> None:
         assert call(b, method, "/api/message", {"role": "dev"})[0] in (404, 501)
     page = (KIT / "dashboard_teams.html").read_text()
     assert "<form" not in page and "<button" not in page and "<a " not in page
-    assert "method:" not in (KIT / "dashboard_teams.js").read_text()
+    script = (KIT / "dashboard_teams.js").read_text()
+    assert script.count("method:") == 1 and 'method: "POST"' in script  # only /api/control
     assert call(b, "GET", "/api/status", headers={"Host": "evil.example"})[0] == 403
 
 

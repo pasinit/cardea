@@ -280,7 +280,8 @@ def handler(
         def do_POST(self) -> None:
             def post() -> None:
                 step = self.path.removeprefix("/api/settings/")
-                if step in ("preview", "apply") and hasattr(backend, "settings_change"):
+                settings = step in ("preview", "apply") and hasattr(backend, "settings_change")
+                if settings or (self.path == "/api/control" and hasattr(backend, "control")):
                     pass
                 elif self.path != "/api/message" or not writable:
                     return self.json(HTTPStatus.NOT_FOUND, {"code": "not_found"})
@@ -294,6 +295,8 @@ def handler(
                     body = json.loads(self.rfile.read(size))
                 except ValueError:
                     raise DashboardError("invalid_message") from None
+                if self.path == "/api/control":
+                    return self.json(HTTPStatus.OK, cast(Any, backend).control(body))
                 if step in ("preview", "apply"):
                     return self.json(HTTPStatus.OK, cast(Any, backend).settings_change(step, body))
                 self.json(HTTPStatus.CREATED, send_message(backend, body))
