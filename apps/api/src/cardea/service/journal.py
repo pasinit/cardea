@@ -27,6 +27,7 @@ refused events replace it, so a pause leaves at most one wake per trigger.
 
 import json
 import logging
+import threading
 from typing import TYPE_CHECKING, Any
 
 import rfc8785
@@ -54,6 +55,9 @@ APPROVALS = {
 # Event data larger than this reaches the run as a size note instead (bounded context).
 MAX_DATA_BYTES = 4096
 BATCH = 200
+# How often the waker looks at the journal's end. One indexed read; the minute tick stays
+# as the safety net.
+WAKE_INTERVAL = 0.5
 # Refusals that end when an operator re-enables a principal: the event waits, pending.
 WAIT_CODES = frozenset({"principal_disabled"})
 
@@ -350,6 +354,44 @@ class Dispatcher:
             "pending_cursor=CASE WHEN ? THEN ? ELSE pending_cursor END WHERE trigger_id=?",
             (cursor, now().isoformat(), int(keep), cursor, trigger_id),
         )
+
+
+class Waker:
+    """Admits journal triggers within seconds of an event, not at the next minute tick.
+
+    Every event is committed with the change it reports (mail sent, record changed), so the
+    journal is the durable wake-up queue: nothing is held in memory that a crash could lose.
+    The waker only watches the journal's end; when it moved (and once at start, to reconcile
+    whatever a stopped kernel left), it runs the same `Dispatcher` the minute tick runs, so
+    admission, dedupe per event id, live authority and coalescing are unchanged. A burst
+    shares one pass. The minute tick is the fallback and may find nothing left to do.
+    """
+
+    def __init__(self, kernel: "Kernel") -> None:
+        self.kernel = kernel
+        self.seen: int | None = None
+
+    def step(self) -> bool:
+        """One look at the journal; True when it ran the dispatcher."""
+        with self.kernel.database.read() as conn:
+            end = int(
+                conn.exec_driver_sql("SELECT COALESCE(MAX(cursor),0) FROM events").scalar_one()
+            )
+        if end == self.seen:
+            return False
+        # Read before the pass: an event committed during it moves the end past `seen`.
+        Dispatcher(self.kernel).tick()
+        self.seen = end
+        return True
+
+    def run(self, stop: threading.Event, interval: float = WAKE_INTERVAL) -> None:
+        while not stop.is_set():
+            try:
+                self.step()
+            except Exception:
+                # The next look (or the minute tick) retries.
+                log.exception("journal wake failed")
+            stop.wait(interval)
 
 
 def deliveries(conn: sa.Connection, trigger_id: str, limit: int = 50) -> list[dict[str, Any]]:

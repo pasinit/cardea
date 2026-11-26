@@ -147,6 +147,7 @@ class ClaudeAgentSession:
                 # Explicit rather than left to the SDK's merge of the parent environment.
                 **{name: os.environ[name] for name in PROXY_VARIABLES if name in os.environ},
                 **direct_endpoint(request.mcp_url),
+                **({"TRACEPARENT": request.traceparent} if request.traceparent else {}),
                 **(
                     workspace.environment(
                         workdir, space.upload_url, request.mcp_token, space.memory_url

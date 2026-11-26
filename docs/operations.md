@@ -18,7 +18,7 @@ Use `systemctl restart cardea-kernel` or reboot the host. DBOS recovers the **cu
 
 ## Upgrade
 
-The verified compatibility path is package `0.1.0-1` / schema `m4_001` to `0.1.0-2` / schema `m5_001`, keeping DBOS `3.0.0` and workflow version `cardea-m1-v1`. Later service schemas, up to the current head `m18_env_runs`, have portable migration tests only; no package upgrade across them has run on Debian (see the [Debian acceptance checklist](acceptance/debian-adr-034-037.md)). Arbitrary future dependencies, runtime versions and host versions require another fit test.
+The verified compatibility path is package `0.1.0-1` / schema `m4_001` to `0.1.0-2` / schema `m5_001`, keeping DBOS `3.0.0` and workflow version `cardea-m1-v1`. Later service schemas, up to the current head `m20_run_traceparent`, have portable migration tests only; no package upgrade across them has run on Debian (see the [Debian acceptance checklist](acceptance/debian-adr-034-037.md)). Arbitrary future dependencies, runtime versions and host versions require another fit test.
 
 1. Arrange a maintenance window, stop admissions and reconcile outstanding work. Stop with `systemctl stop cardea-kernel`.
 2. As `cardea-kernel`, run `cardea backup /private/path/pre-upgrade.sqlite3 --config /etc/cardea/config.json`. The destination must not already exist.

@@ -21,6 +21,7 @@ host fails to load rather than reaching for it. The last line is `screenshots: P
 
 import argparse
 import functools
+import html.parser
 import http.server
 import io
 import os
@@ -32,6 +33,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.parse
 import urllib.request
 from collections.abc import Sequence
 from pathlib import Path
@@ -43,7 +45,15 @@ MOCKS = "docs/mocks"
 # paths are fixed in the catalog: two per page, so at most 16 files, 8 pages.
 MAX_BYTES = 256 * 1024
 MAX_TOTAL = 1024 * 1024
-MAX_PAGES = 8
+MAX_PAGES = 7
+# A text report of what each page shows, for a reader who cannot open images: one artifact.
+REPORT = "report.txt"
+REPORT_BYTES = 64 * 1024
+LOG_REPORT = 4000
+REPORT_TEXT = 3000
+# The rendered DOM of each page, scripts and external references removed, as one HTML file.
+DOM = "dom.html"
+DOM_BYTES = 128 * 1024
 # Tried in turn until the screenshot fits its share of the limit.
 SCALES = (1.0, 0.75, 0.5, 0.35, 0.25)
 MAX_HEIGHT = 10000
@@ -59,9 +69,96 @@ STARTED = time.monotonic()
 # Served with every HTML page: records the page's height for the capture of its full length.
 MEASURE = (
     b"<script>setTimeout(() => document.documentElement.setAttribute("
-    b"'data-page-height', document.documentElement.scrollHeight), 4000)</script>"
+    b"'data-page-height', document.documentElement.scrollHeight), 4000);"
+    b"setTimeout(() => {const d = document.documentElement, w = d.clientWidth, id = (e) =>"
+    b" (e.tagName + (e.id ? '#' + e.id : '') + (typeof e.className === 'string' && e.className"
+    b" ? '.' + e.className.trim().split(/\\s+/)[0] : '')).replace(/[^\\w#.-]/g, '');"
+    b" d.setAttribute('data-scroll-width', d.scrollWidth); d.setAttribute('data-client-width', w);"
+    b" d.setAttribute('data-wide', [...document.body.querySelectorAll('*')].filter((e) =>"
+    b" e.getBoundingClientRect().right > w + 1).slice(0, 8).map(id).join(','));"
+    b" d.setAttribute('data-outline', encodeURIComponent([...document.body.querySelectorAll('*')]"
+    b".filter((e) => !['SCRIPT', 'STYLE'].includes(e.tagName)).slice(0, 250).map((e) => {const r ="
+    b" e.getBoundingClientRect(), t = [...e.childNodes].filter((n) => n.nodeType === 3)"
+    b".map((n) => n.textContent.trim()).join(' ').slice(0, 40);"
+    b" return [e.tagName.toLowerCase(), t, Math.round(r.x + scrollX), Math.round(r.y + scrollY),"
+    b" Math.round(r.width), Math.round(r.height), r.right > w + 1 ? 'OVERFLOW' : ''].join(' | ')})"
+    b".join('\\n')))}, 4000)</script>"
 )
+# Chromium's headless window is never narrower than this: a phone width is measured in a
+# frame of that width inside the page, so the page sees the width that was asked for.
+MIN_WINDOW = 500
+RUNNER = ""
+FRAME = (
+    "<!doctype html><body style=\"margin:0\"><iframe id=f src=\"{src}\" "
+    "style=\"width:{width}px;height:{tall}px;border:0;display:block\"></iframe>"
+    "<script>setTimeout(() => {{const i = document.getElementById('f'), "
+    "d = i.contentDocument.documentElement, r = document.documentElement;"
+    "for (const a of ['data-page-height', 'data-scroll-width', 'data-client-width', 'data-wide',"
+    " 'data-outline']) if (d.hasAttribute(a)) r.setAttribute(a, d.getAttribute(a));"
+    "const c = document.createElement('div'); c.hidden = true;"
+    "c.innerHTML = i.contentDocument.body.innerHTML; document.body.appendChild(c)}}, 4500)"
+    "</script>"
+)
+# Pages whose content was wider than the width asked for.
+OVERFLOWS: list[str] = []
 HEIGHT = re.compile(r'data-page-height="(\d+)"')
+ATTRIBUTE = re.compile(r'data-(scroll-width|client-width|wide|outline)="([^"]*)"')
+# The report lines of the run, written to REPORT at the end.
+LINES: list[str] = []
+# The rendered DOM of each page and width, for DOM.
+DOMS: list[str] = []
+
+
+class Texts(html.parser.HTMLParser):
+    """The visible text of a rendered DOM, one line per text node, scripts and styles left out."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.lines: list[str] = []
+        self.skip = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.skip += tag in {"script", "style", "head"}
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in {"script", "style", "head"} and self.skip:
+            self.skip -= 1
+
+    def handle_data(self, data: str) -> None:
+        if not self.skip and data.strip():
+            self.lines.append(" ".join(data.split()))
+
+
+def summary(dom: str, width: int) -> list[str]:
+    """What a reader without images needs: overflow, and the page's text in reading order."""
+    seen = dict(ATTRIBUTE.findall(dom))
+    parser = Texts()
+    parser.feed(dom)
+    text = [line for line in parser.lines if line]
+    out = []
+    if "scroll-width" in seen:
+        scroll, client = seen["scroll-width"], seen["client-width"]
+        over = int(scroll) > width
+        if over:
+            OVERFLOWS.append(f"{width}px: content {scroll}px wide")
+        out.append(f"  viewport {client}px, content {scroll}px: "
+                   f"{'HORIZONTAL OVERFLOW' if over else 'no horizontal overflow'}")
+        if seen["wide"]:
+            out.append(f"  elements past the right edge: {seen['wide']}")
+    else:
+        out.append(f"  viewport {width}px (layout not measured: page not served by the runner)")
+    if seen.get("outline"):
+        out.append("  layout outline (tag | own text | x | y | width | height | overflow):")
+        out.extend(f"    {row}" for row in urllib.parse.unquote(seen["outline"]).split("\n"))
+    out.append(f"  {len(text)} text blocks; first lines:")
+    shown = 0
+    for line in text:
+        if shown + len(line) > REPORT_TEXT:
+            out.append("  ...")
+            break
+        out.append(f"    | {line[:200]}")
+        shown += len(line)
+    return out
 
 
 class Quiet(http.server.SimpleHTTPRequestHandler):
@@ -70,6 +167,18 @@ class Quiet(http.server.SimpleHTTPRequestHandler):
 
     def send_head(self):  # type: ignore[no-untyped-def]
         path = Path(self.translate_path(self.path))
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        if query.get("frame") and path.suffix in {".html", ".htm"} and path.is_file():
+            src = urllib.parse.urlsplit(self.path).path
+            body = FRAME.format(
+                src=html.escape(src), width=int(query["frame"][0]),
+                tall=int(query.get("tall", ["800"])[0]),
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            return io.BytesIO(body)
         if path.suffix not in {".html", ".htm"} or not path.is_file():
             return super().send_head()
         body = path.read_bytes() + MEASURE
@@ -132,6 +241,16 @@ def direct(found: str) -> str:
     elif fonts.is_file():
         EXTRA_ENV["FONTCONFIG_FILE"] = str(fonts)
     return str(real)
+
+
+SCRIPTS = re.compile(r"<script\b.*?</script\s*>|<link\b[^>]*>|<meta\b[^>]*>", re.S | re.I)
+EXTERNAL = re.compile(r"""\s(src|href|srcset|action|poster)\s*=\s*(["'])(?!#)[^"']*\2""", re.I)
+MEASURED = re.compile(r'\sdata-(?:page-height|scroll-width|client-width|wide|outline)="[^"]*"')
+
+
+def sanitize(dom: str) -> str:
+    """The DOM as text for a reader: no scripts, no external loads, no measuring attributes."""
+    return MEASURED.sub("", EXTERNAL.sub("", SCRIPTS.sub("", dom)))
 
 
 def serve(root: Path) -> http.server.ThreadingHTTPServer:
@@ -223,9 +342,22 @@ def run(argv: list[str]) -> tuple[str, str]:
     return done.stdout, ""
 
 
+def framed(url: str, width: int, tall: int) -> str:
+    """`url` inside a frame of `width` when the window cannot be that narrow."""
+    if width >= MIN_WINDOW or not RUNNER or not url.startswith(RUNNER):
+        return url
+    return f"{url}?frame={width}&tall={tall}"
+
+
 def height(binary: str, scratch: Path, url: str, width: int, tall: int) -> int:
     """The page's full height at `width`, from the DOM after it has settled."""
-    shown, problem = run(command(binary, scratch / "measure", url, width, tall))
+    shown, problem = run(
+        command(binary, scratch / "measure", framed(url, width, tall), width, tall)
+    )
+    LINES.append(f"{width}px wide:" if not problem else f"{width}px wide: could not be read")
+    if not problem:
+        LINES.extend(summary(shown, width))
+        DOMS.append(f"<!-- {url.split('/', 3)[-1] or '/'} at {width}px -->\n{sanitize(shown)}")
     found = None if problem else HEIGHT.search(shown)
     # A page we did not serve (the dashboard) has no measuring script: capture a long window.
     return min(max(int(found.group(1)), tall), MAX_HEIGHT) if found else max(tall, UNMEASURED)
@@ -240,7 +372,9 @@ def shoot(
     problem = ""
     for scale in SCALES:
         target.unlink(missing_ok=True)
-        problem = run(command(binary, scratch / name, url, width, full, target, scale))[1]
+        problem = run(
+            command(binary, scratch / name, framed(url, width, full), width, full, target, scale)
+        )[1]
         if not problem and not target.is_file():
             problem = "no screenshot written"
         if problem:
@@ -252,10 +386,13 @@ def shoot(
 
 def capture(binary: str, urls: list[str], out: Path) -> list[tuple[str, bool, str]]:
     results: list[tuple[str, bool, str]] = []
-    limit = min(MAX_BYTES, MAX_TOTAL // (2 * max(len(urls), 1)))
+    limit = min(MAX_BYTES, (MAX_TOTAL - REPORT_BYTES - DOM_BYTES) // (2 * max(len(urls), 1)))
     with tempfile.TemporaryDirectory(prefix="shots-") as scratch:
         for number, url in enumerate(urls, 1):
-            sys.stdout.write(f"p{number}: {url.split('/', 3)[-1] or '/'}\n")
+            name = url.split("/", 3)[-1]
+            shown = name if name.startswith("docs/") or name.endswith(".html") else f"/{name}"
+            sys.stdout.write(f"p{number}: {shown}\n")
+            LINES.append(f"p{number}: /{url.split('/', 3)[-1]}")
             for kind, width, tall in WIDTHS:
                 label = f"p{number}-{kind}"
                 target = out / f"{label}.png"
@@ -381,6 +518,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     try:
         base = f"http://127.0.0.1:{server.server_port}"
+        global RUNNER
+        RUNNER = base
         urls = [f"{base}/{name}" for name in names]
         if running is not None:
             urls += [running[1] + route for route in dashboard_routes(args.root)]
@@ -390,13 +529,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         server.shutdown()
         if running is not None:
             running[0].kill()
+    # The log reaches a reader even when an artifact does not: the layout report, bounded.
+    sys.stdout.write("layout report:\n" + "\n".join(LINES)[:LOG_REPORT] + "\n")
+    (args.out / REPORT).write_text("\n".join(LINES)[:REPORT_BYTES] + "\n")
+    (args.out / DOM).write_text("\n".join(DOMS)[:DOM_BYTES] + "\n")
     if not all(ok for _, ok, _ in results):
         diagnose()
     for name, ok, problem in results:
         sys.stdout.write(f"{name}: {'pass' if ok else 'FAIL ' + problem}\n")
     for url in skipped:
         sys.stdout.write(f"not captured, over {MAX_PAGES} pages: {url.split('/', 3)[-1]}\n")
-    passed = all(ok for _, ok, _ in results) and not skipped
+    for line in OVERFLOWS:
+        sys.stdout.write(f"HORIZONTAL OVERFLOW at {line}\n")
+    passed = all(ok for _, ok, _ in results) and not skipped and not OVERFLOWS
     sys.stdout.write(f"screenshots: {'PASS' if passed else 'FAIL'}\n")
     return 0 if passed else 1
 

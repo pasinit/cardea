@@ -69,6 +69,9 @@ class HarnessRequest(_Frozen):
     # Stable identity of this attempt (task and attempt number); a confined harness's
     # worker job derives from it so recovery can stop it (ADR-028).
     job_key: str = ""
+    # W3C traceparent of the attempt's span; the harness passes it as TRACEPARENT so its own
+    # telemetry joins the run's trace. Diagnostic only; empty when tracing gave none.
+    traceparent: str = ""
     # Set only for a run with a workspace: built-in tools and a checkout. Unset, the
     # session has no built-in tools at all (ADR-033).
     workspace: HarnessWorkspace | None = None

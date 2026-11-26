@@ -48,6 +48,7 @@ from cardea.service import (
     mailbox,
     memory,
     spend,
+    tracing,
 )
 from cardea.service.approvals import ApprovalRequirement
 from cardea.service.confined import ConfinedAgentSession, WorkerFailed
@@ -243,6 +244,8 @@ class AgentRunRuntime:
         self.kernel = kernel
         # The attempt in progress; tool calls arrive on the endpoint's thread and report here.
         self.activity: AttemptActivity | None = None
+        # The task span of each task's current attempt (see `tracing`).
+        self.spans: dict[str, tracing.Span] = {}
 
     # Authority
 
@@ -463,6 +466,10 @@ class AgentRunRuntime:
             assert task.lease is not None
             at = now()
             state: dict[str, Any] = {"attempt": attempt, "free": free, "resumed": resumed}
+            # Tracing is diagnostic and never fails an attempt; the span joins the run's trace.
+            span = tracing.attempt_span(conn, task_id)
+            self.spans[task_id] = span
+            state["traceparent"] = span.traceparent
             inbox = next((c for c in request.context if c.operation == mailbox.INBOX), None)
             if inbox is not None:
                 # Mail for this attempt is leased with its checkpoint (ADR-034 decision 4.3).
@@ -605,8 +612,12 @@ class AgentRunRuntime:
                     )
             stack.enter_context(activities.bind(activity))
             self.activity = activity
+            span = self.spans.get(task_id)
             activity.event(
                 "attempt started",
+                trace_id=span.trace_id if span else None,
+                span_id=span.span_id if span else None,
+                parent_span_id=span.parent_span_id if span else None,
                 lease_expires_at=lease.expires_at,
                 timeout_s=float(request.attempt_timeout_seconds),
             )
@@ -825,7 +836,14 @@ class AgentRunRuntime:
             else None
         )
         with ToolEndpoint(
-            tools, call, self.kernel.endpoint_host, upload=upload, memory=remember
+            tools,
+            call,
+            self.kernel.endpoint_host,
+            upload=upload,
+            memory=remember,
+            read_artifact=(
+                partial(artifacts.read, self.kernel.database) if request.workspace else None
+            ),
         ) as endpoint:
             # Defence in depth: the token is never logged, and is scrubbed from harness output.
             self._current(task_id).redact(endpoint.token)
@@ -842,6 +860,7 @@ class AgentRunRuntime:
                 timeout_seconds=timeout,
                 model=model or None,
                 job_key=f"{task_id}:{attempt}",
+                traceparent=span.traceparent if (span := self.spans.get(task_id)) else "",
                 workspace=(
                     HarnessWorkspace(
                         repositories=request.workspace.repositories,

@@ -238,6 +238,8 @@ class OpenCodeHarness:
                 **{f"OPENCODE_DISABLE_{name}": "1" for name in DISABLED},
             }
         )
+        if request.traceparent:
+            env["TRACEPARENT"] = request.traceparent
         return env
 
     def command(self, model: str) -> list[str]:
