@@ -613,18 +613,11 @@ class AgentRunRuntime:
             stack.enter_context(activities.bind(activity))
             self.activity = activity
             span = self.spans.get(task_id)
-            trace = (
-                {
-                    "trace_id": span.trace_id,
-                    "span_id": span.span_id,
-                    "parent_span_id": span.parent_span_id,
-                }
-                if span is not None
-                else {}
-            )
             activity.event(
                 "attempt started",
-                **trace,
+                trace_id=span.trace_id if span else None,
+                span_id=span.span_id if span else None,
+                parent_span_id=span.parent_span_id if span else None,
                 lease_expires_at=lease.expires_at,
                 timeout_s=float(request.attempt_timeout_seconds),
             )
