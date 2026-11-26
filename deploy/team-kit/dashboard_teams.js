@@ -18,7 +18,9 @@ function table(head, rows) {
     row.forEach((cell) => r.append(el("td", cell === null || cell === undefined ? "-" : cell)));
     t.append(r);
   });
-  return t;
+  const box = el("div", null, "scroll");
+  box.append(t);
+  return box;
 }
 
 function section(title, node) {
