@@ -30,9 +30,9 @@ from test_opencode import found, harness, listing_tools, request
 from cardea.runtime import activity as activities
 from cardea.runtime.activity import AttemptActivity, OutputLimits, scrub
 from cardea.runtime.agent_session import SessionRequest, SessionResult, observe
+from cardea.service import tracing
 from cardea.service.agent_run_runtime import AgentRunRuntime
 from cardea.service.confined import ConfinedAgentSession, Workers
-from cardea.service import tracing
 from cardea.service.kernel import Kernel
 from cardea.service.logs import (
     ATTEMPT_LOGS,
