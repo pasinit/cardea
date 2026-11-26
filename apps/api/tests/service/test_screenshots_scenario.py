@@ -44,7 +44,7 @@ def stand_in(directory: Path) -> Path:
         "args = sys.argv[1:]\n"
         "assert '--no-proxy-server' in args\n"
         "get = urllib.request.build_opener(urllib.request.ProxyHandler({})).open\n"
-        "url = args[-1]\n"
+        "url = args[-1].split('?frame=')[0]\n"
         "body = get(url).read().decode()\n"
         "if 'setAttribute' not in body:\n"
         "    sys.exit(3)\n"
