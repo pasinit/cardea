@@ -61,6 +61,7 @@ from cardea.service.responses import (
     ApprovalList,
     ApprovalView,
     ChildrenView,
+    ClaimReleased,
     CollectionApplied,
     CollectionDeleted,
     CollectionView,
@@ -80,6 +81,7 @@ from cardea.service.responses import (
     Readiness,
     ReconcileResult,
     RecordHistory,
+    ReleaseRequest,
     RunOutput,
     RunView,
     StatusChanges,
@@ -556,6 +558,22 @@ def create_app(kernel: Kernel, max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTE
             else:
                 transaction.commit()
         return {"schema_version": "0.2", "dry_run": dry_run, **result}
+
+    @app.post("/v0.2/collections/{name}/records/{record_id}/release", response_model=ClaimReleased)
+    def release_claim(
+        name: CollectionPath,
+        record_id: Annotated[str, Path(pattern=r"^rec-[0-9a-f]{32}$")],
+        body: ReleaseRequest,
+        namespace: Namespace,
+        proof: Credential,
+    ) -> dict[str, Any]:
+        """The collection's supervisor releases a stuck claim (the HTTP form of
+        `records.force_release`). Authority is checked live; the change is recorded in the
+        record's history and the journal. Releasing a free record changes nothing."""
+        with kernel.database.engine.begin() as conn:
+            principal = proof.resolve(conn)
+            result = records.release_claim(conn, principal, namespace, name, record_id, body.reason)
+        return {"schema_version": "0.2", **result}
 
     @app.get("/v0.2/collections/{name}", response_model=CollectionView)
     def get_collection(name: CollectionPath, proof: Credential, namespace: Namespace) -> Any:

@@ -42,14 +42,63 @@ function members(view) {
   return rows.length ? table(["Pool", "Member", "State", "Running", "Last run"], rows) : note("No members.");
 }
 
+function shortName(id) {
+  const parts = String(id).split(".");
+  return parts.length > 1 ? parts.slice(1).join(".") : String(id);
+}
+
+function ago(iso) {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "-";
+  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  return `${Math.floor(s / 86400)} d ago`;
+}
+
+const BOARD = [
+  ["Open", ["open", "ready"]],
+  ["In progress", ["in_progress"]],
+  ["In review", ["in_review"]],
+  ["Done", ["done"]],
+];
+
+// Plain-language labels for a state the board has no column for.
+function plain(state) {
+  return String(state).replace(/_/g, " ");
+}
+
 function work(view) {
   const box = el("div");
   view.collections.forEach((c) => {
     if (c.status !== "ok") return box.append(el("p", `${c.name}: unavailable`, "bad"));
-    const counts = Object.entries(c.by_state || {}).map(([k, v]) => `${k} ${v}`).join(", ");
-    box.append(el("p", `${c.name}: ${c.total} records: ${counts || "none"}`));
+    const by = c.by_state || {};
+    const known = new Set(BOARD.flatMap(([, states]) => states));
+    const columns = BOARD.map(([title, states]) => [title, states, states.reduce((n, s) => n + (by[s] || 0), 0)]);
+    Object.entries(by)
+      .filter(([k, v]) => !known.has(k) && v > 0)
+      .forEach(([k, v]) => columns.push([plain(k).replace(/^./, (ch) => ch.toUpperCase()), [k], v]));
+    box.append(el("p", `${c.name}: ${c.total} records`, "muted"));
+    const board = el("div", null, "board");
+    columns.forEach(([title, states, count]) => {
+      const col = el("div", null, "col");
+      col.append(el("h4", `${title} (${count})`));
+      const held = (c.claimed || []).filter((r) => states.includes(r.state));
+      held.forEach((r) => {
+        const item = el("div", null, "item");
+        item.append(el("div", r.title || r.record_id), el("span", `${shortName(r.holder)}, ${ago(r.claimed_at)}`, "muted"));
+        col.append(item);
+      });
+      const rest = count - held.length;
+      if (rest > 0) col.append(el("p", `${held.length ? rest + " more" : rest + " not claimed"}`, "muted"));
+      if (!count) col.append(el("p", "None", "muted"));
+      board.append(col);
+    });
+    box.append(board);
+    if (c.truncated) box.append(note(`${c.truncated} more claimed items not shown.`));
   });
-  return view.collections.length ? box : note("No collections.");
+  return view.collections.length ? box : note("No work yet.");
 }
 
 function mail(view) {
@@ -84,6 +133,122 @@ function events(view) {
   return list;
 }
 
+const ROLE_WORDS = { dev: "developer", pm: "product manager", tl: "team lead", pe: "principal engineer", ux: "designer" };
+
+function shortName(id) {
+  const parts = String(id).split(".");
+  return parts.length > 1 ? parts.slice(1).join(".") : String(id);
+}
+
+const FAILURE_WORDS = {
+  attempt_timeout: "it ran out of time",
+  budget_exceeded: "it hit its spending limit",
+  cancelled: "it was stopped",
+};
+
+function failureWords(code) {
+  return FAILURE_WORDS[code] || "it did not finish";
+}
+
+function allMembers(view) {
+  return view.pools.flatMap((pool) => pool.members.map((m) => ({ pool: pool.name, m })));
+}
+
+function ago(iso) {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "-";
+  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  return `${Math.floor(s / 86400)} d ago`;
+}
+
+// What needs the owner: approvals waiting, dead-lettered mail, failed last runs.
+function needsYou(view) {
+  const items = [];
+  view.approvals.items
+    .filter((a) => a.state === "pending")
+    .forEach((a) => items.push(`${a.operation} on ${a.resource} waits for your approval.`));
+  view.mailbox.addresses
+    .filter((a) => a.dead > 0)
+    .forEach((a) => items.push(`${a.dead} undeliverable mail for ${a.address}.`));
+  allMembers(view)
+    .filter(({ m }) => !m.active_task_id && m.last_run && m.last_run.outcome === "failed")
+    .forEach(({ m }) => items.push(`${shortName(m.principal_id)}: last run failed: ${failureWords(m.last_run.failure_code)}.`));
+  const box = el("section", null, "needs");
+  box.setAttribute("role", "status");
+  box.append(el("h3", items.length ? `Needs you (${items.length})` : "Needs you"));
+  if (!items.length) return box.append(el("p", "Nothing needs you right now.")), box;
+  const list = el("ul");
+  items.forEach((text) => list.append(el("li", text)));
+  box.append(list);
+  return box;
+}
+
+function summary(view) {
+  const members = allMembers(view);
+  const working = members.filter(({ m }) => m.active_task_id).length;
+  let open = 0;
+  let review = 0;
+  view.collections.forEach((c) => {
+    if (c.status !== "ok") return;
+    const by = c.by_state || {};
+    Object.entries(by).forEach(([k, v]) => {
+      if (k === "in_review") review += v;
+      if (k === "open" || k === "ready" || k === "in_progress" || k === "in_review") open += v;
+    });
+  });
+  const mails = view.mailbox.addresses.reduce((n, a) => n + a.pending + a.in_flight, 0);
+  const day = view.spend.accounts.find((a) => a.account === "group" && a.window === "day");
+  const cards = el("div", null, "cards");
+  cards.setAttribute("role", "group");
+  cards.setAttribute("aria-label", "Summary");
+  const card = (big, small) => {
+    const c = el("div", null, "card");
+    c.append(el("b", big), el("span", small));
+    return c;
+  };
+  cards.append(card(`${working} of ${members.length}`, "members working"));
+  cards.append(card(String(open), `work items open, ${review} in review`));
+  cards.append(card(String(mails), "mails waiting"));
+  if (day && day.usd !== null && day.usd > 0) {
+    const c = card(`$${day.used_usd} of $${day.usd}`, "spent today");
+    const meter = el("div", null, "meter");
+    meter.setAttribute("role", "img");
+    const pct = Math.min(100, Math.round((100 * day.used_usd) / day.usd));
+    meter.setAttribute("aria-label", `${pct} percent of the daily limit`);
+    const bar = el("i");
+    bar.style.width = `${pct}%`;
+    meter.append(bar);
+    c.append(meter);
+    cards.append(c);
+  } else if (day) {
+    cards.append(card(`$${day.used_usd}`, "spent today"));
+  }
+  return cards;
+}
+
+function memberCard(pool, m) {
+  const card = el("div", null, "member");
+  const running = Boolean(m.active_task_id);
+  const state = m.disabled ? "paused" : running ? "running" : "idle";
+  const head = el("div");
+  head.append(el("b", shortName(m.principal_id)), document.createTextNode(" "), el("span", ROLE_WORDS[pool] || pool, "muted"));
+  head.append(el("span", state, `state state-${state}`));
+  card.append(head);
+  const claim = m.claims && m.claims[0];
+  card.append(el("div", running ? (claim ? `Working on ${claim}` : "Working") : "Waiting for work"));
+  if (m.last_run) {
+    const failed = m.last_run.outcome === "failed" || Boolean(m.last_run.failure_code);
+    const outcome = failed ? `failed, ${failureWords(m.last_run.failure_code)}` : m.last_run.outcome === "succeeded" ? "finished" : String(m.last_run.outcome);
+    card.append(el("div", `Last run ${outcome}, ${ago(m.last_run.finished_at)}`, m.last_run.outcome === "failed" ? "bad" : "muted"));
+  } else {
+    card.append(el("div", "Has not run yet", "muted"));
+  }
+  return card;
+}
+
 function overview(team) {
   const box = el("div");
   if (team.error) {
@@ -91,8 +256,17 @@ function overview(team) {
     return box;
   }
   const view = team.view;
-  box.append(note(`${view.group} (${view.namespace}): ${view.state}; as of ${view.as_of}`));
-  box.append(...section("Members", members(view)), ...section("Work", work(view)), ...section("Mail", mail(view)));
+  if (view.state !== "active") {
+    const banner = el("p", "Team paused. Work and mail below are the last known state.", "banner");
+    banner.setAttribute("role", "status");
+    box.append(banner);
+  }
+  box.append(note(`${view.group} (${view.namespace}): ${team.state}. Updated ${ago(view.as_of)}. Refreshes every 15 seconds.`));
+  box.append(needsYou(view), summary(view));
+  const grid = el("div", null, "grid");
+  allMembers(view).forEach(({ pool, m }) => grid.append(memberCard(pool, m)));
+  box.append(el("h3", "Members"), allMembers(view).length ? grid : note("No members."));
+  box.append(...section("Work", work(view)), ...section("Mail", mail(view)));
   box.append(...section("Approvals", approvals(view)), ...section("Spend", spend(view)), ...section("Latest events", events(view)));
   return box;
 }

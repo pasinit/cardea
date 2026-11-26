@@ -370,6 +370,8 @@ DASHBOARD_FIXTURES = (
 )
 # Extra routes a commit wants captured, one per line (for example a member page), else "/".
 DASHBOARD_ROUTES = f"{DASHBOARD}/screenshots.routes"
+# Fixture pages (paths under the root) always captured along with a changed dashboard.
+DASHBOARD_PAGES = f"{DASHBOARD}/screenshots.pages"
 
 
 def dashboard_changed(root: Path) -> bool:
@@ -396,6 +398,12 @@ def dashboard_routes(root: Path) -> list[str]:
     routes = path.read_text().splitlines() if path.is_file() else []
     cleaned = [r.strip() for r in routes if r.strip().startswith("/")]
     return cleaned or ["/"]
+
+
+def dashboard_pages(root: Path) -> list[str]:
+    path = root / DASHBOARD_PAGES
+    lines = path.read_text().splitlines() if path.is_file() else []
+    return [n.strip() for n in lines if n.strip() and (root / n.strip()).is_file()]
 
 
 def start_dashboard(root: Path) -> tuple[subprocess.Popen[bytes], str] | None:
@@ -449,6 +457,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     binary = browser()
     names = [] if binary is None else pages(args.root, args.page)
     dashboard = binary is not None and not args.page and dashboard_changed(args.root)
+    if dashboard:
+        names += [n for n in dashboard_pages(args.root) if n not in names]
     problem = ""
     if binary is None:
         problem = "no Chromium on PATH"
