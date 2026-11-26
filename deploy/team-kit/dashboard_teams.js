@@ -40,14 +40,63 @@ function members(view) {
   return rows.length ? table(["Pool", "Member", "State", "Running", "Last run"], rows) : note("No members.");
 }
 
+function shortName(id) {
+  const parts = String(id).split(".");
+  return parts.length > 1 ? parts.slice(1).join(".") : String(id);
+}
+
+function ago(iso) {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "-";
+  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  return `${Math.floor(s / 86400)} d ago`;
+}
+
+const BOARD = [
+  ["Open", ["open", "ready"]],
+  ["In progress", ["in_progress"]],
+  ["In review", ["in_review"]],
+  ["Done", ["done"]],
+];
+
+// Plain-language labels for a state the board has no column for.
+function plain(state) {
+  return String(state).replace(/_/g, " ");
+}
+
 function work(view) {
   const box = el("div");
   view.collections.forEach((c) => {
     if (c.status !== "ok") return box.append(el("p", `${c.name}: unavailable`, "bad"));
-    const counts = Object.entries(c.by_state || {}).map(([k, v]) => `${k} ${v}`).join(", ");
-    box.append(el("p", `${c.name}: ${c.total} records: ${counts || "none"}`));
+    const by = c.by_state || {};
+    const known = new Set(BOARD.flatMap(([, states]) => states));
+    const columns = BOARD.map(([title, states]) => [title, states, states.reduce((n, s) => n + (by[s] || 0), 0)]);
+    Object.entries(by)
+      .filter(([k, v]) => !known.has(k) && v > 0)
+      .forEach(([k, v]) => columns.push([plain(k).replace(/^./, (ch) => ch.toUpperCase()), [k], v]));
+    box.append(el("p", `${c.name}: ${c.total} records`, "muted"));
+    const board = el("div", null, "board");
+    columns.forEach(([title, states, count]) => {
+      const col = el("div", null, "col");
+      col.append(el("h4", `${title} (${count})`));
+      const held = (c.claimed || []).filter((r) => states.includes(r.state));
+      held.forEach((r) => {
+        const item = el("div", null, "item");
+        item.append(el("div", r.title || r.record_id), el("span", `${shortName(r.holder)}, ${ago(r.claimed_at)}`, "muted"));
+        col.append(item);
+      });
+      const rest = count - held.length;
+      if (rest > 0) col.append(el("p", `${held.length ? rest + " more" : rest + " not claimed"}`, "muted"));
+      if (!count) col.append(el("p", "None", "muted"));
+      board.append(col);
+    });
+    box.append(board);
+    if (c.truncated) box.append(note(`${c.truncated} more claimed items not shown.`));
   });
-  return view.collections.length ? box : note("No collections.");
+  return view.collections.length ? box : note("No work yet.");
 }
 
 function mail(view) {
