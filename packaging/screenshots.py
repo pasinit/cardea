@@ -153,12 +153,17 @@ def summary(dom: str, width: int) -> list[str]:
     out = []
     if seen.get("narrow"):
         width390, scroll390, wide390 = (seen["narrow"].split("|") + ["", "", ""])[:3]
+        if int(scroll390) > int(width390):
+            OVERFLOWS.append(f"{width}px (iframe): content {scroll390}px wide")
         out.append(f"  AT 390px (iframe): viewport {width390}px, content {scroll390}px: "
                    f"{'HORIZONTAL OVERFLOW' if int(scroll390) > int(width390) else 'no overflow'}"
                    f"{' past the edge: ' + wide390 if wide390 else ''}")
     if "scroll-width" in seen:
         scroll, client = seen["scroll-width"], seen["client-width"]
         over = int(scroll) > width
+        if seen.get("narrow") and width < 500:
+            # headless Chromium's window is at least ~500px wide; the 390px iframe above is the real test
+            over = False
         if over:
             OVERFLOWS.append(f"{width}px: content {scroll}px wide")
         out.append(f"  viewport {client}px, content {scroll}px: "
