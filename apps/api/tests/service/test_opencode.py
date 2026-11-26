@@ -146,6 +146,14 @@ def test_config_offers_only_cardea_tools_and_holds_no_secret(
     assert {"--pure", "--title"} <= set(adapter.command("z-ai/glm-4.6"))
 
 
+def test_traceparent_reaches_the_session_environment(tmp_path: Path) -> None:
+    parent = "00-" + "a" * 32 + "-" + "b" * 16 + "-01"
+    adapter = harness()
+    env = adapter.environment(request(traceparent=parent), "z-ai/glm-4.6", tmp_path)
+    assert env["TRACEPARENT"] == parent
+    assert "TRACEPARENT" not in adapter.environment(request(), "z-ai/glm-4.6", tmp_path)
+
+
 def test_mcp_server_timeout_is_the_requested_tool_timeout() -> None:
     # OpenCode 1.18.35 uses the server's `timeout` (ms, positive integer) for connecting,
     # listing tools and every tool call; unset, a call falls back to the MCP SDK's 60 s.
