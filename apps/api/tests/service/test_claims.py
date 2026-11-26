@@ -14,8 +14,8 @@ from fastapi.testclient import TestClient
 from test_records import Auth, FakeClient, collection, created, events, put, run
 
 from cardea.service import claims, operation_runtime
-from cardea.service.app import create_app
 from cardea.service import kernel as handlers
+from cardea.service.app import create_app
 from cardea.service.auth import Authentication
 from cardea.service.database import Database
 from cardea.service.kernel import Kernel, provision
