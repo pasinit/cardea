@@ -6,7 +6,6 @@ cannot act after its lease is replaced, and a retried session receives the call 
 """
 
 import asyncio
-import base64
 import json
 import logging
 import threading
@@ -74,12 +73,6 @@ LEASE_MARGIN = 30.0
 SETTLE_MARGIN = 1.0
 POLL_SECONDS = 1.0
 MAX_TOOL_TEXT = 16384
-# PNG artifacts in a tool's output go back to the session as images too, so a member can
-# look at screenshots it asked for (a reviewer must see the page, not a listing of it).
-# Bounded per image and per result, under the model's own image limits.
-MAX_IMAGE_BYTES = 3 * 1024 * 1024
-MAX_IMAGES = 8
-MAX_IMAGES_BYTES = 12 * 1024 * 1024
 # Added to the slowest operation's worst case for admission and settlement when the
 # harness's tool-call timeout is derived.
 TOOL_TIMEOUT_MARGIN = 10.0
@@ -151,43 +144,6 @@ def _error(code: str, detail: str = "") -> types.CallToolResult:
     return types.CallToolResult(
         content=[types.TextContent(type="text", text=message)], is_error=True
     )
-
-
-def tool_images(
-    read: Callable[[dict[str, Any]], bytes], output: object
-) -> list[types.ImageContent]:
-    """The output's PNG artifacts as image content, in listed order, within the limits.
-    An artifact that cannot be read is left out: the text listing still names it."""
-    listed = output.get("artifacts") if isinstance(output, dict) else None
-    if not isinstance(listed, list):
-        return []
-    images: list[types.ImageContent] = []
-    total = 0
-    for artifact in listed:
-        if len(images) >= MAX_IMAGES:
-            break
-        size = artifact.get("bytes") if isinstance(artifact, dict) else None
-        if not (
-            isinstance(artifact, dict)
-            and str(artifact.get("name", "")).lower().endswith(".png")
-            and isinstance(size, int)
-            and 0 < size <= MAX_IMAGE_BYTES
-            and total + size <= MAX_IMAGES_BYTES
-        ):
-            continue
-        try:
-            content = read(artifact)
-        except (KeyError, ValueError, TypeError, StoreError):
-            continue
-        if not content.startswith(b"\x89PNG\r\n\x1a\n"):
-            continue
-        total += size
-        images.append(
-            types.ImageContent(
-                type="image", data=base64.b64encode(content).decode(), mime_type="image/png"
-            )
-        )
-    return images
 
 
 def context_block(
@@ -1077,9 +1033,6 @@ class AgentRunRuntime:
                 structured_content=outcome.pending,
                 is_error=True,
             )
-        images = await asyncio.to_thread(
-            tool_images, partial(artifacts.read, self.kernel.database), outcome.output
-        )
         if outcome.deduplicated:
             return types.CallToolResult(
                 content=[
@@ -1087,13 +1040,12 @@ class AgentRunRuntime:
                         type="text",
                         text="Already done earlier in this scope; not repeated. "
                         + _text(outcome.output),
-                    ),
-                    *images,
+                    )
                 ],
                 structured_content=outcome.output,
             )
         return types.CallToolResult(
-            content=[types.TextContent(type="text", text=_text(outcome.output)), *images],
+            content=[types.TextContent(type="text", text=_text(outcome.output))],
             structured_content=outcome.output,
         )
 
