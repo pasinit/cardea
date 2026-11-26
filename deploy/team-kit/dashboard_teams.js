@@ -142,7 +142,7 @@ function controls(team) {
       ? "The members can start new runs again. This is recorded in the audit log."
       : "Every unfinished run stops and nothing new starts until you resume. This is recorded in the audit log.";
     const reason = el("input");
-    reason.placeholder = "Reason (optional, shown on the dashboard)";
+    reason.placeholder = "Reason (optional)";
     reason.maxLength = 200;
     reason.setAttribute("aria-label", "Reason");
     const yes = el("button", paused ? "Yes, resume the team" : "Yes, pause the team", "danger");
