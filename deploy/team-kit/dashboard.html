@@ -15,15 +15,30 @@
   .bad { color: #b42318; }
   .reply { margin: .3rem 0; padding-left: .6rem; border-left: 3px solid #d0d7de; white-space: pre-wrap; }
   .ok { color: #1a7f37; }
-  #error { color: #b42318; }
+  #banner { margin: .5rem 0 1rem; padding: .6rem .8rem; border: 1px solid #d0d7de; border-radius: 6px; }
+  #banner.paused { background: #fff8c5; border-color: #bf8700; color: #4d2d00; }
+  #banner.problem { border-color: #b42318; color: #b42318; }
+  #banner .headline { font-weight: 600; margin: 0 0 .25rem; }
+  #banner p { margin: .25rem 0; }
+  .note { color: #57606a; font-style: italic; margin: 0 0 .4rem; }
+  button, select { min-height: 44px; font: inherit; }
+  button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid #0969da; outline-offset: 2px; }
+  td, th, p, h1, h2, h3 { overflow-wrap: anywhere; }
   form { display: grid; gap: .5rem; max-width: 40rem; }
   textarea { min-height: 5rem; font: inherit; }
+  @media (max-width: 600px) {
+    body { margin: 0; padding: 16px; }
+    form, label, select, textarea, button { max-width: 100%; box-sizing: border-box; }
+    select, button { width: 100%; }
+  }
 </style>
 </head>
 <body>
 <h1 id="title">Team dashboard</h1>
-<p id="summary" class="muted">Loading…</p>
-<p id="error" role="alert"></p>
+<div id="banner" role="status">Checking team status…</div>
+
+<section id="collections"><h2>Work</h2><p class="note" hidden>Read-only while paused</p><div class="body"></div></section>
+<section id="mailbox"><h2>Mail</h2><p class="note" hidden>Read-only while paused</p><div class="body"></div></section>
 
 <section id="message-box">
   <h2>Message a role</h2>
@@ -36,8 +51,6 @@
 </section>
 
 <section id="members"><h2>Members</h2><div class="body"></div></section>
-<section id="collections"><h2>Work</h2><div class="body"></div></section>
-<section id="mailbox"><h2>Mail</h2><div class="body"></div></section>
 <section id="approvals"><h2>Approvals</h2><div class="body"></div></section>
 <section id="spend"><h2>Spend and run ceilings</h2><div class="body"></div></section>
 <section id="journal"><h2>Latest events</h2><div class="body"></div></section>

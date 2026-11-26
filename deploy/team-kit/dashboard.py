@@ -39,6 +39,9 @@ IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 TEAM = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 ITEM = re.compile(r"^[a-z][a-z0-9_-]{0,63}/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 CURSOR = re.compile(r"^[0-9a-f-]{36}$")
+# Plain words for the codes a pause can leave behind; the page never shows a raw code.
+PLAIN_REASONS = {"principal_disabled": "The team has been paused by the owner."}
+MAX_REASON = 200
 MAIL_FILTERS = {"team", "member", "item", "after", "limit"}
 MAIL_LIMIT = 20
 STATIC = {
@@ -58,8 +61,18 @@ class DashboardError(Exception):
         self.code, self.status = code, status
 
 
+def plain_reason(value: object) -> str | None:
+    """The pause reason as a sentence, or None when it is missing or not text."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    return PLAIN_REASONS.get(text, text[:MAX_REASON])
+
+
 class Backend(Protocol):
     def overview(self) -> dict[str, Any]: ...
+
+    def status(self) -> dict[str, Any]: ...
 
     def replies(self) -> list[dict[str, Any]]: ...
 
@@ -124,6 +137,9 @@ class FixtureBackend:
     def overview(self) -> dict[str, Any]:
         return self.view
 
+    def status(self) -> dict[str, Any]:
+        return self.view
+
     def replies(self) -> list[dict[str, Any]]:
         return self.recorded[:MAX_REPLIES]
 
@@ -141,8 +157,16 @@ class FixtureBackend:
 class KernelBackend:
     """The kernel, as the supervisor: `request` is `KernelClient.request`."""
 
-    def __init__(self, request: Callable[..., Any], namespace: str, group: str) -> None:
+    def __init__(
+        self,
+        request: Callable[..., Any],
+        namespace: str,
+        group: str,
+        pause: Callable[[], dict[str, Any]] | None = None,
+    ) -> None:
         self.request, self.namespace, self.group = request, namespace, group
+        self.pause = pause
+        self.last_view: dict[str, Any] | None = None
 
     def overview(self) -> dict[str, Any]:
         view: dict[str, Any] = self.request(
@@ -150,9 +174,42 @@ class KernelBackend:
         )
         return view
 
+    def status(self) -> dict[str, Any]:
+        """The overview, or for a paused team (the kernel refuses a disabled supervisor with
+        `principal_disabled`) `{paused, pause: {since, reason}, view}`, `view` being the last
+        overview read or None. Only the pause record's time and reason are copied out of it."""
+        try:
+            view = self.overview()
+        except Exception as error:
+            if getattr(error, "code", None) != "principal_disabled":
+                raise
+            return self.paused(self.last_view)
+        self.last_view = view
+        return self.paused(view) if team_state(view) == "paused" else view
+
+    def paused(self, view: dict[str, Any] | None) -> dict[str, Any]:
+        """`{paused, pause: {since, reason}, view}`; only the pause record's time and reason
+        are copied out of the record."""
+        try:
+            record = self.pause() if self.pause else {}
+        except Exception:
+            record = {}
+        since = record.get("paused_at")
+        reason = plain_reason(record.get("reason")) or PLAIN_REASONS["principal_disabled"]
+        return {
+            "paused": True,
+            "pause": {"since": since if isinstance(since, str) else None, "reason": reason},
+            "view": view,
+        }
+
     def replies(self) -> list[dict[str, Any]]:
         """The newest messages a group member sent to an instance, as the supervisor sees them."""
-        group = members(self.overview())
+        try:
+            group = members(self.overview())
+        except Exception as error:
+            if getattr(error, "code", None) == "principal_disabled":
+                return []
+            raise
         found: list[dict[str, Any]] = []
         after = ""
         for _ in range(MAX_MAIL_PAGES):
@@ -270,7 +327,7 @@ def handler(
                     name, kind = static[self.path]
                     return self.reply(HTTPStatus.OK, (HERE / name).read_bytes(), kind)
                 if self.path == "/api/status":
-                    return self.json(HTTPStatus.OK, backend.overview())
+                    return self.json(HTTPStatus.OK, backend.status())
                 if self.path == "/api/replies":
                     return self.json(HTTPStatus.OK, backend.replies())
                 self.json(HTTPStatus.NOT_FOUND, {"code": "not_found"})

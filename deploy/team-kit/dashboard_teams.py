@@ -69,6 +69,11 @@ base = load("dashboard")
 DashboardError = base.DashboardError
 
 
+plain_reason = base.plain_reason
+PLAIN_REASONS = base.PLAIN_REASONS
+MAX_REASON = base.MAX_REASON
+
+
 def error_code(error: Exception) -> str:
     """The kernel's error code only: never the exception text, which could carry anything."""
     code = getattr(error, "code", None)
@@ -87,20 +92,47 @@ class TeamsBackend:
         mails: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] | None = None,
         hosts: dict[str, Path] | None = None,
         connect: Callable[[dict[str, Any]], Any] | None = None,
+        pauses: dict[str, Callable[[], dict[str, Any]]] | None = None,
+        guards: dict[str, Callable[[], Any]] | None = None,
     ) -> None:
         self.sources, self.mails = sources, mails or {}
+        self.pauses, self.guards = pauses or {}, guards or {}
         self.hosts, self.connect = hosts or {}, connect
+
+    def pause(self, name: str, code: str | None = None) -> dict[str, Any]:
+        """Since when and why a team is paused, as text: the host's pause record, best effort.
+        The record's path and the host file's credentials are never part of it."""
+        try:
+            record = self.pauses[name]() if name in self.pauses else {}
+        except Exception:
+            record = {}
+        since = record.get("paused_at")
+        reason = plain_reason(record.get("reason")) or plain_reason(code)
+        return {"since": since if isinstance(since, str) else None, "reason": reason}
 
     def one(self, name: str) -> dict[str, Any]:
         try:
             view = self.sources[name]()
-            return {"name": name, "state": base.team_state(view), "view": view}
+            state = base.team_state(view)
+            found: dict[str, Any] = {"name": name, "state": state, "view": view}
+            if state == "paused":
+                found["pause"] = self.pause(name)
+            return found
         except Exception as error:  # an unreachable team must not hide the others
-            return {"name": name, "error": error_code(error)}
+            code = error_code(error)
+            if code == "principal_disabled":  # a kernel that still refuses a paused team
+                return {"name": name, "state": "paused", "pause": self.pause(name, code)}
+            return {"name": name, "error": code}
 
     def overview(self) -> dict[str, Any]:
         with ThreadPoolExecutor(max_workers=max(1, len(self.sources))) as pool:
             return {"teams": list(pool.map(self.one, self.sources))}
+
+    def status(self) -> dict[str, Any]:
+        return self.overview()
+
+    def replies(self) -> list[dict[str, Any]]:
+        return []
 
     def send(self, role: str, text: str, client_key: str) -> dict[str, Any]:
         raise DashboardError("read_only", 405)
@@ -112,13 +144,18 @@ class TeamsBackend:
         read = self.mails.get(team)
         return read(query) if read else {"total": 0, "items": [], "next": None}
 
-    def _settings_team(self, name: object) -> Path:
-        """The team's host file, once the kernel has confirmed the caller is its supervisor."""
+    def _settings_team(self, name: object, write: bool = False) -> Path:
+        """The team's host file, once the kernel has confirmed the caller is its supervisor.
+
+        The overview is readable while the team is paused, so a preview or an apply (`write`)
+        also passes the guard: a read the kernel refuses for a disabled supervisor."""
         if not isinstance(name, str) or name not in self.sources:
             raise DashboardError("unknown_team", 404)
         if name not in self.hosts:
             raise DashboardError("settings_unavailable", 404)
         self.sources[name]()  # the group overview: the kernel refuses a non-supervisor, live
+        if write and name in self.guards:
+            self.guards[name]()  # ... and a disabled one: no change to a paused team
         return self.hosts[name]
 
     def settings_current(self, query: dict[str, Any]) -> dict[str, Any]:
@@ -132,7 +169,7 @@ class TeamsBackend:
         wanted = {"team", "settings"} | ({"confirm"} if step == "apply" else set())
         if not isinstance(body, dict) or set(body) != wanted:
             raise DashboardError("invalid_change")
-        path = self._settings_team(body["team"])
+        path = self._settings_team(body["team"], write=True)
         confirm = body.get("confirm")
         if step == "apply" and not (isinstance(confirm, str) and CONFIRM.match(confirm)):
             raise DashboardError("invalid_confirm")
@@ -209,6 +246,29 @@ def kernel_source(
     return read, read_mail
 
 
+def pause_source(host_file: Path) -> Callable[[], dict[str, Any]]:
+    kit = load("teamkit")
+    host = kit.load_host(host_file)
+    return lambda: dict(kit.read_pause_record(host))
+
+
+def guard_source(host_file: Path) -> Callable[[], Any]:
+    """A read the kernel refuses unless the supervisor is enabled (unlike the overview, which a
+    paused team's supervisor may still read): the group itself."""
+    kit = load("teamkit")
+    host = kit.load_host(host_file)
+    namespace, group, _, _ = kit._names(host)
+
+    def check() -> None:
+        kernel = kit.client(host)
+        try:
+            kernel.request("GET", f"/groups/{group}", params={"namespace": namespace})
+        finally:
+            kernel.close()
+
+    return check
+
+
 def fixture_source(path: Path) -> Callable[[], dict[str, Any]]:
     view = json.loads(path.read_text())
     return lambda: view
@@ -233,6 +293,8 @@ def main(argv: list[str]) -> int:
                 {n: read for n, (read, _) in kernels.items()},
                 {n: mail for n, (_, mail) in kernels.items()},
                 dict(read_teams(args.teams)),
+                pauses={n: pause_source(h) for n, h in read_teams(args.teams)},
+                guards={n: guard_source(h) for n, h in read_teams(args.teams)},
             )
         else:
             pairs = [item.partition("=") for item in args.fixtures]

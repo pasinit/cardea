@@ -655,10 +655,16 @@ def test_only_the_groups_live_supervisor_may_read(
     assert status(kernel, section, group="no-such-team").status_code == 404
     # An agent member is not the supervisor either.
     assert status(kernel, section, who="runtime").status_code == 404
+    # A paused team (supervisor disabled) is still readable by that supervisor, read-only...
     with kernel.database.engine.begin() as conn:
         conn.exec_driver_sql("UPDATE principals SET disabled=1 WHERE principal_id='sup-eng'")
+    assert status(kernel, section).status_code == 200
+    assert status(kernel, section, who="sup-desk").status_code == 404
+    # ...but only while its grant is live.
+    with kernel.database.engine.begin() as conn:
+        conn.exec_driver_sql("DELETE FROM policies WHERE principal_id='sup-eng'")
     gone = status(kernel, section)
-    assert gone.status_code == 403 and gone.json()["code"] == "principal_disabled"
+    assert gone.status_code == 403 and gone.json()["code"] == "authority_denied"
 
 
 @pytest.mark.parametrize("section", READABLE)

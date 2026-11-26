@@ -1872,7 +1872,8 @@ def dashboard(host: dict[str, Any], port: int) -> None:
     namespace, group, _, _ = _names(host)
     kernel = client(host)
     try:
-        page.serve(page.KernelBackend(kernel.request, namespace, group), port)
+        record: Callable[[], dict[str, Any]] = lambda: read_pause_record(host)  # noqa: E731
+        page.serve(page.KernelBackend(kernel.request, namespace, group, record), port)
     finally:
         kernel.close()
 

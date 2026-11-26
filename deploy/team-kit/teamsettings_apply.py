@@ -271,11 +271,12 @@ def _make(
 
 def _authority(kit: ModuleType, host: dict[str, Any], connect: Callable[..., Any]) -> None:
     """The supervisor's live standing, read from the kernel before anything is changed. The
-    kernel decides; a supervisor it refuses stops the change here."""
+    kernel decides; a supervisor it refuses, disabled included, stops the change here. (The
+    overview would not: it stays readable for a paused team.)"""
     _, group, _, _ = kit._names(host)
     kernel = connect(host)
     try:
-        kernel.request("GET", f"/groups/{group}/overview", params={"namespace": host["namespace"]})
+        kernel.request("GET", f"/groups/{group}", params={"namespace": host["namespace"]})
     finally:
         kernel.close()
 

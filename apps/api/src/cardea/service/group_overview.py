@@ -322,11 +322,9 @@ def overview(
 
     limit = max(0, min(events, MAX_EVENTS))
     with kernel.database.read() as conn:
-        principal = proof.resolve(conn)
+        principal = proof.resolve(conn, allow_disabled=True)
         _owned(conn, principal, namespace, name)
-        policy = Policy(conn)
-        policy.principal(principal)
-        policy.require(principal, namespace, "groups.manage")
+        Policy(conn).require_paused_read(principal, namespace, "groups.manage")
         at = now()
         last = "SELECT COALESCE(MAX(cursor),0) FROM events"
         cursor = int(conn.exec_driver_sql(last).scalar_one())

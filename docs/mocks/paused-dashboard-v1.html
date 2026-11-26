@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Team dashboard (paused)</title>
+<style>
+  body { font: 14px/1.4 system-ui, sans-serif; margin: 1.5rem; color: #1b1f24; background: #fafafa; }
+  h1 { font-size: 1.3rem; margin: 0 0 .25rem; }
+  h2 { font-size: 1rem; margin: 1.5rem 0 .4rem; border-bottom: 1px solid #d0d7de; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: .2rem .6rem .2rem 0; vertical-align: top; }
+  th { font-weight: 600; color: #57606a; }
+  .muted { color: #57606a; }
+  .bad { color: #b42318; }
+  .reply { margin: .3rem 0; padding-left: .6rem; border-left: 3px solid #d0d7de; white-space: pre-wrap; }
+  .ok { color: #1a7f37; }
+  #banner { margin: .5rem 0 1rem; padding: .6rem .8rem; border: 1px solid #d0d7de; border-radius: 6px; }
+  #banner.paused { background: #fff8c5; border-color: #bf8700; color: #4d2d00; }
+  #banner.problem { border-color: #b42318; color: #b42318; }
+  #banner .headline { font-weight: 600; margin: 0 0 .25rem; }
+  #banner p { margin: .25rem 0; }
+  .note { color: #57606a; font-style: italic; margin: 0 0 .4rem; }
+  button, select { min-height: 44px; font: inherit; }
+  button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid #0969da; outline-offset: 2px; }
+  td, th, p, h1, h2, h3 { overflow-wrap: anywhere; }
+  form { display: grid; gap: .5rem; max-width: 40rem; }
+  textarea { min-height: 5rem; font: inherit; }
+  @media (max-width: 600px) {
+    body { margin: 0; padding: 16px; }
+    form, label, select, textarea, button { max-width: 100%; box-sizing: border-box; }
+    select, button { width: 100%; }
+  }
+</style>
+</head>
+<body>
+<h1>Team dashboard</h1>
+<div id="banner" class="paused" role="status">
+<p class="headline"><span aria-hidden="true">⏸</span> Team paused</p>
+<p>Paused since <time datetime="2026-11-24T18:30:00Z">2026-11-24 18:30</time>. Reason: paused by the owner.</p>
+<p>Work and mail below are the last known state. Nothing is being processed.</p>
+</div>
+<section id="collections"><h2>Work</h2><p class="note">Read-only while paused</p><div class="body">
+<table><tr><th>Title</th><th>State</th></tr>
+<tr><td>Dashboard v2: mail and activity views</td><td>ready</td></tr>
+<tr><td>Dashboard v2: controls</td><td>in review</td></tr></table></div></section>
+<section id="mailbox"><h2>Mail</h2><p class="note">Read-only while paused</p><div class="body"><p>No messages.</p></div></section>
+</body>
+</html>

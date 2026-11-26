@@ -262,3 +262,95 @@ def test_the_team_supervisor_may_mail_every_role() -> None:
     group = host.get("group", "dev-team")
     assert {f"mail:{group}.{pool}" for pool in module.POOLS} <= rights
     assert re.fullmatch(r"[a-z0-9.-]+", group)
+
+
+class Disabled:
+    """A kernel client that serves the overview until the supervisor is disabled."""
+
+    def __init__(self, refusal: str = "principal_disabled") -> None:
+        self.refusal, self.down = refusal, False
+
+    def request(self, method: str, path: str, **kwargs: Any) -> Any:
+        if self.down:
+            raise ClientError(self.refusal, 403)
+        return fixture()
+
+
+def paused_backend(
+    record: dict[str, Any], refusal: str = "principal_disabled", seen: bool = True
+) -> tuple[Any, Disabled]:
+    client = Disabled(refusal)
+    backend = dashboard().KernelBackend(client.request, "ns", "dev-team", lambda: record)
+    if seen:
+        backend.status()
+    client.down = True
+    return backend, client
+
+
+@pytest.mark.loopback
+def test_a_paused_team_is_reported_as_paused_with_its_reason_and_last_view() -> None:
+    since = "2026-11-23T10:00:00+00:00"
+    record = {"paused_at": since, "reason": "Budget review", "token": "s3cret"}
+    backend, _ = paused_backend(record)
+    status, body = call(backend, "GET", "/api/status")
+    assert status == 200
+    assert body == {
+        "paused": True,
+        "pause": {"since": since, "reason": "Budget review"},
+        "view": fixture(),
+    }
+    assert "s3cret" not in json.dumps(body) and "principal_disabled" not in json.dumps(body)
+    assert call(backend, "GET", "/api/replies") == (200, [])
+
+
+@pytest.mark.loopback
+def test_a_paused_team_without_a_reason_gets_the_owner_sentence() -> None:
+    for record in ({}, {"reason": "principal_disabled"}, {"reason": "  "}):
+        backend, _ = paused_backend(record, seen=False)
+        body = call(backend, "GET", "/api/status")[1]
+        assert body["paused"] is True and body["view"] is None
+        assert body["pause"] == {
+            "since": None,
+            "reason": "The team has been paused by the owner.",
+        }
+
+
+@pytest.mark.loopback
+def test_other_refusals_and_a_broken_pause_record_stay_as_they_were() -> None:
+    backend, _ = paused_backend({}, refusal="forbidden")
+    assert call(backend, "GET", "/api/status") == (403, {"code": "forbidden"})
+    assert call(backend, "GET", "/api/replies") == (403, {"code": "forbidden"})
+
+    def broken() -> dict[str, Any]:
+        raise OSError("/secret/path")
+
+    client = Disabled()
+    client.down = True
+    found = dashboard().KernelBackend(client.request, "ns", "dev-team", broken).status()
+    assert found["paused"] is True and "/secret" not in json.dumps(found)
+
+
+def test_the_page_shows_a_paused_team_in_plain_words_in_reading_order() -> None:
+    page, script = (KIT / "dashboard.html").read_text(), (KIT / "dashboard.js").read_text()
+    assert 'id="banner" role="status">Checking team status…<' in page
+    order = [page.index(f'id="{name}"') for name in ("banner", "collections", "mailbox")]
+    assert order == sorted(order)
+    assert order[2] < min(page.index(f'id="{n}"') for n in ("message-box", "members", "journal"))
+    assert "<h2>Work</h2>" in page and "<h2>Mail</h2>" in page
+    assert page.count("Read-only while paused") == 2
+    for text in (
+        "Team paused",
+        "Paused since ",
+        "Reason: ",
+        "Work and mail below are the last known state. Nothing is being processed.",
+        "No work items.",
+        "No messages.",
+        "We could not load the team status. Try again in a moment.",
+        "Try again",
+    ):
+        assert text in script
+    assert "min-height: 44px" in page and ":focus-visible" in page
+    assert "max-width: 600px" in page and "padding: 16px" in page
+    assert "innerHTML" not in script and "principal_disabled" not in script
+    # The only unconditional tab stop before Work and Mail is the retry button, made on demand.
+    assert page.index("<button") > page.index('id="mailbox"')
