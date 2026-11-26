@@ -50,7 +50,7 @@ MAX_PAGES = 7
 # A text report of what each page shows, for a reader who cannot open images: one artifact.
 REPORT = "report.txt"
 REPORT_BYTES = 64 * 1024
-LOG_REPORT = 1500
+LOG_REPORT = 6000
 REPORT_TEXT = 3000
 # The rendered DOM of each page, scripts and external references removed, as one HTML file.
 DOM = "dom.html"
@@ -443,6 +443,17 @@ def shoot(
     return f"{target.stat().st_size} bytes at scale {SCALES[-1]}, over its {limit} byte share"
 
 
+def log_report() -> str:
+    """The layout report for the log, each page cut to its own share so every page shows."""
+    pages: list[list[str]] = []
+    for line in LINES:
+        if re.match(r"p\d+: ", line) or not pages:
+            pages.append([])
+        pages[-1].append(line)
+    share = LOG_REPORT // max(len(pages), 1)
+    return "\n".join("\n".join(page)[:share] for page in pages)
+
+
 def capture(binary: str, urls: list[str], out: Path) -> list[tuple[str, bool, str]]:
     results: list[tuple[str, bool, str]] = []
     limit = min(MAX_BYTES, (MAX_TOTAL - REPORT_BYTES - DOM_BYTES) // (2 * max(len(urls), 1)))
@@ -594,7 +605,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if running is not None:
             running[0].kill()
     # The log reaches a reader even when an artifact does not: the layout report, bounded.
-    sys.stdout.write("layout report:\n" + "\n".join(LINES)[:LOG_REPORT] + "\n")
+    sys.stdout.write("layout report:\n" + log_report() + "\n")
     (args.out / REPORT).write_text("\n".join(LINES)[:REPORT_BYTES] + "\n")
     (args.out / DOM).write_text("\n".join(DOMS)[:DOM_BYTES] + "\n")
     if not all(ok for _, ok, _ in results):
