@@ -73,6 +73,8 @@ GRANT_RENEWAL_DAYS = 2
 CERT_RENEWAL_SECONDS = 30 * 24 * 3600
 WORKER_PROFILES = ("session", "coding", "vcs", "try")
 WORKER_NAMES = ("agent", "code-session", "env-try", "vcs-check-repository")
+LOOPBACK_PROFILES = ("try-loopback",)
+LOOPBACK_WORKERS = ("env-try-loopback",)
 PACKAGES = {
     "cardea-vcs-ops": "cardea_vcs_ops",
     "cardea-coding-ops": "cardea_coding_ops",
@@ -1023,6 +1025,24 @@ class Workers(Step):
             f"worker {w}" for w in WORKER_NAMES if w not in workers
         ]
 
+    def loopback_note(self, ctx: Context) -> str:
+        """Non-fatal: the owner's file may predate the loopback phase; it is never rewritten."""
+        document = ctx.read_json(ctx.layout.workers_config)
+        if not isinstance(document, dict):
+            return ""
+        profiles, workers = document.get("profiles") or {}, document.get("workers") or {}
+        lacks = [f"profile {p}" for p in LOOPBACK_PROFILES if p not in profiles]
+        lacks += [f"worker {w}" for w in LOOPBACK_WORKERS if w not in workers]
+        if "workspace_mb" not in (profiles.get("try") or {}):
+            lacks.append("workspace_mb on profile try")
+        if not lacks:
+            return ""
+        return (
+            f"loopback phase not offered (lacks {', '.join(lacks)}): env.try reports loopback "
+            "scenarios such as screenshots as unavailable; copy these from "
+            f"{ctx.layout.small_host}/cardea/cardea-host-workers.json to enable it"
+        )
+
     def pending(self, ctx: Context) -> list[str]:
         found = self.profile_problems(ctx)
         try:
@@ -1076,12 +1096,13 @@ class Workers(Step):
         )
         problems = self.profile_problems(ctx)
         ok = probe.code == 0 and not problems
-        return Verdict(
-            ok,
+        detail = (
             "helper probe ok; profiles " + ", ".join(WORKER_PROFILES)
             if ok
-            else f"helper probe exit {probe.code}; {'; '.join(problems)}",
+            else f"helper probe exit {probe.code}; {'; '.join(problems)}"
         )
+        note = self.loopback_note(ctx)
+        return Verdict(ok, f"{detail}; {note}" if note else detail)
 
 
 class Kernel(Step):

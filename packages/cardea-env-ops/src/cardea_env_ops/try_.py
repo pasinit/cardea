@@ -45,8 +45,9 @@ network namespace with only its own loopback, no proxy and no route out:
    kernel's copy of the first phase's output (`context.previous`), never a file the commit
    could have written.
 
-A host without the second phase refuses the call before running anything
-(`env_loopback_unavailable`), never running a loopback scenario with the network it has.
+A host without the second phase (no workspace, or no `then` for the kernel to start) still
+runs the other scenarios. Each loopback scenario is reported `unavailable` with the reason
+`env_loopback_unavailable`, never run with the network it has.
 """
 
 import os
@@ -305,6 +306,22 @@ def _scenario(
     return {"name": name, **ran}
 
 
+def unavailable(name: str) -> dict[str, JsonValue]:
+    """A loopback scenario's report on a host without the second phase."""
+    return {
+        "name": name,
+        "outcome": "unavailable",
+        "reason": "env_loopback_unavailable",
+        "exit_code": None,
+        "log_tail": (
+            "this host does not offer the loopback phase; an operator enables it with the "
+            "try-loopback profile, the env-try-loopback worker and workspace_mb on the "
+            "try profile"
+        ),
+        "artifacts": [],
+    }
+
+
 def _report(
     alias: str,
     commit: str,
@@ -340,22 +357,24 @@ def try_commit(
             raise OperationRejected("The second phase has no workspace", "env_phase_invalid")
         return phase_two(arguments, context, workspace, mode)
     alias, commit, names, entry, catalog = _admit(arguments)
-    deferred = [n for n in names if catalog.scenarios[n].network == "loopback"]
-    if deferred:
-        if workspace is None:
-            raise OperationRejected(
-                f"Scenarios {', '.join(deferred)} need loopback, whose second phase this host "
-                "does not offer",
-                "env_loopback_unavailable",
-            )
+    wanted = [n for n in names if catalog.scenarios[n].network == "loopback"]
+    offered = workspace is not None and context.follow_on
+    deferred = wanted if offered else []
+    results: dict[str, JsonValue] = {}
+    if not offered:
+        # The others still run; each loopback scenario says why it did not.
+        for name in wanted:
+            results[name] = unavailable(name)
+    if deferred and workspace is not None:
         scratch = workspace  # the second phase inherits it, checkout and fetched dependencies
     env = environment(scratch, catalog)
     checkout = stage(entry.source, commit, scratch, entry.git_url, context.inputs.get("/change"))
     deadline = context.deadline.timestamp() - 5  # leave time to report
     dropped = {"artifacts": 0, "log_bytes": 0}
     kept: dict[str, bytes] = {}
-    results: dict[str, JsonValue] = {}
     for name in names:
+        if name in results:
+            continue
         if name in deferred:
             continue
         scenario = catalog.scenarios[name]

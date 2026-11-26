@@ -149,6 +149,9 @@ class OperationContext:
     # 2026-11-22): the kernel's own copy of what the first worker reported, never the
     # caller's. None in a call's first (or only) phase.
     previous: Mapping[str, JsonValue] | None = None
+    # Whether the kernel will start a second phase after this one (the executor's `then`),
+    # so a first-phase worker knows if it may defer work to it.
+    follow_on: bool = False
 
 
 @dataclass(frozen=True)

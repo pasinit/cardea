@@ -218,6 +218,8 @@ python3 /opt/cardea/packaging/fetch_opencode.py /opt/cardea/opencode
    3. Build and pin the toolchain image as root, from a checkout of the same commit as `/opt/cardea`: `make try-toolchain`. Then install `cardea/cardea-try-toolchain.service` and `.timer` under `/etc/systemd/system/` and run `systemctl enable --now cardea-try-toolchain.timer` for the weekly refresh. A refresh changes the image digest, and so every run key.
    4. Install `packages/cardea-env-ops` into `/opt/cardea/apps/api/.venv` and copy its `descriptors/` into `operations_dir`. Provision `env.try` and `repo:<alias>` for the supervisors that may use it, and restart.
 
+   5. Optional: the loopback phase, for scenarios that declare `network: loopback` (`make teams`, MCP loopback tests). Without it, `env.try` runs the other scenarios and reports each loopback one as `unavailable` (`env_loopback_unavailable`). To enable it, keep `workspace_mb` on the `try` profile, install the `try-loopback` profile (no proxy, no route out, a private loopback only) and the `env-try-loopback` worker from `cardea/cardea-host-workers.json`, and restart.
+
    Checks:
    - `curl -s -o /dev/null -w '%{http_connect}\n' -x http://127.0.10.7:3128 https://pypi.org/` prints 200, and `https://example.com/` prints 403.
    - `sudo sh experiments/debian-acceptance/env_try.sh` passes (see its README).

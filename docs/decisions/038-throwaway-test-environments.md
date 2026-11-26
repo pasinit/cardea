@@ -173,9 +173,13 @@ Both are confined workers under ADR-028 with the same repository aliases; they s
     - a scratch `HOME`;
     - the profile's proxy;
     - the catalog's fixed variables, never credential-shaped names.
-  - **Each scenario reports** `pass`, `fail`, `timeout`, `error` or `not_run`, with:
+  - **Each scenario reports** `pass`, `fail`, `timeout`, `error`, `not_run` or `unavailable`, with:
     - its exit code and duration;
     - a log tail of at most 4 KiB, scrubbed of credential shapes;
+    - for `unavailable`, a `reason`: a loopback scenario on a host without the second phase
+      reports `env_loopback_unavailable` and a log tail saying how an operator enables it (the
+      `try-loopback` profile, the `env-try-loopback` worker and `workspace_mb` on `try`). The
+      call's other scenarios still run;
     - its artifact paths, at most 256 KiB each, 1 MiB and 8 files in all, returned as artifacts the kernel stores as objects.
 
     Anything over a limit is dropped and counted.
