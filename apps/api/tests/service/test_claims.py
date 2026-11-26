@@ -10,9 +10,11 @@ from typing import Any, cast
 
 import pytest
 import test_records as records_test
+from fastapi.testclient import TestClient
 from test_records import Auth, FakeClient, collection, created, events, put, run
 
 from cardea.service import claims, operation_runtime
+from cardea.service.app import create_app
 from cardea.service import kernel as handlers
 from cardea.service.auth import Authentication
 from cardea.service.database import Database
@@ -783,3 +785,41 @@ def test_a_holder_whose_attempts_all_fail_loses_the_claim_within_the_bound(
     Scheduler(kernel, lambda: leases[0] + timedelta(seconds=60)).tick()
     stored = row(kernel, record_id)
     assert stored["holder"] is None and stored["claim_epoch"] == 2
+
+
+# Supervisor release over HTTP
+
+def release_http(
+    kernel: Kernel, record: dict[str, Any], token: str = "supervisor", reason: str = "stuck"
+) -> Any:
+    return TestClient(create_app(kernel)).post(
+        f"/v0.2/collections/items/records/{record['record_id']}/release",
+        params={"namespace": "test"},
+        json={"reason": reason},
+        headers={**records_test.HEADERS, "Authorization": f"Bearer {token}"},
+    )
+
+
+def test_the_supervisor_releases_a_claim_over_http_with_history(items: Kernel) -> None:
+    record = created(items)
+    claim(items, record)
+    done = release_http(items, record)
+    assert done.status_code == 200, done.json()
+    assert done.json()["released"] is True
+    stored = row(items, record["record_id"])
+    assert stored["holder"] is None and stored["claim_epoch"] == 2
+    last = events(items, record["record_id"])[-1]
+    assert last[0] == "released" and last[2] == "supervisor"
+    # The old holder is fenced; a repeat changes nothing.
+    assert call(items, "records.release", record, claim_epoch=1)[2] == "claim_lost"
+    again = release_http(items, record)
+    assert again.status_code == 200 and again.json()["released"] is False
+    assert row(items, record["record_id"])["claim_epoch"] == 2
+
+
+def test_http_release_is_refused_for_anyone_but_the_supervisor(items: Kernel) -> None:
+    record = created(items)
+    claim(items, record)
+    refused = release_http(items, record, token="outsider")
+    assert refused.status_code in {403, 404}
+    assert row(items, record["record_id"])["holder"] is not None
