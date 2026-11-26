@@ -9,8 +9,7 @@ Serves `--root` (default the current directory, the checkout) on an ephemeral po
 loopback interface. The pages are the HTML files HEAD adds under `docs/mocks/`, or just
 `--page` (a path under the root) when it is given. Each page gets two screenshots as tall as
 the page, `p<N>-mobile-390.png` and `p<N>-desktop-1280.png` (N from 1, in path order, at most
-`MAX_PAGES`) and one `dom.html` (every page's settled DOM as text, for reviewers who cannot
-open PNGs), written to `--out` (default `screenshots`), the scenario's artifact paths; the
+`MAX_PAGES`), written to `--out` (default `screenshots`), the scenario's artifact paths; the
 log names the page behind each N. `env.try` keeps at most 256 KiB per artifact and 1 MiB in
 all, so a screenshot over its share is retaken at a lower device pixel ratio, and a page that
 still does not fit fails. It needs only a loopback, so the catalog declares `network:
@@ -34,6 +33,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.parse
 import urllib.request
 from collections.abc import Sequence
 from pathlib import Path
@@ -42,14 +42,18 @@ WIDTHS: tuple[tuple[str, int, int], ...] = (("mobile-390", 390, 844), ("desktop-
 BROWSERS = ("chromium", "chromium-browser", "google-chrome")
 MOCKS = "docs/mocks"
 # env.try keeps artifacts of at most 256 KiB each and 1 MiB in all, and a scenario's artifact
-# paths are fixed in the catalog: two per page and one DOM file, so at most 16 files, 7 pages.
+# paths are fixed in the catalog: two per page, so at most 16 files, 8 pages.
 MAX_BYTES = 256 * 1024
 MAX_TOTAL = 1024 * 1024
 MAX_PAGES = 7
-# The share of the total a DOM text file may take, kept out of the screenshots' share.
+# A text report of what each page shows, for a reader who cannot open images: one artifact.
+REPORT = "report.txt"
+REPORT_BYTES = 64 * 1024
+LOG_REPORT = 4000
+REPORT_TEXT = 3000
+# The rendered DOM of each page, scripts and external references removed, as one HTML file.
+DOM = "dom.html"
 DOM_BYTES = 128 * 1024
-# How much of the pages' visible text goes into the log, which env.try keeps the tail of.
-LOG_TEXT = 6000
 # Tried in turn until the screenshot fits its share of the limit.
 SCALES = (1.0, 0.75, 0.5, 0.35, 0.25)
 MAX_HEIGHT = 10000
@@ -65,9 +69,77 @@ STARTED = time.monotonic()
 # Served with every HTML page: records the page's height for the capture of its full length.
 MEASURE = (
     b"<script>setTimeout(() => document.documentElement.setAttribute("
-    b"'data-page-height', document.documentElement.scrollHeight), 4000)</script>"
+    b"'data-page-height', document.documentElement.scrollHeight), 4000);"
+    b"setTimeout(() => {const d = document.documentElement, w = d.clientWidth, id = (e) =>"
+    b" (e.tagName + (e.id ? '#' + e.id : '') + (typeof e.className === 'string' && e.className"
+    b" ? '.' + e.className.trim().split(/\\s+/)[0] : '')).replace(/[^\\w#.-]/g, '');"
+    b" d.setAttribute('data-scroll-width', d.scrollWidth); d.setAttribute('data-client-width', w);"
+    b" d.setAttribute('data-wide', [...document.body.querySelectorAll('*')].filter((e) =>"
+    b" e.getBoundingClientRect().right > w + 1).slice(0, 8).map(id).join(','));"
+    b" d.setAttribute('data-outline', encodeURIComponent([...document.body.querySelectorAll('*')]"
+    b".filter((e) => !['SCRIPT', 'STYLE'].includes(e.tagName)).slice(0, 250).map((e) => {const r ="
+    b" e.getBoundingClientRect(), t = [...e.childNodes].filter((n) => n.nodeType === 3)"
+    b".map((n) => n.textContent.trim()).join(' ').slice(0, 40);"
+    b" return [e.tagName.toLowerCase(), t, Math.round(r.x + scrollX), Math.round(r.y + scrollY),"
+    b" Math.round(r.width), Math.round(r.height), r.right > w + 1 ? 'OVERFLOW' : ''].join(' | ')})"
+    b".join('\\n')))}, 4000)</script>"
 )
 HEIGHT = re.compile(r'data-page-height="(\d+)"')
+ATTRIBUTE = re.compile(r'data-(scroll-width|client-width|wide|outline)="([^"]*)"')
+# The report lines of the run, written to REPORT at the end.
+LINES: list[str] = []
+# The rendered DOM of each page and width, for DOM.
+DOMS: list[str] = []
+
+
+class Texts(html.parser.HTMLParser):
+    """The visible text of a rendered DOM, one line per text node, scripts and styles left out."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.lines: list[str] = []
+        self.skip = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.skip += tag in {"script", "style", "head"}
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in {"script", "style", "head"} and self.skip:
+            self.skip -= 1
+
+    def handle_data(self, data: str) -> None:
+        if not self.skip and data.strip():
+            self.lines.append(" ".join(data.split()))
+
+
+def summary(dom: str, width: int) -> list[str]:
+    """What a reader without images needs: overflow, and the page's text in reading order."""
+    seen = dict(ATTRIBUTE.findall(dom))
+    parser = Texts()
+    parser.feed(dom)
+    text = [line for line in parser.lines if line]
+    out = []
+    if "scroll-width" in seen:
+        scroll, client = seen["scroll-width"], seen["client-width"]
+        over = int(scroll) > int(client)
+        out.append(f"  viewport {client}px, content {scroll}px: "
+                   f"{'HORIZONTAL OVERFLOW' if over else 'no horizontal overflow'}")
+        if seen["wide"]:
+            out.append(f"  elements past the right edge: {seen['wide']}")
+    else:
+        out.append(f"  viewport {width}px (layout not measured: page not served by the runner)")
+    if seen.get("outline"):
+        out.append("  layout outline (tag | own text | x | y | width | height | overflow):")
+        out.extend(f"    {row}" for row in urllib.parse.unquote(seen["outline"]).split("\n"))
+    out.append(f"  {len(text)} text blocks; first lines:")
+    shown = 0
+    for line in text:
+        if shown + len(line) > REPORT_TEXT:
+            out.append("  ...")
+            break
+        out.append(f"    | {line[:200]}")
+        shown += len(line)
+    return out
 
 
 class Quiet(http.server.SimpleHTTPRequestHandler):
@@ -138,6 +210,16 @@ def direct(found: str) -> str:
     elif fonts.is_file():
         EXTRA_ENV["FONTCONFIG_FILE"] = str(fonts)
     return str(real)
+
+
+SCRIPTS = re.compile(r"<script\b.*?</script\s*>|<link\b[^>]*>|<meta\b[^>]*>", re.S | re.I)
+EXTERNAL = re.compile(r"""\s(src|href|srcset|action|poster)\s*=\s*(["'])(?!#)[^"']*\2""", re.I)
+MEASURED = re.compile(r'\sdata-(?:page-height|scroll-width|client-width|wide|outline)="[^"]*"')
+
+
+def sanitize(dom: str) -> str:
+    """The DOM as text for a reader: no scripts, no external loads, no measuring attributes."""
+    return MEASURED.sub("", EXTERNAL.sub("", SCRIPTS.sub("", dom)))
 
 
 def serve(root: Path) -> http.server.ThreadingHTTPServer:
@@ -232,6 +314,10 @@ def run(argv: list[str]) -> tuple[str, str]:
 def height(binary: str, scratch: Path, url: str, width: int, tall: int) -> int:
     """The page's full height at `width`, from the DOM after it has settled."""
     shown, problem = run(command(binary, scratch / "measure", url, width, tall))
+    LINES.append(f"{width}px wide:" if not problem else f"{width}px wide: could not be read")
+    if not problem:
+        LINES.extend(summary(shown, width))
+        DOMS.append(f"<!-- {url.split('/', 3)[-1] or '/'} at {width}px -->\n{sanitize(shown)}")
     found = None if problem else HEIGHT.search(shown)
     # A page we did not serve (the dashboard) has no measuring script: capture a long window.
     return min(max(int(found.group(1)), tall), MAX_HEIGHT) if found else max(tall, UNMEASURED)
@@ -256,57 +342,20 @@ def shoot(
     return f"{target.stat().st_size} bytes at scale {SCALES[-1]}, over its {limit} byte share"
 
 
-def dump_dom(binary: str, scratch: Path, url: str) -> str:
-    """The settled page's DOM as text, for reviewers who cannot open PNGs."""
-    shown, problem = run(command(binary, scratch / "dom", url, WIDTHS[0][1], WIDTHS[0][2]))
-    return "" if problem else shown
-
-
-class _Text(html.parser.HTMLParser):
-    def __init__(self) -> None:
-        super().__init__()
-        self.parts: list[str] = []
-        self.skip = 0
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag in ("script", "style"):
-            self.skip += 1
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag in ("script", "style") and self.skip:
-            self.skip -= 1
-
-    def handle_data(self, data: str) -> None:
-        if not self.skip and data.strip():
-            self.parts.append(" ".join(data.split()))
-
-
-def visible_text(markup: str) -> str:
-    """The text a reader sees in `markup`, one run per line."""
-    parser = _Text()
-    parser.feed(markup)
-    return "\n".join(parser.parts)
-
-
 def capture(binary: str, urls: list[str], out: Path) -> list[tuple[str, bool, str]]:
     results: list[tuple[str, bool, str]] = []
-    limit = min(MAX_BYTES, (MAX_TOTAL - DOM_BYTES) // (2 * max(len(urls), 1)))
-    dumps: list[str] = []
+    limit = min(MAX_BYTES, (MAX_TOTAL - REPORT_BYTES - DOM_BYTES) // (2 * max(len(urls), 1)))
     with tempfile.TemporaryDirectory(prefix="shots-") as scratch:
         for number, url in enumerate(urls, 1):
-            sys.stdout.write(f"p{number}: {url.split('/', 3)[-1] or '/'}\n")
+            name = url.split("/", 3)[-1]
+            shown = name if name.startswith("docs/") or name.endswith(".html") else f"/{name}"
+            sys.stdout.write(f"p{number}: {shown}\n")
+            LINES.append(f"p{number}: /{url.split('/', 3)[-1]}")
             for kind, width, tall in WIDTHS:
                 label = f"p{number}-{kind}"
                 target = out / f"{label}.png"
                 problem = shoot(binary, Path(scratch), url, (label, width, tall), target, limit)
                 results.append((label, not problem, problem))
-            dumps.append(f"<!-- p{number}: {url.split('/', 3)[-1] or '/'} -->\n")
-            dumps.append(dump_dom(binary, Path(scratch), url))
-    share = DOM_BYTES // max(len(urls), 1)
-    text = "\n".join(part[:share] for part in dumps)
-    (out / "dom.html").write_text(text, encoding="utf-8")
-    # The catalog may not list dom.html as an artifact: the log carries the visible text too.
-    sys.stdout.write(f"--- page text ---\n{visible_text(text)[:LOG_TEXT]}\n--- end ---\n")
     return results
 
 
@@ -436,6 +485,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         server.shutdown()
         if running is not None:
             running[0].kill()
+    # The log reaches a reader even when an artifact does not: the layout report, bounded.
+    sys.stdout.write("layout report:\n" + "\n".join(LINES)[:LOG_REPORT] + "\n")
+    (args.out / REPORT).write_text("\n".join(LINES)[:REPORT_BYTES] + "\n")
+    (args.out / DOM).write_text("\n".join(DOMS)[:DOM_BYTES] + "\n")
     if not all(ok for _, ok, _ in results):
         diagnose()
     for name, ok, problem in results:

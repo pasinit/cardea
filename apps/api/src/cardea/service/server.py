@@ -21,7 +21,7 @@ from cardea.runtime.agent_session import ClaudeAgentSession
 from cardea.runtime.harness import Harness
 from cardea.runtime.opencode import OpenCodeHarness, Price
 from cardea.service import harnesses as registry
-from cardea.service import mailbox, repositories
+from cardea.service import journal, mailbox, repositories
 from cardea.service.app import create_app
 from cardea.service.auth import Authentication, IdentityProvider
 from cardea.service.confined import ConfinedAgentSession, Workers
@@ -277,6 +277,13 @@ def serve(
             runtime = Runtime(kernel)
             runtime_launched = True
             runtime.launch()
+            # Mail and record events wake their triggers within a second (journal.Waker).
+            threading.Thread(
+                target=journal.Waker(kernel).run,
+                args=(threading.Event(),),
+                name="cardea-journal-wake",
+                daemon=True,
+            ).start()
             if host:
 
                 def maintain() -> None:
