@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teams dashboard: overview fixture</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font: 14px/1.4 system-ui, sans-serif; margin: 1rem; color: #1b1f24; background: #fafafa; overflow-wrap: anywhere; }
+  h1 { font-size: 1.3rem; margin: 0 0 .75rem; }
+  h2 { font-size: 1.1rem; margin: 0 0 .25rem; }
+  h3 { font-size: .95rem; margin: 1rem 0 .3rem; border-bottom: 1px solid #d0d7de; }
+  #tabs { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: 1rem; }
+  #tabs button { font: inherit; padding: .35rem .7rem; border: 1px solid #d0d7de; border-radius: 6px; background: #fff; color: inherit; cursor: pointer; }
+  #tabs button[aria-selected="true"] { border-color: #1b1f24; font-weight: 600; }
+  .state { font-size: .8rem; margin-left: .4rem; padding: 0 .35rem; border-radius: 4px; border: 1px solid currentColor; }
+  .state-running { color: #1a7f37; }
+  .state-stalled { color: #b42318; }
+  .state-paused { color: #9a6700; }
+  .state-idle { color: #57606a; }
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: .2rem .6rem .2rem 0; vertical-align: top; }
+  th { font-weight: 600; color: #57606a; }
+  .muted { color: #57606a; }
+  .bad { color: #b42318; }
+  .filters { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: .75rem; }
+  .filters select, .filters input, .filters button { font: inherit; padding: .3rem .5rem; max-width: 100%; }
+  .filters input { flex: 1 1 12rem; min-width: 0; }
+  .message { background: #fff; border: 1px solid #d0d7de; border-radius: 6px; padding: .5rem .7rem; margin-bottom: .5rem; }
+  .message .head { color: #57606a; font-size: .85rem; }
+  .message pre { margin: .35rem 0 0; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .banner { border: 1px solid #9a6700; background: #fff8c5; border-radius: 6px; padding: .6rem .8rem; }
+  .needs { border: 1px solid #0969da; background: #ddf4ff; border-radius: 6px; padding: .6rem .8rem; margin: .5rem 0 1rem; }
+  .needs h3 { border: 0; margin: 0; }
+  .needs ul { margin: .3rem 0 0; padding-left: 1.1rem; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: .5rem; margin: .5rem 0 1rem; }
+  .card { background: #fff; border: 1px solid #d0d7de; border-radius: 6px; padding: .5rem .7rem; }
+  .card b { display: block; font-size: 1.3rem; }
+  .meter { height: 8px; background: #eaeef2; border-radius: 4px; overflow: hidden; margin: .3rem 0; }
+  .meter i { display: block; height: 100%; background: #1a7f37; }
+  .grid { display: grid; gap: .5rem; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); }
+  .member { background: #fff; border: 1px solid #d0d7de; border-radius: 6px; padding: .6rem .7rem; }
+  @media (max-width: 600px) { body { margin: .6rem; font-size: 15px; } .filters > * { flex: 1 1 100%; } }
+</style>
+</head>
+<body>
+<h1>Teams <span class="muted">(read-only)</span></h1>
+<div id="tabs" role="tablist">Loading…</div>
+<div id="team"></div>
+<h3>Mail</h3>
+<div id="mail"></div>
+<script>
+const FIXTURE = {"teams": [{"name": "dev-team", "state": "active", "view": {"group": "dev-team", "namespace": "acme", "state": "active", "as_of": "2026-11-25T00:05:49Z", "pools": [{"name": "dev", "members": [{"principal_id": "dev-team.dev.0", "state": "running", "disabled": false, "active_task_id": "t1", "claims": ["work/rec-d7d2"], "last_run": {"outcome": "succeeded", "failure_code": null, "finished_at": "2026-11-25T00:00:49Z"}}, {"principal_id": "dev-team.dev.1", "state": "idle", "disabled": false, "active_task_id": null, "claims": [], "last_run": {"outcome": "failed", "failure_code": "attempt_timeout", "finished_at": "2026-11-24T23:23:49Z"}}, {"principal_id": "dev-team.dev.2", "state": "idle", "disabled": false, "active_task_id": null, "claims": [], "last_run": null}]}, {"name": "ux", "members": [{"principal_id": "dev-team.ux.0", "state": "idle", "disabled": false, "active_task_id": null, "claims": [], "last_run": {"outcome": "succeeded", "failure_code": null, "finished_at": "2026-11-24T23:45:49Z"}}]}, {"name": "tl", "members": [{"principal_id": "dev-team.tl.0", "state": "idle", "disabled": false, "active_task_id": null, "claims": [], "last_run": {"outcome": "succeeded", "failure_code": null, "finished_at": "2026-11-24T22:35:49Z"}}]}], "collections": [{"name": "work", "status": "ok", "total": 12, "by_state": {"ready": 2, "in_progress": 3, "in_review": 2, "done": 5}}], "mailbox": {"addresses": [{"address": "dev-team.tl", "pending": 1, "in_flight": 0, "dead": 0}, {"address": "dev-team.pe", "pending": 0, "in_flight": 1, "dead": 1}]}, "approvals": {"items": [{"request_id": "req-1", "operation": "vcs.merge", "resource": "repo:cardea", "state": "pending"}]}, "spend": {"accounts": [{"account": "group", "window": "day", "usd": 20, "used_usd": 7.5, "runs": null, "used_runs": 0}]}, "journal": {"events": []}}}]};
+const MAIL = {"items": [], "next": null, "total": 0};
+window.fetch = async (path) => ({ ok: true, json: async () => (String(path).startsWith('/api/mail') ? MAIL : FIXTURE) });
+</script>
+<script src="/deploy/team-kit/dashboard_teams.js"></script>
+</body>
+</html>
