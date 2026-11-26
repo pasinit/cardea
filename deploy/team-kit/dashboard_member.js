@@ -154,9 +154,18 @@ function history() {
 function describe(operation) {
   const colon = operation.indexOf(":");
   const kind = colon < 0 ? operation : operation.slice(0, colon);
-  const scope = colon < 0 ? "any" : operation.slice(colon + 1);
-  const words = { mail: "Send mail", repo: "Use a repository", record: "Use work items", read: "Read" };
-  return [words[kind] || operation, words[kind] ? scope : "any"];
+  const scope = colon < 0 ? "" : operation.slice(colon + 1);
+  const words = {
+    mail: ["Send mail", "to"],
+    repo: ["Work in the repository", ""],
+    record: ["Change work items", "in"],
+    read: ["Read", ""],
+    env: ["Run tests", "in"],
+    vcs: ["Change pull requests", "in"],
+  };
+  const w = words[kind];
+  if (!w) return [`Other permission: ${operation}`, "Everything it covers"];
+  return [w[0], scope ? (w[1] ? `${w[1]} ${scope}` : scope) : "Everything"];
 }
 
 function capabilities() {
@@ -338,6 +347,12 @@ async function load(first) {
   } catch (error) {
     const text = error.message === "member_not_found" ? "This member is not in the team." : "Could not load this member. Try again in a moment.";
     document.getElementById("summary").replaceChildren(failure(text, () => load(true)));
+    if (error.message === "member_not_found") {
+      document.body.classList.add("gone");
+      document.title = "Member not found";
+      document.getElementById("title").textContent = "Member not found";
+      clearInterval(timer);
+    }
     return;
   }
   const keep = detail.runs.some((r) => r.task_id === callsTask);
@@ -360,6 +375,7 @@ function schedule() {
 }
 
 if (!team || !member) {
+  document.body.classList.add("gone");
   document.getElementById("summary").replaceChildren(failure("No member chosen. Go back to the teams and tap a member."));
 } else {
   load(true);
