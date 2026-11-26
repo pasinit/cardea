@@ -593,6 +593,50 @@ def delete_collection(
     }
 
 
+def release_claim(
+    conn: sa.Connection, principal: str, namespace: str, name: str, record_id: str, reason: str
+) -> dict[str, Any]:
+    """`POST /v0.2/collections/{name}/records/{record_id}/release`: the collection's
+    supervisor takes a record back from its holder, live-checked like `records.force_release`.
+
+    The epoch is incremented, so the old holder's later writes fail with `claim_lost`; the
+    change has a history row and a journal event naming the supervisor and the reason. A
+    record nobody holds is returned unchanged, so a repeat is a no-op.
+    """
+    row = _row(conn, namespace, name)
+    if row is None or row["supervisor_id"] != principal:
+        raise Fault("collection_not_found", "No accessible collection", 404)
+    policy = Policy(conn)
+    policy.principal(principal)
+    policy.require(principal, namespace, "groups.manage")
+    policy.require("platform", namespace, "groups.manage")
+    record = _record_row(conn, namespace, name, record_id)
+    if record is None:
+        raise Fault("record_not_found", "No such record", 404)
+    old = record_view(record)
+    if record["holder"] is None:
+        return {"released": False, "record": old}
+    at = now()
+    new: dict[str, JsonValue] = {
+        **old,
+        "holder": None,
+        "lease_expires_at": None,
+        "claim_epoch": int(record["claim_epoch"]) + 1,
+        "version": int(record["version"]) + 1,
+        "updated_at": at.isoformat(),
+    }
+    write_claim(conn, record, new)
+    detail: dict[str, JsonValue] = {
+        "forced": True,
+        "reason": reason,
+        "previous_holder": record["holder"],
+        "previous_epoch": record["claim_epoch"],
+    }
+    append_history(conn, namespace, "released", principal, None, None, old, new, detail)
+    journal(conn, namespace, "released", new, principal, None, at, detail)
+    return {"released": True, "record": new}
+
+
 def read_access(conn: sa.Connection, principal: str, namespace: str, name: str) -> sa.RowMapping:
     """The collection's supervisor (with `groups.manage`) or a holder of `record:<C>/read`."""
     policy = Policy(conn)
