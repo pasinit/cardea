@@ -33,6 +33,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Sequence
@@ -49,7 +50,7 @@ MAX_PAGES = 7
 # A text report of what each page shows, for a reader who cannot open images: one artifact.
 REPORT = "report.txt"
 REPORT_BYTES = 64 * 1024
-LOG_REPORT = 4000
+LOG_REPORT = 6000
 REPORT_TEXT = 3000
 # The rendered DOM of each page, scripts and external references removed, as one HTML file.
 DOM = "dom.html"
@@ -83,6 +84,18 @@ MEASURE = (
     b" return [e.tagName.toLowerCase(), t, Math.round(r.x + scrollX), Math.round(r.y + scrollY),"
     b" Math.round(r.width), Math.round(r.height), r.right > w + 1 ? 'OVERFLOW' : ''].join(' | ')})"
     b".join('\\n')))}, 4000)</script>"
+    # Headless Chromium will not make its window narrower than about 500 px, so a "390 px"
+    # capture is wider. Measure the page again inside a 390 px iframe of itself.
+    b"<script>if (window.top === window) {let f; setTimeout(() => {f = document.createElement("
+    b"'iframe'); f.style.cssText = 'position:absolute;left:0;top:0;width:390px;height:600px;"
+    b"visibility:hidden;border:0'; f.src = location.href; document.body.appendChild(f)}, 500);"
+    b"setTimeout(() => {try {const d = f.contentDocument.documentElement, w = d.clientWidth;"
+    b" document.documentElement.setAttribute('data-narrow', [w, d.scrollWidth,"
+    b" [...f.contentDocument.body.querySelectorAll('*')]"
+    b".filter((e) => e.getBoundingClientRect().right > w + 1).slice(0, 5)"
+    b".map((e) => e.tagName.toLowerCase() + (typeof e.className === 'string' && e.className ? '.' +"
+    b" e.className.trim().split(/\\s+/)[0] : '')).join(',').replace(/[^\\w#.,-]/g, '')].join('|'))}"
+    b" catch (e) {}}, 4500)}</script>"
 )
 # Chromium's headless window is never narrower than this: a phone width is measured in a
 # frame of that width inside the page, so the page sees the width that was asked for.
@@ -102,11 +115,15 @@ FRAME = (
 # Pages whose content was wider than the width asked for.
 OVERFLOWS: list[str] = []
 HEIGHT = re.compile(r'data-page-height="(\d+)"')
-ATTRIBUTE = re.compile(r'data-(scroll-width|client-width|wide|outline)="([^"]*)"')
+ATTRIBUTE = re.compile(r'data-(scroll-width|client-width|wide|outline|narrow)="([^"]*)"')
 # The report lines of the run, written to REPORT at the end.
 LINES: list[str] = []
 # The rendered DOM of each page and width, for DOM.
 DOMS: list[str] = []
+# One short line per page and width, printed first so a truncated log still has it.
+DIGEST: list[str] = []
+# The page's text in reading order at the widest width, printed last: the log tail keeps it.
+TEXTS: list[str] = []
 
 
 class Texts(html.parser.HTMLParser):
@@ -136,9 +153,19 @@ def summary(dom: str, width: int) -> list[str]:
     parser.feed(dom)
     text = [line for line in parser.lines if line]
     out = []
+    if seen.get("narrow"):
+        width390, scroll390, wide390 = (seen["narrow"].split("|") + ["", "", ""])[:3]
+        if int(scroll390) > int(width390):
+            OVERFLOWS.append(f"{width}px (iframe): content {scroll390}px wide")
+        out.append(f"  AT 390px (iframe): viewport {width390}px, content {scroll390}px: "
+                   f"{'HORIZONTAL OVERFLOW' if int(scroll390) > int(width390) else 'no overflow'}"
+                   f"{' past the edge: ' + wide390 if wide390 else ''}")
     if "scroll-width" in seen:
         scroll, client = seen["scroll-width"], seen["client-width"]
         over = int(scroll) > width
+        if seen.get("narrow") and width < 500:
+            # headless window is >=500px wide; the 390px iframe is the real test
+            over = False
         if over:
             OVERFLOWS.append(f"{width}px: content {scroll}px wide")
         out.append(f"  viewport {client}px, content {scroll}px: "
@@ -187,6 +214,40 @@ class Quiet(http.server.SimpleHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         return io.BytesIO(body)
+
+
+class Measured(http.server.BaseHTTPRequestHandler):
+    """Forwards GETs to the dashboard and appends MEASURE to its HTML, so its pages get the
+    same layout report as a mock."""
+
+    upstream = ""
+
+    def log_message(self, format: str, *args: object) -> None:
+        pass
+
+    def do_GET(self) -> None:
+        try:
+            with urllib.request.urlopen(self.upstream + self.path, timeout=10) as reply:
+                body, status = reply.read(), reply.status
+                kind = reply.headers.get("Content-Type", "")
+        except urllib.error.HTTPError as error:
+            body, kind, status = error.read(), error.headers.get("Content-Type", ""), error.code
+        except OSError:
+            body, kind, status = b"", "text/plain", 502
+        if kind.startswith("text/html"):
+            body += MEASURE
+        self.send_response(status)
+        self.send_header("Content-Type", kind)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+def measuring(upstream: str) -> http.server.ThreadingHTTPServer:
+    handler = type("Handler", (Measured,), {"upstream": upstream})
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
 
 
 # Set when the browser is a toolchain's Chromium started directly (see `direct`).
@@ -245,7 +306,9 @@ def direct(found: str) -> str:
 
 SCRIPTS = re.compile(r"<script\b.*?</script\s*>|<link\b[^>]*>|<meta\b[^>]*>", re.S | re.I)
 EXTERNAL = re.compile(r"""\s(src|href|srcset|action|poster)\s*=\s*(["'])(?!#)[^"']*\2""", re.I)
-MEASURED = re.compile(r'\sdata-(?:page-height|scroll-width|client-width|wide|outline)="[^"]*"')
+MEASURED = re.compile(
+    r'\sdata-(?:page-height|scroll-width|client-width|wide|outline|narrow)="[^"]*"'
+)
 
 
 def sanitize(dom: str) -> str:
@@ -356,8 +419,16 @@ def height(binary: str, scratch: Path, url: str, width: int, tall: int) -> int:
     )
     LINES.append(f"{width}px wide:" if not problem else f"{width}px wide: could not be read")
     if not problem:
-        LINES.extend(summary(shown, width))
+        rows = summary(shown, width)
+        LINES.extend(rows)
+        DIGEST.extend(f"{url.split('/', 3)[-1] or '/'} @{width}: {r.strip()}" for r in rows[:3]
+                      if "viewport" in r)
         DOMS.append(f"<!-- {url.split('/', 3)[-1] or '/'} at {width}px -->\n{sanitize(shown)}")
+        if width >= MIN_WINDOW:
+            reader = Texts()
+            reader.feed(shown)
+            body = "\n".join(f"  | {t[:160]}" for t in reader.lines)
+            TEXTS.append(f"text of {url.split('/', 3)[-1] or '/'} at {width}px:\n{body[:2200]}")
     found = None if problem else HEIGHT.search(shown)
     # A page we did not serve (the dashboard) has no measuring script: capture a long window.
     return min(max(int(found.group(1)), tall), MAX_HEIGHT) if found else max(tall, UNMEASURED)
@@ -382,6 +453,17 @@ def shoot(
         if target.stat().st_size <= limit:
             return ""
     return f"{target.stat().st_size} bytes at scale {SCALES[-1]}, over its {limit} byte share"
+
+
+def log_report() -> str:
+    """The layout report for the log, each page cut to its own share so every page shows."""
+    pages: list[list[str]] = []
+    for line in LINES:
+        if re.match(r"p\d+: ", line) or not pages:
+            pages.append([])
+        pages[-1].append(line)
+    share = LOG_REPORT // max(len(pages), 1)
+    return "\n".join("\n".join(page)[:share] for page in pages)
 
 
 def capture(binary: str, urls: list[str], out: Path) -> list[tuple[str, bool, str]]:
@@ -516,27 +598,34 @@ def main(argv: Sequence[str] | None = None) -> int:
         server.shutdown()
         sys.stdout.write("the dashboard did not start\nscreenshots: FAIL\n")
         return 1
+    proxy: http.server.ThreadingHTTPServer | None = None
     try:
         base = f"http://127.0.0.1:{server.server_port}"
         global RUNNER
         RUNNER = base
         urls = [f"{base}/{name}" for name in names]
         if running is not None:
-            urls += [running[1] + route for route in dashboard_routes(args.root)]
+            proxy = measuring(running[1])
+            origin = f"http://127.0.0.1:{proxy.server_port}"
+            urls += [origin + route for route in dashboard_routes(args.root)]
         skipped = urls[MAX_PAGES:]
         results = capture(binary, urls[:MAX_PAGES], args.out)
     finally:
         server.shutdown()
+        if proxy is not None:
+            proxy.shutdown()
         if running is not None:
             running[0].kill()
     # The log reaches a reader even when an artifact does not: the layout report, bounded.
-    sys.stdout.write("layout report:\n" + "\n".join(LINES)[:LOG_REPORT] + "\n")
+    sys.stdout.write("layout report:\n" + log_report() + "\n")
     (args.out / REPORT).write_text("\n".join(LINES)[:REPORT_BYTES] + "\n")
     (args.out / DOM).write_text("\n".join(DOMS)[:DOM_BYTES] + "\n")
     if not all(ok for _, ok, _ in results):
         diagnose()
     for name, ok, problem in results:
         sys.stdout.write(f"{name}: {'pass' if ok else 'FAIL ' + problem}\n")
+    sys.stdout.write("widths:\n" + "\n".join(DIGEST)[:1500] + "\n")
+    sys.stdout.write("\n".join(TEXTS) + "\n")
     for url in skipped:
         sys.stdout.write(f"not captured, over {MAX_PAGES} pages: {url.split('/', 3)[-1]}\n")
     for line in OVERFLOWS:

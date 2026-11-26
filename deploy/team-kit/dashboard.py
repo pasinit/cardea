@@ -41,9 +41,15 @@ ITEM = re.compile(r"^[a-z][a-z0-9_-]{0,63}/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 CURSOR = re.compile(r"^[0-9a-f-]{36}$")
 MAIL_FILTERS = {"team", "member", "item", "after", "limit"}
 MAIL_LIMIT = 20
+DETAIL_FILTERS = {"team", "member", "task", "after", "limit"}
+RUNS_PAGE = 20
 STATIC = {
     "/": ("dashboard.html", "text/html; charset=utf-8"),
     "/dashboard.js": ("dashboard.js", "text/javascript; charset=utf-8"),
+}
+MEMBER_STATIC = {
+    "/member": ("dashboard_member.html", "text/html; charset=utf-8"),
+    "/dashboard_member.js": ("dashboard_member.js", "text/javascript; charset=utf-8"),
 }
 # The page loads its one script from this server and talks only to this server.
 CSP = (
@@ -87,6 +93,27 @@ def mail_query(raw: str) -> dict[str, Any]:
     return query
 
 
+def detail_query(raw: str) -> dict[str, Any]:
+    """A member-page request's filters, checked: `team`, `member`, `task`, `after`, `limit`."""
+    try:
+        found = parse_qs(raw, keep_blank_values=True, strict_parsing=bool(raw))
+    except ValueError:
+        raise DashboardError("invalid_query") from None
+    if set(found) - DETAIL_FILTERS or any(len(v) != 1 for v in found.values()):
+        raise DashboardError("invalid_query")
+    query: dict[str, Any] = {k: v[0] for k, v in found.items() if v[0]}
+    for key, pattern in (("team", TEAM), ("member", IDENTIFIER), ("task", IDENTIFIER)):
+        if key in query and not pattern.match(query[key]):
+            raise DashboardError("invalid_query")
+    if "after" in query and not IDENTIFIER.match(query["after"]):
+        raise DashboardError("invalid_query")
+    limit = query.get("limit", str(RUNS_PAGE))
+    if not (limit.isascii() and limit.isdigit() and 1 <= int(limit) <= 50):
+        raise DashboardError("invalid_query")
+    query["limit"] = int(limit)
+    return query
+
+
 def team_state(view: dict[str, Any]) -> str:
     """`paused`, `running`, `stalled` or `idle`, from one overview.
 
@@ -107,6 +134,10 @@ def team_state(view: dict[str, Any]) -> str:
 
 def roles(view: dict[str, Any]) -> list[str]:
     return [str(pool["name"]) for pool in view.get("pools", [])]
+
+
+def members_of(view: dict[str, Any]) -> list[dict[str, Any]]:
+    return [m for pool in view.get("pools", []) for m in pool["members"]]
 
 
 def members(view: dict[str, Any]) -> set[str]:
@@ -136,6 +167,66 @@ class FixtureBackend:
 
     def mail(self, query: dict[str, Any]) -> dict[str, Any]:
         return {"total": 0, "items": [], "next": None}
+
+    def detail(self, kind: str, query: dict[str, Any]) -> dict[str, Any]:
+        """A member page from the recorded overview, with made-up runs, calls and memory."""
+        if kind == "calls":
+            calls = [
+                {
+                    "operation_id": f"fixture-call-{i}",
+                    "tool": "records.transition" if i else "vcs.merge",
+                    "state": "succeeded" if i else "failed",
+                    "failure_code": None if i else "merge_behind_base",
+                    "failure_message": None if i else "the head is behind main",
+                    "arguments": '{"transition": "submit"}',
+                    "result": "ok",
+                    "created_at": f"2026-11-21T08:3{i}:00+00:00",
+                    "updated_at": f"2026-11-21T08:3{i}:02+00:00",
+                }
+                for i in range(3)
+            ]
+            return {"total": len(calls), "items": calls, "next": None}
+        name = query.get("member", "")
+        found = next((m for m in members_of(self.view) if m["principal_id"] == name), None)
+        if found is None:
+            raise DashboardError("member_not_found", 404)
+        run = {
+            "task_id": "7f0c1d52-3a39-4d0e-9a53-0d3f6f1d1a03",
+            "created_at": "2026-11-21T08:30:00+00:00",
+            "updated_at": "2026-11-21T08:40:00+00:00",
+            "outcome": "succeeded",
+            "failure_code": None,
+            "cost_usd": 1.25,
+        }
+        note = {
+            "name": "notes.md",
+            "bytes": 120,
+            "changed_at": "2026-11-21T08:40:00+00:00",
+            "text": "Lessons from earlier runs.",
+            "truncated": False,
+        }
+        return {
+            "member": name,
+            "pool": found["pool"],
+            "state": found["state"],
+            "disabled": found["disabled"],
+            "active_task_id": found["active_task_id"],
+            "claims": found["claims"],
+            "capabilities": [
+                {"operation": "repo:cardea", "mode": "allow"},
+                {"operation": "mail:dev-team.tl", "mode": "allow"},
+                {"operation": "groups.manage", "mode": "deny"},
+            ],
+            "capabilities_truncated": 0,
+            "memory": {
+                "version": 3,
+                "archive_bytes": 2048,
+                "limit_bytes": 1048576,
+                "files": [note],
+            },
+            "runs": [run],
+            "runs_next": None,
+        }
 
 
 class KernelBackend:
@@ -176,6 +267,56 @@ class KernelBackend:
             "GET",
             f"/groups/{self.group}/status/mail/text",
             params={"namespace": self.namespace, **params},
+        )
+        return page
+
+    def member_detail(self, member: str) -> dict[str, Any]:
+        """One member as the supervisor sees it: card, grants, memory and its recent runs.
+
+        Every part is a read the kernel checks live for the supervisor (`groups.manage`).
+        """
+        found = next((m for m in members_of(self.overview()) if m["principal_id"] == member), None)
+        if found is None:
+            raise DashboardError("member_not_found", 404)
+        detail: dict[str, Any] = self.request(
+            "GET",
+            f"/groups/{self.group}/status/members/{member}",
+            params={"namespace": self.namespace},
+        )
+        runs = self.runs(member, "", RUNS_PAGE)
+        return {
+            "member": member,
+            "pool": found["pool"],
+            "state": found["state"],
+            "disabled": found["disabled"],
+            "active_task_id": found["active_task_id"],
+            "claims": found["claims"],
+            "capabilities": detail["capabilities"],
+            "capabilities_truncated": detail["capabilities_truncated"],
+            "memory": detail["memory"],
+            "runs": runs["items"],
+            "runs_next": runs["next"],
+        }
+
+    def runs(self, member: str, after: str, limit: int) -> dict[str, Any]:
+        page: dict[str, Any] = self.request(
+            "GET",
+            f"/groups/{self.group}/status/runs",
+            params={"namespace": self.namespace, "member": member, "after": after, "limit": limit},
+        )
+        return page
+
+    def calls(self, task_id: str, after: str, limit: int) -> dict[str, Any]:
+        """One run's receipted tool calls, newest first (the kernel checks the run)."""
+        page: dict[str, Any] = self.request(
+            "GET",
+            f"/groups/{self.group}/status/calls",
+            params={
+                "namespace": self.namespace,
+                "task_id": task_id,
+                "after": after,
+                "limit": limit,
+            },
         )
         return page
 
@@ -263,11 +404,14 @@ def handler(
                 url = urlsplit(self.path)
                 if url.path == "/api/mail":
                     return self.json(HTTPStatus.OK, backend.mail(mail_query(url.query)))
+                if url.path in ("/api/member", "/api/calls") and hasattr(backend, "detail"):
+                    found = cast(Any, backend).detail(url.path[5:], detail_query(url.query))
+                    return self.json(HTTPStatus.OK, found)
                 if url.path == "/api/settings" and hasattr(backend, "settings_current"):
                     current = cast(Any, backend).settings_current(mail_query(url.query))
                     return self.json(HTTPStatus.OK, current)
-                if self.path in static:
-                    name, kind = static[self.path]
+                if url.path in static:
+                    name, kind = static[url.path]
                     return self.reply(HTTPStatus.OK, (HERE / name).read_bytes(), kind)
                 if self.path == "/api/status":
                     return self.json(HTTPStatus.OK, backend.overview())

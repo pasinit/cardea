@@ -3,6 +3,7 @@ one team failing does not hide the others, and no credential reaches the page.""
 
 import importlib.util
 import json
+import re
 from pathlib import Path
 from typing import Any, cast
 
@@ -295,3 +296,87 @@ def test_the_page_renders_mail_as_text_and_fits_a_phone() -> None:
     assert "pre-wrap" in page and "overflow-wrap: anywhere" in page
     # Tabs show the team state, and the server sends the policy that forbids inline script.
     assert 'role", "tab"' in script and "team.state" in script
+
+
+# The member page
+
+
+def kernel_backend(kernel: Kernel, who: str = "sup-eng") -> Any:
+    return teams().base.KernelBackend(Supervisor(kernel, who).request, "eng", "eng-team")
+
+
+def test_the_member_page_reads_card_grants_memory_and_runs(team: tuple[Kernel, str, str]) -> None:
+    kernel, _, _ = team
+    found = kernel_backend(kernel).member_detail("eng-team.dev.0")
+    assert found["member"] == "eng-team.dev.0" and found["pool"] == "dev"
+    assert found["active_task_id"] is not None and found["claims"] == ["work/rec-a"]
+    assert found["memory"]["version"] is None and found["memory"]["limit_bytes"] == 1048576
+    assert [r["member"] for r in found["runs"]] == ["eng-team.dev.0"]
+    assert found["runs_next"] is None
+    module = teams()
+    backend_ = module.base.KernelBackend(Supervisor(kernel, "sup-eng").request, "eng", "eng-team")
+    with pytest.raises(module.base.DashboardError) as stranger:
+        backend_.member_detail("eng-team.dev.9")
+    assert stranger.value.code == "member_not_found"
+
+
+def test_the_member_page_is_refused_to_anyone_but_the_groups_supervisor(
+    team: tuple[Kernel, str, str],
+) -> None:
+    kernel, _, _ = team
+    for who in ("sup-desk", "runtime"):
+        with pytest.raises(ClientError) as refused:
+            kernel_backend(kernel, who).member_detail("eng-team.dev.0")
+        assert refused.value.code == "group_not_found"
+    task = kernel_backend(kernel).member_detail("eng-team.dev.0")["active_task_id"]
+    with pytest.raises(ClientError) as stranger:
+        kernel_backend(kernel, "sup-desk").calls(task, "", 10)
+    assert stranger.value.code == "group_not_found"
+
+
+def test_the_member_queries_are_checked() -> None:
+    base = teams().base
+    assert base.detail_query("team=eng&member=eng-team.dev.0")["limit"] == 20
+    assert base.detail_query("team=eng&task=task-1&after=call-0003&limit=5")["limit"] == 5
+    bads = ("x=1", "team=a b", "member=%3Cb%3E", "limit=0", "limit=51", "team=a&team=b", "task=/e")
+    for bad in bads:
+        with pytest.raises(base.DashboardError):
+            base.detail_query(bad)
+
+
+def test_the_member_page_has_no_route_to_markup_or_a_credential() -> None:
+    page = (KIT / "dashboard_member.html").read_text()
+    script = (KIT / "dashboard_member.js").read_text()
+    assert '<script src="/dashboard_member.js">' in page and "<form" not in page
+    assert "innerHTML" not in script and "insertAdjacentHTML" not in script
+    assert "authorization" not in script.lower() and "bearer" not in script.lower()
+    assert "method:" not in script  # every request is a GET
+    paths = set(re.findall(r"get\(`(/api/[a-z]+)", script))
+    assert paths == {"/api/member", "/api/calls", "/api/mail"}
+
+
+@pytest.mark.loopback
+def test_the_member_page_is_served_and_its_data_comes_from_the_teams_reader() -> None:
+    seen: list[tuple[str, dict[str, Any]]] = []
+
+    def read(kind: str, query: dict[str, Any]) -> dict[str, Any]:
+        seen.append((kind, query))
+        return {"kind": kind}
+
+    module = teams()
+    b = module.TeamsBackend({"dev": lambda: fixture()}, details={"dev": read})
+    status, page = call(b, "GET", "/member?team=dev&member=dev-team.dev.1")
+    assert status == 200 and "dashboard_member.js" in page
+    assert call(b, "GET", "/dashboard_member.js")[0] == 200
+    member = "/api/member?team=dev&member=dev-team.dev.1"
+    assert call(b, "GET", member) == (200, {"kind": "member"})
+    assert call(b, "GET", "/api/calls?team=dev&task=task-1&limit=5") == (200, {"kind": "calls"})
+    assert seen[1][1] == {"team": "dev", "task": "task-1", "limit": 5}
+    assert call(b, "GET", "/api/member?team=nope&member=a")[0] == 404
+    assert call(b, "GET", "/api/member?team=dev&member=%3Cb%3E")[0] == 400
+    evil = {"Host": "evil.example"}
+    assert call(b, "GET", "/api/member?team=dev&member=a", headers=evil)[0] == 403
+    bare = call(backend(), "GET", "/api/member?team=dev&member=a")
+    assert bare == (404, {"code": "detail_unavailable"})
+    for method in ("POST", "PUT", "DELETE"):
+        assert call(b, method, "/api/member?team=dev&member=a", {})[0] in (404, 501)

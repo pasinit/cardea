@@ -122,6 +122,7 @@ errors answer 409. A request that fails schema validation answers
 | `login_timeout` | 401 | Login timed out | `cardea.service.__main__` |
 | `member_binding` | 403 | A group member runs only for its group's supervisor; A group member runs only active agent runs | `cardea.service.groups` |
 | `member_busy` | 409 | The member's previous run is unfinished | `cardea.service.triggers` |
+| `member_not_found` | 404 | No such member in this group | `cardea.service.team_status` |
 | `message_not_found` | 404 | No accessible message | `cardea.service.mailbox` |
 | `migration_required` | 500 | Run service initialization first | `cardea.service.database` |
 | `model_not_allowed` | 422 | Model {…} is not allowed on {…} | `cardea.service.harnesses` |
@@ -163,6 +164,7 @@ errors answer 409. A request that fails schema validation answers
 | `restored_scope_sealed` | 403 | New execution requires a fresh recovery namespace | `cardea.service.policy` |
 | `retired_profile` | 503 | Cancel unfinished incident agent tasks with the previous release first | `cardea.service.kernel` |
 | `revision_conflict` | 409 | A kernel contract rule refused the change | `cardea.kernel.lifecycle` |
+| `run_not_found` | 404 | No such run in this group | `cardea.service.team_status` |
 | `runtime_binding` | 403, 500 | Runtime does not match task; Coordinator identity changed; Scheduler is not the installed kernel runtime (and 3 more) | `cardea.service.agent_run_runtime`, `cardea.service.delegation_runtime`, `cardea.service.host_runtime`, `cardea.service.kernel`, `cardea.service.operation_runtime`, `cardea.service.policy`, `cardea.service.runtime` |
 | `runtime_identity_unavailable` | 503 | Cannot authenticate peer call; Runtime identity cannot be established | `cardea.service.auth` |
 | `self_approval` | 403 | The requesting agent or runtime cannot approve | `cardea.service.approval_requests` |

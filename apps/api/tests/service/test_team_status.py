@@ -678,4 +678,126 @@ def test_there_is_no_write_path(team: tuple[Kernel, str, str], section: str) -> 
         for route in create_app(kernel).routes
         if getattr(route, "path", "").startswith("/v0.2/groups/{name}/status/")
     ]
-    assert len(routed) == len(READABLE) and all(methods == {"GET"} for methods in routed)
+    assert len(routed) == len(READABLE) + 2 and all(methods == {"GET"} for methods in routed)
+
+
+def plant_memory(kernel: Kernel, member: str, files: dict[str, str]) -> None:
+    """A saved memory archive, as `cardea-memory save` would leave it."""
+    import io
+    import tarfile
+
+    from cardea.kernel.models import ResourceRef
+    from cardea.service.database import borrow
+    from cardea.service.models import now
+
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        for name, text in files.items():
+            data = text.encode()
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            info.mtime = 1_700_000_000
+            archive.addfile(info, io.BytesIO(data))
+    with kernel.database.engine.begin() as conn, borrow(conn) as tx:
+        tx.put_object(
+            ResourceRef(namespace="eng", resource_id=f"memory.{member}"),
+            buffer.getvalue(),
+            expected_version=0,
+            producer_id=member,
+            at=now(),
+        )
+
+
+def test_member_shows_grants_and_memory(team: tuple[Kernel, str, str]) -> None:
+    kernel, _, _ = team
+    member = "eng-team.dev.0"
+    empty = status(kernel, f"members/{member}").json()
+    assert empty["member"] == member and empty["pool"] == "dev" and not empty["disabled"]
+    assert empty["memory"]["version"] is None and empty["memory"]["files"] == []
+    assert empty["memory"]["limit_bytes"] == 1048576
+    plant_memory(kernel, member, {"INDEX.md": "# Notes <b>x</b>", "notes/a.md": "hello"})
+    with kernel.database.engine.begin() as conn:
+        conn.exec_driver_sql(
+            "INSERT INTO policies(principal_id,namespace,operation,mode,expires_at) "
+            "VALUES (?,?,?,?,?)",
+            (member, "eng", "mail:eng-team.lead", "allow", 4_102_444_800),
+        )
+        conn.exec_driver_sql(
+            "INSERT INTO policies(principal_id,namespace,operation,mode,expires_at) "
+            "VALUES (?,?,?,?,?)",
+            (member, "eng", "mail:old", "allow", 1),
+        )
+    view = status(kernel, f"members/{member}").json()
+    assert view["memory"]["version"] == 1 and view["memory"]["archive_bytes"] > 0
+    assert [f["name"] for f in view["memory"]["files"]] == ["INDEX.md", "notes/a.md"]
+    assert view["memory"]["files"][0]["text"] == "# Notes <b>x</b>"  # text, never markup
+    operations = [c["operation"] for c in view["capabilities"]]
+    assert "mail:eng-team.lead" in operations and "mail:old" not in operations
+    # Another member's memory is not this member's.
+    other = status(kernel, "members/eng-team.lead.0").json()
+    assert other["memory"]["files"] == []
+
+
+def test_member_refuses_a_stranger_and_a_non_supervisor(team: tuple[Kernel, str, str]) -> None:
+    kernel, _, _ = team
+    stranger = status(kernel, "members/eng-team.dev.9")
+    assert stranger.status_code == 404 and stranger.json()["code"] == "member_not_found"
+    assert status(kernel, "members/eng-team.dev.0", who="sup-desk").status_code == 404
+    assert status(kernel, "members/eng-team.dev.0", who=None).status_code == 401
+
+
+def test_runs_filter_by_member(team: tuple[Kernel, str, str]) -> None:
+    kernel, _, _ = team
+    items = status(kernel, "runs", member="eng-team.lead.0").json()["items"]
+    assert [i["member"] for i in items] == ["eng-team.lead.0"]
+
+
+def plant_call(kernel: Kernel, task_id: str, operation_id: str, snapshot: dict[str, Any]) -> None:
+    with kernel.database.engine.begin() as conn:
+        conn.exec_driver_sql(
+            "INSERT INTO operations VALUES (?,?,?,?,?,?)",
+            (
+                task_id,
+                operation_id,
+                f"rcpt-{operation_id}",
+                snapshot["state"],
+                1,
+                json.dumps(snapshot),
+            ),
+        )
+
+
+def test_calls_list_a_runs_receipts_newest_first_and_page(team: tuple[Kernel, str, str]) -> None:
+    kernel, _, _ = team
+    task = a_task(kernel)
+    for n in range(1, 4):
+        plant_call(
+            kernel,
+            task,
+            f"call-000{n}",
+            {
+                "state": "failed" if n == 2 else "succeeded",
+                "created_at": f"2026-11-24T10:0{n}:00+00:00",
+                "updated_at": f"2026-11-24T10:0{n}:01+00:00",
+                "request": {"name": "env.try", "arguments": {"repo": "cardea", "n": n}},
+                "result": {"output": "x" * 5000},
+                "failure": {"code": "denied", "message": "no"} if n == 2 else None,
+            },
+        )
+    plant_call(
+        kernel,
+        task,
+        "other-1",
+        {"state": "succeeded", "created_at": "x", "updated_at": "x", "request": {"name": "x"}},
+    )
+    page = status(kernel, "calls", task_id=task, limit=2).json()
+    assert page["total"] == 3 and [i["operation_id"] for i in page["items"]] == [
+        "call-0003",
+        "call-0002",
+    ]
+    assert page["items"][1]["failure_code"] == "denied" and page["items"][0]["tool"] == "env.try"
+    assert len(page["items"][0]["result"]) <= 2000
+    rest = status(kernel, "calls", task_id=task, limit=2, after=page["next"]).json()
+    assert [i["operation_id"] for i in rest["items"]] == ["call-0001"] and rest["next"] is None
+    assert status(kernel, "calls", task_id="task-" + "0" * 32).status_code == 404
+    assert status(kernel, "calls", task_id=task, who="sup-desk").status_code == 404

@@ -17,9 +17,11 @@ A team paused by disabling its supervisor refuses this API like every other (the
 has no live authority); `standing` reports what a still-readable team has paused or waived.
 """
 
+import io
 import json
+import tarfile
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import sqlalchemy as sa
@@ -180,8 +182,12 @@ def runs(
     active: bool,
     after: str,
     limit: int,
+    member: str | None = None,
 ) -> dict[str, Any]:
-    """The members' runs, newest first, each with its outcome and what it cost."""
+    """The members' runs, newest first, each with its outcome and what it cost.
+
+    `member` keeps one principal's runs (the counts stay those of the whole group).
+    """
     limit = _bounded(limit)
     with kernel.database.read() as conn:
         _check(conn, proof, namespace, name)
@@ -204,6 +210,9 @@ def runs(
                 raise Fault("invalid_cursor", "Cursor does not name a run of this group", 400)
             clauses.append(f"({created},b.task_id) < (?,?)")
             values += [str(start[0]), after]
+        if member:
+            clauses.append("b.agent_id=?")
+            values.append(member)
         where = "".join(f" AND {c}" for c in clauses)
         counts = {
             str(s): int(n)
@@ -695,4 +704,161 @@ def standing(kernel: "Kernel", proof: Proof, namespace: str, name: str) -> dict[
         "members_draining": [str(p) for p, m in members.items() if m["state"] == "draining"],
         "registry": registry,
         "waived": waivers,
+    }
+
+
+MEMORY_LIMIT = 1048576  # a member's memory archive: one store object (1 MiB)
+MAX_FILE_TEXT = 65536
+MAX_MEMORY_FILES = 50
+MAX_CAPABILITIES = 200
+MAX_CALL_TEXT = 2000
+
+
+def _known(conn: sa.Connection, namespace: str, name: str, member: str) -> dict[str, Any]:
+    found = _members(conn, namespace, name).get(member)
+    if found is None:
+        raise Fault("member_not_found", "No such member in this group", 404)
+    return found
+
+
+def _memory(kernel: "Kernel", conn: sa.Connection, namespace: str, member: str) -> dict[str, Any]:
+    """The member's newest memory: its version, size and each file as text (clipped)."""
+    from cardea.service import memory
+
+    row = conn.exec_driver_sql(
+        "SELECT MAX(version) FROM objects WHERE namespace=? AND resource_id=?",
+        (namespace, memory.reference(namespace, member).resource_id),
+    ).scalar()
+    content = memory.latest(kernel.database, namespace, member) if row else None
+    shown: list[dict[str, Any]] = []
+    if content is not None:
+        with tarfile.open(fileobj=io.BytesIO(content), mode="r:gz") as archive:
+            for entry in archive.getmembers():
+                if not entry.isfile() or len(shown) >= MAX_MEMORY_FILES:
+                    continue
+                data = archive.extractfile(entry)
+                raw = data.read(MAX_FILE_TEXT + 1) if data else b""
+                shown.append(
+                    {
+                        "name": entry.name[:200],
+                        "bytes": entry.size,
+                        "changed_at": datetime.fromtimestamp(entry.mtime, UTC).isoformat(),
+                        "text": raw[:MAX_FILE_TEXT].decode("utf-8", "replace"),
+                        "truncated": len(raw) > MAX_FILE_TEXT,
+                    }
+                )
+    shown.sort(key=lambda f: f["name"])
+    return {
+        "version": int(row) if row else None,
+        "archive_bytes": len(content) if content is not None else 0,
+        "limit_bytes": MEMORY_LIMIT,
+        "files": shown,
+    }
+
+
+def member(
+    kernel: "Kernel", proof: Proof, namespace: str, name: str, member_id: str
+) -> dict[str, Any]:
+    """One member's standing grants and its saved memory, for the supervisor only.
+
+    Grants are what the policy table holds for the principal now (expired ones left out);
+    memory files are the member's own notes: untrusted text, shown as text.
+    """
+    with kernel.database.read() as conn:
+        _check(conn, proof, namespace, name)
+        at = now()
+        found = _known(conn, namespace, name, member_id)
+        rows = conn.exec_driver_sql(
+            "SELECT operation,mode,expires_at FROM policies WHERE principal_id=? AND namespace=? "
+            "AND expires_at > ? ORDER BY mode,operation LIMIT ?",
+            (member_id, namespace, time.time(), MAX_CAPABILITIES + 1),
+        ).all()
+        return {
+            **_envelope(name, namespace, at),
+            "member": member_id,
+            "pool": found["pool"],
+            "state": found["state"],
+            "disabled": bool(found["disabled"]),
+            "capabilities": [
+                {"operation": str(r[0])[:200], "mode": str(r[1]), "expires_at": float(r[2])}
+                for r in rows[:MAX_CAPABILITIES]
+            ],
+            "capabilities_truncated": max(0, len(rows) - MAX_CAPABILITIES),
+            "memory": _memory(kernel, conn, namespace, member_id),
+        }
+
+
+def _text(value: object) -> str | None:
+    if value is None:
+        return None
+    text = value if isinstance(value, str) else json.dumps(value, sort_keys=True)
+    return text[:MAX_CALL_TEXT]
+
+
+def calls(
+    kernel: "Kernel",
+    proof: Proof,
+    namespace: str,
+    name: str,
+    *,
+    task_id: str,
+    after: str,
+    limit: int,
+) -> dict[str, Any]:
+    """A member's tool calls in one run, newest first: what the kernel receipted, nothing else.
+
+    `task_id` must be a run of a member of this group. Arguments and results are clipped
+    text; a call the content gate refused shows as failed with its redacted arguments.
+    """
+    limit = _bounded(limit)
+    with kernel.database.read() as conn:
+        _check(conn, proof, namespace, name)
+        at = now()
+        owner = conn.exec_driver_sql(
+            "SELECT b.agent_id FROM task_bindings b JOIN group_members m "
+            "ON m.principal_id=b.agent_id AND m.namespace=b.namespace AND m.group_name=? "
+            "WHERE b.namespace=? AND b.task_id=?",
+            (name, namespace, task_id),
+        ).scalar()
+        if owner is None:
+            raise Fault("run_not_found", "No such run in this group", 404)
+        where = "task_id=? AND (operation_id LIKE 'call-%' OR operation_id LIKE 'ctx-%')"
+        values: list[str] = [task_id]
+        total = conn.exec_driver_sql(
+            f"SELECT COUNT(*) FROM operations WHERE {where}", tuple(values)
+        ).scalar()
+        if after:
+            where += " AND operation_id < ?"
+            values.append(after)
+        rows = conn.exec_driver_sql(
+            f"SELECT operation_id,snapshot FROM operations WHERE {where} "
+            "ORDER BY operation_id DESC LIMIT ?",
+            (*values, limit + 1),
+        ).all()
+        items = []
+        for operation_id, snapshot in rows[:limit]:
+            receipt = json.loads(snapshot)
+            request = receipt.get("request", {})
+            failure = receipt.get("failure") or {}
+            result = receipt.get("result")
+            items.append(
+                {
+                    "operation_id": str(operation_id),
+                    "tool": str(request.get("name", ""))[:100],
+                    "state": receipt.get("state"),
+                    "created_at": receipt.get("created_at"),
+                    "updated_at": receipt.get("updated_at"),
+                    "arguments": _text(request.get("arguments")),
+                    "result": _text(result),
+                    "failure_code": failure.get("code"),
+                    "failure_message": _text(failure.get("message")),
+                }
+            )
+    return {
+        **_envelope(name, namespace, at),
+        "task_id": task_id,
+        "member": str(owner),
+        "total": int(total or 0),
+        "items": items,
+        "next": items[-1]["operation_id"] if len(rows) > limit else None,
     }
