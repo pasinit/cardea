@@ -33,6 +33,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Sequence
@@ -156,6 +157,40 @@ class Quiet(http.server.SimpleHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         return io.BytesIO(body)
+
+
+class Measured(http.server.BaseHTTPRequestHandler):
+    """Forwards GETs to the dashboard and appends MEASURE to its HTML, so its pages get the
+    same layout report as a mock."""
+
+    upstream = ""
+
+    def log_message(self, format: str, *args: object) -> None:
+        pass
+
+    def do_GET(self) -> None:
+        try:
+            with urllib.request.urlopen(self.upstream + self.path, timeout=10) as reply:
+                body, status = reply.read(), reply.status
+                kind = reply.headers.get("Content-Type", "")
+        except urllib.error.HTTPError as error:
+            body, kind, status = error.read(), error.headers.get("Content-Type", ""), error.code
+        except OSError:
+            body, kind, status = b"", "text/plain", 502
+        if kind.startswith("text/html"):
+            body += MEASURE
+        self.send_response(status)
+        self.send_header("Content-Type", kind)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+def measuring(upstream: str) -> http.server.ThreadingHTTPServer:
+    handler = type("Handler", (Measured,), {"upstream": upstream})
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
 
 
 # Set when the browser is a toolchain's Chromium started directly (see `direct`).
@@ -474,15 +509,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         server.shutdown()
         sys.stdout.write("the dashboard did not start\nscreenshots: FAIL\n")
         return 1
+    proxy: http.server.ThreadingHTTPServer | None = None
     try:
         base = f"http://127.0.0.1:{server.server_port}"
         urls = [f"{base}/{name}" for name in names]
         if running is not None:
-            urls += [running[1] + route for route in dashboard_routes(args.root)]
+            proxy = measuring(running[1])
+            origin = f"http://127.0.0.1:{proxy.server_port}"
+            urls += [origin + route for route in dashboard_routes(args.root)]
         skipped = urls[MAX_PAGES:]
         results = capture(binary, urls[:MAX_PAGES], args.out)
     finally:
         server.shutdown()
+        if proxy is not None:
+            proxy.shutdown()
         if running is not None:
             running[0].kill()
     # The log reaches a reader even when an artifact does not: the layout report, bounded.
