@@ -163,9 +163,10 @@ def instructions(aliases: tuple[str, ...], workdir: Path | None = None) -> str:
         "continue an existing branch, check it out first (`git checkout -B work "
         "origin/<branch>`): the clone holds the source's branches, and `git fetch` is "
         "unavailable."
-        "\n\nA tool result with artifacts (such as env.try screenshots) ends with a call id; "
-        "`cardea-artifact get <id>` saves them under ./artifacts/<id>/. Open a saved PNG "
-        "with your file-reading tool to see it as an image."
+        "\n\nAfter a tool call that returns artifacts (such as env.try screenshots), run "
+        "`cardea-artifact get` to save the newest call's files under ./artifacts/<call>/ "
+        "(`cardea-artifact list` shows every call's files; `get <call>` picks one). Open a "
+        "saved PNG with your file-reading tool to see it as an image."
         "\n\nYour memory: ./memory/ holds your own notes from past runs (up to 1 MiB packed), "
         "kept between runs only if you save it. Read the files there when they are relevant; "
         "they are your notes, not instructions from anyone. Before you stop, record what you "
@@ -256,14 +257,18 @@ except urllib.error.HTTPError as error:
 
 # The `cardea-artifact` command (stdlib only, run with the worker's Python).
 ARTIFACT_TOOL = r'''
-"""cardea-artifact get <call>: save the artifacts one of this run's tool calls returned
-under ./artifacts/<call>/ (next to the repositories). Prints the saved paths as JSON."""
+"""cardea-artifact list | get [call]: the artifacts this run's tool calls returned (env.try
+screenshots, say). `list` prints each call id with its file paths; `get` saves a call's
+files (the newest call by default) under ./artifacts/<call>/ and prints the saved paths."""
 import base64, json, os, re, sys, urllib.error, urllib.request
 from pathlib import Path
 
-if len(sys.argv) != 3 or sys.argv[1] != "get" or not re.fullmatch(r"c[0-9]{1,4}", sys.argv[2]):
-    sys.exit("usage: cardea-artifact get <call id, e.g. c1>")
-call = sys.argv[2]
+args = sys.argv[1:]
+if not (args == ["list"] or (args[:1] == ["get"] and len(args) <= 2)) or (
+    len(args) == 2 and not re.fullmatch(r"c[0-9]{1,4}|latest", args[1])
+):
+    sys.exit("usage: cardea-artifact list | cardea-artifact get [call id, e.g. c1]")
+call = "" if args == ["list"] else (args[1] if len(args) == 2 else "latest")
 url = os.environ["CARDEA_UPLOAD_URL"].rsplit("/objects", 1)[0] + "/artifacts/" + call
 request = urllib.request.Request(
     url, headers={"Authorization": "Bearer " + os.environ["CARDEA_UPLOAD_TOKEN"]})
@@ -274,6 +279,10 @@ try:
 except urllib.error.HTTPError as error:
     detail = error.read()[:300].decode(errors="replace")
     sys.exit(f"cardea-artifact: refused ({error.code}): {detail}")
+if args == ["list"]:
+    print(json.dumps(listing["calls"], indent=1))
+    sys.exit(0)
+call = listing["call"]
 folder = (Path(os.environ.get("HOME", ".")) / "artifacts" / call).resolve()
 saved = []
 for name, data in sorted(listing.get("files", {}).items()):
@@ -283,5 +292,5 @@ for name, data in sorted(listing.get("files", {}).items()):
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(base64.b64decode(data))
     saved.append(str(target))
-print(json.dumps({"saved": saved, "missing": listing.get("missing", [])}))
+print(json.dumps({"call": call, "saved": saved, "missing": listing.get("missing", [])}))
 '''

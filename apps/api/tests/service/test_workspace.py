@@ -465,6 +465,15 @@ def test_cardea_artifact_saves_a_calls_screenshots_as_files(tmp_path: Path, sour
             [tool, "get", "c9"], env=env, capture_output=True, text=True, check=False
         )
         assert unknown.returncode != 0 and "404" in unknown.stderr
+        listed = subprocess.run(
+            [tool, "list"], env=env, capture_output=True, text=True, check=False
+        )
+        assert json.loads(listed.stdout) == {
+            "c1": ["escape.txt", "screenshots/p1-desktop-1280.png", "screenshots/p1-mobile-390.png"]
+        }
+        # Without an id, the newest call: a session may never see the note's id.
+        newest = subprocess.run([tool, "get"], env=env, capture_output=True, text=True, check=False)
+        assert json.loads(newest.stdout)["call"] == "c1", newest.stderr
         bad = subprocess.run(
             [tool, "get", "../x"], env=env, capture_output=True, text=True, check=False
         )
