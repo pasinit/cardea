@@ -50,7 +50,7 @@ MAX_PAGES = 7
 # A text report of what each page shows, for a reader who cannot open images: one artifact.
 REPORT = "report.txt"
 REPORT_BYTES = 64 * 1024
-LOG_REPORT = 4000
+LOG_REPORT = 1500
 REPORT_TEXT = 3000
 # The rendered DOM of each page, scripts and external references removed, as one HTML file.
 DOM = "dom.html"
@@ -84,13 +84,27 @@ MEASURE = (
     b" return [e.tagName.toLowerCase(), t, Math.round(r.x + scrollX), Math.round(r.y + scrollY),"
     b" Math.round(r.width), Math.round(r.height), r.right > w + 1 ? 'OVERFLOW' : ''].join(' | ')})"
     b".join('\\n')))}, 4000)</script>"
+    # Headless Chromium will not make its window narrower than about 500 px, so a "390 px"
+    # capture is wider. Measure the page again inside a 390 px iframe of itself.
+    b"<script>if (window.top === window) {let f; setTimeout(() => {f = document.createElement("
+    b"'iframe'); f.style.cssText = 'position:absolute;left:0;top:0;width:390px;height:600px;"
+    b"visibility:hidden;border:0'; f.src = location.href; document.body.appendChild(f)}, 500);"
+    b"setTimeout(() => {try {const d = f.contentDocument.documentElement, w = d.clientWidth;"
+    b" document.documentElement.setAttribute('data-narrow', [w, d.scrollWidth,"
+    b" [...f.contentDocument.body.querySelectorAll('*')]"
+    b".filter((e) => e.getBoundingClientRect().right > w + 1).slice(0, 5)"
+    b".map((e) => e.tagName.toLowerCase() + (typeof e.className === 'string' && e.className ? '.' +"
+    b" e.className.trim().split(/\\s+/)[0] : '')).join(',').replace(/[^\\w#.,-]/g, '')].join('|'))}"
+    b" catch (e) {}}, 4500)}</script>"
 )
 HEIGHT = re.compile(r'data-page-height="(\d+)"')
-ATTRIBUTE = re.compile(r'data-(scroll-width|client-width|wide|outline)="([^"]*)"')
+ATTRIBUTE = re.compile(r'data-(scroll-width|client-width|wide|outline|narrow)="([^"]*)"')
 # The report lines of the run, written to REPORT at the end.
 LINES: list[str] = []
 # The rendered DOM of each page and width, for DOM.
 DOMS: list[str] = []
+# One short line per page and width, printed first so a truncated log still has it.
+DIGEST: list[str] = []
 
 
 class Texts(html.parser.HTMLParser):
@@ -120,6 +134,11 @@ def summary(dom: str, width: int) -> list[str]:
     parser.feed(dom)
     text = [line for line in parser.lines if line]
     out = []
+    if seen.get("narrow"):
+        width390, scroll390, wide390 = (seen["narrow"].split("|") + ["", "", ""])[:3]
+        out.append(f"  AT 390px (iframe): viewport {width390}px, content {scroll390}px: "
+                   f"{'HORIZONTAL OVERFLOW' if int(scroll390) > int(width390) else 'no overflow'}"
+                   f"{' past the edge: ' + wide390 if wide390 else ''}")
     if "scroll-width" in seen:
         scroll, client = seen["scroll-width"], seen["client-width"]
         over = int(scroll) > int(client)
@@ -249,7 +268,9 @@ def direct(found: str) -> str:
 
 SCRIPTS = re.compile(r"<script\b.*?</script\s*>|<link\b[^>]*>|<meta\b[^>]*>", re.S | re.I)
 EXTERNAL = re.compile(r"""\s(src|href|srcset|action|poster)\s*=\s*(["'])(?!#)[^"']*\2""", re.I)
-MEASURED = re.compile(r'\sdata-(?:page-height|scroll-width|client-width|wide|outline)="[^"]*"')
+MEASURED = re.compile(
+    r'\sdata-(?:page-height|scroll-width|client-width|wide|outline|narrow)="[^"]*"'
+)
 
 
 def sanitize(dom: str) -> str:
@@ -351,7 +372,10 @@ def height(binary: str, scratch: Path, url: str, width: int, tall: int) -> int:
     shown, problem = run(command(binary, scratch / "measure", url, width, tall))
     LINES.append(f"{width}px wide:" if not problem else f"{width}px wide: could not be read")
     if not problem:
-        LINES.extend(summary(shown, width))
+        rows = summary(shown, width)
+        LINES.extend(rows)
+        DIGEST.extend(f"{url.split('/', 3)[-1] or '/'} @{width}: {r.strip()}" for r in rows[:3]
+                      if "viewport" in r)
         DOMS.append(f"<!-- {url.split('/', 3)[-1] or '/'} at {width}px -->\n{sanitize(shown)}")
     found = None if problem else HEIGHT.search(shown)
     # A page we did not serve (the dashboard) has no measuring script: capture a long window.
@@ -533,6 +557,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         diagnose()
     for name, ok, problem in results:
         sys.stdout.write(f"{name}: {'pass' if ok else 'FAIL ' + problem}\n")
+    sys.stdout.write("widths:\n" + "\n".join(DIGEST)[:1500] + "\n")
     for url in skipped:
         sys.stdout.write(f"not captured, over {MAX_PAGES} pages: {url.split('/', 3)[-1]}\n")
     passed = all(ok for _, ok, _ in results) and not skipped
